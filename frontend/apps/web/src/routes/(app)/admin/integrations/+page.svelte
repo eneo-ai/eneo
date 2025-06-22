@@ -7,6 +7,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { TenantIntegration } from "@intric/intric-js";
   import TenantConnectedSplitButton from "$lib/features/integrations/components/TenantConnectedSplitButton.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const { data }: PageProps = $props();
 
@@ -25,20 +26,20 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Integrations</title>
+  <title>Eneo.ai – {m.admin()} – {m.integrations()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Integrations"></Page.Title>
+    <Page.Title title={m.integrations()}></Page.Title>
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="Configure integrations">
+      <Settings.Group title={m.configure_integrations()}>
         <Settings.Row
           fullWidth
-          title="Knowledge providers"
-          description="Enable an integration to allow your users to connect to external knowledge providers and import information into intric."
+          title={m.knowledge_providers()}
+          description={m.knowledge_providers_description()}
         >
           <IntegrationGrid>
             {#each tenantIntegrations as integration (integration.integration_id)}
@@ -49,7 +50,7 @@
                     ></TenantConnectedSplitButton>
                   {:else}
                     <Button variant="primary" onclick={() => enableIntegration(integration)}
-                      >Enable integration</Button
+                      >{m.enable_integration()}</Button
                     >
                   {/if}
                 {/snippet}

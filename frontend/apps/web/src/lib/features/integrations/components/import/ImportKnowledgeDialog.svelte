@@ -6,6 +6,7 @@
   import ImportBackdrop from "./ImportBackdrop.svelte";
   import IntegrationVendorIcon from "../IntegrationVendorIcon.svelte";
   import { integrationData } from "../../IntegrationData";
+  import { m } from "$lib/paraglide/messages";
 
   const availableIntegrations = getAvailableIntegrations();
 
@@ -44,7 +45,7 @@
 
 <Dialog.Root openController={showSelectDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button variant="primary" is={trigger}>Import knowledge</Button>
+    <Button variant="primary" is={trigger}>{m.import_knowledge()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content width="dynamic">
@@ -53,10 +54,10 @@
         <ImportBackdrop></ImportBackdrop>
       </div>
       <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
-        <h3 class="px-4 pb-1 text-2xl font-extrabold">Import knowledge</h3>
+        <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.import_knowledge()}</h3>
         <p class="text-secondary max-w-[60ch] pr-48 pl-4">
-          Import knowledge from third-party platforms into intric. To use integrations, configure
-          them in your <a href="/account/integrations" class="underline">personal account</a>.
+          {m.import_knowledge_from_third_party()}
+          <a href="/account/integrations" class="underline">{m.personal_account()}</a>.
         </p>
         <!-- <div class="h-8"></div> -->
         <div class=" border-dimmer mt-14 mb-6 border-t"></div>
@@ -71,7 +72,7 @@
               <Tooltip
                 text={integration.connected
                   ? undefined
-                  : `Enable ${integration.name} in your account settings to select this option`}
+                  : m.enable_integration_in_account_settings({ name: integration.name })}
                 class="cursor-not-allowed opacity-70 *:pointer-events-none"
               >
                 {@render integrationSelector(integration)}
@@ -83,9 +84,9 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" onclick={goImport} disabled={selectedIntegration === null}
-        >Continue</Button
+        >{m.continue()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

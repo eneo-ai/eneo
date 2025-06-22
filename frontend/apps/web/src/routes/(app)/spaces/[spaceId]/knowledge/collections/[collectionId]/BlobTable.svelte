@@ -6,6 +6,7 @@
   import BlobActions from "./BlobActions.svelte";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { PAGINATION } from "$lib/core/constants";
+  import { m } from "$lib/paraglide/messages";
 
   export let blobs: InfoBlob[];
   export let canEdit: boolean;
@@ -13,7 +14,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.metadata.title ?? "",
       cell: (item) => {
         return createRender(BlobPreview, {
@@ -24,7 +25,7 @@
     }),
 
     table.column({
-      header: "Size",
+      header: m.size(),
       accessor: (item) => item,
       cell: (item) => formatBytes(item.value.metadata.size),
       plugins: {
@@ -49,5 +50,8 @@
   {viewModel}
   filter
   resourceName="file"
-  emptyMessage="You do not have any files uploaded yet"
+  filterPlaceholder={m.filter()}
+  listText={m.list()}
+  cardsText={m.cards()}
+  emptyMessage={m.no_files_uploaded_yet()}
 ></Table.Root>

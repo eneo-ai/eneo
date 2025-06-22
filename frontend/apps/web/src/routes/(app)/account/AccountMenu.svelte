@@ -4,6 +4,7 @@
   import { page } from "$app/stores";
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";
+  import { m } from "$lib/paraglide/messages";
   // import { IconIntegrations } from "@intric/icons/integrations";
 
   let currentRoute = "";
@@ -16,7 +17,7 @@
   }[] = [
     {
       icon: IconAssistant,
-      label: "My account",
+      label: m.my_account(),
       url: "/account"
     },
     // {
@@ -26,7 +27,7 @@
     // },
     {
       icon: IconKey,
-      label: "API keys",
+      label: m.api_keys(),
       url: "/account/api-keys"
     }
   ];

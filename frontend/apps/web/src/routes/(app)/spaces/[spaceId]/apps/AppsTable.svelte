@@ -7,6 +7,7 @@
   import { IconApp } from "@intric/icons/app";
   import PublishingStatusChip from "$lib/features/publishing/components/PublishingStatusChip.svelte";
   import AppActions from "./AppActions.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let apps: AppSparse[];
   const table = Table.createWithResource(apps);
@@ -17,7 +18,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
         return createRender(Table.PrimaryCell, {
@@ -32,7 +33,7 @@
     ...(!$currentSpace.personal
       ? [
           table.column({
-            header: "Status",
+            header: m.status(),
             accessor: (item) => item,
             cell: (item) => {
               return createRender(PublishingStatusChip, {
@@ -68,10 +69,21 @@
   }
 </script>
 
-<Table.Root {viewModel} resourceName="app" displayAs="cards" gapX={1.5} gapY={1.5} layout="grid">
+<Table.Root 
+  {viewModel} 
+  resourceName="app" 
+  displayAs="cards" 
+  gapX={1.5} 
+  gapY={1.5} 
+  layout="grid"
+  filterPlaceholder={m.filter_apps_placeholder()}
+  listText={m.list()}
+  cardsText={m.cards()}
+  noItemsMessage={m.there_are_currently_no_apps_configured()}
+>
   {#if $currentSpace.hasPermission("publish", "app")}
-    <Table.Group title="Published" filterFn={isPublished(true)}></Table.Group>
-    <Table.Group title="Drafts" filterFn={isPublished(false)}></Table.Group>
+    <Table.Group title={m.published()} filterFn={isPublished(true)}></Table.Group>
+    <Table.Group title={m.drafts()} filterFn={isPublished(false)}></Table.Group>
   {:else}
     <Table.Group></Table.Group>
   {/if}

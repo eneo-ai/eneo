@@ -4,6 +4,7 @@
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric";
   import { Button, Dialog } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     user,
@@ -26,25 +27,25 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="My API Keys"></Page.Title>
+    <Page.Title title={m.my_api_keys()}></Page.Title>
   </Page.Header>
   <Page.Main>
     <div
       class="border-default hover:bg-hover-dimmer flex items-center gap-1 border-b py-4 pr-4 pl-2"
     >
       <div class="flex flex-grow flex-col gap-1">
-        <h3 class="font-medium">Api Key</h3>
+        <h3 class="font-medium">{m.api_key()}</h3>
         <pre class="">{apiKey
             ? apiKey
             : user.truncated_api_key
               ? `****${user.truncated_api_key}`
-              : "No active key"}</pre>
+              : m.no_active_key()}</pre>
       </div>
       {#if apiKey}
         <Button
           on:click={() => {
             if (!apiKey) {
-              alert("No api key found. Please generate a new one.");
+              alert(m.no_api_key_found_generate());
               return;
             }
             navigator.clipboard.writeText(apiKey);
@@ -56,26 +57,22 @@
           variant="outlined"
           class="w-24"
         >
-          <span>{showCopiedMessage ? "Copied!" : "Copy key"}</span>
+          <span>{showCopiedMessage ? m.copied() : m.copy_key()}</span>
         </Button>
       {/if}
       <Dialog.Root alert>
         <Dialog.Trigger asFragment let:trigger>
-          <Button variant="outlined" is={trigger}>Generate API key</Button>
+          <Button variant="outlined" is={trigger}>{m.generate_api_key()}</Button>
         </Dialog.Trigger>
 
         <Dialog.Content>
-          <Dialog.Title>Generate new API key</Dialog.Title>
-          <Dialog.Description
-            >Do you really want to generate a new API key? <br /><br />Your old API key will get
-            deleted in the process and no longer work.<br /><br /> Write down your new API key once it
-            is generated, you will not be able to retrieve it from the server in the future.</Dialog.Description
-          >
+          <Dialog.Title>{m.generate_new_api_key_title()}</Dialog.Title>
+          <Dialog.Description>{@html m.generate_api_key_warning()}</Dialog.Description>
 
           <Dialog.Controls let:close>
-            <Button is={close}>Cancel</Button>
+            <Button is={close}>{m.cancel()}</Button>
             <Button is={close} variant="destructive" on:click={generateApiKey}
-              >Generate new key</Button
+              >{m.generate_new_key()}</Button
             >
           </Dialog.Controls>
         </Dialog.Content>

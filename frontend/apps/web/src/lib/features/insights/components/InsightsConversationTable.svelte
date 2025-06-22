@@ -13,6 +13,7 @@
   import { getInsightsService } from "../InsightsService.svelte";
   import { toStore } from "svelte/store";
   import InsightsConversationPrimaryCell from "./InsightsConversationPrimaryCell.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
@@ -22,7 +23,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Question",
+      header: m.question(),
       value: (item) => item.name,
       cell: (item) => {
         return createRender(InsightsConversationPrimaryCell, {
@@ -32,7 +33,7 @@
     }),
 
     table.column({
-      header: "Created",
+      header: m.created(),
       accessor: (item) => item,
       cell: (item) => {
         return createRender(Table.FormattedCell, {
@@ -66,7 +67,7 @@
     displayAs="list"
     fitted
     actionPadding="tight"
-    emptyMessage="No questions found in the selected timeframe."
+    emptyMessage={m.no_questions_found_timeframe()}
   ></Table.Root>
 
   <div class="text-secondary flex-col pt-8 pb-12">
@@ -75,20 +76,20 @@
         <Button
           variant="primary-outlined"
           on:click={() => insights.loadMoreConversations()}
-          aria-label="Load more conversations"
+          aria-label={m.load_more_conversations()}
         >
           {#if insights.loadMoreConversations.isLoading}
-            Loading...
+            {m.loading()}
           {:else}
-            Load more conversations
+            {m.load_more_conversations()}
           {/if}
         </Button>
         <p role="status" aria-live="polite">
-          Loaded {insights.conversations.length}/{insights.totalConversationCount} conversations
+          {m.loaded_conversations_count({ loaded: insights.conversations.length, total: insights.totalConversationCount })}
         </p>
       {:else if insights.totalConversationCount > 0}
         <p role="status" aria-live="polite">
-          Loaded all {insights.totalConversationCount} conversations.
+          {m.loaded_all_conversations({ total: insights.totalConversationCount })}
         </p>
       {/if}
     </div>

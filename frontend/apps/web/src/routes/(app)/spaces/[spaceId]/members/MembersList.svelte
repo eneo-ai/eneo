@@ -9,6 +9,7 @@
   import { Button } from "@intric/ui";
   import { derived } from "svelte/store";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -33,7 +34,7 @@
     unstyled
     class="hover:bg-hover-default -mr-2 flex cursor-pointer rounded-lg p-2 pl-4"
     href="/spaces/{$currentSpace.routeId}/members"
-    aria-label="Go to members page for this space"
+    aria-label={m.go_to_members_page_for_this_space()}
   >
     {#each $members as member (member)}
       <MemberChip {member}></MemberChip>

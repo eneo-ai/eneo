@@ -7,14 +7,15 @@
 <script lang="ts">
   import { Select } from "@intric/ui";
   import { behaviourList, type ModelBehaviour } from "../ModelBehaviours";
+  import { m } from "$lib/paraglide/messages";
 
   export let value: ModelBehaviour;
 
   const behaviourLabels: Record<ModelBehaviour, string> = {
-    creative: "Creative",
-    default: "Default",
-    deterministic: "Deterministic",
-    custom: "Custom"
+    creative: m.creative(),
+    default: m.default(),
+    deterministic: m.deterministic(),
+    custom: m.custom()
   };
 </script>
 
@@ -24,5 +25,5 @@
   options={behaviourList.map((behaviour) => ({
     value: behaviour,
     label: behaviourLabels[behaviour]
-  }))}>Model behaviour</Select.Simple
+  }))}>{m.model_behaviour()}</Select.Simple
 >

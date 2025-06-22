@@ -5,23 +5,24 @@
   import type { AppRun } from "@intric/intric-js";
   export let run: Pick<AppRun, "status">;
   export let variant: "icon" | "full" = "icon";
+  import { m } from "$lib/paraglide/messages";
   $: cssClass = run.status.replace(" ", "-");
 </script>
 
 <div class="{cssClass} flex min-h-8 min-w-8 items-center justify-center rounded-lg px-4">
   {#if run.status === "complete"}
-    <Tooltip text="Finished">
+    <Tooltip text={m.finished()}>
       <IconCheck />
     </Tooltip>
   {:else if run.status === "in progress"}
-    <Tooltip text="Running">
+    <Tooltip text={m.running()}>
       <div class="relative h-3 w-3">
         <span class="bg-accent-default absolute h-full w-full animate-ping rounded-full"></span>
         <span class="bg-accent-default absolute h-full w-full rounded-full"></span>
       </div>
     </Tooltip>
   {:else if run.status === "failed"}
-    <Tooltip text="Failed">
+    <Tooltip text={m.failed()}>
       <IconCancel />
     </Tooltip>
   {/if}

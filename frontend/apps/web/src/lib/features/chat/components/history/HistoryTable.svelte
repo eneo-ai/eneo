@@ -11,6 +11,7 @@
   import type { Conversation, ConversationSparse } from "@intric/intric-js";
   import { getChatService } from "../../ChatService.svelte";
   import { toStore } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     onConversationLoaded?: ((session: Conversation) => void) | undefined;
@@ -24,7 +25,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name ?? "",
       cell: (item) => {
         return createRender(Table.ButtonCell, {
@@ -40,7 +41,7 @@
       sortable: false
     }),
     table.column({
-      header: "Created",
+      header: m.created(),
       accessor: "created_at",
       cell: (item) => {
         return createRender(Table.FormattedCell, {
@@ -60,5 +61,5 @@
   ]);
 </script>
 
-<Table.Root {viewModel} resourceName="session" emptyMessage="No previous sessions found"
+<Table.Root {viewModel} resourceName="session" emptyMessage={m.no_previous_sessions_found()}
 ></Table.Root>

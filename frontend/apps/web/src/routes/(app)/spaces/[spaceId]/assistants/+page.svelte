@@ -7,6 +7,7 @@
   import { initTemplateController } from "$lib/features/templates/TemplateController";
   import { createAssistantTemplateAdapter } from "$lib/features/templates/TemplateAdapter";
   import CreateNew from "./CreateNew.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -29,12 +30,12 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.personal ? "Personal" : $currentSpace.name} – Assistants</title>
+  <title>Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.assistants()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Assistants"></Page.Title>
+    <Page.Title title={m.assistants()}></Page.Title>
     <!--
       We made the decision to not look at assistants and group chats as individual permissions for now,
       meaning if we ever intend to change that, we would need that distinction here

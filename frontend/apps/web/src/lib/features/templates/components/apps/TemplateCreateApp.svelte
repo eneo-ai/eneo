@@ -6,6 +6,7 @@
   import { getTemplateController } from "$lib/features/templates/TemplateController";
   import { Button, Dialog, Input } from "@intric/ui";
   import CreateAppBackdrop from "./CreateAppBackdrop.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace },
@@ -34,7 +35,7 @@
     {#if $$slots.default}
       <slot {trigger}></slot>
     {:else}
-      <Button is={trigger} variant="primary">Create app</Button>
+      <Button is={trigger} variant="primary">{m.create_app()}</Button>
     {/if}
   </Dialog.Trigger>
 
@@ -43,9 +44,8 @@
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Warning:</span>
-        This space does currently not have any completion models enabled. Enable at least one completion
-        model to be able to create an app.
+        <span class="font-bold">{m.warning()}:</span>
+        {m.completion_models_warning_app()}
       </p>
       <div class="border-dimmer border-b"></div>
     {/if}
@@ -68,7 +68,7 @@
         class="flex-row-reverse p-2"
         sideEffect={() => {
           userTouchedToggle = true;
-        }}>Open app editor after creation</Input.Switch
+        }}>{m.open_app_editor_after_creation()}</Input.Switch
       >
       <div class="flex-grow"></div>
 
@@ -76,10 +76,10 @@
         <Button
           on:click={() => {
             $currentStep = "start";
-          }}>Back</Button
+          }}>{m.back()}</Button
         >
       {:else}
-        <Button is={close}>Cancel</Button>
+        <Button is={close}>{m.cancel()}</Button>
       {/if}
       <Button
         variant="primary"

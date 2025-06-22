@@ -11,6 +11,7 @@
   import PublishingDialog from "$lib/features/publishing/components/PublishingDialog.svelte";
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { m } from "$lib/paraglide/messages";
 
   export let assistant: AssistantSparse;
 
@@ -28,7 +29,7 @@
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete assistant.");
+      alert(m.could_not_delete_assistant());
       console.error(e);
     }
     isProcessing = false;
@@ -87,7 +88,7 @@
           padding="icon-leading"
         >
           <IconEdit size="sm" />
-          Edit</Button
+          {m.edit()}</Button
         >
       {/if}
       {#if assistant.permissions?.includes("publish")}
@@ -100,10 +101,10 @@
         >
           {#if assistant.published}
             <IconArrowDownToLine size="sm"></IconArrowDownToLine>
-            Unpublish
+            {m.unpublish()}
           {:else}
             <IconArrowUpToLine size="sm"></IconArrowUpToLine>
-            Publish
+            {m.publish()}
           {/if}
         </Button>
       {/if}
@@ -116,7 +117,7 @@
           padding="icon-leading"
         >
           <IconMove size="sm" />
-          Move</Button
+          {m.move()}</Button
         >
         <Button
           is={item}
@@ -126,7 +127,7 @@
           }}
           padding="icon-leading"
         >
-          <IconTrash size="sm" />Delete</Button
+          <IconTrash size="sm" />{m.delete()}</Button
         >
       {/if}
     </Dropdown.Menu>
@@ -135,16 +136,15 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete assistant</Dialog.Title>
+    <Dialog.Title>{m.delete_assistant()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{assistant.name}</span
-      >?</Dialog.Description
+      >{m.confirm_delete_assistant({ name: assistant.name })}</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteAssistant}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>
@@ -152,7 +152,7 @@
 
 <Dialog.Root bind:isOpen={showMoveDialog}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Move assistant</Dialog.Title>
+    <Dialog.Title>{m.move_assistant()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
       <Select.Simple
@@ -162,26 +162,25 @@
         fitViewport={true}
         resourceName="space"
         class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
-        >Destination</Select.Simple
+        >{m.destination()}</Select.Simple
       >
       <Input.Switch bind:value={moveResources} class="hover:bg-hover-dimmer px-4 py-4"
-        >Include assistant's knowledge</Input.Switch
+        >{m.include_assistants_knowledge()}</Input.Switch
       >
       {#if moveResources}
         <p
           class="label-warning border-label-default bg-label-dimmer text-label-stronger mx-4 mb-3 rounded-md border px-2 py-1 text-sm"
         >
-          <span class="font-bold">Hint:</span>
-          Moving the assistant's connected collections and websites will only work if the destination
-          space uses the same embedding model. All other assistants will lose access to the moved knowledge.
+          <span class="font-bold">{m.hint()}:</span>
+          {m.move_assistant_hint()}
         </p>
       {/if}
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={moveAssistant}
-        >{isProcessing ? "Moving..." : "Move assistant"}</Button
+        >{isProcessing ? m.moving() : m.move_assistant()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

@@ -12,6 +12,7 @@
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { sortModels } from "$lib/features/ai-models/sortModels";
+  import { m } from "$lib/paraglide/messages";
 
   export let selectableModels: (TranscriptionModel & {
     meets_security_classification?: boolean | null | undefined;
@@ -56,16 +57,15 @@
 </script>
 
 <Settings.Row
-  title="Transcription Models"
-  description="Choose which transcription models will be available to transcribe audio in this space."
+  title={m.transcription_models()}
+  description={m.transcription_models_description()}
 >
   <svelte:fragment slot="description">
     {#if $currentSpace.transcription_models.length === 0}
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Hint:&nbsp;</span>Enable a transcription model to be able to process
-        audio in this space.
+        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.transcription_models_hint()}
       </p>
     {/if}
   </svelte:fragment>
@@ -75,7 +75,7 @@
     <Tooltip
       text={meetsClassification
         ? undefined
-        : "This model does not meet the selected security classification"}
+        : m.model_does_not_meet_security_classification()}
     >
       <div
         class="border-default hover:bg-hover-dimmer cursor-pointer border-b py-4 pr-4 pl-2"

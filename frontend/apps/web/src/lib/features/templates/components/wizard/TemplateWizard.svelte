@@ -10,6 +10,7 @@
   import { fly } from "svelte/transition";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import WizardBackdrop from "./WizardBackdrop.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { selectedAttachments, selectedCollections, selectedTemplate }
@@ -30,13 +31,12 @@
   <div class="relative flex flex-col">
     <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
       <div class="flex flex-col px-4">
-        <span class="font-mono text-sm font-normal uppercase">Template setup</span>
+        <span class="font-mono text-sm font-normal uppercase">{m.template_setup()}</span>
         <h3 class="flex items-center gap-3 pb-1 text-2xl font-extrabold">
           {formatEmojiTitle($selectedTemplate.name)}
         </h3>
         <p class="text-secondary max-w-[45ch]">
-          Configure this template's additional settings to help the assistant provide more relevant
-          answers.
+          {m.configure_template_settings()}
         </p>
       </div>
 
@@ -48,7 +48,7 @@
             <h4 class="flex items-center gap-4 text-lg font-medium">
               {$selectedTemplate.wizard.collections.title}
               {#if $selectedTemplate.wizard.collections.required}
-                <span class="text-muted text-base font-normal">(required)</span>{/if}
+                <span class="text-muted text-base font-normal">({m.required()})</span>{/if}
             </h4>
             <p class="text-secondary max-w-[65ch] pt-1 pb-2">
               {$selectedTemplate.wizard.collections.description}
@@ -64,7 +64,7 @@
             <h4 class="flex items-center gap-4 text-lg font-medium">
               {$selectedTemplate.wizard.attachments.title}
               {#if $selectedTemplate.wizard.attachments.required}
-                <span class="text-muted text-base font-normal">(required)</span>{/if}
+                <span class="text-muted text-base font-normal">({m.required()})</span>{/if}
             </h4>
             <p class="text-secondary max-w-[65ch] pt-1">
               {$selectedTemplate.wizard.attachments.description}
@@ -85,5 +85,5 @@
     </div>
   </div>
 {:else}
-  No template selected
+  {m.no_template_selected()}
 {/if}

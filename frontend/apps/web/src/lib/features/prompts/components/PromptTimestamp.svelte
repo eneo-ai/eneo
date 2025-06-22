@@ -10,6 +10,8 @@
   import utc from "dayjs/plugin/utc";
 
   dayjs.extend(utc);
+  
+  import { m } from "$lib/paraglide/messages";
 
   export let prompt: {
     created_at?: string | null;
@@ -22,6 +24,6 @@
   <span>{dayjs(prompt.created_at).format("HH:mm")}</span>
 
   {#if prompt.is_selected}
-    <Label.Single item={{ label: "Latest", color: "green" }}></Label.Single>
+    <Label.Single item={{ label: m.latest(), color: "green" }}></Label.Single>
   {/if}
 </div>

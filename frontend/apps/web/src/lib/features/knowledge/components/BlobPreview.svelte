@@ -4,6 +4,7 @@
   import { IconDocument } from "@intric/icons/document";
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
+  import { m } from "$lib/paraglide/messages";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;
@@ -17,7 +18,7 @@
       try {
         blob = await intric.infoBlobs.get(blob);
       } catch (e) {
-        alert("Error retrieving reference, see console for details.");
+        alert(m.error_retrieving_reference_see_console());
         console.error(e);
       }
       loadingBlob = false;
@@ -51,13 +52,13 @@
     }
   }
 
-  let copyButtonText = "Copy to clipboard";
+  let copyButtonText = m.copy_to_clipboard();
   function copyText() {
     if (blob.text && browser) {
       navigator.clipboard.writeText(blob.text);
-      copyButtonText = "Copied!";
+      copyButtonText = m.copied();
       setTimeout(() => {
-        copyButtonText = "Copy to clipboard";
+        copyButtonText = m.copy_to_clipboard();
       }, 2000);
     }
   }
@@ -93,12 +94,12 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{blob.metadata.title}</Dialog.Title>
-    <Dialog.Description hidden>File contents of {blob.metadata.title}</Dialog.Description>
+    <Dialog.Description hidden>{m.file_contents_of({ title: blob.metadata.title })}</Dialog.Description>
 
     <Dialog.Section scrollable>
       <div class="p-4">
         {#if loadingBlob}
-          <pre>Loading...</pre>
+          <pre>{m.loading()}</pre>
         {:else}
           <Markdown source={blob.text ?? ""}></Markdown>
         {/if}
@@ -122,7 +123,7 @@
               d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
             />
           </svg>
-          Download extracted text
+          {m.download_extracted_text()}
         </Button>
 
         <Button variant="simple" padding="icon-leading" on:click={copyText}>
@@ -144,7 +145,7 @@
         >
         <div class="flex-grow"></div>
       {/if}
-      <Button variant="primary" is={close}>Done</Button>
+      <Button variant="primary" is={close}>{m.done()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

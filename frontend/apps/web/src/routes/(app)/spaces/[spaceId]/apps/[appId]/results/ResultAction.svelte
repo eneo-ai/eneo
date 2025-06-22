@@ -5,6 +5,7 @@
   import { Button, Dialog, Dropdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { getResultTitle } from "$lib/features/apps/getResultTitle";
+  import { m } from "$lib/paraglide/messages";
 
   export let result: Pick<AppRun, "id" | "input">;
   export let onResultDeleted: ((result: Pick<AppRun, "id" | "input">) => void) | undefined =
@@ -20,7 +21,7 @@
       onResultDeleted?.(result);
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete crawl.");
+      alert(m.could_not_delete_result());
       console.error(e);
     }
     isProcessing = false;
@@ -44,22 +45,21 @@
       }}
       padding="icon-leading"
     >
-      <IconTrash size="sm" />Delete</Button
+      <IconTrash size="sm" />{m.delete()}</Button
     >
   </Dropdown.Menu>
 </Dropdown.Root>
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete result</Dialog.Title>
+    <Dialog.Title>{m.delete_result()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete the result <span class="italic">{getResultTitle(result)}</span
-      >?</Dialog.Description
+      >{m.confirm_delete_result({ resultTitle: getResultTitle(result) })}</Dialog.Description
     >
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteResult}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

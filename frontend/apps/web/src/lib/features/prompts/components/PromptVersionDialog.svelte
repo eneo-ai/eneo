@@ -12,8 +12,9 @@
   import { getIntric } from "$lib/core/Intric";
   import { initPromptManager } from "../PromptManager";
   import type { Prompt, PromptSparse } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
-  export let title = "Prompt history";
+  export let title = m.prompt_history();
   export let onPromptSelected: (prompt: Prompt) => void;
   export let loadPromptVersionHistory: () => Promise<PromptSparse[]>;
 
@@ -30,7 +31,7 @@
 
 <Dialog.Root openController={showPromptVersionDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Tooltip text="Show prompt history">
+    <Tooltip text={m.show_prompt_history()}>
       <Button is={trigger} padding="icon"><IconHistory /></Button>
     </Tooltip>
   </Dialog.Trigger>

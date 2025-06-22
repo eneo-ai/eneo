@@ -9,16 +9,17 @@
   import { Table, Label } from "@intric/ui";
   import UserActions from "./UserActions.svelte";
   import { createRender } from "svelte-headless-table";
+  import { m } from "$lib/paraglide/messages";
 
   export let users: User[];
   const table = Table.createWithResource(users);
 
   const viewModel = table.createViewModel([
-    table.column({ accessor: "username", header: "Username" }),
+    table.column({ accessor: "username", header: m.username() }),
     // table.column({ accessor: "email", header: "Email" }),
     table.column({
       accessor: (user) => user,
-      header: "Roles",
+      header: m.roles(),
       cell: (item) => {
         const roles = item.value.roles?.concat(item.value.predefined_roles ?? []) ?? [];
         const content: { label: string; color: Label.LabelColor }[] = roles.map((group) => {
@@ -40,7 +41,7 @@
     }),
     table.column({
       accessor: (user) => user,
-      header: "Groups",
+      header: m.user_groups(),
       cell: (item) => {
         const content: { label: string; color: Label.LabelColor }[] = item.value.user_groups.map(
           (group) => {

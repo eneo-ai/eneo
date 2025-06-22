@@ -10,6 +10,7 @@
   import RoleEditor from "./RoleEditor.svelte";
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
+  import { m } from "$lib/paraglide/messages";
 
   export let role: Role;
   export let permissions: Array<{ name: Permission; description: string }>;
@@ -24,7 +25,7 @@
 
 <Dialog.Root alert>
   <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} label="Delete role" variant="destructive" padding="icon" {disabled}
+    <Button is={trigger} label={m.delete_role()} variant="destructive" padding="icon" {disabled}
       ><svg
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
@@ -43,20 +44,20 @@
   </Dialog.Trigger>
 
   <Dialog.Content width="small">
-    <Dialog.Title>Delete role</Dialog.Title>
+    <Dialog.Title>{m.delete_role()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{role.name}</span>?</Dialog.Description
+      >{m.do_you_really_want_to_delete()} <span class="italic">{role.name}</span>?</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button
         is={close}
         variant="destructive"
         on:click={async () => {
           await intric.roles.delete(role);
           invalidate("admin:roles:load");
-        }}>Delete</Button
+        }}>{m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

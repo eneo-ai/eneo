@@ -11,6 +11,7 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import SpaceMembersChips from "$lib/features/spaces/components/SpaceMembersChips.svelte";
   import StorageSpaceName from "./StorageSpaceName.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let spaces: StorageSpaceList[];
 
@@ -22,7 +23,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
         return createRender(StorageSpaceName, {
@@ -31,7 +32,7 @@
       }
     }),
     table.column({
-      header: "Members",
+      header: m.members(),
       accessor: "members",
       cell: (item) => {
         return createRender(SpaceMembersChips, {
@@ -47,7 +48,7 @@
       }
     }),
     table.column({
-      header: "Storage",
+      header: m.storage(),
       accessor: "size",
       cell: (item) => formatBytes(item.value, 2)
     })
@@ -63,6 +64,6 @@
     class="h-12"
     on:click={() => {
       showAllSpaces = !showAllSpaces;
-    }}>{showAllSpaces ? "Show only 10 spaces" : `Show all ${spaces.length} spaces`}</Button
+    }}>{showAllSpaces ? m.show_only_10_spaces() : m.show_all_spaces({ count: spaces.length })}</Button
   >
 {/if}

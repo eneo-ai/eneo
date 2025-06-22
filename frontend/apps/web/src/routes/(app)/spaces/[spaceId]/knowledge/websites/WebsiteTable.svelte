@@ -9,6 +9,7 @@
   import type { WebsiteSparse } from "@intric/intric-js";
   import { IconWeb } from "@intric/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -39,7 +40,7 @@
   const viewModel = table.createViewModel([
     table.column({
       accessor: (item) => item,
-      header: "Website",
+      header: m.website(),
       cell: (item) => {
         return createRender(Table.PrimaryCell, {
           link: `/spaces/${$currentSpace.routeId}/knowledge/websites/${item.value.id}`,
@@ -65,11 +66,11 @@
 
     table.column({
       accessor: "url",
-      header: "Link",
+      header: m.link(),
       cell: (item) => {
         return createRender(Table.ButtonCell, {
           link: item.value,
-          label: "Go to website",
+          label: m.go_to_website(),
           linkIsExternal: true
         });
       }
@@ -77,7 +78,7 @@
 
     table.column({
       accessor: (item) => item,
-      header: "Status",
+      header: m.status(),
       cell: (item) => {
         return createRender(WebsiteStatus, {
           website: item.value
@@ -99,7 +100,7 @@
 
     table.column({
       accessor: "update_interval",
-      header: "Auto updates",
+      header: m.auto_updates(),
       cell: (item) => {
         return createRender(WebsiteSync, {
           updateInterval: item.value
@@ -125,7 +126,7 @@
   {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
     {#each $embeddingModels as embeddingModel (embeddingModel.id)}
       <Table.Group
-        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + " (disabled)"}
+        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + ` (${m.disabled()})`}
         filterFn={createModelFilter(embeddingModel)}
       ></Table.Group>
     {/each}

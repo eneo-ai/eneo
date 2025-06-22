@@ -8,6 +8,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   export let service: ServiceSparse;
 
@@ -25,7 +26,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete service.");
+      alert(m.could_not_delete_service());
       console.error(e);
     }
     isProcessing = false;
@@ -86,7 +87,7 @@
           padding="icon-leading"
         >
           <IconEdit size="sm" />
-          Edit</Button
+          {m.edit()}</Button
         >
       {/if}
       {#if service.permissions?.includes("delete")}
@@ -98,7 +99,7 @@
           padding="icon-leading"
         >
           <IconMove size="sm" />
-          Move</Button
+          {m.move()}</Button
         >
         <Button
           is={item}
@@ -108,7 +109,7 @@
           }}
           padding="icon-leading"
         >
-          <IconTrash size="sm" />Delete</Button
+          <IconTrash size="sm" />{m.delete()}</Button
         >
       {/if}
     </Dropdown.Menu>
@@ -117,15 +118,15 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete service</Dialog.Title>
+    <Dialog.Title>{m.delete_service()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{service.name}</span>?</Dialog.Description
+      >{m.confirm_delete_service({ serviceName: service.name })}</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteService}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>
@@ -133,7 +134,7 @@
 
 <Dialog.Root bind:isOpen={showMoveDialog}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Move service</Dialog.Title>
+    <Dialog.Title>{m.move_service()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
       <Select.Simple
@@ -143,14 +144,14 @@
         fitViewport={true}
         resourceName="space"
         class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
-        >Destination</Select.Simple
+        >{m.destination()}</Select.Simple
       >
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={moveService}
-        >{isProcessing ? "Moving..." : "Move service"}</Button
+        >{isProcessing ? m.moving() : m.move_service()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

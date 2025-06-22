@@ -6,6 +6,7 @@
   import { IconCheck } from "@intric/icons/check";
   import { IconCancel } from "@intric/icons/cancel";
   import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { m } from "$lib/paraglide/messages";
 
   /** An array of models the user can choose from, this component will sort in-place the models by vendor */
   export let availableModels: T[];
@@ -13,7 +14,7 @@
   /** Bindable id of the selected model*/
   export let selectedModel: T | undefined | null;
 
-  export let aria: AriaProps = { "aria-label": "Select AI model" };
+  export let aria: AriaProps = { "aria-label": m.select_ai_model() };
 
   const {
     elements: { trigger, menu, option },
@@ -52,13 +53,13 @@
 >
   {#if unsupportedModelSelected}
     <div class="text-negative-default flex gap-3 truncate pl-1">
-      <IconCancel />Unsupported model selected ({selectedModel?.name ?? "No model found"})
+      <IconCancel />{m.unsupported_model_selected()} ({selectedModel?.name ?? m.no_model_found()})
     </div>
   {:else if $selected}
     <ModelNameAndVendor model={$selected.value}></ModelNameAndVendor>
   {:else}
     <div class="text-negative-default flex gap-3 truncate pl-1">
-      <IconCancel />No model selected
+      <IconCancel />{m.no_model_selected()}
     </div>
   {/if}
   <IconChevronDown />
@@ -72,7 +73,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 font-mono text-sm"
   >
-    Select a completion model
+    {m.select_completion_model()}
   </div>
   {#each availableModels as model (model.id)}
     <div

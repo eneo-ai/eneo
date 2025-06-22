@@ -6,6 +6,8 @@
   import { Button } from "@intric/ui";
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
+  import { m } from "$lib/paraglide/messages";
+  import SelectLanguage from "$lib/components/SelectLanguage.svelte";
 
   const {
     elements: { menu, item, trigger, overlay, arrow },
@@ -27,7 +29,7 @@
 <Button
   is={[$trigger]}
   unstyled
-  label="Account and settings"
+  label={m.account_and_settings()}
   class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric relative flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center"
 >
   <IconProfile class="!h-7 !min-w-7 !stroke-[1.4]" />
@@ -49,7 +51,7 @@
     <p
       class="border-default text-secondary border-b px-6 pt-1 pb-2.5 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
-      Settings
+      {m.settings()}
     </p>
     <Button
       unstyled
@@ -59,7 +61,7 @@
       class="group border-default text-primary hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[3.5rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
     >
       <IconAssistant />
-      My account</Button
+      {m.my_account()}</Button
     ><Button
       is={[$item]}
       unstyled
@@ -68,7 +70,7 @@
       class="group border-default text-primary hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[3.5rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
     >
       <IconKey />
-      My API keys</Button
+      {m.my_api_keys()}</Button
     >
     <Button
       variant="destructive"
@@ -77,7 +79,7 @@
       class="mt-3 flex !justify-center !gap-2 rounded-lg !py-2 focus:ring-offset-4 focus:outline-offset-4"
     >
       <IconLogout />
-      Logout</Button
+      {m.logout()}</Button
     >
 
     <div {...$arrow} use:arrow class="border-stronger !z-10"></div>

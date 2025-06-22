@@ -12,13 +12,14 @@
   import SpaceActions from "./SpaceActions.svelte";
   import SpaceCell from "./SpaceCell.svelte";
   import type { Readable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   export let spaces: Readable<SpaceSparse[]>;
   const table = Table.createWithStore(spaces);
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
         return createRender(SpaceCell, {
@@ -46,4 +47,13 @@
   ]);
 </script>
 
-<Table.Root {viewModel} resourceName="space" gapX={1.5} gapY={1.5} layout="grid"></Table.Root>
+<Table.Root 
+  {viewModel} 
+  resourceName="space" 
+  gapX={1.5} 
+  gapY={1.5} 
+  layout="grid" 
+  filterPlaceholder={m.filter_spaces_placeholder()}
+  listText={m.list()}
+  cardsText={m.cards()}
+></Table.Root>

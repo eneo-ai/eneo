@@ -16,6 +16,7 @@
   import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
   import ModelActions from "./ModelActions.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let transcriptionModels: TranscriptionModel[];
   const table = Table.createWithResource(transcriptionModels);
@@ -23,7 +24,7 @@
   const viewModel = table.createViewModel([
     table.column({
       accessor: (model) => model,
-      header: "Name",
+      header: m.name(),
       cell: (item) => {
         return createRender(ModelCardDialog, { model: item.value, includeTrigger: true });
       },
@@ -42,7 +43,7 @@
     }),
     table.column({
       accessor: (model) => model,
-      header: "Enabled",
+      header: m.enabled(),
       cell: (item) => {
         return createRender(ModelEnableSwitch, { model: item.value, type: "transcriptionModel" });
       },
@@ -56,7 +57,7 @@
     }),
     table.column({
       accessor: (model) => model,
-      header: "Details",
+      header: m.details(),
       cell: (item) => {
         return createRender(ModelLabels, { model: item.value });
       },
@@ -77,7 +78,7 @@
 
     table.column({
       accessor: (model) => model,
-      header: "Security",
+      header: m.security(),
       cell: (item) => {
         return createRender(ModelClassificationPreview, { model: item.value });
       },

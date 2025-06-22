@@ -9,6 +9,7 @@
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import type { SecurityClassification } from "@intric/intric-js";
   import { createSelect } from "@melt-ui/svelte";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     classifications: SecurityClassification[];
@@ -54,7 +55,7 @@
   use:trigger
   class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
 >
-  <span class="truncate capitalize">{$selected?.value?.name ?? "No classification"}</span>
+  <span class="truncate capitalize">{$selected?.value?.name ?? m.no_classification()}</span>
   <IconChevronDown />
 </button>
 
@@ -66,7 +67,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 font-mono text-sm"
   >
-    Select a security classification
+    {m.select_security_classification()}
   </div>
   {#each classifications as classification (classification.id)}
     <div
@@ -91,7 +92,7 @@
     {...$option({ value: null })}
     use:option
   >
-    <span class="capitalize">No classification</span>
+    <span class="capitalize">{m.no_classification()}</span>
     <div class="check {$selected?.value === null ? 'block' : 'hidden'}">
       <IconCheck class="text-positive-default" />
     </div>

@@ -14,6 +14,7 @@
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
   import { UserList } from "./AddMember.svelte.ts";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     refreshCurrentSpace,
@@ -58,7 +59,7 @@
       $showDialog = false;
       $selected = undefined;
     } catch (e) {
-      alert("Could not add new member.");
+      alert(m.could_not_add_new_member());
       console.error(e);
     }
   });
@@ -66,23 +67,23 @@
 
 <Dialog.Root bind:isOpen={showDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button variant="primary" is={trigger}>Add new member</Button>
+    <Button variant="primary" is={trigger}>{m.add_new_member()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Add new member</Dialog.Title>
+    <Dialog.Title>{m.add_new_member()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
       <div class="hover:bg-hover-dimmer flex items-center rounded-md">
         <div class="flex flex-grow flex-col gap-1 rounded-md pt-2 pr-2 pb-4 pl-4">
           <div>
-            <span class="pl-3 font-medium">User</span>
+            <span class="pl-3 font-medium">{m.user()}</span>
           </div>
 
           <div class="relative flex flex-grow">
             <input
               bind:this={inputElement}
-              placeholder="Find user..."
+              placeholder={m.find_user()}
               {...$input}
               required
               use:input
@@ -121,7 +122,7 @@
                   >
                     <Tooltip
                       text={isMember
-                        ? `This user is already a member of ${$currentSpace.name}`
+                        ? m.user_already_member({ space: $currentSpace.name })
                         : undefined}
                       class="pointer-events-auto flex w-full"
                     >
@@ -136,7 +137,7 @@
                   </li>
                 {/each}
               {:else}
-                <span class="text-secondary px-2 py-1">No matching users found.</span>
+                <span class="text-secondary px-2 py-1">{m.no_matching_users_found()}</span>
               {/if}
             </div>
             {#if userList.hasMoreUsers}
@@ -146,9 +147,9 @@
                 disabled={userList.isLoadingUsers}
               >
                 {#if userList.isLoadingUsers}
-                  Loading...
+                  {m.loading_more()}
                 {:else}
-                  Load more ({userList.filteredUsers.length}/{userList.totalCount})
+                  {m.load_more_users({ current: userList.filteredUsers.length, total: userList.totalCount })}
                 {/if}
               </Button>
             {/if}
@@ -160,16 +161,16 @@
           options={$currentSpace.available_roles.map((role) => {
             return { label: role.label, value: role };
           })}
-          bind:value={selectedRole}>Role</Select.Simple
+          bind:value={selectedRole}>{m.role()}</Select.Simple
         >
       </div>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
 
       <Button variant="primary" on:click={addMember} type="submit"
-        >{addMember.isLoading ? "Adding..." : "Add member"}</Button
+        >{addMember.isLoading ? m.adding() : m.add_member()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

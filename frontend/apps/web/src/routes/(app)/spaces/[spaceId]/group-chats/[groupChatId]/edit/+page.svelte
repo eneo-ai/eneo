@@ -9,6 +9,7 @@
   import GroupChatAssistantList from "$lib/features/group-chats/components/GroupChatAssistantList.svelte";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -32,7 +33,7 @@
   beforeNavigate((navigate) => {
     if (
       $currentChanges.hasUnsavedChanges &&
-      !confirm("You have unsaved changes. Do you want to discard all changes?")
+      !confirm(m.unsaved_changes_warning())
     ) {
       navigate.cancel();
       return;
@@ -54,7 +55,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – {$resource.name}</title
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {$resource.name}</title
   >
 </svelte:head>
 
@@ -65,7 +66,7 @@
         title: $resource.name,
         href: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`
       }}
-      title="Edit"
+      title={m.edit()}
     ></Page.Title>
 
     <Page.Flex>
@@ -75,7 +76,7 @@
           disabled={$isSaving}
           on:click={() => {
             discardChanges();
-          }}>Discard all changes</Button
+          }}>{m.discard_all_changes()}</Button
         >
 
         <Button
@@ -87,23 +88,23 @@
             setTimeout(() => {
               showSavesChangedNotice = false;
             }, 5000);
-          }}>{$isSaving ? "Saving..." : "Save changes"}</Button
+          }}>{$isSaving ? m.saving() : m.save_changes()}</Button
         >
       {:else}
         {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>All changes saved!</p>
+          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>Done</Button>
+        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
 
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="General">
+      <Settings.Group title={m.general()}>
         <Settings.Row
-          title="Name"
-          description="Give this group chat a name that will be displayed to its users."
+          title={m.name()}
+          description={m.give_group_chat_name_displayed_to_users()}
           hasChanges={$currentChanges.diff.name !== undefined}
           revertFn={() => {
             discardChanges("name");
@@ -119,10 +120,10 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title="Group settings">
+      <Settings.Group title={m.group_settings()}>
         <Settings.Row
-          title="Assistants"
-          description="These assistants will be able to answer the users' questions. Intric uses the assistant's description to determine the most suitable assistant for each answer."
+          title={m.assistants()}
+          description={m.assistants_will_be_able_to_answer_questions()}
           hasChanges={$currentChanges.diff.tools?.assistants !== undefined}
           revertFn={() => {
             $update.tools.assistants = $resource.tools.assistants;
@@ -132,10 +133,10 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title="Advanced settings">
+      <Settings.Group title={m.advanced_settings()}>
         <Settings.Row
-          title="Mentions"
-          description="Allow users to select which assistant should answer their question by mentioning them."
+          title={m.mentions()}
+          description={m.allow_users_to_select_assistant_by_mentioning()}
           hasChanges={$currentChanges.diff.allow_mentions !== undefined}
           revertFn={() => {
             discardChanges("allow_mentions");
@@ -144,15 +145,15 @@
           <div class="border-default flex h-14 border-b py-2">
             <Input.RadioSwitch
               bind:value={$update.allow_mentions}
-              labelTrue="Enable mentions"
-              labelFalse="Disable mentions"
+              labelTrue={m.enable_mentions()}
+              labelFalse={m.disable_mentions()}
             ></Input.RadioSwitch>
           </div>
         </Settings.Row>
 
         <Settings.Row
-          title="Response labels"
-          description="Show the answering assistant's name next to its response during a chat."
+          title={m.response_labels()}
+          description={m.show_answering_assistant_name_next_to_response()}
           hasChanges={$currentChanges.diff.show_response_label !== undefined}
           revertFn={() => {
             discardChanges("show_response_label");
@@ -161,19 +162,19 @@
           <div class="border-default flex h-14 border-b py-2">
             <Input.RadioSwitch
               bind:value={$update.show_response_label}
-              labelTrue="Show labels"
-              labelFalse="Hide labels"
+              labelTrue={m.show_labels()}
+              labelFalse={m.hide_labels()}
             ></Input.RadioSwitch>
           </div>
         </Settings.Row>
       </Settings.Group>
 
       {#if data.groupChat.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}
-        <Settings.Group title="Publishing">
+        <Settings.Group title={m.publishing()}>
           {#if data.groupChat.permissions?.includes("publish")}
             <Settings.Row
-              title="Status"
-              description="Publishing your assistant will make it available to all users of this space, including viewers."
+              title={m.status()}
+              description={m.publishing_group_chat_description()}
             >
               <PublishingSetting
                 endpoints={data.intric.groupChats}
@@ -189,14 +190,14 @@
               revertFn={() => {
                 discardChanges("insight_enabled");
               }}
-              title="Insights"
-              description="Collect insights about this assistant's usage and let space editors/admins view a complete history of all user questions."
+              title={m.insights()}
+              description={m.collect_insights_about_group_chat_usage()}
             >
               <div class="border-default flex h-14 border-b py-2">
                 <Input.RadioSwitch
                   bind:value={$update.insight_enabled}
-                  labelTrue="Enable insights"
-                  labelFalse="Disable insights"
+                  labelTrue={m.enable_insights()}
+                  labelFalse={m.disable_insights()}
                 ></Input.RadioSwitch>
               </div>
             </Settings.Row>

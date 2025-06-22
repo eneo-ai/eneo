@@ -8,6 +8,7 @@
   import { browser } from "$app/environment";
   import { getChatService } from "../../ChatService.svelte";
   import { setMessageContext } from "../../MessageContext.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   interface Props {
     message: ConversationMessage;
@@ -85,7 +86,7 @@
       {#if isReasoning}
         <span
           class="bg-accent-dimmer text-accent-stronger w-fit animate-pulse rounded-full px-4 py-2"
-          >Thinking...</span
+          >{m.thinking()}</span
         >
       {/if}
     </div>

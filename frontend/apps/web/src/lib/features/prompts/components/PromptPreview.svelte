@@ -12,6 +12,7 @@
   import utc from "dayjs/plugin/utc";
   import MemberChip from "../../spaces/components/MemberChip.svelte";
   import EditPromptDescription from "./EditPromptDescription.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
@@ -29,8 +30,8 @@
         class="border-default bg-primary sticky top-0 flex items-center justify-between border-b px-4 py-2.5 font-medium backdrop-blur"
       >
         <h2 class="font-medium">
-          <span class="sr-only">Previewing prompt created at</span>
-          <span aria-hidden="true">Version:</span>
+          <span class="sr-only">{m.previewing_prompt_created_at()}</span>
+          <span aria-hidden="true">{m.version()}:</span>
           {dayjs($previewedPrompt?.created_at).format("YYYY-MM-DD HH:mm")}
         </h2>
         <MemberChip member={$previewedPrompt.user}></MemberChip>
@@ -62,13 +63,13 @@
             onPromptSelected($previewedPrompt);
           }}
           variant="primary"
-          >Restore this version
+          >{m.restore_this_version()}
         </Button>
       </div>
     </div>
   {:else}
     <div class="text-secondary flex h-full w-full items-center justify-center">
-      Please select a prompt
+      {m.please_select_prompt()}
     </div>
   {/if}
 </div>

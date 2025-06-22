@@ -3,6 +3,7 @@
   import type { CompletionModel } from "@intric/intric-js";
   import { Select } from "@intric/ui";
   import { writable, type Writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   /** Id of currently selected Completion Model */
   export let value: { id: string } | null | undefined;
@@ -28,20 +29,18 @@
       unsupportedModelSelected = true;
       if (browser) {
         setTimeout(() => {
-          alert(
-            "The selected completion model is no longer supported. Please change it in the assistants settings."
-          );
+          alert(m.model_no_longer_supported());
         }, 400);
       }
     }
     modelSelectStore = writable({
       value: selectedModel,
-      label: selectedModel ? getModelDisplayName(selectedModel) : "No model selected"
+      label: selectedModel ? getModelDisplayName(selectedModel) : m.no_model_selected()
     });
   } else {
     modelSelectStore = writable({
       value: selectableModels[0],
-      label: selectableModels[0] ? getModelDisplayName(selectableModels[0]) : "No model selected"
+      label: selectableModels[0] ? getModelDisplayName(selectableModels[0]) : m.no_model_selected()
     });
   }
 
@@ -58,10 +57,10 @@
   customStore={modelSelectStore}
   class="border-dimmer hover:bg-hover-dimmer relative w-full border-b px-4 py-4"
 >
-  <Select.Label>Completion model</Select.Label>
-  <Select.Trigger placeholder="Select..." error={unsupportedModelSelected}></Select.Trigger>
+  <Select.Label>{m.completion_model()}</Select.Label>
+  <Select.Trigger placeholder={m.select_ellipsis()} error={unsupportedModelSelected}></Select.Trigger>
   <Select.Options>
-    <Select.OptionGroup label="Stable completion models">
+    <Select.OptionGroup label={m.stable_completion_models()}>
       {#each stableModels as model (model.id)}
         {@const modelName = getModelDisplayName(model)}
         <Select.Item value={model} label={modelName}>
@@ -73,12 +72,12 @@
         </Select.Item>
       {/each}
       {#if !stableModels.length}
-        <Select.Item disabled label="No enabled completion models for this space" value={null}
+        <Select.Item disabled label={m.no_enabled_completion_models()} value={null}
         ></Select.Item>
       {/if}
     </Select.OptionGroup>
     {#if experimentalModels.length > 0}
-      <Select.OptionGroup label="Experimental completion models">
+      <Select.OptionGroup label={m.experimental_completion_models()}>
         {#each experimentalModels as model (model.id)}
           {@const modelName = getModelDisplayName(model)}
           <Select.Item value={model} label={modelName}>

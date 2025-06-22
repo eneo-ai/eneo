@@ -10,6 +10,7 @@
   import type { AppRunSparse } from "@intric/intric-js";
   import { fade } from "svelte/transition";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -36,7 +37,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – {data.app
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {data.app
       .name}</title
   >
 </svelte:head>
@@ -47,16 +48,16 @@
       <AppSwitcher currentApp={data.app}></AppSwitcher>
     </Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="run">Run</Page.TabTrigger>
-      <Page.TabTrigger tab="results">Results</Page.TabTrigger>
+      <Page.TabTrigger tab="run">{m.run()}</Page.TabTrigger>
+      <Page.TabTrigger tab="results">{m.results()}</Page.TabTrigger>
     </Page.Tabbar>
 
     <Page.Flex>
       {#if data.app.permissions?.includes("edit")}
-        <Button href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}/edit">Edit</Button>
+        <Button href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}/edit">{m.edit()}</Button>
       {/if}
       <Page.TabTrigger asFragment let:trigger tab="run">
-        <Button is={trigger} variant="primary" class="!line-clamp-1">New run</Button>
+        <Button is={trigger} variant="primary" class="!line-clamp-1">{m.new_run()}</Button>
       </Page.TabTrigger>
     </Page.Flex>
   </Page.Header>

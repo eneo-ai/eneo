@@ -10,6 +10,7 @@
   import { invalidate } from "$app/navigation";
   import InviteLinkDialog from "./editor/InviteLinkDialog.svelte";
   import UserEditor from "./editor/UserEditor.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   export let user: User;
@@ -25,7 +26,7 @@
       invalidate("admin:users:load");
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete user.");
+      alert(m.could_not_delete_user());
       console.error(e);
     }
     isProcessing = false;
@@ -50,7 +51,7 @@
       }}
     >
       <IconEdit size="sm"></IconEdit>
-      Edit</Button
+      {m.edit()}</Button
     >
 
     {#if !user.is_active}
@@ -62,7 +63,7 @@
         }}
       >
         <IconLink size="sm" />
-        Show invite link</Button
+        {m.show_invite_link()}</Button
       >
     {/if}
 
@@ -75,22 +76,22 @@
       disabled={currentUser.id === user.id}
       padding="icon-leading"
     >
-      <IconTrash size="sm"></IconTrash>Delete</Button
+      <IconTrash size="sm"></IconTrash>{m.delete()}</Button
     >
   </Dropdown.Menu>
 </Dropdown.Root>
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete user</Dialog.Title>
+    <Dialog.Title>{m.delete_user()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{user.email}</span>?</Dialog.Description
+      >{m.do_you_really_want_to_delete()} <span class="italic">{user.email}</span>?</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteUser}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

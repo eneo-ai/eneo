@@ -3,6 +3,7 @@
   import { availableThemes, type Theme } from "../core/theme";
   import { getThemeStore } from "../core/theme";
   import { writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
   const currentTheme = getThemeStore();
   function capitalise(string: string) {
     const first = [...string][0].toUpperCase();
@@ -17,9 +18,9 @@
 
 <Select.Root customStore={selected}>
   <div class="sr-only">
-    <Select.Label>Select colour scheme</Select.Label>
+    <Select.Label>{m.select_colour_scheme()}</Select.Label>
   </div>
-  <Select.Trigger placeholder="Select theme..."></Select.Trigger>
+  <Select.Trigger placeholder={m.select_theme()}></Select.Trigger>
   <Select.Options>
     {#each availableThemes as theme (theme)}
       <Select.Item value={theme} label={capitalise(theme)}></Select.Item>

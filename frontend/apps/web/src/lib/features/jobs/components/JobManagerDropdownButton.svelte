@@ -6,6 +6,7 @@
   import { fly, fade } from "svelte/transition";
   import JobManagerDropdownPanel from "./JobManagerDropdownPanel.svelte";
   import { getJobManager } from "../JobManager";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentlyRunningJobs, showJobManagerPanel }
@@ -32,7 +33,7 @@
 <Button
   is={[$trigger]}
   unstyled
-  label="Notifications"
+  label={m.notifications()}
   class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center pt-[0.1rem]"
 >
   {#if $currentlyRunningJobs === 0}
@@ -58,7 +59,7 @@
     <p
       class="border-default text-secondary mb-2 border-b px-6 pt-1 pb-2.5 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
-      Notifications and Jobs
+      {m.notifications_and_jobs()}
     </p>
     <JobManagerDropdownPanel></JobManagerDropdownPanel>
 

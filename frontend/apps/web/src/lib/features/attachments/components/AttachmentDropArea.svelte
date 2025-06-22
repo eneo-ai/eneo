@@ -9,7 +9,8 @@
   import { getAttachmentManager } from "../AttachmentManager";
 
   export let isDragging: boolean;
-  export let label = "Drop files here to upload";
+  export let label = m.drop_files_here_to_upload();
+  import { m } from "$lib/paraglide/messages";
 
   const { queueValidUploads } = getAttachmentManager();
 

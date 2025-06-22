@@ -12,6 +12,7 @@
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { sortModels } from "$lib/features/ai-models/sortModels";
+  import { m } from "$lib/paraglide/messages";
 
   export let selectableModels: (EmbeddingModel & {
     meets_security_classification?: boolean | null | undefined;
@@ -56,24 +57,21 @@
 </script>
 
 <Settings.Row
-  title="Embedding Models"
-  description="Choose which embedding models will be available to embed data in this space."
+  title={m.embedding_models()}
+  description={m.embedding_models_description()}
 >
   <svelte:fragment slot="description">
     {#if $currentSpace.embedding_models.length === 0}
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Hint:&nbsp;</span>Enable an emedding model to be able to use
-        knowledge from collections and websites.
+        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_hint()}
       </p>
     {:else if $currentSpace.embedding_models.length > 1}
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Hint:&nbsp;</span>We strongly recommend to only activate one
-        embedding model per space. Data embedded with different models is not compatible with each
-        other.
+        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning()}
       </p>
     {/if}
   </svelte:fragment>
@@ -83,7 +81,7 @@
     <Tooltip
       text={meetsClassification
         ? undefined
-        : "This model does not meet the selected security classification"}
+        : m.model_does_not_meet_security_classification()}
     >
       <div
         class="border-default hover:bg-hover-dimmer cursor-pointer border-b py-4 pr-4 pl-2"

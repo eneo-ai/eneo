@@ -6,6 +6,7 @@
   import type { InfoBlob } from "@intric/intric-js";
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { IconEdit } from "@intric/icons/edit";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   export let blob: InfoBlob;
@@ -21,7 +22,7 @@
       invalidate("blobs:list");
       return true;
     } catch (e) {
-      alert(`Could not change title  to ${updatableTitle}`);
+      alert(m.could_not_change_title_to({ title: updatableTitle }));
       console.error(e);
       return false;
     }
@@ -33,7 +34,7 @@
       invalidate("blobs:list");
       return true;
     } catch (e) {
-      alert(`Could not delete ${blob.metadata.title ?? "this file"}`);
+      alert(m.could_not_delete_file({ fileName: blob.metadata.title ?? m.this_file() }));
       console.error(e);
       return false;
     }
@@ -60,7 +61,7 @@
         padding="icon-leading"
       >
         <IconEdit size="sm" />
-        Edit</Button
+        {m.edit()}</Button
       >
       <Button
         is={item}
@@ -70,7 +71,7 @@
         }}
         padding="icon-leading"
       >
-        <IconTrash size="sm" />Delete</Button
+        <IconTrash size="sm" />{m.delete()}</Button
       >
     </Dropdown.Menu>
   </Dropdown.Root>
@@ -78,34 +79,33 @@
 
 <Dialog.Root bind:isOpen={showEditDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Edit file</Dialog.Title>
-    <Dialog.Description hidden>Enter new file name:</Dialog.Description>
+    <Dialog.Title>{m.edit_file()}</Dialog.Title>
+    <Dialog.Description hidden>{m.enter_new_file_name()}</Dialog.Description>
 
     <Dialog.Section>
       <Input.Text
         bind:value={updatableTitle}
-        label="Name"
+        label={m.name()}
         class=" border-default hover:bg-hover-dimmer px-4 py-4"
       ></Input.Text>
     </Dialog.Section>
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
-      <Button is={close} variant="primary" on:click={updateBlobName}>Save changes</Button>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button is={close} variant="primary" on:click={updateBlobName}>{m.save_changes()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete group</Dialog.Title>
+    <Dialog.Title>{m.delete_group()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{blob.metadata.title}</span
-      >?</Dialog.Description
+      >{m.confirm_delete_file({ fileName: blob.metadata.title })}</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
-      <Button is={close} variant="destructive" on:click={deleteBlob}>Delete</Button>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button is={close} variant="destructive" on:click={deleteBlob}>{m.delete()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

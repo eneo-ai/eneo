@@ -9,9 +9,10 @@
   } = getMentionInput();
 
   let mentionsDiabled = $derived($mentions.length > 0);
+  import { m } from "$lib/paraglide/messages";
 </script>
 
-<Tooltip text={mentionsDiabled ? "We currently only support one mention per question" : undefined}>
+<Tooltip text={mentionsDiabled ? m.one_mention_per_question() : undefined}>
   <Button
     unstyled
     disabled={mentionsDiabled}
@@ -19,6 +20,6 @@
     on:click={showMentionPicker}
   >
     <IconAtSymbol></IconAtSymbol>
-    Mention</Button
+    {m.mention()}</Button
   >
 </Tooltip>

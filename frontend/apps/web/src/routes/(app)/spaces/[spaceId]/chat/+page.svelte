@@ -16,6 +16,7 @@
   import { page } from "$app/state";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const { data } = $props();
 
@@ -51,16 +52,15 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name}</title>
+  <title>Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name}</title>
 </svelte:head>
 
 {#snippet defaultAssistantWelcomeMessage()}
   <div class="max-w-[640px]">
     <div class="relative">
-      <h3 class="b-1 text-2xl font-extrabold">Hi, {$userInfo.firstName}!</h3>
-      <p class="text-secondary max-w-[50ch] pt-2 pr-20">
-        Welcome to Eneo. I'm your personal assistant and ready to help. Ask me a question to get
-        started.
+      <h3 class="b-1 text-2xl font-extrabold">{m.hi_firstname({ firstName: $userInfo.firstName })}</h3>
+      <p class="text-secondary max-w-[50ch] pr-20 pt-2">
+        {m.personal_assistant_welcome()}
       </p>
     </div>
   </div>
@@ -69,7 +69,7 @@
 <Page.Root tabController={currentTab}>
   <Page.Header>
     {#if chat.partner.type === "default-assistant"}
-      <Page.Title truncate={true} title="Personal assistant"></Page.Title>
+      <Page.Title truncate={true} title={m.personal_assistant()}></Page.Title>
     {:else}
       <Page.Title truncate={true} parent={{ href: `/spaces/${$currentSpace.routeId}/assistants` }}>
         <AssistantSwitcher></AssistantSwitcher>
@@ -77,10 +77,10 @@
     {/if}
 
     <Page.Tabbar>
-      <Page.TabTrigger tab="chat">Chat</Page.TabTrigger>
-      <Page.TabTrigger tab="history">History</Page.TabTrigger>
+      <Page.TabTrigger tab="chat">{m.chat()}</Page.TabTrigger>
+      <Page.TabTrigger tab="history">{m.history()}</Page.TabTrigger>
       {#if chat.partner.permissions?.includes("insight_view")}
-        <Page.TabTrigger tab="insights">Insights</Page.TabTrigger>
+        <Page.TabTrigger tab="insights">{m.insights()}</Page.TabTrigger>
       {/if}
     </Page.Tabbar>
 
@@ -89,7 +89,7 @@
         <DefaultAssistantModelSwitcher></DefaultAssistantModelSwitcher>
       {:else if chat.partner.permissions?.includes("edit")}
         <Button href="/spaces/{$currentSpace.routeId}/{chat.partner.type}s/{chat.partner.id}/edit"
-          >Edit</Button
+          >{m.edit()}</Button
         >
       {/if}
       <Button
@@ -106,7 +106,7 @@
           );
         }}
         class="!line-clamp-1"
-        >New conversation
+        >{m.new_conversation()}
       </Button>
     </Page.Flex>
   </Page.Header>
@@ -158,16 +158,16 @@
             <Button
               variant="primary-outlined"
               on:click={() => chat.loadMoreConversations()}
-              aria-label="Load more conversations"
+              aria-label={m.load_more_conversations()}
             >
-              Load more conversations</Button
+              {m.load_more_conversations()}</Button
             >
             <p role="status" aria-live="polite">
-              Loaded {chat.loadedConversations.length}/{chat.totalConversations} conversations
+              {m.loaded_conversations_count({ loaded: chat.loadedConversations.length, total: chat.totalConversations })}
             </p>
           {:else if chat.totalConversations > 0}
             <p role="status" aria-live="polite">
-              Loaded all {chat.totalConversations} conversations.
+              {m.loaded_all_conversations({ total: chat.totalConversations })}
             </p>
           {/if}
         </div>
@@ -181,7 +181,7 @@
         {/if}
       {:else}
         <div class="absolute inset-0 flex items-center justify-center">
-          No insights available for this chat.
+          {m.no_insights_available_for_this_chat()}
         </div>
       {/if}
     </Page.Tab>

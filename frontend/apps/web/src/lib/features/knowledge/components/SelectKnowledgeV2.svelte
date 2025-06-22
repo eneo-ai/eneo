@@ -10,6 +10,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAvailableKnowledge } from "../getAvailableKnowledge";
   import { tick } from "svelte";
+  import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
 
@@ -118,7 +119,7 @@
       {:else}
         <span
           class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
-          >Empty</span
+          >{m.empty()}</span
         >
       {/if}
       <Button
@@ -200,7 +201,7 @@
     <label
       for="knowledgeFilter"
       class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg"
-      >Filter:</label
+      >{m.filter()}</label
     >
   </div>
 {:else}
@@ -232,7 +233,7 @@
           {...$groupLabel(section.name)}
           use:groupLabel
         >
-          {availableKnowledge.showHeaders ? section.name : "Select a knowledge source"}
+          {availableKnowledge.showHeaders ? section.name : m.select_knowledge_source()}
         </div>
         {#if !section.isEnabled}
           <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
@@ -242,7 +243,7 @@
             knowledge.
           </p>
         {:else if section.availableItemsCount === 0}
-          <p class="knowledge-message">No more sources available.</p>
+          <p class="knowledge-message">{m.no_more_sources()}</p>
         {:else}
           {#each section.groups as collection (collection.id)}
             <div
@@ -264,7 +265,7 @@
               {:else}
                 <span
                   class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
-                  >Empty</span
+                  >{m.empty()}</span
                 >
               {/if}
             </div>

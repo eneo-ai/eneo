@@ -12,6 +12,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { Assistant } from "@intric/intric-js";
   import type { CalendarDate } from "@internationalized/date";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
 
@@ -53,7 +54,7 @@
       message.answer = answer;
     } catch (e) {
       console.error(e);
-      message.answer = "There was an error connecting to the server.";
+      message.answer = m.error_connecting_to_server();
     }
     loadingAnswer = false;
   }
@@ -70,8 +71,8 @@
       class="border-default bg-primary flex w-full max-w-[62ch] items-end justify-center gap-1 overflow-clip rounded-lg border p-1 shadow-lg"
     >
       <textarea
-        aria-label="Ask a question about what this assistant has been asked previously"
-        placeholder="Ask about insights..."
+        aria-label={m.ask_question_about_assistant()}
+        placeholder={m.ask_about_insights()}
         bind:this={textarea}
         bind:value={question}
         on:input={() => {
@@ -97,7 +98,7 @@
       <button
         disabled={loadingAnswer}
         type="submit"
-        aria-label="Submit your question"
+        aria-label={m.submit_your_question()}
         on:click={askQuestion}
         class="bg-secondary hover:bg-hover-stronger flex h-11 w-11 items-center justify-center rounded-lg p-2 text-lg"
       >
@@ -112,8 +113,7 @@
 
   {#if message.answer === NOT_ANSWERED}
     <p class="text-secondary text-center transition-all" id="insights_description">
-      Discover what users wanted to know from <span class="italic">{assistant.name}</span>.<br />Ask
-      a question about the conversation history to get started.
+      {m.discover_what_users_wanted({ assistant: assistant.name })} {m.ask_question_about_conversation_history()}
     </p>
   {:else if message.answer !== ""}
     <div
@@ -130,7 +130,7 @@
         class="my-4"
         on:click={() => {
           message.answer = NOT_ANSWERED;
-        }}>New questions</Button
+        }}>{m.new_questions()}</Button
       >
     </div>
   {/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
   import { IconFeedback } from "@intric/icons/feedback";
+  import { m } from "$lib/paraglide/messages";
 
   let cls: string = "";
   export { cls as class };
@@ -18,7 +19,7 @@
       rel="noreferrer"
       class="text-muted hover:bg-hover-default hover:text-primary relative flex items-center justify-center gap-3 px-[1.45rem] py-2.5 tracking-[0.008rem] hover:font-medium hover:tracking-normal"
     >
-      <span>Have a question?</span>
+      <span>{m.have_a_question()}</span>
       <IconFeedback />
     </a>
   {/if}

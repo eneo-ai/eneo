@@ -9,6 +9,7 @@
   import type { StorageSpaceList, StorageUsageSummary } from "@intric/intric-js";
   import StorageOverviewBar from "./StorageOverviewBar.svelte";
   import StorageTable from "./StorageTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     spaces: StorageSpaceList[];
@@ -19,13 +20,13 @@
 </script>
 
 <Settings.Page>
-  <Settings.Group title="Overview">
+  <Settings.Group title={m.overview()}>
     <StorageOverviewBar {storageStats}></StorageOverviewBar>
   </Settings.Group>
-  <Settings.Group title="Details">
+  <Settings.Group title={m.details()}>
     <Settings.Row
-      title="Public Spaces"
-      description="See this organisation's public spaces and their storage use."
+      title={m.public_spaces()}
+      description={m.public_spaces_storage_description()}
       fullWidth
     >
       <StorageTable {spaces} />

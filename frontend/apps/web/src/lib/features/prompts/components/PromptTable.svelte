@@ -15,6 +15,7 @@
   import { onMount } from "svelte";
   import PromptTimestamp from "./PromptTimestamp.svelte";
   import PromptCreator from "./PromptCreator.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
@@ -32,7 +33,7 @@
 
   const viewModel = table.createViewModel([
     table.column({
-      header: "Created",
+      header: m.created(),
       accessor: (item) => item,
       cell: (item) => {
         return createRender(PromptTimestamp, {
@@ -55,7 +56,7 @@
     }),
 
     table.columnPrimary({
-      header: "Author",
+      header: m.author(),
       value: (item) => item.user.email,
       cell: (item) => {
         return createRender(PromptCreator, {
@@ -76,7 +77,7 @@
   let allUniqueDates = new Set($allPrompts.map((prompt) => getUniqueDate(prompt.created_at)));
 
   function getUniqueDate(date: string | undefined | null) {
-    return date ? dayjs(date).format("MMM D, YYYY") : "Prompts without date";
+    return date ? dayjs(date).format("MMM D, YYYY") : m.prompts_without_date();
   }
 
   function createDateFilter(date: string) {

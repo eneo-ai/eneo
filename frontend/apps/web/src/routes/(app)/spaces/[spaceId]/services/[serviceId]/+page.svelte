@@ -5,6 +5,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import EditService from "./EditService.svelte";
   import { dynamicColour } from "$lib/core/colours";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   const {
@@ -36,7 +37,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {$currentSpace.personal ? "Personal" : $currentSpace.name} - {data.service
+    >Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} - {data.service
       .name}</title
   >
 </svelte:head>
@@ -44,16 +45,16 @@
 <Page.Root>
   <Page.Header>
     <Page.Title
-      parent={{ title: "Services", href: `/spaces/${$currentSpace.routeId}/services` }}
+      parent={{ title: m.services(), href: `/spaces/${$currentSpace.routeId}/services` }}
       title={data.service.name}
     ></Page.Title>
 
     <Page.Tabbar>
       <Page.Flex>
-        <Page.TabTrigger tab="playground" label="Test your service {data.service.name}"
-          >Playground</Page.TabTrigger
+        <Page.TabTrigger tab="playground" label={m.test_your_service({ serviceName: data.service.name })}
+          >{m.playground()}</Page.TabTrigger
         >
-        <Page.TabTrigger tab="edit">Settings</Page.TabTrigger>
+        <Page.TabTrigger tab="edit">{m.settings()}</Page.TabTrigger>
       </Page.Flex>
     </Page.Tabbar>
   </Page.Header>
@@ -65,19 +66,19 @@
         class="grid h-full grid-cols-1 gap-4 py-4 pr-4 md:grid-cols-2"
       >
         <div class="flex h-full flex-col items-end gap-4">
-          <Input.TextArea bind:value={playgroundInput} label="Input" class="h-full w-full"
+          <Input.TextArea bind:value={playgroundInput} label={m.input()} class="h-full w-full"
           ></Input.TextArea>
           <Button variant="primary" on:click={runService}>
-            {#if runningService}Running...{:else}
-              Run this service{/if}</Button
+            {#if runningService}{m.running()}{:else}
+              {m.run_this_service()}{/if}</Button
           >
         </div>
         <div class="flex flex-col items-end gap-1">
-          <h3 class="self-start font-medium">Output</h3>
+          <h3 class="self-start font-medium">{m.output()}</h3>
           <div
             class="border-dynamic-default bg-dynamic-dimmer text-dynamic-default h-full w-full overflow-y-auto border-b p-4 font-mono text-sm"
           >
-            {runningService ? "Loading..." : playgroundOutput}
+            {runningService ? m.loading() : playgroundOutput}
           </div>
 
           <Button
@@ -85,7 +86,7 @@
             class="mt-3"
             on:click={() => {
               navigator.clipboard.writeText(playgroundOutput);
-            }}>Copy response</Button
+            }}>{m.copy_response()}</Button
           >
         </div>
       </div>
