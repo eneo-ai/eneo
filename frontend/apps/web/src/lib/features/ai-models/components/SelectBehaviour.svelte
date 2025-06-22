@@ -13,7 +13,7 @@
 
   const behaviourLabels: Record<ModelBehaviour, string> = {
     creative: m.creative(),
-    default: m.default(),
+    default: (m as any)["default"](),
     deterministic: m.deterministic(),
     custom: m.custom()
   };

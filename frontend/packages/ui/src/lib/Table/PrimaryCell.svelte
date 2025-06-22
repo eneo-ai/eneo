@@ -21,7 +21,7 @@
     {#if link}
       <Button
         href={link}
-        is={trigger}
+        is={trigger && trigger[0]}
         padding={icon ? "icon-leading" : undefined}
         class="{icon ? '-ml-1' : '-ml-2'} max-w-full"
       >
@@ -37,9 +37,9 @@
       {#if icon}
         <svelte:component this={icon} class="min-w-6"></svelte:component>
       {/if}
-      <span class="truncate overflow-ellipsis" {...trigger}>
+      <button class="truncate overflow-ellipsis" type="button" {...(trigger && trigger[0] || {})}>
         {label}
-      </span>
+      </button>
     {/if}
   </div>
 </Tooltip>

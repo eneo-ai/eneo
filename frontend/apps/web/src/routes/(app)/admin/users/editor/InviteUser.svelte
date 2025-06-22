@@ -43,7 +43,7 @@
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.invite_a_new_user_to({ name: tenant.display_name })}</Dialog.Title>
+    <Dialog.Title>{m.invite_a_new_user_to({ name: tenant.display_name || "" })}</Dialog.Title>
 
     <Dialog.Section>
       <Input.Text

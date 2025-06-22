@@ -253,6 +253,7 @@
         >
           <SelectBehaviourV2
             bind:kwArgs={$update.completion_model_kwargs}
+            isDisabled={false}
             {aria}
           ></SelectBehaviourV2>
         </Settings.Row>

@@ -75,10 +75,6 @@
     <Input.Files 
       bind:files 
       {acceptedMimeTypes}
-      dragDropText={m.drag_drop_files()}
-      clickToBrowseText={m.click_to_browse()}
-      dropFilesHereText={m.drop_your_files_here()}
-      clickHereToSeeText={m.click_here_to_see_supported_filetypes()}
     ></Input.Files>
 
     <Dialog.Controls let:close>

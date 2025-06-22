@@ -50,8 +50,5 @@
   {viewModel}
   filter
   resourceName="file"
-  filterPlaceholder={m.filter()}
-  listText={m.list()}
-  cardsText={m.cards()}
   emptyMessage={m.no_files_uploaded_yet()}
 ></Table.Root>

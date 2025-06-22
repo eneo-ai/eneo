@@ -76,10 +76,7 @@
   gapX={1.5} 
   gapY={1.5} 
   layout="grid"
-  filterPlaceholder={m.filter_apps_placeholder()}
-  listText={m.list()}
-  cardsText={m.cards()}
-  noItemsMessage={m.there_are_currently_no_apps_configured()}
+  emptyMessage={m.there_are_currently_no_apps_configured()}
 >
   {#if $currentSpace.hasPermission("publish", "app")}
     <Table.Group title={m.published()} filterFn={isPublished(true)}></Table.Group>

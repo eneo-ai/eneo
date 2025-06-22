@@ -100,7 +100,7 @@
   <Dialog.Content width="small">
     <Dialog.Title>{m.delete_group()}</Dialog.Title>
     <Dialog.Description
-      >{m.confirm_delete_file({ fileName: blob.metadata.title })}</Dialog.Description
+      >{m.confirm_delete_file({ fileName: blob.metadata.title || "" })}</Dialog.Description
     >
 
     <Dialog.Controls let:close>

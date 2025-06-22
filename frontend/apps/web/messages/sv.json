@@ -1137,5 +1137,18 @@
   "eneo_logo": "Eneo-logotyp",
   "intric_logo": "Intric-logotyp",
   "eneo_icon": "Eneo-ikon",
-  "intric_icon": "Intric-ikon"
+  "intric_icon": "Intric-ikon",
+  "assistant": "Assistent",
+  "download": "Ladda ner",
+  "mentions": "Omnämnanden",
+  "default": "Standard",
+  "monday": "Måndag",
+  "tuesday": "Tisdag",
+  "wednesday": "Onsdag",
+  "thursday": "Torsdag",
+  "friday": "Fredag",
+  "saturday": "Lördag",
+  "sunday": "Söndag",
+  "new": "Nya",
+  "conversations": "konversationer"
 }

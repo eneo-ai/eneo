@@ -2,6 +2,7 @@ import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vitest/config";
 import type { PluginOption } from "vite";
 import tailwindcss from "@tailwindcss/vite";
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 // Visualiser to analyse bundle sizes
 // import { visualizer } from "rollup-plugin-visualizer";
 
@@ -19,6 +20,11 @@ export default defineConfig({
     //   emitFile: true,
     //   filename: "stats.html"
     // }),
+    paraglideVitePlugin({
+      project: "./project.inlang",
+      outdir: "./src/lib/paraglide",
+      strategy: ["url", "cookie", "baseLocale"]
+    }) as PluginOption,
     tailwindcss() as PluginOption,
     intricIcons() as PluginOption,
     sveltekit() as PluginOption

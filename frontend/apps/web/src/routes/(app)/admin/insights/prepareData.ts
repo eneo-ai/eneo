@@ -7,6 +7,7 @@
 import type { AnalyticsData } from "@intric/intric-js";
 import type { Chart } from "@intric/ui";
 import { fromAbsolute, getDayOfWeek, parseAbsolute, toCalendarDate } from "@internationalized/date";
+import { m } from "$lib/paraglide/messages";
 
 // {sessions: { "Monday": {count: 12, total: 12}}}
 type UsageData = Record<string, Record<string, Record<string, number>>>;
@@ -58,7 +59,7 @@ const getMaxCount = (obj: UsageData) => {
   return Math.ceil(Math.max(...counts) / 5) * 5;
 };
 
-const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const days = [m.monday(), m.tuesday(), m.wednesday(), m.thursday(), m.friday(), m.saturday(), m.sunday()];
 
 type PreparedData = Chart.Config["options"] & { dataset: Record<string, unknown>[] };
 
@@ -157,7 +158,7 @@ export function prepareData(data: AnalyticsData, timeframe: { start: string; end
 }
 
 export function getConfig(data: PreparedData, filter: "sessions" | "questions"): Chart.Config {
-  const label = filter === "sessions" ? "conversations" : filter;
+  const label = filter === "sessions" ? m.conversations() : filter;
 
   return {
     options: {
@@ -190,7 +191,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         {
           type: "bar",
           dimensions: ["created_at", "count"],
-          name: `New ${label}`,
+          name: `${m.new()} ${label}`,
           datasetId: "filtered"
         }
       ]

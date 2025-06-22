@@ -91,10 +91,7 @@
   gapX={1.5}
   gapY={1.5}
   layout="grid"
-  filterPlaceholder={m.filter_assistants_placeholder()}
-  listText={m.list()}
-  cardsText={m.cards()}
-  noItemsMessage={m.there_are_currently_no_assistants_configured()}
+  emptyMessage={m.there_are_currently_no_assistants_configured()}
 >
   {#if $currentSpace.hasPermission("publish", "assistant")}
     <Table.Group title={m.published()} filterFn={isPublished(true)}></Table.Group>

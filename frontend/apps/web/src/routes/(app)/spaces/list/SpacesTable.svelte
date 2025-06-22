@@ -53,7 +53,4 @@
   gapX={1.5} 
   gapY={1.5} 
   layout="grid" 
-  filterPlaceholder={m.filter_spaces_placeholder()}
-  listText={m.list()}
-  cardsText={m.cards()}
 ></Table.Root>
