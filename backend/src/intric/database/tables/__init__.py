@@ -8,6 +8,7 @@ import intric.database.tables.app_template_table
 import intric.database.tables.assistant_table
 import intric.database.tables.assistant_template_table
 import intric.database.tables.collections_table
+import intric.database.tables.completion_model_migration_history_table
 import intric.database.tables.feature_flag_table
 import intric.database.tables.files_table
 import intric.database.tables.group_chats_table

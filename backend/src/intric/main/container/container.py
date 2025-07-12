@@ -32,6 +32,15 @@ from intric.authentication.api_key_repo import ApiKeysRepository
 from intric.authentication.auth_service import AuthService
 from intric.collections.application.collection_crud_service import CollectionCRUDService
 from intric.completion_models.application import CompletionModelCRUDService
+from intric.completion_models.application.completion_model_migration_service import (
+    CompletionModelMigrationService,
+)
+from intric.completion_models.application.completion_model_migration_history_service import (
+    CompletionModelMigrationHistoryService,
+)
+from intric.completion_models.application.completion_model_usage_service import (
+    CompletionModelUsageService,
+)
 from intric.completion_models.domain import CompletionModelRepository
 from intric.completion_models.domain.completion_model_service import (
     CompletionModelService,
@@ -477,6 +486,21 @@ class Container(containers.DeclarativeContainer):
     completion_model_service = providers.Factory(
         CompletionModelService,
         completion_model_repo=completion_model_repo2,
+    )
+    completion_model_usage_service = providers.Factory(
+        CompletionModelUsageService,
+        session=session,
+        completion_model_repo=completion_model_repo2,
+    )
+    completion_model_migration_service = providers.Factory(
+        CompletionModelMigrationService,
+        session=session,
+        completion_model_repo=completion_model_repo2,
+        usage_service=completion_model_usage_service,
+    )
+    completion_model_migration_history_service = providers.Factory(
+        CompletionModelMigrationHistoryService,
+        session=session,
     )
     transcription_model_service = providers.Factory(
         TranscriptionModelService,
