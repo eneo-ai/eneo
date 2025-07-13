@@ -129,7 +129,7 @@ class CompletionModelMigrationService:
                 and_(
                     CompletionModelSettings.completion_model_id == from_model_id,
                     CompletionModelSettings.tenant_id == user.tenant_id,
-                    CompletionModelSettings.is_enabled == True
+                    CompletionModelSettings.is_org_enabled == True
                 )
             )
             from_settings = await self.session.execute(from_settings_stmt)
@@ -143,7 +143,7 @@ class CompletionModelMigrationService:
                 and_(
                     CompletionModelSettings.completion_model_id == to_model_id,
                     CompletionModelSettings.tenant_id == user.tenant_id,
-                    CompletionModelSettings.is_enabled == True
+                    CompletionModelSettings.is_org_enabled == True
                 )
             )
             to_settings = await self.session.execute(to_settings_stmt)
