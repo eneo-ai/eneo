@@ -522,30 +522,29 @@ async def migrate_completion_model_for_all_tenants(
         tenant_repo = container.tenant_repo()
         user_repo = container.user_repo()
         
-        # Get all active tenants
-        async with container.session().begin():
-            tenants = await tenant_repo.get_all_tenants()
-            
-            from intric.tenants.tenant import TenantState
-            active_tenants = [t for t in tenants if t.state == TenantState.ACTIVE]
-            
-            logger.info(
-                f"Found {len(active_tenants)} active tenants for migration",
-                extra={
-                    "total_tenants": len(tenants),
-                    "active_tenants": len(active_tenants),
-                    "active_tenant_ids": [str(t.id) for t in active_tenants],
-                }
-            )
-            
-            if not active_tenants:
-                return {
-                    "message": "No active tenants found",
-                    "total_tenants": 0,
-                    "successful_migrations": 0,
-                    "failed_migrations": 0,
-                    "results": [],
-                }
+        # Get all active tenants (using a separate session scope)
+        tenants = await tenant_repo.get_all_tenants()
+        
+        from intric.tenants.tenant import TenantState
+        active_tenants = [t for t in tenants if t.state == TenantState.ACTIVE]
+        
+        logger.info(
+            f"Found {len(active_tenants)} active tenants for migration",
+            extra={
+                "total_tenants": len(tenants),
+                "active_tenants": len(active_tenants),
+                "active_tenant_ids": [str(t.id) for t in active_tenants],
+            }
+        )
+        
+        if not active_tenants:
+            return {
+                "message": "No active tenants found",
+                "total_tenants": 0,
+                "successful_migrations": 0,
+                "failed_migrations": 0,
+                "results": [],
+            }
         
         # Process each tenant
         successful_migrations = 0
