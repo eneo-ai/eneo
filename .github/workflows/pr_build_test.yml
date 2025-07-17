@@ -1,0 +1,36 @@
+name: PR Build Test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
+  FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    name: Test Docker builds
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Test build backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: test-build
+      
+      - name: Test build frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false
+          tags: test-build
