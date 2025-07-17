@@ -44,6 +44,13 @@ jobs:
       - name: Check branch naming
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
+          
+          # Skip branch naming check for long-lived branches
+          if [[ "$BRANCH_NAME" == "develop" ]]; then
+            echo "✅ Branch 'develop' is a long-lived branch - skipping naming convention check"
+            exit 0
+          fi
+          
           VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor)/"
           
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
