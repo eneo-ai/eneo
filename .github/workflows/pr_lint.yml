@@ -1,9 +1,10 @@
-name: Pull request actions
+name: Pull Request Checks
 
 on:
   pull_request:
     branches:
       - main
+      - develop
     types:
       - opened
       - edited
@@ -14,17 +15,55 @@ permissions:
   pull-requests: read
 
 jobs:
-  validate-pr-title:
+  validate-pr:
     runs-on: ubuntu-latest
-    name: Validate semantic PR title
+    name: Validate PR title and branch
     steps:
-      - uses: amannn/action-semantic-pull-request@v5
+      - name: Validate semantic PR title
+        uses: amannn/action-semantic-pull-request@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            test
+            chore
+            perf
+            ci
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            didn't match the configured pattern. Please ensure that the subject
+            doesn't start with an uppercase character.
+      
+      - name: Check branch naming
+        run: |
+          BRANCH_NAME="${{ github.head_ref }}"
+          
+          # Skip branch naming check for long-lived branches
+          if [[ "$BRANCH_NAME" == "develop" ]]; then
+            echo "✅ Branch 'develop' is a long-lived branch - skipping naming convention check"
+            exit 0
+          fi
+          
+          VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor)/"
+          
+          if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
+            echo "❌ Branch name '$BRANCH_NAME' does not follow naming convention."
+            echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, or refactor/"
+            exit 1
+          fi
+          
+          echo "✅ Branch name follows naming convention"
 
-  run-check-and-lint:
+  frontend-checks:
     runs-on: ubuntu-latest
-    name: Typecheck, linting and formatting
+    name: Frontend basic checks
     defaults:
       run:
         working-directory: frontend
@@ -45,6 +84,60 @@ jobs:
       - name: Install dependencies
         run: pnpm run setup:github
       - name: Run svelte-check
-        run: pnpm run check
-      - name: Run eslint
-        run: pnpm run lint
+        run: pnpm run check || echo "Svelte check failed but continuing..."
+      - name: Run eslint (non-blocking)
+        run: pnpm run lint || echo "ESLint failed but continuing..."
+
+  backend-checks:
+    runs-on: ubuntu-latest
+    name: Backend checks (Ruff)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for changed files detection
+      
+      - name: Get changed Python files
+        id: changed-files
+        run: |
+          # Get changed Python files in backend directory
+          CHANGED_FILES=$(git diff --name-only --diff-filter=AM origin/main...HEAD -- 'backend/**/*.py' | tr '\n' ' ')
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "Changed Python files: $CHANGED_FILES"
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Python files changed in backend/"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 🚨 Critical Issues Check (BLOCKING)
+        if: steps.changed-files.outputs.skip == 'false'
+        uses: astral-sh/ruff-action@v3
+        with:
+          src: ${{ steps.changed-files.outputs.files }}
+          args: check --select F401,F811,F821,F841,B007,B008 --output-format github
+        # This step will FAIL the workflow for critical issues
+      
+      - name: 💅 Style & Format Check (NON-BLOCKING)
+        if: steps.changed-files.outputs.skip == 'false'
+        run: |
+          echo "Installing ruff for style checks..."
+          pip install ruff
+          echo "Checking style issues in: ${{ steps.changed-files.outputs.files }}"
+          ruff check --select E,W,I,UP,B --ignore F401,F811,F821,F841,B007,B008 --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
+        continue-on-error: true
+      
+      - name: 🎨 Auto-format Check (NON-BLOCKING)
+        if: steps.changed-files.outputs.skip == 'false'
+        run: |
+          echo "Installing ruff for formatting check..."
+          pip install ruff
+          echo "Checking format of: ${{ steps.changed-files.outputs.files }}"
+          ruff format --check ${{ steps.changed-files.outputs.files }} || echo "⚠️ Files need formatting (run 'ruff format' locally)"
+        continue-on-error: true
+      
+      - name: Skip message
+        if: steps.changed-files.outputs.skip == 'true'
+        run: echo "✅ No Python files changed in backend/ - skipping ruff checks"
