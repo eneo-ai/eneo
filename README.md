@@ -310,3 +310,10 @@ See [LICENSE](LICENSE) for the complete AGPL v3 license text.
 [🌐 Project Website](#) • [📧 Contact](mailto:digitalisering@sundsvall.se) • [💬 Community](https://github.com/eneo-ai/eneo/issues)
 
 </div>
+
+---
+
+## **🚀 Development Branch**
+
+**This branch contains the latest development features and CI/CD enhancements.**  
+**Used for testing new features before merging to production.**
