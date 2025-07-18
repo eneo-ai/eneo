@@ -21,7 +21,11 @@
   <Button
     href={link}
     target={linkIsExternal ? "_blank" : undefined}
-    on:click={() => onclick?.()}
+    on:click={() => {
+      if (onclick) {
+        onclick();
+      }
+    }}
     padding={icon ? "icon-leading" : undefined}
     class="{icon ? '-ml-1' : '-ml-2'} max-w-full"
   >
