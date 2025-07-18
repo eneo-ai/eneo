@@ -22,6 +22,66 @@ export function initUsage(client) {
           }
         });
         return res;
+      },
+
+      /**
+       * List token usage status aggregated by users for current tenant
+       * @param {{startDate: string, endDate: string}} [params] Define start and end date for data; Expects UTC time string.
+       * @throws {IntricError}
+       * */
+      getUsersSummary: async (params) => {
+        const res = await client.fetch("/api/v1/token-usage/users", {
+          method: "get",
+          params: {
+            query: {
+              start_date: params?.startDate,
+              end_date: params?.endDate,
+              page: params?.page,
+              per_page: params?.perPage,
+              sort_by: params?.sortBy,
+              sort_order: params?.sortOrder
+            }
+          }
+        });
+        return res;
+      },
+
+      /**
+       * Get summary for a specific user without fetching all users
+       * @param {string} userId User ID to get summary for
+       * @param {{startDate: string, endDate: string}} [params] Define start and end date for data; Expects UTC time string.
+       * @throws {IntricError}
+       * */
+      getUserSummary: async (userId, params) => {
+        const res = await client.fetch(`/api/v1/token-usage/users/${userId}/summary`, {
+          method: "get",
+          params: {
+            query: {
+              start_date: params?.startDate,
+              end_date: params?.endDate
+            }
+          }
+        });
+        return res;
+      },
+
+      /**
+       * Get model breakdown for a specific user
+       * @param {string} userId User ID to get breakdown for
+       * @param {{startDate: string, endDate: string}} [params] Define start and end date for data; Expects UTC time string.
+       * @throws {IntricError}
+       * */
+      getUserModelBreakdown: async (userId, params) => {
+        const res = await client.fetch(`/api/v1/token-usage/users/${userId}`, {
+          method: "get",
+          params: {
+            query: {
+              start_date: params?.startDate,
+              end_date: params?.endDate
+            }
+          }
+        });
+        return res;
       }
     },
 
