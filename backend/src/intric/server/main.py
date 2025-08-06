@@ -107,6 +107,9 @@ async def custom_http_500_exception_handler(request, exc):
 
     return response
 
+@app.get("/healthz")
+async def get_healthz():
+    return "OK"
 
 @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
 async def get_version():
