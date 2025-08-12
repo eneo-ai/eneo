@@ -31,7 +31,6 @@ from intric.server.protocol import responses
 from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdatePublic
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.authentication import auth
-from intric.jobs.job_service import JobService
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
@@ -642,7 +641,7 @@ async def migrate_completion_model_for_all_tenants(
                 continue
         
         logger.info(
-            f"Completed completion model migration for all tenants",
+            "Completed completion model migration for all tenants",
             extra={
                 "total_tenants": len(active_tenants),
                 "successful_migrations": successful_migrations,
@@ -662,7 +661,7 @@ async def migrate_completion_model_for_all_tenants(
         
     except Exception as e:
         logger.error(
-            f"Error in migrate_completion_model_for_all_tenants endpoint",
+            "Error in migrate_completion_model_for_all_tenants endpoint",
             extra={
                 "from_model_id": str(model_id),
                 "to_model_id": str(migration_request.to_model_id),

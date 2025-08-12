@@ -1,6 +1,5 @@
 """Service for completion model migration history operations."""
 
-from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
