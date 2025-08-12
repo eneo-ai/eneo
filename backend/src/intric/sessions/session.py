@@ -117,3 +117,6 @@ class SSEFirstChunk(AskChatResponse):
 
 # Add the SSE models here in order to include them in the openapi schema
 SSE_MODELS = [SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk]
+
+# Add standalone enums that need to be included in the openapi schema
+SSE_ENUMS = [IntricEventType]
