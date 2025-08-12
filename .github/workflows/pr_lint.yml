@@ -40,25 +40,25 @@ jobs:
             The subject "{subject}" found in the pull request title "{title}"
             didn't match the configured pattern. Please ensure that the subject
             doesn't start with an uppercase character.
-      
+
       - name: Check branch naming
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
-          
+
           # Skip branch naming check for long-lived branches
           if [[ "$BRANCH_NAME" == "develop" ]]; then
             echo "✅ Branch 'develop' is a long-lived branch - skipping naming convention check"
             exit 0
           fi
-          
+
           VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor)/"
-          
+
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "❌ Branch name '$BRANCH_NAME' does not follow naming convention."
             echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, or refactor/"
             exit 1
           fi
-          
+
           echo "✅ Branch name follows naming convention"
 
   frontend-checks:
@@ -78,7 +78,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          cache-dependency-path: frontend/pnpm-lock.yaml 
+          cache-dependency-path: frontend/pnpm-lock.yaml
           node-version: 20
           cache: pnpm
       - name: Install dependencies
@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Needed for changed files detection
-      
+
       - name: Get changed Python files
         id: changed-files
         run: |
@@ -111,33 +111,35 @@ jobs:
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: 🚨 Critical Issues Check (BLOCKING)
         if: steps.changed-files.outputs.skip == 'false'
         uses: astral-sh/ruff-action@v3
         with:
           src: ${{ steps.changed-files.outputs.files }}
-          args: check --select F401,F811,F821,F841,B007,B008 --output-format github
+          args: --config backend/pyproject.toml check --output-format github
         # This step will FAIL the workflow for critical issues
-      
+
       - name: 💅 Style & Format Check (NON-BLOCKING)
         if: steps.changed-files.outputs.skip == 'false'
         run: |
           echo "Installing ruff for style checks..."
           pip install ruff
           echo "Checking style issues in: ${{ steps.changed-files.outputs.files }}"
-          ruff check --select E,W,I,UP,B --ignore F401,F811,F821,F841,B007,B008 --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
+          ruff check --config backend/pyproject.toml --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
         continue-on-error: true
-      
-      - name: 🎨 Auto-format Check (NON-BLOCKING)
-        if: steps.changed-files.outputs.skip == 'false'
-        run: |
-          echo "Installing ruff for formatting check..."
-          pip install ruff
-          echo "Checking format of: ${{ steps.changed-files.outputs.files }}"
-          ruff format --check ${{ steps.changed-files.outputs.files }} || echo "⚠️ Files need formatting (run 'ruff format' locally)"
-        continue-on-error: true
-      
+
+      # Disabled for now as the project has not used ruff formatting previously
+      # TODO: Re-enable this when the project is ready to use ruff formatting
+      # - name: 🎨 Auto-format Check (NON-BLOCKING)
+      #   if: steps.changed-files.outputs.skip == 'false'
+      #   run: |
+      #     echo "Installing ruff for formatting check..."
+      #     pip install ruff
+      #     echo "Checking format of: ${{ steps.changed-files.outputs.files }}"
+      #     ruff format --config backend/pyproject.toml --check ${{ steps.changed-files.outputs.files }} || echo "⚠️ Files need formatting (run 'ruff format' locally)"
+      #   continue-on-error: true
+
       - name: Skip message
         if: steps.changed-files.outputs.skip == 'true'
         run: echo "✅ No Python files changed in backend/ - skipping ruff checks"
