@@ -12,7 +12,6 @@ from intric.completion_models.presentation import (
 from intric.roles.permissions import Permission, validate_permission
 from intric.completion_models.presentation.completion_model_models import (
     ModelUsageStatistics,
-    ModelUsageDetail,
     ModelMigrationRequest,
     MigrationResult,
     ModelUsageSummary,
@@ -100,7 +99,7 @@ async def get_model_usage_details(
     logger = logging.getLogger(__name__)
     
     logger.info(
-        f"Starting get_model_usage_details endpoint",
+        "Starting get_model_usage_details endpoint",
         extra={
             "model_id": str(model_id),
             "tenant_id": str(user.tenant_id),
@@ -135,7 +134,7 @@ async def get_model_usage_details(
         )
         
         logger.info(
-            f"Successfully retrieved model usage details",
+            "Successfully retrieved model usage details",
             extra={
                 "model_id": str(model_id),
                 "tenant_id": str(user.tenant_id),
@@ -149,7 +148,7 @@ async def get_model_usage_details(
         
     except Exception as e:
         logger.error(
-            f"Error in get_model_usage_details endpoint",
+            "Error in get_model_usage_details endpoint",
             extra={
                 "model_id": str(model_id),
                 "tenant_id": str(user.tenant_id),
@@ -182,7 +181,7 @@ async def migrate_model_usage(
     logger = logging.getLogger(__name__)
     
     logger.info(
-        f"Starting migrate_model_usage endpoint",
+        "Starting migrate_model_usage endpoint",
         extra={
             "from_model_id": str(model_id),
             "to_model_id": str(migration_request.to_model_id),
@@ -234,7 +233,7 @@ async def migrate_model_usage(
         )
         
         logger.info(
-            f"Successfully completed model migration",
+            "Successfully completed model migration",
             extra={
                 "from_model_id": str(model_id),
                 "to_model_id": str(migration_request.to_model_id),
@@ -252,7 +251,7 @@ async def migrate_model_usage(
         
     except Exception as e:
         logger.error(
-            f"Error in migrate_model_usage endpoint",
+            "Error in migrate_model_usage endpoint",
             extra={
                 "from_model_id": str(model_id),
                 "to_model_id": str(migration_request.to_model_id),
@@ -284,7 +283,7 @@ async def get_all_models_usage_summary(
         import logging
         logger = logging.getLogger(__name__)
         logger.error(
-            f"Error in get_all_models_usage_summary endpoint",
+            "Error in get_all_models_usage_summary endpoint",
             extra={
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),

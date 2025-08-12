@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from intric.events.model_events import DomainEvent
 

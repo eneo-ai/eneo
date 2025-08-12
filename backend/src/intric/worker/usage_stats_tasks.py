@@ -4,9 +4,6 @@ import logging
 from uuid import UUID
 
 from dependency_injector import providers
-from intric.completion_models.application.completion_model_usage_service import (
-    CompletionModelUsageService,
-)
 from intric.events import ModelUsageStatsUpdated, get_event_publisher
 from intric.jobs.job_models import Task
 from intric.jobs.task_models import UpdateUsageStatsTaskParams

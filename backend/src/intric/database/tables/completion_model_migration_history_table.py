@@ -2,7 +2,6 @@
 
 from sqlalchemy import Column, String, Text, JSON, Integer, Float, ForeignKey, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 
 from intric.database.tables.base_class import BasePublic
 
