@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Union
 
-from intric.completion_models.domain import ModelFamily, ModelHostingLocation
+from intric.completion_models.domain import ModelFamily
 from intric.main.config import SETTINGS
 from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided

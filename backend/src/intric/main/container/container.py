@@ -153,7 +153,6 @@ from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
 from intric.limits.limit_service import LimitService
 from intric.main.aiohttp_client import aiohttp_client
-from intric.main.config import SETTINGS
 from intric.modules.module_repo import ModuleRepository
 from intric.predefined_roles.predefined_role_service import PredefinedRolesService
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
