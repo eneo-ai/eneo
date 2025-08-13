@@ -111,99 +111,200 @@ graph TB
 
 ---
 
-## 🚀 Quick Production Deployment
+## 🚀 Production Deployment in 5 Steps
 
-### Prerequisites
+This guide provides a streamlined, step-by-step process to get Eneo running in a production environment using Docker.
+
+### Step 1: Prerequisites
+
+Before you begin, ensure you have the following:
+
+- **A Linux server** that meets the [minimum system requirements](#-system-requirements).
+- **Docker and Docker Compose** installed. If not, run the following:
+  ```bash
+  # Install Docker and Docker Compose
+  curl -fsSL https://get.docker.com -o get-docker.sh
+  sh get-docker.sh
+  ```
+- **A registered domain name** (e.g., `eneo.my-organization.com`) with its DNS `A` record pointing to your server's IP address.
+- **An API key** from at least one AI provider (e.g., OpenAI, Anthropic).
+
+---
+
+### Step 2: Download & Prepare
+
+First, create a dedicated directory for the Eneo deployment files. Using `/opt/eneo` is a common convention for applications on Linux, but you can choose a different location if you prefer.
 
 ```bash
-# Install Docker and Docker Compose
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-
-# Install Docker Compose (if not included)
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-```
-
-### 1. Setup Deployment Directory
-
-**Option A: Download deployment files only (Recommended)**
-
-```bash
-# Create deployment directory
+# Create and enter the deployment directory
 sudo mkdir -p /opt/eneo/deployment
 cd /opt/eneo/deployment
 
-# Download deployment files
-curl -o docker-compose.yml https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/docker-compose.yml
-curl -o env_backend.template https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/env_backend.template
-curl -o env_frontend.template https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/env_frontend.template
-curl -o env_db.template https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/env_db.template
-```
+# Download the required configuration files
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/docker-compose.yml
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_backend.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_frontend.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_db.template
 
-**Option B: Clone full repository (for customization)**
-
-```bash
-# Create deployment directory
-sudo mkdir -p /opt/eneo
-cd /opt/eneo
-
-# Clone repository for access to source code and templates
-git clone https://github.com/sundsvallai/eneo.git .
-cd docs/deployment
-```
-
-### 2. Configure Environment
-
-```bash
-# Copy environment templates
+# Create the environment files from the templates
 cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
+```
 
-# Generate secure secrets
-BACKEND_JWT_SECRET=$(openssl rand -hex 32)
-FRONTEND_JWT_SECRET=$BACKEND_JWT_SECRET
+---
+
+### Step 3: Configuration
+
+This is the most critical step. You will configure your Eneo instance by setting environment variables.
+
+**A. Configure `docker-compose.yml`:**
+
+Set your domain name and email address in the `docker-compose.yml` file. These are used by the Traefik reverse proxy to automatically issue a free SSL certificate from Let's Encrypt.
+
+```bash
+# Set your email (for SSL certificate notifications)
+sed -i 's/your-email@domain.com/your-actual-email@example.com/g' docker-compose.yml
+
+# Set your domain name (replace `your-domain.com` with your actual domain)
+sed -i 's/your-domain.com/eneo.my-organization.com/g' docker-compose.yml
+```
+> **Note:** The domain `eneo.my-organization.com` is an example. Remember to use your own.
+
+**B. Configure Secrets and Passwords:**
+
+Generate unique secrets and a strong database password, then add them to the appropriate `.env` files.
+
+```bash
+# 1. Generate a secure database password
 DB_PASSWORD=$(openssl rand -base64 32)
+echo "POSTGRES_PASSWORD=$DB_PASSWORD" >> env_db.env
 
-# Edit environment files
-nano env_backend.env  # Add AI API keys and secrets
-nano env_frontend.env # Configure domain and secrets
-nano env_db.env       # Set database password
+# 2. Generate a JWT secret for securing user sessions
+JWT_SECRET=$(openssl rand -hex 32)
+echo "JWT_SECRET=$JWT_SECRET" >> env_backend.env
+echo "JWT_SECRET=$JWT_SECRET" >> env_frontend.env # Must be identical to the backend
+
+# 3. Generate a URL signing key for the backend
+URL_SIGNING_KEY=$(openssl rand -hex 32)
+echo "URL_SIGNING_KEY=$URL_SIGNING_KEY" >> env_backend.env
 ```
 
-> ⚠️ **Critical Security Steps**:
-> - **JWT_SECRET**: Must be unique and match in both backend and frontend
-> - **Database Password**: Use a strong, unique password
-> - **API Keys**: Keep secure and never commit to version control
-> - **Default Credentials**: Change immediately after first login
+**C. Configure Backend and Frontend URLs:**
 
-### 3. Update Docker Compose Configuration
-
-Edit `docker-compose.yml` to configure your domain and email:
+Set the public URL for the frontend and backend in their respective `.env` files.
 
 ```bash
-# Edit docker-compose.yml
-nano docker-compose.yml
-
-# Find and replace these values (marked with "CHANGE THIS"):
-# 1. your-email@domain.com → your actual email (for SSL certificates)
-# 2. your-domain.com → your actual domain (appears 4 times)
+# Set the public URLs (use your actual domain)
+echo "ORIGIN=https://eneo.my-organization.com" >> env_frontend.env
+echo "INTRIC_BACKEND_URL=https://eneo.my-organization.com" >> env_frontend.env
 ```
 
-### 4. Deploy
+**D. Add Your AI Provider API Key:**
+
+Add your AI provider's API key to the `env_backend.env` file. You only need to add one.
 
 ```bash
-# Create external network
+# Example for OpenAI (replace with your actual key)
+echo "OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >> env_backend.env
+```
+
+<details>
+<summary>🔍 Click to see final example environment files</summary>
+
+**`env_db.env` should look like this:**
+```
+# Database Environment Configuration for Eneo
+
+# IMPORTANT: Change the password for production!
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD= # This will be populated by the command above
+POSTGRES_DB=eneo
+```
+
+**`env_backend.env` should look like this:**
+```
+# Backend Environment Configuration for Eneo
+
+###############
+# REQUIRED: AI Model API Keys - Add at least ONE
+###############
+# OpenAI Configuration
+OPENAI_API_KEY= # This will be populated by the command above
+
+# ... (other AI provider keys)
+
+###############
+# REQUIRED: Security Settings - MUST BE CHANGED!
+###############
+# Generate with: openssl rand -hex 32
+JWT_SECRET= # This will be populated by the command above
+URL_SIGNING_KEY= # This will be populated by the command above
+
+# ... (rest of the file)
+```
+
+**`env_frontend.env` should look like this:**
+```
+# Frontend Environment Configuration for Eneo
+
+###############
+# REQUIRED: Public URL Configuration
+###############
+# The public URL where Eneo will be accessible
+ORIGIN= # This will be populated by the command above
+
+# Backend URL as seen from the browser (public URL)
+INTRIC_BACKEND_URL= # This will be populated by the command above
+
+# ... (rest of the file)
+```
+
+</details>
+
+---
+
+### Step 4: Deploy Eneo
+
+Now that configuration is complete, you can start the application.
+
+```bash
+# Create the external network for the reverse proxy
 docker network create proxy_tier
 
-# Start services
+# Start all services in the background
 docker compose up -d
-
-# Check status
-docker compose ps
-docker compose logs -f
 ```
+The initial startup may take a few minutes as Docker downloads the necessary images.
+
+---
+
+### Step 5: Verify & Secure Your Installation
+
+**A. Check Container Status:**
+
+Ensure all services are running correctly.
+
+```bash
+docker compose ps
+```
+You should see `eneo_frontend`, `eneo_backend`, `eneo_worker`, `eneo_db`, and `eneo_traefik` with the status `running`.
+
+**B. Access Your Eneo Instance:**
+
+Open your web browser and navigate to the domain you configured (e.g., `https://eneo.my-organization.com`). You should see the Eneo login page.
+
+**C. Change the Default Password (CRITICAL):**
+
+This is the most important post-deployment step.
+
+1.  Log in with the default credentials:
+    - **Email:** `user@example.com`
+    - **Password:** `Password1!`
+2.  Navigate to the user menu in the top-right corner and change your password immediately.
+
+**Congratulations! Your Eneo instance is now deployed and secured.**
+
 
 ---
 
@@ -472,7 +573,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: ghcr.io/sundsvallai/eneo-backend:latest
+        image: ghcr.io/eneo-ai/eneo-backend:latest
         ports:
         - containerPort: 8000
         envFrom:
@@ -599,10 +700,10 @@ docker compose exec backend python init_db.py
 
 **Production Issues:**
 - 🔍 Check [Troubleshooting Guide](TROUBLESHOOTING.md)
-- 🐛 [Report Issues](https://github.com/sundsvallai/eneo/issues)
+- 🐛 [Report Issues](https://github.com/eneo-ai/eneo/issues)
 - 📧 [Enterprise Support](mailto:digitalisering@sundsvall.se)
 
 **Community Support:**
-- 💬 [GitHub Discussions](https://github.com/sundsvallai/eneo/discussions)
+- 💬 [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
 - 📖 [Documentation](README.md)
 - 🤝 [Contributing Guide](CONTRIBUTING.md)

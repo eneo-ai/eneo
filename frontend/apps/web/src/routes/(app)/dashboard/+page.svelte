@@ -8,7 +8,7 @@
   import { createAccordion } from "@melt-ui/svelte";
   import { slide } from "svelte/transition";
   import { onMount } from "svelte";
-  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
 
   export let data;
   const { user } = getAppContext();
@@ -49,7 +49,7 @@
   <div
     class="bg-frosted-glass-primary sticky top-0 z-10 flex items-center justify-between p-4 py-2.5"
   >
-    <IntricWordMark class="text-brand-intric my-2 h-5 w-20"></IntricWordMark>
+    <EneoWordMark class="text-brand-intric my-2 h-5 w-20"></EneoWordMark>
     <Dropdown.Root>
       <Dropdown.Trigger let:trigger asFragment>
         <Button is={trigger} padding="icon">

@@ -1,46 +1,12 @@
 # Deployment Configuration Files
 
-This directory contains production deployment templates for Eneo.
+This directory contains the necessary template files for a production deployment of Eneo.
 
-## 📁 Files
+- `docker-compose.yml`: The main Docker Compose file for all services.
+- `env_backend.template`: Environment variable template for the backend service.
+- `env_frontend.template`: Environment variable template for the frontend service.
+- `env_db.template`: Environment variable template for the database service.
 
-- `docker-compose.yml` - Production Docker Compose configuration with Traefik
-- `env_backend.template` - Backend environment template
-- `env_frontend.template` - Frontend environment template
-- `env_db.template` - Database environment template
+For complete, step-by-step instructions on how to use these files to deploy Eneo, please see the main guide:
 
-## 🚀 Quick Start
-
-1. **Download files** (if not cloning repo):
-   ```bash
-   mkdir eneo-deployment && cd eneo-deployment
-   curl -LO https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/{docker-compose.yml,env_backend.template,env_frontend.template,env_db.template}
-   ```
-
-2. **Create environment files**:
-   ```bash
-   cp env_backend.template env_backend.env
-   cp env_frontend.template env_frontend.env
-   cp env_db.template env_db.env
-   ```
-
-3. **Configure** (marked with comments in templates):
-   - Replace `your-domain.com` in all files
-   - Add at least one AI provider API key
-   - Generate JWT_SECRET: `openssl rand -hex 32`
-   - Set secure database password
-
-4. **Deploy**:
-   ```bash
-   docker network create proxy_tier
-   docker compose up -d
-   ```
-
-## ⚠️ Important Notes
-
-- **Security**: Generate unique secrets, never use defaults
-- **Domains**: Update all occurrences of `your-domain.com`
-- **Ports**: Production uses port 8000 (not 8123 like development)
-- **SSL**: Traefik auto-manages certificates via Let's Encrypt
-
-For detailed instructions, see [DEPLOYMENT.md](../DEPLOYMENT.md)
+### 📖 **[Production Deployment Guide](../DEPLOYMENT.md)**

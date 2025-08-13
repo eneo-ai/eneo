@@ -5,7 +5,7 @@
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import { LoadingScreen } from "$lib/components/layout";
-  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
 
   const { data } = $props();
 
@@ -31,7 +31,7 @@
   <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
     <div class="box w-[400px] justify-center">
       <h1 class="flex justify-center">
-        <IntricWordMark class="text-brand-intric h-16 w-24" />
+        <EneoWordMark class="text-brand-intric h-16 w-24" />
         <span class="sr-only">Eneo</span>
       </h1>
 

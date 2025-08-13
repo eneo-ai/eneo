@@ -783,7 +783,7 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 ### For New Contributors
 
 **Getting Started:**
-1. Join the [GitHub Discussions](https://github.com/sundsvallai/eneo/discussions)
+1. Join the [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
 2. Look for `good-first-issue` labels
 3. Read through existing code to understand patterns
 4. Ask questions in discussions or issue comments
@@ -823,4 +823,4 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 
 Thank you for contributing to Eneo! Your work helps make AI technology democratic and accessible to public sector organizations worldwide. Together, we're building a platform that truly serves the public interest.
 
-**Questions?** Join our [GitHub Discussions](https://github.com/sundsvallai/eneo/discussions) or reach out to digitalisering@sundsvall.se
+**Questions?** Join our [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions) or reach out to digitalisering@sundsvall.se

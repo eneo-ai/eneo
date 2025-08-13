@@ -46,7 +46,7 @@ This directory contains the complete documentation for Eneo, the democratic AI p
 
 ### 5-Minute Developer Setup
 ```bash
-git clone https://github.com/sundsvallai/eneo.git
+git clone https://github.com/eneo-ai/eneo.git
 cd eneo
 code .  # Open in VS Code
 # Click "Reopen in Container" when prompted

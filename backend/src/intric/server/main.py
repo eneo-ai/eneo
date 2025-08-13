@@ -14,7 +14,7 @@ from intric.server.middleware.cors import CORSMiddleware
 from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
 from intric.server.websockets.websocket_models import WS_MODELS
-from intric.sessions.session import SSE_MODELS
+from intric.sessions.session import SSE_MODELS, SSE_ENUMS
 
 logger = get_logger(__name__)
 
@@ -55,6 +55,12 @@ def get_application():
             openapi_schema["components"]["schemas"][model.__name__] = model.model_json_schema(
                 ref_template=f"#/components/schemas/{model.__name__}/$defs/{{model}}"
             )
+
+        # Adding SSE enums to the schema
+        for enum_type in SSE_ENUMS:
+            from pydantic import TypeAdapter
+            adapter = TypeAdapter(enum_type)
+            openapi_schema["components"]["schemas"][enum_type.__name__] = adapter.json_schema()
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

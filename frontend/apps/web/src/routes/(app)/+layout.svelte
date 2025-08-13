@@ -11,7 +11,7 @@
   import { PageLoadBar } from "$lib/components/layout";
   import { browser } from "$app/environment";
   import { onDestroy } from "svelte";
-  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { IconEneo } from "@intric/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
@@ -74,8 +74,8 @@
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
     >
       <a href="/">
-        <IntricWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"
-        ></IntricWordMark>
+        <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"
+        ></EneoWordMark>
         <IconEneo class="text-brand-intric -ml-0.5 block md:hidden" viewBox="0 0 330 330"
         ></IconEneo>
       </a>

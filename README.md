@@ -7,9 +7,9 @@
 **Democratic AI Platform for the Public Sector**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Made for: Public Sector](https://img.shields.io/badge/Made%20for-Public%20Sector-green)](https://github.com/sundsvallai/eneo)
+[![Made for: Public Sector](https://img.shields.io/badge/Made%20for-Public%20Sector-green)](https://github.com/eneo-ai/eneo)
 [![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg)](#contributing)
-[![Contributors](https://img.shields.io/github/contributors/sundsvallai/eneo)](https://github.com/sundsvallai/eneo/graphs/contributors)
+[![Contributors](https://img.shields.io/github/contributors/eneo-ai/eneo)](https://github.com/eneo-ai/eneo/graphs/contributors)
 
 [Getting Started](#-getting-started) • [Features](#-features) • [Documentation](#-documentation) • [Architecture](#️-architecture) • [Contributing](#-contributing)
 
@@ -69,43 +69,11 @@ Eneo is an open-source AI platform specifically designed for Swedish public sect
 
 Choose your path based on your needs:
 
-### 🏛️ **For Municipal Organizations**
-**Want to evaluate Eneo for your organization?**
+### 🚀 **For Production Deployment**
 
-**📋 Option 1: Learn & Evaluate**
-- 📖 **[See Use Cases & Features](#-use-cases)** - Understand what Eneo can do
-- 📞 **[Contact Us](mailto:digitalisering@sundsvall.se)** - Get guidance from other municipalities
-- 💬 **[Community Issues](https://github.com/sundsvallai/eneo/issues)** - Ask questions and report issues
+Ready to deploy Eneo for your organization? Our comprehensive production guide provides a step-by-step walkthrough for a secure and scalable setup.
 
-**🚀 Option 2: Quick Production Deployment**
-```bash
-# Option A: Clone repository
-git clone https://github.com/sundsvallai/eneo.git
-cd eneo/docs/deployment
-
-# Option B: Download files only
-mkdir eneo-deployment && cd eneo-deployment
-curl -O https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/docker-compose.yml
-curl -O https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/env_backend.template
-curl -O https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/env_frontend.template
-curl -O https://raw.githubusercontent.com/sundsvallai/eneo/main/docs/deployment/env_db.template
-
-# Configure and deploy
-cp env_backend.template env_backend.env
-cp env_frontend.template env_frontend.env  
-cp env_db.template env_db.env
-# Edit configuration files with your settings, then:
-docker network create proxy_tier && docker compose up -d
-```
-
-**🌐 Access Your Deployment:**
-- **Platform**: https://your-domain.com
-- **API Documentation**: https://your-domain.com/docs
-- **Default Login**: `user@example.com` / `Password1!`
-
-> 🔐 **Security**: Change default password and update all `your-domain.com` placeholders!
-
-📖 **[Full Production Guide](docs/DEPLOYMENT.md)** for complete deployment instructions
+📖 **[View the Full Production Deployment Guide](docs/DEPLOYMENT.md)**
 
 ### 🔧 **For Developers**
 **Want to contribute or customize Eneo?**
@@ -118,7 +86,7 @@ docker network create proxy_tier && docker compose up -d
 - 🔧 **Prerequisites:** Docker Desktop + VS Code + Dev Containers extension
 
 ```bash
-git clone https://github.com/sundsvallai/eneo
+git clone https://github.com/eneo-ai/eneo
 cd eneo && code .
 # Click "Reopen in Container" when prompted
 # If no prompt: Ctrl+Shift+P → "Dev Containers: Reopen in Container"
@@ -130,7 +98,7 @@ cd eneo && code .
 - 📺 Need 3 terminals for full functionality
 
 ```bash
-git clone https://github.com/sundsvallai/eneo
+git clone https://github.com/eneo-ai/eneo
 cd eneo
 # Setup backend, frontend, and worker (see detailed guide below)
 ```
@@ -289,8 +257,8 @@ Eneo is governed by a user association of public sector organizations, ensuring 
 ## 🆘 Support & Help
 
 **Get Help:**
-- **🐛 Bug Reports**: [GitHub Issues](https://github.com/sundsvallai/eneo/issues)
-- **💬 Community Discussion**: [GitHub Discussions](https://github.com/sundsvallai/eneo/discussions)  
+- **🐛 Bug Reports**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+- **💬 Community Discussion**: [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)  
 - **📖 Documentation**: [docs/](docs/) folder for comprehensive guides
 - **📧 Municipal Collaboration**: digitalisering@sundsvall.se (public sector organizations)
 
@@ -339,6 +307,13 @@ See [LICENSE](LICENSE) for the complete AGPL v3 license text.
 
 *Empowering democratic access to AI technology*
 
-[🌐 Project Website](#) • [📧 Contact](mailto:digitalisering@sundsvall.se) • [💬 Community](https://github.com/sundsvallai/eneo/issues)
+[🌐 Project Website](#) • [📧 Contact](mailto:digitalisering@sundsvall.se) • [💬 Community](https://github.com/eneo-ai/eneo/issues)
 
 </div>
+
+---
+
+## **🚀 Development Branch**
+
+**This branch contains the latest development features and CI/CD enhancements.**  
+**Used for testing new features before merging to production.**

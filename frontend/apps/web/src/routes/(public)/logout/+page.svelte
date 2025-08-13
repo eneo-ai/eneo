@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button } from "@intric/ui";
-  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
 
   export let data;
 
@@ -22,7 +22,7 @@
 <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
   <div class="box w-[400px] justify-center">
     <h1 class="flex justify-center">
-      <IntricWordMark class="text-brand-intric h-16 w-20"></IntricWordMark>
+      <EneoWordMark class="text-brand-intric h-16 w-20"></EneoWordMark>
       <span class="hidden">Intric</span>
     </h1>
 

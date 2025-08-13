@@ -1,5 +1,5 @@
 <script lang="ts">
-  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { Button } from "@intric/ui";
 
   const { data } = $props();
@@ -11,7 +11,7 @@
 
 <div class="absolute inset-0 flex flex-col items-center justify-center gap-4">
   <div class="border-default bg-primary flex flex-col items-start rounded-sm border p-8 shadow">
-    <IntricWordMark class="text-brand-intric h-8 w-16" />
+    <EneoWordMark class="text-brand-intric h-8 w-16" />
     <div class="h-14"></div>
     <h2 class="mb-2 text-2xl font-bold">Organisation deactivated</h2>
     <p class="text-secondary max-w-[60ch]">

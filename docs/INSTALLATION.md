@@ -30,7 +30,7 @@ This guide covers setting up Eneo for development and testing. For production de
 
 1. **Clone Repository**
    ```bash
-   git clone https://github.com/sundsvallai/eneo.git
+   git clone https://github.com/eneo-ai/eneo.git
    cd eneo
    ```
 
@@ -132,7 +132,7 @@ npm install -g pnpm@9.12.3
 #### 3. Clone and Setup
 
 ```bash
-git clone https://github.com/sundsvallai/eneo.git
+git clone https://github.com/eneo-ai/eneo.git
 cd eneo
 ```
 
@@ -468,6 +468,6 @@ Once development environment is running:
 
 **Need Help?** 
 
-- 🐛 [Report Issues](https://github.com/sundsvallai/eneo/issues)
-- 💬 [Community Discussions](https://github.com/sundsvallai/eneo/discussions)
+- 🐛 [Report Issues](https://github.com/eneo-ai/eneo/issues)
+- 💬 [Community Discussions](https://github.com/eneo-ai/eneo/discussions)
 - 📧 [Contact Team](mailto:digitalisering@sundsvall.se)

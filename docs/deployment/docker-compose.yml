@@ -27,7 +27,7 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
   frontend:
-    image: ghcr.io/sundsvallai/eneo-frontend:latest
+    image: ghcr.io/eneo-ai/eneo-frontend:latest
     container_name: eneo_frontend
     restart: unless-stopped
     env_file:
@@ -50,13 +50,14 @@ services:
       - backend
 
   backend:
-    image: ghcr.io/sundsvallai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_backend
     restart: unless-stopped
     env_file:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
     networks:
       - proxy_tier
     labels:
@@ -77,7 +78,7 @@ services:
       - db-init
 
   worker:
-    image: ghcr.io/sundsvallai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_worker
     restart: unless-stopped
     command: ["poetry", "run", "arq", "src.intric.worker.arq.WorkerSettings"]
@@ -85,6 +86,7 @@ services:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
     networks:
       - proxy_tier
     depends_on:
@@ -111,7 +113,7 @@ services:
       - proxy_tier
 
   db-init:
-    image: ghcr.io/sundsvallai/eneo-backend:latest
+    image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_db_init
     command: ["python", "init_db.py"]
     env_file:
@@ -130,3 +132,4 @@ volumes:
   eneo_redis_data:
   eneo_backend_data:
   traefik_letsencrypt:
+  eneo_temp_files:
