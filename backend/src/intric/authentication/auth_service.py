@@ -7,7 +7,6 @@ from uuid import UUID
 
 import bcrypt
 import jwt
-from passlib.context import CryptContext
 from pydantic import ValidationError
 
 from intric.authentication.api_key_repo import ApiKeysRepository
@@ -30,34 +29,36 @@ JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
 JWT_SECRET = get_settings().jwt_secret
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
 class AuthService:
     def __init__(self, api_key_repo: ApiKeysRepository):
         self.api_key_repo = api_key_repo
 
     @staticmethod
-    def _generate_salt() -> str:
-        return bcrypt.gensalt().decode()
+    def _generate_salt() -> bytes:
+        return bcrypt.gensalt()
 
     @staticmethod
-    def _hash_password(password: str, salt: str) -> str:
-        return pwd_context.hash(password + salt)
+    def _hash_password(password: str, salt: bytes) -> str:
+        pwd_bytes = password.encode('utf-8')
+        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode('utf-8')
 
     @staticmethod
     def hash_api_key(api_key: str):
         return hashlib.sha256(api_key.encode()).hexdigest()
 
     def create_salt_and_hashed_password(self, plaintext_password: str | None):
-        salt = self._generate_salt()
-        hashed_password = self._hash_password(password=plaintext_password, salt=salt)
-        return salt, hashed_password
+        if plaintext_password == None:
+            plaintext_password = ""
+        pwd_bytes = plaintext_password.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+        return salt.decode(), hashed_password.decode('utf-8')
 
     @staticmethod
-    def verify_password(password: str, salt: str, hashed_pw: str) -> bool:
+    def verify_password(password: str, hashed_pw: str) -> bool:
         """Verify that incoming password+salt matches hashed pw"""
-        return pwd_context.verify(password + salt, hashed_pw)
+        password_byte_enc = password.encode('utf-8')
+        return bcrypt.checkpw(password = password_byte_enc , hashed_password = hashed_pw.encode('utf-8'))
 
     @staticmethod
     def generate_password(length: int):
