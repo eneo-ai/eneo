@@ -10,15 +10,22 @@
 
   const intric = getIntric();
 
+  // Use a separate state variable for the loaded text to avoid prop mutation
+  let loadedBlobText: string | undefined = blob.text;
   let loadingBlob = false;
+  let loadError = false;
+  
   async function loadBlob() {
-    if (!blob.text) {
+    if (!loadedBlobText) {
       loadingBlob = true;
+      loadError = false;
       try {
-        blob = await intric.infoBlobs.get(blob);
+        const loadedBlob = await intric.infoBlobs.get(blob);
+        loadedBlobText = loadedBlob.text;
       } catch (e) {
+        loadError = true;
+        console.error("Error retrieving blob content:", e);
         alert("Error retrieving reference, see console for details.");
-        console.error(e);
       }
       loadingBlob = false;
     }
@@ -29,8 +36,8 @@
 
   async function downloadText() {
     await loadBlob();
-    if (blob.text && browser) {
-      const file = new Blob([blob.text], { type: "application/octet-stream;charset=utf-8" });
+    if (loadedBlobText && browser) {
+      const file = new Blob([loadedBlobText], { type: "application/octet-stream;charset=utf-8" });
       const filename = blob.metadata.title
         ? `${blob.metadata.title}${blob.metadata.title.endsWith(".txt") ? "" : ".txt"}`
         : "Download.txt";
@@ -52,9 +59,10 @@
   }
 
   let copyButtonText = "Copy to clipboard";
-  function copyText() {
-    if (blob.text && browser) {
-      navigator.clipboard.writeText(blob.text);
+  async function copyText() {
+    await loadBlob();
+    if (loadedBlobText && browser) {
+      navigator.clipboard.writeText(loadedBlobText);
       copyButtonText = "Copied!";
       setTimeout(() => {
         copyButtonText = "Copy to clipboard";
@@ -99,14 +107,16 @@
       <div class="p-4">
         {#if loadingBlob}
           <pre>Loading...</pre>
+        {:else if loadError}
+          <pre>Error loading content. Please try again.</pre>
         {:else}
-          <Markdown source={blob.text ?? ""}></Markdown>
+          <Markdown source={loadedBlobText ?? ""}></Markdown>
         {/if}
       </div>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      {#if blob.text}
+      {#if loadedBlobText}
         <Button variant="simple" on:click={downloadText} padding="icon-leading">
           <svg
             xmlns="http://www.w3.org/2000/svg"
