@@ -124,8 +124,8 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
 
         if model is None:
             add_model_query = sql.SQL(
-                """INSERT INTO completion_models 
-                (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning) 
+                """INSERT INTO completion_models
+                (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
             )
             cur.execute(
@@ -149,7 +149,7 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
 
         # Enable the completion model for the tenant
         check_model_setting_query = sql.SQL(
-            """SELECT 1 FROM completion_model_settings 
+            """SELECT 1 FROM completion_model_settings
             WHERE completion_model_id = %s AND tenant_id = %s"""
         )
         cur.execute(check_model_setting_query, (model_id, tenant_id))
@@ -157,8 +157,8 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
 
         if model_setting is None:
             enable_model_query = sql.SQL(
-                """INSERT INTO completion_model_settings 
-                (completion_model_id, tenant_id, is_org_enabled, is_org_default) 
+                """INSERT INTO completion_model_settings
+                (completion_model_id, tenant_id, is_org_enabled, is_org_default)
                 VALUES (%s, %s, %s, %s)"""
             )
             cur.execute(enable_model_query, (model_id, tenant_id, True, True))
@@ -184,17 +184,23 @@ if __name__ == "__main__":
         password=settings.postgres_password,
     )
 
-    # Add tenant and user
-    add_tenant_user(
-        conn,
-        "ExampleTenant",
-        "10737418240",
-        "ExampleUser",
-        "user@example.com",
-        "Password1!",
-    )
+    if (settings.default_tenant_name is None or
+        settings.default_tenant_quota_limit is None or
+        settings.default_user_name is None or
+        settings.default_user_email is None or
+        settings.default_user_password is None):
+        print("Error: One or more environment variables for default tenant and user are not set. Skipping creation of default user.")
+    else:
+        add_tenant_user(
+            conn,
+            settings.default_tenant_name,
+            settings.default_tenant_quota_limit,
+            settings.default_user_name,
+            settings.default_user_email,
+            settings.default_user_password,
+        )
 
-    print("Great! Your Tenant and User are all set up.")
+        print("Great! Your Tenant and User are all set up.")
 
     # Close the connection
     conn.close()
