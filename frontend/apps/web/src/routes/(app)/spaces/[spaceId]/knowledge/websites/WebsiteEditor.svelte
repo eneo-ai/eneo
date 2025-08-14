@@ -13,7 +13,10 @@
       crawl_type: "crawl",
       download_files: undefined,
       embedding_model: undefined,
-      update_interval: "never"
+      update_interval: "never",
+      requires_auth: false,
+      auth_username: "",
+      auth_password: ""
     } as unknown as Website;
   };
 
@@ -33,12 +36,24 @@
   let websiteName = website.name ?? "";
   let isProcessing = false;
   let validUrl = false;
+  let authFieldsValid = true;
+
+  // Validate auth fields when they change
+  $: authFieldsValid = !editableWebsite.requires_auth || 
+    (editableWebsite.auth_username?.trim() && editableWebsite.auth_password?.trim());
 
   async function updateWebsite() {
     isProcessing = true;
     try {
       let edits = editableWebsite.getEdits();
       edits.name = websiteName === "" ? null : websiteName;
+      
+      // Only send auth fields if authentication is required
+      if (!editableWebsite.requires_auth) {
+        edits.auth_username = null;
+        edits.auth_password = null;
+      }
+      
       const updated = await intric.websites.update({ website: { id: website.id }, update: edits });
       editableWebsite.updateWithValue(updated);
       refreshCurrentSpace();
@@ -57,11 +72,19 @@
 
     isProcessing = true;
     try {
-      await intric.websites.create({
+      const websiteData = {
         spaceId: $currentSpace.id,
         ...editableWebsite,
         name: websiteName === "" ? null : websiteName
-      });
+      };
+      
+      // Only send auth fields if authentication is required
+      if (!editableWebsite.requires_auth) {
+        delete websiteData.auth_username;
+        delete websiteData.auth_password;
+      }
+      
+      await intric.websites.create(websiteData);
       editableWebsite.updateWithValue(emptyWebsite());
       websiteName = "";
       refreshCurrentSpace();
@@ -80,7 +103,11 @@
 
   const updateOptions = [
     { label: "Never", value: "never" },
-    { label: "Every week", value: "weekly" }
+    { label: "Daily", value: "daily" },
+    { label: "Every 3 days", value: "every_3_days" },
+    { label: "Every week", value: "weekly" },
+    { label: "Every 2 weeks", value: "every_2_weeks" },
+    { label: "Monthly", value: "monthly" }
   ] as { label: string; value: Website["update_interval"] }[];
 </script>
 
@@ -133,6 +160,39 @@
         placeholder={editableWebsite.url.split("//")[1] ?? editableWebsite.url}
       ></Input.Text>
 
+      <Input.Switch
+        bind:value={editableWebsite.requires_auth}
+        class="border-default hover:bg-hover-dimmer p-4 px-6"
+      >
+        Requires basic authentication
+      </Input.Switch>
+
+      {#if editableWebsite.requires_auth}
+        <div class="bg-info-dimmer border-info-default text-info-stronger m-4 rounded-md border px-3 py-2 text-sm">
+          <span class="font-medium">Security Note:</span>
+          Credentials are encrypted and stored securely. They will only be used for crawling this website.
+        </div>
+        
+        <Input.Text
+          bind:value={editableWebsite.auth_username}
+          label="Username"
+          description="Username for basic authentication"
+          required={editableWebsite.requires_auth}
+          placeholder="Enter username"
+          class="border-default hover:bg-hover-dimmer border-b p-4"
+        ></Input.Text>
+
+        <Input.Text
+          bind:value={editableWebsite.auth_password}
+          label="Password"
+          description="Password for basic authentication"
+          type="password"
+          required={editableWebsite.requires_auth}
+          placeholder="Enter password"
+          class="border-default hover:bg-hover-dimmer border-b p-4"
+        ></Input.Text>
+      {/if}
+
       <div class="flex">
         <Select.Simple
           class="border-default hover:bg-hover-dimmer w-1/2 border-b px-4 py-4"
@@ -183,11 +243,11 @@
           variant="primary"
           on:click={createWebsite}
           type="submit"
-          disabled={isProcessing || $currentSpace.embedding_models.length === 0}
+          disabled={isProcessing || $currentSpace.embedding_models.length === 0 || !authFieldsValid}
           >{isProcessing ? "Creating..." : "Create website"}</Button
         >
       {:else if mode === "update"}
-        <Button variant="primary" on:click={updateWebsite} disabled={isProcessing}
+        <Button variant="primary" on:click={updateWebsite} disabled={isProcessing || !authFieldsValid}
           >{isProcessing ? "Saving..." : "Save changes"}</Button
         >
       {/if}

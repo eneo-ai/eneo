@@ -30,6 +30,8 @@ class WebsiteBase(BaseModel):
     download_files: bool = False
     crawl_type: CrawlType = CrawlType.CRAWL
     update_interval: UpdateInterval = UpdateInterval.NEVER
+    requires_auth: bool = False
+    auth_username: Optional[str] = None
 
 
 class WebsiteCreateRequestDeprecated(WebsiteBase):
@@ -97,6 +99,9 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     latest_crawl: Optional[CrawlRunPublic]
     embedding_model: EmbeddingModelPublic
     metadata: WebsiteMetadata
+    requires_auth: bool = False
+    auth_username: Optional[str] = None
+    # Note: Never expose auth_password in public models for security
 
     @classmethod
     def from_domain(cls, website: Website):
@@ -118,6 +123,9 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             embedding_model=EmbeddingModelPublic.from_domain(website.embedding_model),
             metadata=WebsiteMetadata(size=website.size),
             permissions=website.permissions,
+            requires_auth=website.requires_auth,
+            auth_username=website.auth_username,
+            # Never include auth_password for security
         )
 
 
@@ -128,6 +136,9 @@ class WebsiteCreate(BaseModel):
     crawl_type: CrawlType = CrawlType.CRAWL
     update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: Optional[ModelId] = None
+    requires_auth: bool = False
+    auth_username: Optional[str] = None
+    auth_password: Optional[str] = None  # Only accepted in create/update, never returned
 
 
 class WebsiteUpdate(BaseModel):
@@ -136,3 +147,6 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
+    requires_auth: Union[bool, NotProvided] = NOT_PROVIDED
+    auth_username: Union[Optional[str], NotProvided] = NOT_PROVIDED
+    auth_password: Union[Optional[str], NotProvided] = NOT_PROVIDED  # Only for updates

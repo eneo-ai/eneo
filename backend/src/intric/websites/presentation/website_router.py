@@ -59,6 +59,9 @@ async def update_website(
         download_files=website_update.download_files,
         crawl_type=website_update.crawl_type,
         update_interval=website_update.update_interval,
+        requires_auth=website_update.requires_auth,
+        auth_username=website_update.auth_username,
+        auth_password=website_update.auth_password,
     )
 
     return WebsitePublic.from_domain(website)

@@ -463,6 +463,10 @@ class SpaceRepository:
                         user_id=website.user_id,
                         embedding_model_id=website.embedding_model.id,
                         space_id=space_in_db.id,
+                        requires_auth=website.requires_auth,
+                        auth_username=website.auth_username,
+                        encrypted_auth_password=website.get_encrypted_password(),
+                        auth_last_verified=website.auth_last_verified,
                     )
                     for website in new_websites
                 ]
@@ -481,6 +485,10 @@ class SpaceRepository:
                     size=_set_size_subquery(website),
                     embedding_model_id=website.embedding_model.id,
                     space_id=space_in_db.id,
+                    requires_auth=website.requires_auth,
+                    auth_username=website.auth_username,
+                    encrypted_auth_password=website.get_encrypted_password(),
+                    auth_last_verified=website.auth_last_verified,
                 )
                 .where(WebsitesTable.id == website.id)
             )

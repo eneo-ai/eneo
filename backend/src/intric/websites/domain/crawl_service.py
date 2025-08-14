@@ -24,6 +24,8 @@ class CrawlService:
             url=website.url,
             download_files=website.download_files,
             crawl_type=website.crawl_type,
+            http_user=website.auth_username if website.requires_auth else None,
+            http_pass=website.auth_password if website.requires_auth else None,
         )
 
         crawl_run.update(job_id=crawl_job.id)

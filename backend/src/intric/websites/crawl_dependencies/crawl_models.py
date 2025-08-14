@@ -15,6 +15,8 @@ class CrawlTask(TaskParams):
     url: str
     download_files: bool = False
     crawl_type: CrawlType = CrawlType.CRAWL
+    http_user: Optional[str] = None
+    http_pass: Optional[str] = None
 
 
 class CrawlRunBase(BaseModel):

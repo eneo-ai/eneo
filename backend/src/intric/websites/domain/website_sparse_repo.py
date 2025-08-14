@@ -21,3 +21,12 @@ class WebsiteSparseRepository:
         websites_db = await self.session.scalars(stmt)
 
         return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
+    
+    async def get_websites_by_interval(self, interval: UpdateInterval) -> list[WebsiteSparse]:
+        stmt = sa.select(WebsitesTable).where(
+            WebsitesTable.update_interval == interval
+        )
+
+        websites_db = await self.session.scalars(stmt)
+
+        return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]

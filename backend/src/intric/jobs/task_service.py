@@ -97,6 +97,8 @@ class TaskService:
         download_files: bool = False,
         crawl_type: CrawlType = CrawlType.CRAWL,
         website_id: UUID | None = None,
+        http_user: str | None = None,
+        http_pass: str | None = None,
     ) -> JobInDb:
         params = CrawlTask(
             user_id=self.user.id,
@@ -105,6 +107,8 @@ class TaskService:
             download_files=download_files,
             crawl_type=crawl_type,
             website_id=website_id,
+            http_user=http_user,
+            http_pass=http_pass,
         )
 
         return await self.job_service.queue_job(Task.CRAWL, name=name, task_params=params)

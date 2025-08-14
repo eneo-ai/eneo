@@ -321,6 +321,9 @@ async def create_space_websites(
         crawl_type=website.crawl_type,
         update_interval=website.update_interval,
         embedding_model_id=(website.embedding_model.id if website.embedding_model else None),
+        requires_auth=website.requires_auth,
+        auth_username=website.auth_username,
+        auth_password=website.auth_password,
     )
 
     return WebsitePublic.from_domain(website)

@@ -11,12 +11,18 @@ from intric.websites.crawl_dependencies.crawl_models import (
 logger = get_logger(__name__)
 
 
-async def queue_website_crawls(container: Container):
+async def queue_website_crawls(container: Container, interval: "UpdateInterval" = "weekly"):
+    from intric.websites.domain.website import UpdateInterval
+    
+    # Convert string to enum if needed (for backward compatibility)
+    if isinstance(interval, str):
+        interval = UpdateInterval(interval)
+    
     user_repo = container.user_repo()
     website_sparse_repo = container.website_sparse_repo()
 
     async with container.session().begin():
-        websites = await website_sparse_repo.get_weekly_websites()
+        websites = await website_sparse_repo.get_websites_by_interval(interval)
 
         for website in websites:
             try:
@@ -30,7 +36,7 @@ async def queue_website_crawls(container: Container):
                 await crawl_service.crawl(website)
             except Exception as e:
                 # If a website fails to queue, try the next one
-                logger.error(f"Error when queueing up website {website.url}: {e}")
+                logger.error(f"Error when queueing up website {website.url} with interval {interval}: {e}")
 
     return True
 
@@ -67,6 +73,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             url=params.url,
             download_files=params.download_files,
             crawl_type=params.crawl_type,
+            http_user=params.http_user,
+            http_pass=params.http_pass,
         ) as crawl:
             for page in crawl.pages:
                 num_pages += 1

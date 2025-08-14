@@ -45,6 +45,9 @@ class WebsiteCRUDService:
         crawl_type: "CrawlType",
         update_interval: UpdateInterval,
         embedding_model_id: Optional["UUID"] = None,
+        requires_auth: bool = False,
+        auth_username: Optional[str] = None,
+        auth_password: Optional[str] = None,
     ) -> Website:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -68,6 +71,9 @@ class WebsiteCRUDService:
             crawl_type=crawl_type,
             update_interval=update_interval,
             embedding_model=embedding_model,
+            requires_auth=requires_auth,
+            auth_username=auth_username,
+            auth_password=auth_password,
         )
 
         space.add_website(website)
@@ -96,6 +102,9 @@ class WebsiteCRUDService:
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union["CrawlType", NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
+        requires_auth: Union[bool, NotProvided] = NOT_PROVIDED,
+        auth_username: Union[Optional[str], NotProvided] = NOT_PROVIDED,
+        auth_password: Union[Optional[str], NotProvided] = NOT_PROVIDED,
     ) -> Website:
         space = await self.space_service.get_space_by_website(id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -111,6 +120,9 @@ class WebsiteCRUDService:
             download_files=download_files,
             crawl_type=crawl_type,
             update_interval=update_interval,
+            requires_auth=requires_auth,
+            auth_username=auth_username,
+            auth_password=auth_password,
         )
 
         await self.space_repo.update(space=space)
