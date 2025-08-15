@@ -18,3 +18,6 @@ from intric.completion_models.infrastructure.adapters.ovhcloud_model_adapter imp
 from intric.completion_models.infrastructure.adapters.vllm_model_adapter import (
     VLMMModelAdapter,
 )
+from intric.completion_models.infrastructure.adapters.gemini_model_adapter import (
+    GeminiModelAdapter,
+)

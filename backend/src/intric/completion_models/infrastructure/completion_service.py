@@ -14,6 +14,7 @@ from intric.ai_models.model_enums import ModelFamily
 from intric.completion_models.infrastructure.adapters import (
     AzureOpenAIModelAdapter,
     ClaudeModelAdapter,
+    GeminiModelAdapter,
     MistralModelAdapter,
     OpenAIModelAdapter,
     OVHCloudModelAdapter,
@@ -55,6 +56,7 @@ class CompletionService:
             ModelFamily.AZURE: AzureOpenAIModelAdapter,
             ModelFamily.OVHCLOUD: OVHCloudModelAdapter,
             ModelFamily.MISTRAL: MistralModelAdapter,
+            ModelFamily.GEMINI: GeminiModelAdapter,
         }
         self.context_builder = context_builder
 

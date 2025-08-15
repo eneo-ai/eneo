@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     ovhcloud_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
     flux_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None

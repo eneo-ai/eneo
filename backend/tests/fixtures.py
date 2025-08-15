@@ -6,6 +6,7 @@ from intric.ai_models.completion_models.completion_model import (
     ModelHostingLocation,
     ModelStability,
 )
+from intric.ai_models.model_enums import ModelOrg
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelFamily,
     EmbeddingModelLegacy,
@@ -152,6 +153,32 @@ TEST_MODEL_AZURE = CompletionModel(
     hosting=ModelHostingLocation.USA,
     vision=True,
     reasoning=False,
+)
+
+TEST_MODEL_GEMINI_FLASH = CompletionModel(
+    id=uuid4(),
+    name="gemini-2.5-flash",
+    nickname="Gemini 2.5 Flash",
+    family=CompletionModelFamily.GEMINI,
+    token_limit=1048576,
+    is_deprecated=False,
+    stability=ModelStability.EXPERIMENTAL,
+    hosting=ModelHostingLocation.USA,
+    vision=True,
+    reasoning=True,
+    user=TEST_USER,
+    created_at=None,
+    updated_at=None,
+    description="Google's advanced reasoning model with optional thinking mode",
+    nr_billion_parameters=None,
+    hf_link=None,
+    deployment_name=None,
+    is_org_enabled=False,
+    is_org_default=False,
+    base_url=None,
+    security_classification=None,
+    org=ModelOrg.GOOGLE,
+    open_source=False,
 )
 
 

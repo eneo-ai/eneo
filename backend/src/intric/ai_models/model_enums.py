@@ -9,6 +9,7 @@ class ModelFamily(str, Enum):
     AZURE = "azure"
     OVHCLOUD = "ovhcloud"
     E5 = "e5"
+    GEMINI = "gemini"
 
 
 class ModelStability(str, Enum):

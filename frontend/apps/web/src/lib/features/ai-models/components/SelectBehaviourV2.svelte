@@ -3,18 +3,38 @@
     behaviourList,
     getBehaviour,
     getKwargs,
+    getEffectiveReasoningLevel,
+    convertReasoningLevelToThinkingBudget,
     type ModelBehaviour,
-    type ModelKwArgs
+    type ModelKwArgs,
+    type ReasoningLevel
   } from "../ModelBehaviours";
+  import ReasoningLevelSelector from "./ReasoningLevelSelector.svelte";
   import { createSelect } from "@melt-ui/svelte";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconCheck } from "@intric/icons/check";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { Input, Tooltip } from "@intric/ui";
+  import type { CompletionModel } from "@intric/intric-js";
 
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
+  export let selectedModel: CompletionModel | null = null;
   export let aria: AriaProps = { "aria-label": "Select model behaviour" };
+
+  // Reasoning level logic (unified approach)
+  $: showThinkingToggle = selectedModel?.reasoning ?? false;
+  
+  // Get current reasoning level from kwArgs (prioritizing reasoning_level over thinking_budget)
+  $: reasoningLevel = getEffectiveReasoningLevel(kwArgs);
+  
+  // Sync reasoning level changes back to kwArgs
+  $: if (reasoningLevel !== undefined) {
+    // Update both parameters for compatibility during transition
+    kwArgs.reasoning_level = reasoningLevel;
+    kwArgs.thinking_budget = convertReasoningLevelToThinkingBudget(reasoningLevel);
+  }
+  
 
   const {
     elements: { trigger, menu, option },
@@ -33,9 +53,20 @@
       // If the user selects "custom", we want to keep the current kwargs settings if they already are custom
       // However, if they are not, then we initialise with a default custom setting
       const customArgs =
-        getBehaviour(kwArgs) === "custom" ? kwArgs : { temperature: 1, top_p: null };
+        getBehaviour(kwArgs) === "custom" ? kwArgs : { 
+          temperature: 1, 
+          top_p: null, 
+          thinking_budget: kwArgs.thinking_budget,
+          reasoning_level: kwArgs.reasoning_level
+        };
+      // Preserve reasoning parameters when changing behaviors
+      const newArgs = args ? { 
+        ...args, 
+        thinking_budget: kwArgs.thinking_budget,
+        reasoning_level: kwArgs.reasoning_level
+      } : customArgs;
       // keep in mind: setting the kwargs will trigger the `watchKwArgs` function
-      kwArgs = args ? args : customArgs;
+      kwArgs = newArgs;
       return next;
     }
   });
@@ -45,7 +76,12 @@
   // This can't be a declarative statement with $: as it would fire in too many situations
   let customTemp: number = 1;
   function maybeSetKwArgsCustom() {
-    const args = { temperature: customTemp, top_p: null };
+    const args = { 
+      temperature: customTemp, 
+      top_p: null,
+      thinking_budget: kwArgs.thinking_budget, // Preserve thinking_budget
+      reasoning_level: kwArgs.reasoning_level  // Preserve reasoning_level
+    };
     if (getBehaviour(args) === "custom") {
       kwArgs = args;
     }
@@ -121,7 +157,9 @@
     <div class="flex items-center gap-2">
       <p class="w-24" aria-label="Temperature setting" id="temperature_label">Temperature</p>
       <Tooltip
-        text="Randomness: A value between 0 and 2 (Default: 1)\nHigher values will create more creative responses.\nLower values will be more deterministic."
+        text="Randomness: A value between 0 and 2 (Default: 1)
+Higher values will create more creative responses.
+Lower values will be more deterministic."
       >
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
@@ -141,6 +179,18 @@
       min={0}
       hiddenLabel={true}
     ></Input.Number>
+  </div>
+{/if}
+
+{#if showThinkingToggle}
+  <div
+    class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
+  >
+    <ReasoningLevelSelector
+      bind:value={reasoningLevel}
+      model={selectedModel}
+      disabled={isDisabled}
+    />
   </div>
 {/if}
 

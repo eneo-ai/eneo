@@ -270,6 +270,73 @@ completion_models:
     org: Google
     vision: false
 
+  - name: 'gemini-2.0-flash'
+    nickname: 'Gemini 2.0 Flash'
+    family: 'gemini'
+    token_limit: 1048576
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    description: "Google's latest multimodal model with next-gen features including audio, images, video, and text processing capabilities."
+    open_source: false
+    reasoning: false
+    org: Google
+    vision: true
+
+  # Keep old model names as deprecated for compatibility
+  - name: 'gemini-2.5-flash'
+    nickname: 'Gemini 2.5 Flash'
+    family: 'gemini'
+    token_limit: 1048576
+    stability: 'experimental'
+    is_deprecated: true
+    hosting: 'usa'
+    description: "Legacy model name - use Gemini 2.5 Flash instead."
+    open_source: false
+    reasoning: true
+    org: Google
+    vision: true
+
+  - name: 'gemini-2.5-pro'
+    nickname: 'Gemini 2.5 Pro'
+    family: 'gemini'
+    token_limit: 1048576
+    stability: 'experimental'
+    is_deprecated: true
+    hosting: 'usa'
+    description: "Legacy model name - REQUIRES PAID BILLING PLAN. Use Gemini 2.5 Flash for free tier."
+    open_source: false
+    reasoning: true
+    org: Google
+    vision: true
+
+  # New correct model names
+  - name: 'gemini-2.5-flash-preview-05-20'
+    nickname: 'Gemini 2.5 Flash'
+    family: 'gemini'
+    token_limit: 1048576
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'usa'
+    description: "Google's advanced reasoning model with optional thinking mode, supporting multimodal inputs and enhanced problem-solving capabilities."
+    open_source: false
+    reasoning: true
+    org: Google
+    vision: true
+
+  - name: 'gemini-2.5-pro-preview-06-05'
+    nickname: 'Gemini 2.5 Pro'
+    family: 'gemini'
+    token_limit: 1048576
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'usa'
+    description: "Google's most powerful reasoning model with mandatory thinking mode, capable of processing up to 1M tokens with advanced multimodal capabilities. REQUIRES PAID BILLING PLAN - no free tier available."
+    open_source: false
+    reasoning: true
+    org: Google
+    vision: true
+
 
 embedding_models:
   

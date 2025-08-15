@@ -206,12 +206,12 @@ export class ChatService {
         if (error instanceof IntricError) {
           message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
         } else if (error instanceof Object && "message" in error && "name" in error) {
-          message += `\n\`\`\`\n$"${error.name}: error.message}"\n\`\`\``;
+          message += `\n\`\`\`\n"${error.name}: ${error.message}"\n\`\`\``;
         }
 
         this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
           message;
-        console.error(error);
+        console.error("ChatService error:", error);
       }
 
       this.reloadHistory();

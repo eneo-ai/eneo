@@ -37,7 +37,14 @@ class OpenAIModelAdapter(CompletionModelAdapter):
         if kwargs is None:
             return {}
 
-        return kwargs.model_dump(exclude_none=True)
+        base_kwargs = kwargs.model_dump(exclude_none=True)
+        
+        # Remove Intric-specific parameters not supported by OpenAI API
+        # These are our internal abstractions that need provider-specific handling
+        base_kwargs.pop("thinking_budget", None)   # Legacy Gemini parameter
+        base_kwargs.pop("reasoning_level", None)   # Unified abstraction
+        
+        return base_kwargs
 
     def get_token_limit_of_model(self):
         return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION

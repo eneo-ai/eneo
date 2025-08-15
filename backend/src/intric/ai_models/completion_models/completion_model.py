@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 
 from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
 from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
@@ -163,6 +163,14 @@ class Context(BaseModel):
 class ModelKwargs(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
+    thinking_budget: Optional[int] = None  # Legacy support - will be deprecated
+    reasoning_level: Optional[str] = Field(None, pattern="^(disabled|low|medium|high)$")  # New unified approach
+    
+    @validator('reasoning_level')
+    def validate_reasoning_level(cls, v):
+        if v is not None and v not in ["disabled", "low", "medium", "high"]:
+            raise ValueError('reasoning_level must be one of: disabled, low, medium, high')
+        return v
 
 
 class CompletionModelSparse(CompletionModelBase, InDB):

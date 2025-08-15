@@ -245,6 +245,7 @@
           <SelectBehaviourV2
             bind:kwArgs={$update.completion_model_kwargs}
             isDisabled={!supportsTemperature($update.completion_model?.name)}
+            selectedModel={$update.completion_model}
             {aria}
           ></SelectBehaviourV2>
         </Settings.Row>

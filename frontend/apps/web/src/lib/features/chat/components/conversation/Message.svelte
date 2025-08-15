@@ -62,10 +62,37 @@
   });
 
   const isReasoning = $derived.by(() => {
-    const modelCanReason =
-      "completion_model" in chat.partner && chat.partner.completion_model?.reasoning;
+    // Check if chat partner has a reasoning-capable model
+    if (!("completion_model" in chat.partner) || !chat.partner.completion_model?.reasoning) {
+      return false;
+    }
+
     const noAnswerReceived = message.answer.trim() === "";
-    return modelCanReason && noAnswerReceived;
+    if (!noAnswerReceived) {
+      return false; // Already received answer, no longer reasoning
+    }
+
+    const modelName = chat.partner.completion_model.name;
+    
+    // Gemini 2.5 Flash models: Check if user has enabled reasoning
+    if (modelName === "gemini-2.5-flash" || modelName === "gemini-2.5-flash-preview-05-20") {
+      if ("completion_model_kwargs" in chat.partner) {
+        const kwargs = chat.partner.completion_model_kwargs;
+        
+        // Check reasoning_level first (new system)
+        if (kwargs?.reasoning_level !== undefined && kwargs?.reasoning_level !== null) {
+          return kwargs.reasoning_level !== "disabled";
+        }
+        
+        // Fallback to thinking_budget (legacy system)
+        const thinkingBudget = kwargs?.thinking_budget ?? 0;
+        return thinkingBudget > 0;
+      }
+      return false;
+    }
+    
+    // Always-on reasoning models (Claude, Gemini 2.5 Pro, etc.): Show if model supports reasoning
+    return true;
   });
 </script>
 
