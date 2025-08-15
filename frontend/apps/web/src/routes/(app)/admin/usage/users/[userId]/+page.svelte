@@ -18,7 +18,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
-  import type { UserTokenUsage, TokenUsageSummary } from "@intric/intric-js";
+  import type { TokenUsageSummary } from "@intric/intric-js";
 
   const intric = getIntric();
   const userId = $page.params.userId;
@@ -41,13 +41,13 @@
   // Load user data and model breakdown
   async function loadUserData() {
     if (!userId) return;
-    
+
     // Check if user data was passed from list view
     if ($page.state?.user && $page.state.user.user_id === userId) {
       user = $page.state.user;
       return;
     }
-    
+
     isLoadingUser = true;
     userError = null;
     try {
@@ -56,9 +56,9 @@
         startDate: dateRange.start.toString(),
         endDate: dateRange.end.add({ days: 1 }).toString()
       });
-      
+
       user = userSummary.user;
-      
+
       if (!user) {
         // User not found in current date range
         console.error('User not found in current date range');
@@ -74,7 +74,7 @@
 
   async function loadModelBreakdown() {
     if (!userId) return;
-    
+
     isLoadingBreakdown = true;
     breakdownError = null;
     try {
@@ -101,7 +101,7 @@
   // Group models by organization for better visualization
   const modelsByOrg = $derived.by(() => {
     if (!modelBreakdown?.models) return [];
-    
+
     return Object.values(
       modelBreakdown.models.reduce(
         (acc, model) => {
@@ -119,10 +119,10 @@
           acc[org].models.push(model);
           return acc;
         },
-        {} as Record<string, { 
-          label: string; 
-          tokenCount: number; 
-          colour: string; 
+        {} as Record<string, {
+          label: string;
+          tokenCount: number;
+          colour: string;
           models: any[];
           org: string;
         }>
@@ -146,21 +146,21 @@
     }),
     modelTable.column({
       header: "Requests",
-      accessor: "request_count", 
+      accessor: "request_count",
       id: "request_count",
       cell: (item) => formatNumber(item.value)
     }),
     modelTable.column({
       header: "Input Tokens",
       accessor: "input_token_usage",
-      id: "input_tokens", 
+      id: "input_tokens",
       cell: (item) => formatNumber(item.value, "compact", 1)
     }),
     modelTable.column({
       header: "Output Tokens",
       accessor: "output_token_usage",
       id: "output_tokens",
-      cell: (item) => formatNumber(item.value, "compact", 1) 
+      cell: (item) => formatNumber(item.value, "compact", 1)
     }),
     modelTable.column({
       header: "Total Tokens",
@@ -185,6 +185,14 @@
     return { label: "Low Usage", class: "bg-secondary text-success" };
   }
 
+  // Get top 5 models by token usage
+  const topModels = $derived.by(() => {
+    if (!modelBreakdown?.models) return [];
+    return [...modelBreakdown.models]
+      .sort((a, b) => b.total_token_usage - a.total_token_usage)
+      .slice(0, 5);
+  });
+
   function goBack() {
     goto('/admin/usage?tab=users');
   }
@@ -200,7 +208,7 @@
       parent={{ title: "Usage", href: "/admin/usage?tab=users" }}
       title={user?.username || 'Loading...'}
     />
-    
+
     <div slot="toolbar">
       <Input.DateRange bind:value={dateRange} />
     </div>
@@ -212,13 +220,13 @@
       <!-- User Overview Statistics -->
       <Settings.Page>
         <Settings.Group title="Overview">
-          <Settings.Row 
+          <Settings.Row
             title="User Information"
             description="Profile and usage activity for {user.username}."
           >
             <div class="flex items-center gap-4">
               <!-- User Avatar using dynamic color system -->
-              <div 
+              <div
                 {...dynamicColour({ basedOn: user.email })}
                 class="bg-dynamic-default flex h-16 w-16 items-center justify-center rounded-xl text-xl font-semibold text-white"
               >
@@ -240,7 +248,7 @@
             </div>
           </Settings.Row>
 
-          <Settings.Row 
+          <Settings.Row
             title="Token Usage Summary"
             description="Total tokens consumed by {user.username} in the selected period."
           >
@@ -338,7 +346,7 @@
               description="Most frequently used AI models by this user."
             >
               <div class="space-y-4">
-                {#each modelBreakdown.models.slice(0, 5) as model (model.model_name)}
+                {#each topModels as model (model.model_name)}
                   <div class="space-y-2">
                     <div class="flex items-center justify-between">
                       <div class="min-w-0 flex-1">
@@ -354,7 +362,7 @@
                     <div class="bg-secondary h-2 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all duration-300"
-                        style="width: {Math.max(2, (model.total_token_usage / modelBreakdown.models[0].total_token_usage) * 100)}%; background: var(--{modelOrgs[model.model_org || 'Unknown']?.chartColour || 'chart-blue'})"
+                        style="width: {Math.max(2, topModels.length > 0 ? (model.total_token_usage / topModels[0].total_token_usage) * 100 : 0)}%; background: var(--{modelOrgs[model.model_org || 'Unknown']?.chartColour || 'chart-blue'})"
                       ></div>
                     </div>
                   </div>

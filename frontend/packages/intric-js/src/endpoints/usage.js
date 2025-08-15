@@ -72,9 +72,12 @@ export function initUsage(client) {
        * @throws {IntricError}
        * */
       getUserModelBreakdown: async (userId, params) => {
-        const res = await client.fetch(`/api/v1/token-usage/users/${userId}`, {
+        const res = await client.fetch(`/api/v1/token-usage/users/{user_id}`, {
           method: "get",
           params: {
+            path: {
+              user_id: userId
+            },
             query: {
               start_date: params?.startDate,
               end_date: params?.endDate
