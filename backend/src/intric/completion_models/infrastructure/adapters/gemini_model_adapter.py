@@ -22,7 +22,9 @@ class GeminiModelAdapter(OpenAIModelAdapter):
     
     Reasoning Support (Stable Versions):
     - gemini-2.0-flash: No reasoning support
-    - gemini-2.5-flash: Optional reasoning (user-controlled intensity)
+    - gemini-2.0-flash-lite: No reasoning support
+    - gemini-2.5-flash: Optional reasoning (user-controlled on/off and intensity)
+    - gemini-2.5-flash-lite: Optional reasoning (user-controlled on/off and intensity, same as 2.5-flash)
     - gemini-2.5-pro: Always-on reasoning (intensity user-controlled)
     """
     
@@ -38,15 +40,25 @@ class GeminiModelAdapter(OpenAIModelAdapter):
     
     def _get_correct_model_name(self) -> str:
         """
-        Map legacy model names to correct API model names.
+        Map model names to correct stable API model names.
         
-        This handles the transition from simplified names to the actual
-        API model names with preview versions and dates.
+        This handles the transition from preview versions to stable versions,
+        ensuring backward compatibility with existing database entries.
         """
         model_name_mapping = {
-            "gemini-2.5-flash": "gemini-2.5-flash-preview-05-20",
-            "gemini-2.5-pro": "gemini-2.5-pro-preview-06-05",
-            "gemini-2.0-flash": "gemini-2.0-flash"  # Already correct
+            # Stable versions (pass through)
+            "gemini-2.5-flash": "gemini-2.5-flash",
+            "gemini-2.5-pro": "gemini-2.5-pro",
+            "gemini-2.0-flash": "gemini-2.0-flash",
+            "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+            "gemini-2.0-flash-lite": "gemini-2.0-flash-lite",
+            
+            # Map preview versions to stable versions for backward compatibility
+            "gemini-2.5-flash-preview-05-20": "gemini-2.5-flash",
+            "gemini-2.5-pro-preview-06-05": "gemini-2.5-pro",
+            "gemini-2.5-flash-lite-06-17": "gemini-2.5-flash-lite",
+            "gemini-2.0-flash-001": "gemini-2.0-flash",
+            "gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite"
         }
         
         return model_name_mapping.get(self.model.name, self.model.name)
@@ -57,26 +69,28 @@ class GeminiModelAdapter(OpenAIModelAdapter):
         
         Based on Google's Gemini API documentation:
         - gemini-2.0-flash: No reasoning support
-        - gemini-2.5-flash-*: Optional reasoning support  
-        - gemini-2.5-pro-*: Reasoning support (always-on for Pro)
+        - gemini-2.0-flash-lite: No reasoning support
+        - gemini-2.5-flash: Optional reasoning support (user can enable/disable)
+        - gemini-2.5-flash-lite: Optional reasoning support (user can enable/disable, same as 2.5-flash)
+        - gemini-2.5-pro: Reasoning support (always-on for Pro)
         
         Returns:
             bool: True if model supports reasoning_effort parameter
         """
+        # Get the mapped stable model name
         model_name = self._get_correct_model_name()
         
         # Models that do NOT support reasoning
         non_reasoning_models = [
-            "gemini-2.0-flash"
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite"
         ]
         
         # Models that DO support reasoning
         reasoning_models = [
             "gemini-2.5-flash",
             "gemini-2.5-pro",
-            # Legacy preview versions for backward compatibility
-            "gemini-2.5-flash-preview-05-20",
-            "gemini-2.5-pro-preview-06-05"
+            "gemini-2.5-flash-lite"
         ]
         
         if model_name in non_reasoning_models:
@@ -84,10 +98,11 @@ class GeminiModelAdapter(OpenAIModelAdapter):
         elif model_name in reasoning_models:
             return True
         else:
-            # Unknown models default to reasoning support
+            # Log warning for truly unknown models only
+            # Preview versions are now mapped, so this should be rare
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f"Unknown Gemini model '{model_name}' - assuming reasoning support")
+            logger.warning(f"Unknown Gemini model '{model_name}' after mapping from '{self.model.name}' - assuming reasoning support")
             return True
     
     def _get_kwargs(self, kwargs: ModelKwargs | None):
