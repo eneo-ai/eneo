@@ -101,3 +101,8 @@ export namespace SSE {
   export type Intric = Omit<components["schemas"]["SSEIntricEvent"], "$defs">;
   export type Event = Text | FirstChunk | Files | Intric;
 }
+
+export type UserTokenUsageSummary = components["schemas"]["UserTokenUsageSummary"];
+export type UserTokenUsage = components["schemas"]["UserTokenUsage"];
+export type UserSortBy = components["schemas"]["UserSortBy"];
+export type ModelUsage = components["schemas"]["ModelUsage"];

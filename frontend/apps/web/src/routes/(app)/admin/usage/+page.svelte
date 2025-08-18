@@ -8,6 +8,7 @@
   import { Page } from "$lib/components/layout";
   import StorageSummary from "./storage/StorageSummary.svelte";
   import TokenSummary from "./tokens/TokenSummary.svelte";
+  import UserTokenSummary from "./users/UserTokenSummary.svelte";
 
   const { data } = $props();
 </script>
@@ -22,6 +23,7 @@
     <Page.Tabbar>
       <Page.TabTrigger tab="storage">Storage</Page.TabTrigger>
       <Page.TabTrigger tab="tokens">Tokens</Page.TabTrigger>
+      <Page.TabTrigger tab="users">Users</Page.TabTrigger>
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
@@ -30,6 +32,9 @@
     </Page.Tab>
     <Page.Tab id="tokens">
       <TokenSummary tokenStats={data.tokenStats}></TokenSummary>
+    </Page.Tab>
+    <Page.Tab id="users">
+      <UserTokenSummary></UserTokenSummary>
     </Page.Tab>
   </Page.Main>
 </Page.Root>

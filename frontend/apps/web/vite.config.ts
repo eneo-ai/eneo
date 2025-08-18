@@ -27,7 +27,7 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{js,ts}"]
   },
   server: {
-    host: process.env.HOST ? "0.0.0.0" : undefined,
+    host: "0.0.0.0",
     port: 3000,
     strictPort: true
   },
