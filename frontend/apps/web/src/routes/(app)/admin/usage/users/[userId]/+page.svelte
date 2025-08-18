@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Table, Input } from "@intric/ui";
+  import { Table, Input, Button } from "@intric/ui";
   import { Page } from "$lib/components/layout";
   import SimpleTextCell from "$lib/components/layout/SimpleTextCell.svelte";
   import { Settings } from "$lib/components/layout";
@@ -200,10 +200,21 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title
-      parent={{ title: "Usage", href: "/admin/usage?tab=users" }}
-      title={user?.username || 'Loading...'}
-    />
+    <Page.Title>
+      <div class="flex items-center gap-2">
+        <Button
+          variant="simple"
+          onclick={() => history.back()}
+          class="text-muted hover:text-primary"
+        >
+          ← Usage
+        </Button>
+        <span class="text-muted">/</span>
+        <h1 class="text-primary text-[1.45rem] font-extrabold">
+          {user?.username || 'Loading...'}
+        </h1>
+      </div>
+    </Page.Title>
 
     <Page.Flex>
       <Input.DateRange bind:value={dateRange} />

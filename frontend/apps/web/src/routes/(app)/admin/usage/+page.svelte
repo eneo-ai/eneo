@@ -34,7 +34,7 @@
       <TokenSummary tokenStats={data.tokenStats}></TokenSummary>
     </Page.Tab>
     <Page.Tab id="users">
-      <UserTokenSummary tokenStats={data.tokenStats}></UserTokenSummary>
+      <UserTokenSummary></UserTokenSummary>
     </Page.Tab>
   </Page.Main>
 </Page.Root>

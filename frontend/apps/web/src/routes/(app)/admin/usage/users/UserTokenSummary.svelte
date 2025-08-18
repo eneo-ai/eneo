@@ -13,14 +13,22 @@
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
   import { goto } from "$app/navigation";
+  import { page } from "$app/stores";
 
   let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
   let error = $state<string | null>(null);
-  let page = $state(1);
-  let perPage = $state(25); // Fixed value, no dropdown
-  let sortBy = $state<UserSortBy>("total_tokens");
-  let sortOrder = $state<"asc" | "desc">("desc");
+
+  // Reactive pagination state derived from URL search parameters
+  const paginationState = $derived.by(() => {
+    const searchParams = $page.url.searchParams;
+    return {
+      page: parseInt(searchParams.get('page') || '1'),
+      perPage: 25, // Fixed value
+      sortBy: (searchParams.get('sortBy') as UserSortBy) || "total_tokens",
+      sortOrder: (searchParams.get('sortOrder') as "asc" | "desc") || "desc"
+    };
+  });
 
 
   const intric = getIntric();
@@ -55,21 +63,37 @@
 
   $effect(() => {
     if (dateRange.start && dateRange.end) {
-      updateUserStats(dateRange, page, perPage, sortBy, sortOrder);
+      updateUserStats(dateRange, paginationState.page, paginationState.perPage, paginationState.sortBy, paginationState.sortOrder);
     }
   });
 
-  function onUserClick(user: UserTokenUsage) {
-    goto(`/admin/usage/users/${user.user_id}`);
+    function onUserClick(user: UserTokenUsage) {
+    // Preserve current URL state by including pagination parameters
+    const currentUrl = new URL($page.url);
+    const params = new URLSearchParams();
+
+    // Preserve pagination parameters for the back navigation
+    if (currentUrl.searchParams.get('page')) params.set('page', currentUrl.searchParams.get('page')!);
+    if (currentUrl.searchParams.get('sortBy')) params.set('sortBy', currentUrl.searchParams.get('sortBy')!);
+    if (currentUrl.searchParams.get('sortOrder')) params.set('sortOrder', currentUrl.searchParams.get('sortOrder')!);
+
+    const userDetailUrl = `/admin/usage/users/${user.user_id}${params.toString() ? '?' + params.toString() : ''}`;
+    goto(userDetailUrl);
   }
 
   function onPageChange(newPage: number) {
-    page = newPage;
+    const url = new URL($page.url);
+    url.searchParams.set('page', newPage.toString());
+    goto(url, { replaceState: true });
   }
 
   function onSortChange(newSortBy: UserSortBy, newSortOrder: "asc" | "desc") {
-    sortBy = newSortBy;
-    sortOrder = newSortOrder;
+    const url = new URL($page.url);
+    url.searchParams.set('sortBy', newSortBy);
+    url.searchParams.set('sortOrder', newSortOrder);
+    // Reset to page 1 when sorting changes
+    url.searchParams.set('page', '1');
+    goto(url, { replaceState: true });
   }
 
 
@@ -101,7 +125,17 @@
         </div>
       {:else if userStats}
         <div class="space-y-4">
-          <UserTokenTable users={userStats.users} totalUsers={userStats.total_users} {page} {perPage} {sortBy} {sortOrder} {onUserClick} {onPageChange} {onSortChange}></UserTokenTable>
+          <UserTokenTable
+            users={userStats.users}
+            totalUsers={userStats.total_users}
+            page={paginationState.page}
+            perPage={paginationState.perPage}
+            sortBy={paginationState.sortBy}
+            sortOrder={paginationState.sortOrder}
+            {onUserClick}
+            {onPageChange}
+            {onSortChange}
+          />
         </div>
       {:else}
         <div class="flex justify-center p-8">
