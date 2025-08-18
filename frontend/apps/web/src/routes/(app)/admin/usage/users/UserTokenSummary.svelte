@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
-  import type { TokenUsageSummary } from "@intric/intric-js";
+  import { IntricError, type UserSortBy, type UserTokenUsage, type UserTokenUsageSummary } from "@intric/intric-js";
   import UserOverviewBar from "./UserOverviewBar.svelte";
   import UserTokenTable from "./UserTokenTable.svelte";
   import { CalendarDate } from "@internationalized/date";
@@ -14,18 +14,13 @@
   import { Input } from "@intric/ui";
   import { goto } from "$app/navigation";
 
-  type Props = {
-    tokenStats: TokenUsageSummary;
-  };
-
-  const { tokenStats }: Props = $props();
-  let userStats = $state(null);
+  let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
-  let error = $state(null);
+  let error = $state<string | null>(null);
   let page = $state(1);
   let perPage = $state(25); // Fixed value, no dropdown
-  let sortBy = $state("total_tokens");
-  let sortOrder = $state("desc");
+  let sortBy = $state<UserSortBy>("total_tokens");
+  let sortOrder = $state<"asc" | "desc">("desc");
 
 
   const intric = getIntric();
@@ -37,7 +32,7 @@
     end: today
   });
 
-  async function updateUserStats(timeframe: { start: CalendarDate; end: CalendarDate }, page: number, perPage: number, sortBy: string, sortOrder: string) {
+  async function updateUserStats(timeframe: { start: CalendarDate; end: CalendarDate }, page: number, perPage: number, sortBy: UserSortBy, sortOrder: string) {
     isLoading = true;
     error = null;
     try {
@@ -50,8 +45,8 @@
         sortBy: sortBy,
         sortOrder: sortOrder
       });
-    } catch (err) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof IntricError ? err.message : "unknown error";
       console.error('Failed to load user token usage:', err);
     } finally {
       isLoading = false;
@@ -64,22 +59,15 @@
     }
   });
 
-  function onUserClick(user: any) {
-    // Convert proxy to plain object to avoid cloning error
-    try {
-      const plainUser = JSON.parse(JSON.stringify(user));
-      goto(`/admin/usage/users/${user.user_id}`, { state: { user: plainUser } });
-    } catch (error) {
-      // Fallback: just navigate without state
-      goto(`/admin/usage/users/${user.user_id}`);
-    }
+  function onUserClick(user: UserTokenUsage) {
+    goto(`/admin/usage/users/${user.user_id}`);
   }
 
   function onPageChange(newPage: number) {
     page = newPage;
   }
 
-  function onSortChange(newSortBy: string, newSortOrder: string) {
+  function onSortChange(newSortBy: UserSortBy, newSortOrder: "asc" | "desc") {
     sortBy = newSortBy;
     sortOrder = newSortOrder;
   }
@@ -102,7 +90,7 @@
       <div slot="toolbar" class="mb-4">
         <Input.DateRange bind:value={dateRange}></Input.DateRange>
       </div>
-      
+
       {#if isLoading}
         <div class="flex justify-center p-8">
           <div class="text-gray-500">Loading user token usage...</div>

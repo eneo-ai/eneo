@@ -26,7 +26,7 @@ export function initUsage(client) {
 
       /**
        * List token usage status aggregated by users for current tenant
-       * @param {{startDate: string, endDate: string}} [params] Define start and end date for data; Expects UTC time string.
+       * @param {{startDate: string, endDate: string, page: number, perPage: number, sortBy: import("../types/resources").UserSortBy, sortOrder: string}} [params] Define start and end date for data; Expects UTC time string.
        * @throws {IntricError}
        * */
       getUsersSummary: async (params) => {
@@ -53,9 +53,12 @@ export function initUsage(client) {
        * @throws {IntricError}
        * */
       getUserSummary: async (userId, params) => {
-        const res = await client.fetch(`/api/v1/token-usage/users/${userId}/summary`, {
+        const res = await client.fetch(`/api/v1/token-usage/users/{user_id}/summary`, {
           method: "get",
           params: {
+            path: {
+              user_id: userId
+            },
             query: {
               start_date: params?.startDate,
               end_date: params?.endDate

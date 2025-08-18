@@ -5,27 +5,27 @@
 -->
 
 <script lang="ts">
-  import type { UserTokenUsage } from "@intric/intric-js";
+  import type { UserTokenUsage, UserSortBy } from "@intric/intric-js";
   import { createRender } from "svelte-headless-table";
   import { Button, Table } from "@intric/ui";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
-  import UsageBadge from "./UsageBadge.svelte";
+  import UsageBadgeWrapper from "./UsageBadgeWrapper.svelte";
 
   interface Props {
     users: UserTokenUsage[];
     totalUsers: number;
     page: number;
     perPage: number;
-    sortBy: string;
-    sortOrder: string;
+    sortBy: UserSortBy;
+    sortOrder: "asc" | "desc";
     onUserClick: (user: UserTokenUsage) => void;
     onPageChange: (page: number) => void;
-    onSortChange: (sortBy: string, sortOrder: string) => void;
+    onSortChange: (sortBy: UserSortBy, sortOrder: "asc" | "desc") => void;
   }
 
-  const { users, totalUsers, page, perPage, sortBy, sortOrder, onUserClick, onPageChange, onSortChange }: Props = $props();
+  const { users, totalUsers, page, perPage, onUserClick, onPageChange }: Props = $props();
 
-  const table = Table.createWithResource([]);
+  const table = Table.createWithResource<UserTokenUsage>([]);
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
@@ -38,13 +38,6 @@
             onUserClick(item.value);
           }
         });
-      },
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item.username.toLowerCase();
-          }
-        }
       }
     }),
 
@@ -53,16 +46,9 @@
       accessor: (item) => item.total_requests,
       id: "usage_level",
       cell: (item) => {
-        return createRender(UsageBadge, {
+        return createRender(UsageBadgeWrapper, {
           requests: item.value
         });
-      },
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item;
-          }
-        }
       }
     }),
 
@@ -71,27 +57,13 @@
       accessor: "total_input_tokens",
       id: "input_tokens",
       cell: (item) => formatNumber(item.value),
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item;
-          }
-        }
-      }
     }),
 
     table.column({
       header: "Output tokens",
       accessor: "total_output_tokens",
-      id: "output_tokens", 
+      id: "output_tokens",
       cell: (item) => formatNumber(item.value),
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item;
-          }
-        }
-      }
     }),
 
     table.column({
@@ -99,13 +71,6 @@
       accessor: "total_tokens",
       id: "total_tokens",
       cell: (item) => formatNumber(item.value),
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item;
-          }
-        }
-      }
     }),
 
     table.column({
@@ -126,16 +91,9 @@
   $effect(() => {
     table.update(users);
   });
-
-  const { sort } = viewModel.pluginStates;
-  $effect(() => {
-    if (sort.id) {
-      onSortChange(sort.id, sort.order);
-    }
-  });
 </script>
 
-<Table.Root {viewModel} resourceName="user" displayAs="list" class="[&>div:nth-child(2)]:mt-4"></Table.Root>
+<Table.Root {viewModel} resourceName="user" displayAs="list"></Table.Root>
 
 {#if totalUsers > perPage}
   <div class="flex justify-center items-center mt-4">

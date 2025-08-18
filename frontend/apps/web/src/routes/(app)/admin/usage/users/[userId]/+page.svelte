@@ -6,7 +6,6 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { goto } from "$app/navigation";
   import { Table, Input } from "@intric/ui";
   import { Page } from "$lib/components/layout";
   import SimpleTextCell from "$lib/components/layout/SimpleTextCell.svelte";
@@ -18,7 +17,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
-  import type { TokenUsageSummary } from "@intric/intric-js";
+  import { IntricError, type ModelUsage, type TokenUsageSummary, type UserTokenUsage } from "@intric/intric-js";
 
   const intric = getIntric();
   const userId = $page.params.userId;
@@ -35,18 +34,12 @@
   let modelBreakdown = $state<TokenUsageSummary | null>(null);
   let isLoadingUser = $state(false);
   let isLoadingBreakdown = $state(false);
-  let userError = $state(null);
-  let breakdownError = $state(null);
+  let userError = $state<string | null>(null);
+  let breakdownError = $state<string | null>(null);
 
   // Load user data and model breakdown
   async function loadUserData() {
     if (!userId) return;
-
-    // Check if user data was passed from list view
-    if ($page.state?.user && $page.state.user.user_id === userId) {
-      user = $page.state.user;
-      return;
-    }
 
     isLoadingUser = true;
     userError = null;
@@ -64,9 +57,9 @@
         console.error('User not found in current date range');
         return;
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load user data:', error);
-      userError = error.message;
+      userError = error instanceof IntricError ? error.message : "unknown error";
     } finally {
       isLoadingUser = false;
     }
@@ -82,8 +75,8 @@
         startDate: dateRange.start.toString(),
         endDate: dateRange.end.add({ days: 1 }).toString()
       });
-    } catch (error) {
-      breakdownError = error.message;
+    } catch (error: unknown) {
+      breakdownError = error instanceof IntricError ? error.message : "unknown error";
       console.error('Failed to load user model breakdown:', error);
     } finally {
       isLoadingBreakdown = false;
@@ -123,7 +116,7 @@
           label: string;
           tokenCount: number;
           colour: string;
-          models: any[];
+          models: ModelUsage[];
           org: string;
         }>
       )
@@ -131,17 +124,24 @@
   });
 
   // Create table for model breakdown
-  const modelTable = Table.createWithResource([]);
+  const modelTable = Table.createWithResource<ModelUsage>([]);
   const modelTableViewModel = modelTable.createViewModel([
     modelTable.column({
       header: "Model",
-      accessor: (model) => model.model_nickname || model.model_name,
+      accessor: (model) => model,
       id: "model_name",
       cell: (item) => {
         return createRender(SimpleTextCell, {
-          primary: item.value,
-          secondary: item.row.original.model_org || "Unknown"
+          primary: item.value.model_nickname || item.value.model_name,
+          secondary: item.value.model_org || "Unknown"
         });
+      },
+      plugins: {
+        tableFilter: {
+          getFilterValue(value) {
+            return `${value.model_nickname || value.model_name} ${value.model_org || ""}`;
+          }
+        }
       }
     }),
     modelTable.column({
@@ -192,10 +192,6 @@
       .sort((a, b) => b.total_token_usage - a.total_token_usage)
       .slice(0, 5);
   });
-
-  function goBack() {
-    goto('/admin/usage?tab=users');
-  }
 </script>
 
 <svelte:head>
@@ -209,9 +205,9 @@
       title={user?.username || 'Loading...'}
     />
 
-    <div slot="toolbar">
+    <Page.Flex>
       <Input.DateRange bind:value={dateRange} />
-    </div>
+    </Page.Flex>
   </Page.Header>
 
   <Page.Main>

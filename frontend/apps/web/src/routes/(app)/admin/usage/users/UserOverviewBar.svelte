@@ -30,7 +30,7 @@
         colour: "chart-red"
       },
       {
-        label: "Medium Usage Users", 
+        label: "Medium Usage Users",
         userCount: medium.length,
         tokenCount: medium.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-yellow"
