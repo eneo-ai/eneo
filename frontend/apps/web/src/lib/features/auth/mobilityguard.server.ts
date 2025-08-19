@@ -18,6 +18,18 @@ const MobilityguardCookie = "mobilityguard-verifier" as const;
 const scopes = ["openid", "email"];
 
 export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }) {
+  // Only generate an url if the environment is correctly set
+  if (!env.MOBILITYGUARD_CLIENT_ID || !env.MOBILITY_GUARD_AUTH) {
+    // Log helpful warnings for missing configuration
+    if (env.MOBILITY_GUARD_AUTH && !env.MOBILITYGUARD_CLIENT_ID) {
+      console.warn("MobilityGuard is configured but MOBILITYGUARD_CLIENT_ID is not set");
+    }
+    if (env.MOBILITYGUARD_CLIENT_ID && !env.MOBILITY_GUARD_AUTH) {
+      console.warn("MOBILITYGUARD_CLIENT_ID is set but MOBILITY_GUARD_AUTH is not configured");
+    }
+    return undefined;
+  }
+
   const { codeVerifier, codeChallenge } = await createCodePair();
 
   event.cookies.set(MobilityguardCookie, codeVerifier, {
@@ -31,7 +43,7 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
 
   const searchParams = new URLSearchParams({
     scope: scopes.join(" "),
-    client_id: "intric",
+    client_id: env.MOBILITYGUARD_CLIENT_ID,
     response_type: "code",
     redirect_uri: `${event.url.origin}/login/callback`,
     state: encodeState({
@@ -46,6 +58,11 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
 }
 
 export async function loginWithMobilityguard(code: string): Promise<boolean> {
+  // Only try to login if the environment is correctly set
+  if (!env.MOBILITYGUARD_CLIENT_ID || !env.MOBILITY_GUARD_AUTH) {
+    return false;
+  }
+
   const event = getRequestEvent();
   const code_verifier = event.cookies.get(MobilityguardCookie);
 
