@@ -5,6 +5,15 @@
 
 set -euf -o pipefail
 
+# Install pre-commit hooks if in a git repository
+cd /workspace
+if git rev-parse --git-dir > /dev/null 2>&1; then
+    pre-commit install
+    echo "Pre-commit hooks installed successfully"
+else
+    echo "Warning: Not in a git repository, pre-commit hooks not installed"
+fi
+
 # Ensure .env files are present
 env_file_errors=()
 env_files=("backend/.env" "frontend/apps/web/.env")
