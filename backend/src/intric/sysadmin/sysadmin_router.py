@@ -1,3 +1,4 @@
+from typing import Any, Dict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -21,6 +22,7 @@ from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
 )
+from intric.main.config import SETTINGS
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
@@ -271,3 +273,72 @@ async def delete_origin(
 ):
     allowed_origin_repo = container.allowed_origin_repo()
     await allowed_origin_repo.delete(id)
+
+
+@router.get("/config/health", response_model=Dict[str, Any])
+async def get_config_health():
+    """
+    Get configuration health status for administrative monitoring.
+    
+    This endpoint provides a comprehensive view of the application configuration
+    status, including validation results and feature status. Secrets are masked
+    for security purposes.
+    
+    Returns:
+        Dict containing configuration validation results and feature status
+    """
+    # Run configuration validation
+    config_status = SETTINGS.check()
+    
+    # Get configuration summary with masked secrets
+    summary = SETTINGS.get_summary(mask_secrets=True)
+    
+    # Enhanced health status with new structure
+    health_status = {
+        "status": "healthy" if not config_status["errors"] else ("degraded" if config_status["warnings"] else "unhealthy"),
+        "config_hash": config_status["config_hash"],
+        "timestamp": config_status["timestamp"],
+        "validation": {
+            "errors": config_status["errors"],
+            "warnings": config_status["warnings"],
+            "unknown_vars": config_status["unknown_vars"],
+            "error_count": len(config_status["errors"]),
+            "warning_count": len(config_status["warnings"]),
+            "unknown_count": len(config_status["unknown_vars"])
+        },
+        "features": {
+            "ai_models": {
+                name: {"enabled": bool(status not in ["Not set", "Disabled"]), 
+                       "reason": "API key configured" if status not in ["Not set", "Disabled"] else "API key not set"}
+                for name, status in summary["ai_models"].items() if status != "Disabled"
+            },
+            "integrations": {
+                "crawling": {"enabled": SETTINGS.using_crawl},
+                "image_generation": {"enabled": SETTINGS.using_image_generation},
+                "access_management": {"enabled": SETTINGS.using_access_management},
+                "iam": {"enabled": SETTINGS.using_iam},
+                "confluence": {"enabled": bool(SETTINGS.confluence_client_id)},
+                "sharepoint": {"enabled": bool(SETTINGS.sharepoint_client_id)}
+            },
+            "auth_providers": {
+                "mobilityguard": {
+                    "enabled": bool(SETTINGS.mobilityguard_client_id and SETTINGS.mobilityguard_discovery_endpoint),
+                    "configured": summary["auth_providers"]["mobilityguard"]
+                }
+            }
+        },
+        "summary": {
+            "total_models": len([k for k, v in summary['ai_models'].items() if v != "Disabled"]),
+            "configured_models": len([k for k, v in summary['ai_models'].items() if v not in ["Not set", "Disabled"]]),
+            "enabled_features": len([k for k, v in summary['features'].items() if v]),
+            "total_features": len(summary['features'])
+        },
+        "environment": {
+            "app_version": summary["app_version"],
+            "environment_type": summary["environment"],
+            "development_mode": SETTINGS.dev,
+            "testing_mode": SETTINGS.testing
+        }
+    }
+    
+    return health_status

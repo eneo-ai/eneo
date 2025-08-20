@@ -68,3 +68,5 @@ async def update_privacy_policy(
 ):
     service = container.admin_service()
     return await service.update_privacy_policy(url)
+
+

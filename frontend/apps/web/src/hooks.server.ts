@@ -7,6 +7,23 @@ import { IntricError, type IntricErrorCode } from "@intric/intric-js";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
 import { env } from "$env/dynamic/private";
 import { getEnvironmentConfig } from "./lib/core/environment.server";
+import { validateConfigOrThrow } from "$lib/core/config.validator.server";
+
+// Configuration validation state
+let configValidationRun = false;
+
+function runConfigValidation() {
+  if (!configValidationRun) {
+    try {
+      // Validate configuration on startup (display is now handled by Vite plugin)
+      validateConfigOrThrow(dev);
+      configValidationRun = true;
+    } catch (error) {
+      console.error("❌ Frontend configuration validation failed:", error);
+      throw error;
+    }
+  }
+}
 
 function routeRequiresLogin(route: { id: string | null }): boolean {
   const routeIsPublic = route.id?.includes("(public)") ?? false;
@@ -14,6 +31,9 @@ function routeRequiresLogin(route: { id: string | null }): boolean {
 }
 
 const authHandle: Handle = async ({ event, resolve }) => {
+  // Run configuration validation once on startup
+  runConfigValidation();
+  
   // Clear authentication cookies if the 'clear_cookies' URL parameter is present
   if (event.url.searchParams.get("clear_cookies")) {
     clearFrontendCookies(event);
