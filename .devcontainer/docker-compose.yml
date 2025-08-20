@@ -36,13 +36,13 @@ services:
   searxng:
     image: searxng/searxng:latest
     ports:
-      - "8081:8080"
+      - "8085:8080"
     networks:
       - eneo
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8081/
+      - SEARXNG_BASE_URL=http://localhost:8085/
     depends_on:
       - redis
 
