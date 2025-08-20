@@ -33,6 +33,20 @@ services:
     volumes:
       - redis_data:/data
 
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8080:8080"
+    networks:
+      - eneo
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    depends_on:
+      - redis
+
+
 volumes:
   postgres_data:
   redis_data:

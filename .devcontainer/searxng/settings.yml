@@ -1,0 +1,83 @@
+# SearXNG settings for development
+use_default_settings: true
+
+general:
+  # Debug mode for development
+  debug: true
+  # Instance name
+  instance_name: "Intric SearXNG"
+  # Enable safe search by default
+  safe_search: 1
+
+search:
+  formats:
+    - html
+    - json
+  max_results: 20
+  default_lang: "en"
+  auto_lang: true
+
+server:
+  # Server settings
+  #port: 8080
+  #bind_address: "0.0.0.0"
+  # Secret key for sessions (replace with random key in production)
+  secret_key: "c6ff3c7fadbd12ec96c76cb873a4ed3238b6af3af57857f7c85308a660f4b8c3"
+  # Base URL
+  #base_url: http://localhost:8080/
+  limiter: false
+
+ui:
+  # UI settings
+  static_use_hash: false
+  default_theme: simple
+  simple_style: auto
+  center_alignment: false
+  results_on_new_tab: false
+  hotkeys: default
+
+# Cache settings
+redis:
+  url: redis://redis:6379/0
+
+# Enable various search engines
+engines:
+  - name: bing
+    engine: bing
+    shortcut: bi
+    api_key: false
+    disabled: false
+
+  - name: google
+    engine: google
+    shortcut: go
+    disabled: false
+    use_mobile_ui: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+
+# Outgoing request settings
+outgoing:
+  # Request timeout
+  request_timeout: 3.0
+  # Max request timeout
+  max_request_timeout: 10.0
+  # Pool connections
+  pool_connections: 100
+  # Pool max size
+  pool_maxsize: 20
+  # Enable HTTP/2
+  enable_http2: true
