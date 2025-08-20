@@ -9,7 +9,7 @@ import { env } from "$env/dynamic/private";
 import { getEnvironmentConfig } from "./lib/core/environment.server";
 import { validateConfigOrThrow } from "$lib/core/config.validator.server";
 
-// Configuration validation state
+// Configuration validation state - simple memoization
 let configValidationRun = false;
 
 function runConfigValidation() {
