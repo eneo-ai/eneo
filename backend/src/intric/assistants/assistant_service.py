@@ -109,6 +109,7 @@ class AssistantService:
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         completion_service: "CompletionService",
         references_service: "ReferencesService",
+        web_search: "WebSearch",
     ):
         self.repo = repo
         self.space_repo = space_repo
@@ -127,10 +128,7 @@ class AssistantService:
         self.integration_knowledge_repo = integration_knowledge_repo
         self.completion_service = completion_service
         self.references_service = references_service
-
-    @property
-    async def web_search(self):
-        return WebSearch()
+        self.web_search = web_search
 
     def validate_space_assistant(self, space: "Space", assistant: Assistant):
         # validate completion model

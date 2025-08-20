@@ -1,8 +1,9 @@
+from intric.libs.clients import SearXNGClient
+from intric.main.logging import get_logger
+from intric.main.models import InDB
 import uuid
 
-from intric.main.config import SETTINGS
-from intric.main.models import InDB
-from tavily import AsyncTavilyClient
+logger = get_logger(__name__)
 
 
 class WebSearchResult(InDB):
@@ -13,21 +14,28 @@ class WebSearchResult(InDB):
 
 
 class WebSearch:
-    def __init__(self):
-        self.client = AsyncTavilyClient(api_key=SETTINGS.tavily_api_key)
+    def __init__(self, searxng_client: SearXNGClient):
+        self.searxng_client = searxng_client
 
-    async def search(self, search_query: str) -> list[WebSearchResult]:
-        # Tavily max char limit is 400
-        pruned_search_query = search_query[:400]
-        response = await self.client.search(query=pruned_search_query, max_results=10)
-
-        return [
-            WebSearchResult(
-                id=uuid.uuid4(),
-                title=result["title"],
-                url=result["url"],
-                content=result["content"],
-                score=result["score"],
+    async def search(self, search_query: str, max_results: int = 10, max_search_query_length: int = 400) -> list[WebSearchResult]:
+        async with self.searxng_client as client:
+            response = await client.search(
+                query=search_query[:max_search_query_length],
             )
-            for result in response["results"]
-        ]
+
+            # Convert raw API response to WebSearchResult objects
+            results = []
+            search_results = response.get("results", [])[:max_results]
+
+            for result in search_results:
+                results.append(
+                    WebSearchResult(
+                        id=result.get("id", uuid.uuid4()),
+                        title=result.get("title", ""),
+                        url=result.get("url", ""),
+                        content=result.get("content", ""),
+                        score=result.get("score", 0.0),
+                    )
+                )
+
+            return results

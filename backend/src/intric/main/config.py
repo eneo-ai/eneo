@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     ovhcloud_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
     flux_api_key: Optional[str] = None
-    tavily_api_key: Optional[str] = None
+    searxng_base_url: Optional[str] = None
     vllm_api_key: Optional[str] = None
     berget_api_key: Optional[str] = None
     intric_marketplace_api_key: Optional[str] = None
