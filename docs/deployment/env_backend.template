@@ -6,7 +6,7 @@
 # OpenAI Configuration
 OPENAI_API_KEY=
 
-# Anthropic Claude Configuration  
+# Anthropic Claude Configuration
 ANTHROPIC_API_KEY=
 
 # Google Gemini Configuration
@@ -19,7 +19,7 @@ AZURE_API_VERSION=2024-02-15-preview
 AZURE_MODEL_DEPLOYMENT=gpt-4o
 
 ###############
-# REQUIRED: Security Settings - MUST BE CHANGED! 
+# REQUIRED: Security Settings - MUST BE CHANGED!
 # Ensure to have it the same in the frontend
 ###############
 # Generate with: openssl rand -hex 32
@@ -199,3 +199,9 @@ VLLM_API_KEY=
 
 # [OPTIONAL] vLLM model service URL
 VLLM_MODEL_URL=
+
+# Web Search Configuration
+# SearxNG URL (for web search functionality)
+# Use the service name 'searxng' for internal Docker network communication
+SEARXNG_BASE_URL=http://searxng:8080
+

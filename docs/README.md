@@ -11,6 +11,7 @@ This directory contains the complete documentation for Eneo, the democratic AI p
 | **[Project Overview](../README.md)** | Project overview and quick start | All users |
 | **[INSTALLATION.md](INSTALLATION.md)** | Development environment setup | Developers |
 | **[DEPLOYMENT.md](DEPLOYMENT.md)** | Production deployment guide | System administrators |
+| **[SEARXNG_SETUP.md](SEARXNG_SETUP.md)** | Web search engine setup with SearxNG | System administrators, developers |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Technical architecture overview | Developers, architects |
 | **[CONTRIBUTING.md](CONTRIBUTING.md)** | Development workflow and standards | Contributors |
 | **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | Common issues and solutions | All users |

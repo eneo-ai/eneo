@@ -112,6 +112,25 @@ services:
     networks:
       - proxy_tier
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: eneo_searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+    networks:
+      - proxy_tier
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   db-init:
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_db_init
