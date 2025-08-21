@@ -49,7 +49,7 @@ This guide covers setting up Eneo for development and testing. For production de
    # In VS Code terminal
    cp backend/env_template backend/.env
    cp frontend/apps/web/.env.example frontend/apps/web/.env
-   
+
    # Edit .env files with your configuration
    # Minimum: Add at least one AI provider API key
    ```
@@ -61,21 +61,21 @@ This guide covers setting up Eneo for development and testing. For production de
    ```
 
 6. **Start Services**
-   
+
    Open 3 terminals in VS Code:
-   
+
    **Terminal 1 - Backend:**
    ```bash
    cd backend
    poetry run start
    ```
-   
+
    **Terminal 2 - Frontend:**
    ```bash
    cd frontend
    pnpm run dev
    ```
-   
+
    **Terminal 3 - Worker (Optional):**
    ```bash
    cd backend
@@ -85,9 +85,11 @@ This guide covers setting up Eneo for development and testing. For production de
 7. **Access Application**
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8123/docs (development)
+   - SearxNG Search: http://localhost:8085 (for web search capabilities)
    - Default login: `user@example.com` / `Password1!`
 
 > **Port Note**: Development uses port 8123, but production deployment uses port 8000.
+> **Web Search**: SearxNG is automatically configured in the DevContainer for web search functionality.
 
 ---
 
@@ -466,7 +468,7 @@ Once development environment is running:
 
 ---
 
-**Need Help?** 
+**Need Help?**
 
 - 🐛 [Report Issues](https://github.com/eneo-ai/eneo/issues)
 - 💬 [Community Discussions](https://github.com/eneo-ai/eneo/discussions)

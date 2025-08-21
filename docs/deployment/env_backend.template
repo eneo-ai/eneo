@@ -6,7 +6,7 @@
 # OpenAI Configuration
 OPENAI_API_KEY=
 
-# Anthropic Claude Configuration  
+# Anthropic Claude Configuration
 ANTHROPIC_API_KEY=
 
 # Google Gemini Configuration
@@ -94,8 +94,10 @@ NODE_ENV=production
 # VLLM_API_KEY=
 # VLLM_MODEL_URL=
 
-# Web Search
-# TAVILY_API_KEY=
+# Web Search Configuration
+# SearxNG URL (for web search functionality)
+# Use the service name 'searxng' for internal Docker network communication
+SEARXNG_BASE_URL=http://searxng:8080
 
 # Worker Configuration
 # NUM_WORKERS=3

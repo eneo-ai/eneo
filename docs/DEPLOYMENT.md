@@ -32,51 +32,51 @@ graph TB
         INT[Internet]
         DNS[DNS Provider]
     end
-    
+
     subgraph "Edge Layer"
         LB[Load Balancer<br/>Optional]
         CF[Cloudflare<br/>Optional]
     end
-    
+
     subgraph "Application Layer"
         TR[Traefik<br/>Reverse Proxy<br/>SSL Termination]
         FE[Eneo Frontend<br/>Container]
         BE[Eneo Backend<br/>Container]
         WK[Background Workers<br/>Container]
     end
-    
+
     subgraph "Data Layer"
         DB[(PostgreSQL<br/>+ pgvector)]
         RD[(Redis<br/>Cache/Queue)]
         FS[File Storage<br/>Persistent Volume]
     end
-    
+
     subgraph "External Services"
         LE[Let's Encrypt<br/>SSL Certificates]
         AI[AI Providers<br/>OpenAI/Anthropic/etc.]
     end
-    
+
     INT --> CF
     CF --> LB
     LB --> TR
     INT -.-> TR
     DNS --> TR
-    
+
     TR --> FE
     TR --> BE
-    
+
     BE --> DB
     BE --> RD
     BE --> FS
     BE --> AI
-    
+
     WK --> RD
     WK --> DB
     WK --> FS
     WK --> AI
-    
+
     TR --> LE
-    
+
     style TR fill:#e1f5fe
     style FE fill:#f3e5f5
     style BE fill:#e8f5e8
@@ -208,6 +208,17 @@ Add your AI provider's API key to the `env_backend.env` file. You only need to a
 # Example for OpenAI (replace with your actual key)
 echo "OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >> env_backend.env
 ```
+
+**E. Configure Web Search (Optional):**
+
+For enhanced AI capabilities with web search, you can set up SearxNG:
+
+```bash
+# Enable SearxNG for web search capabilities
+echo "SEARXNG_BASE_URL=http://searxng:8080" >> env_backend.env
+```
+
+> 📖 **Detailed Setup**: For complete SearxNG configuration, see the [SearxNG Setup Guide](SEARXNG_SETUP.md)
 
 <details>
 <summary>🔍 Click to see final example environment files</summary>
