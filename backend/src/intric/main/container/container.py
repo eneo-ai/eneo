@@ -38,6 +38,7 @@ from intric.completion_models.domain.completion_model_service import (
 )
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
+from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.completion_models.presentation import CompletionModelAssembler
 from intric.conversations.application.conversation_service import ConversationService
 from intric.crawler.crawler import Crawler
@@ -151,6 +152,7 @@ from intric.integration.presentation.assemblers.user_integration_assembler impor
 from intric.jobs.job_repo import JobRepository
 from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
+from intric.libs.clients import SearXNGClient
 from intric.limits.limit_service import LimitService
 from intric.main.aiohttp_client import aiohttp_client
 from intric.modules.module_repo import ModuleRepository
@@ -431,6 +433,13 @@ class Container(containers.DeclarativeContainer):
         context_builder=context_builder,
     )
 
+    # Web search
+    searxng_client = providers.Factory(SearXNGClient)
+    web_search = providers.Factory(
+        WebSearch,
+        searxng_client=searxng_client,
+    )
+
     # Datastore
     create_embeddings_service = providers.Factory(CreateEmbeddingsService)
     datastore = providers.Factory(
@@ -649,6 +658,7 @@ class Container(containers.DeclarativeContainer):
         integration_knowledge_repo=integration_knowledge_repo,
         completion_service=completion_service,
         references_service=references_service,
+        web_search=web_search,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
