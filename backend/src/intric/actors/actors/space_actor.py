@@ -268,6 +268,53 @@ PERSONAL_SPACE_PERMISSIONS = {
     },
 }
 
+ORG_SPACE_PERMISSIONS = {
+    SpaceRole.VIEWER: {
+        # Ingen läsrätt alls i org-space
+    },
+    SpaceRole.EDITOR: {
+        # Ingen läsrätt alls i org-space
+    },
+    SpaceRole.ADMIN: {
+        SpaceResourceType.ASSISTANT: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.PUBLISH, SpaceAction.INSIGHT_TOGGLE, SpaceAction.INSIGHT_VIEW,
+        },
+        SpaceResourceType.GROUP_CHAT: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.PUBLISH, SpaceAction.INSIGHT_TOGGLE, SpaceAction.INSIGHT_VIEW,
+        },
+        SpaceResourceType.APP: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE, SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.SERVICE: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE, SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.COLLECTION: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+        },
+        SpaceResourceType.WEBSITE: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+        },
+        SpaceResourceType.INTEGRATION_KNOWLEDGE: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+        },
+        SpaceResourceType.INFO_BLOB: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.DELETE,
+        },
+        SpaceResourceType.SPACE: {
+            SpaceAction.READ, SpaceAction.EDIT, SpaceAction.DELETE,
+        },
+        SpaceResourceType.MEMBER: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+        },
+        # Chat / default-assistenten synlig & redigerbar endast för admin:
+        SpaceResourceType.DEFAULT_ASSISTANT: {
+            SpaceAction.READ, SpaceAction.EDIT,
+        },
+    },
+}
+
 PROPRIETARY_RESOURCES = {}
 PERMISSION_RESOURCES = {
     SpaceResourceType.ASSISTANT,
@@ -298,11 +345,13 @@ class SpaceActor:
         space: "Space",
         shared_space_permissions: AccessControlList = SHARED_SPACE_PERMISSIONS,
         personal_space_permissions: AccessControlList = PERSONAL_SPACE_PERMISSIONS,
+        org_space_permissions: AccessControlList = ORG_SPACE_PERMISSIONS,
     ):
         self.user = user
         self.space = space
         self._shared_space_permissions = shared_space_permissions
         self._personal_space_permissions = personal_space_permissions
+        self._org_space_permissions = org_space_permissions
 
     def _to_permisson(self, resource_type: SpaceResourceType):
         permission_map = {
@@ -327,12 +376,12 @@ class SpaceActor:
         return space_member.role if space_member else None
 
     def _get_permissions(self, role: SpaceRole):
-        return (
-            self._personal_space_permissions.get(role, {})
-            if self.space.is_personal()
-            else self._shared_space_permissions.get(role, {})
-        )
-
+        if self.space.is_personal():
+            return self._personal_space_permissions.get(role, {})
+        if self.space.is_organization(): 
+            return self._org_space_permissions.get(role, {})
+        return self._shared_space_permissions.get(role, {})
+    
     def can_perform_action(
         self,
         action: SpaceAction,

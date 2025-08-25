@@ -536,13 +536,6 @@ class Container(containers.DeclarativeContainer):
         file_size_service=file_size_service,
         job_service=job_service,
     )
-    collection_crud_service = providers.Factory(
-        CollectionCRUDService,
-        user=user,
-        space_service=space_service,
-        space_repo=space_repo,
-        actor_manager=actor_manager,
-    )
     group_service = providers.Factory(
         GroupService,
         user=user,
@@ -554,6 +547,14 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         task_service=task_service,
+    )
+    collection_crud_service = providers.Factory(
+        CollectionCRUDService,
+        user=user,
+        space_service=space_service,
+        space_repo=space_repo,
+        actor_manager=actor_manager,
+        group_service=group_service,
     )
     quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
     allowed_origin_service = providers.Factory(
