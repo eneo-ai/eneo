@@ -117,6 +117,10 @@ export interface paths {
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
   };
+  "/api/v1/info-blobs/spaces/{space_id}/info-blobs/": {
+    /** Get Space Info Blobs */
+    get: operations["get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get"];
+  };
   "/api/v1/groups/": {
     /**
      * Get Groups
@@ -249,10 +253,6 @@ export interface paths {
   "/api/v1/assistants/{id}/transfer/": {
     /** Transfer Assistant To Space */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
-  };
-  "/api/v1/assistants/{id}/prompts/": {
-    /** Get Prompts */
-    get: operations["get_prompts_api_v1_assistants__id__prompts__get"];
   };
   "/api/v1/assistants/{id}/publish/": {
     /** Publish Assistant */
@@ -722,6 +722,10 @@ export interface paths {
     /** Get Personal Space */
     get: operations["get_personal_space_api_v1_spaces_type_personal__get"];
   };
+  "/api/v1/spaces/type/organization/": {
+    /** Get Organization Space */
+    get: operations["get_organization_space_api_v1_spaces_type_organization__get"];
+  };
   "/api/v1/dashboard/": {
     /** Get Dashboard */
     get: operations["get_dashboard_api_v1_dashboard__get"];
@@ -951,23 +955,81 @@ export interface paths {
     /** On Auth Callback */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
   };
-  "/api/v1/roles/permissions/": {
-    /** Get Permissions */
-    get: operations["get_permissions_api_v1_roles_permissions__get"];
+  "/api/v1/sysadmin/users/": {
+    /** Get All Users */
+    get: operations["get_all_users_api_v1_sysadmin_users__get"];
+    /** Register New User */
+    post: operations["register_new_user_api_v1_sysadmin_users__post"];
   };
-  "/api/v1/roles/": {
-    /** Get Roles */
-    get: operations["get_roles_api_v1_roles__get"];
-    /** Create Role */
-    post: operations["create_role_api_v1_roles__post"];
+  "/api/v1/sysadmin/users/{user_id}/": {
+    /** Get User */
+    get: operations["get_user_api_v1_sysadmin_users__user_id___get"];
+    /**
+     * Update User
+     * @description Omitted fields are not updated.
+     */
+    post: operations["update_user_api_v1_sysadmin_users__user_id___post"];
+    /** Delete User */
+    delete: operations["delete_user_api_v1_sysadmin_users__user_id___delete"];
   };
-  "/api/v1/roles/{role_id}/": {
-    /** Get Role By Id */
-    get: operations["get_role_by_id_api_v1_roles__role_id___get"];
-    /** Update Role */
-    post: operations["update_role_api_v1_roles__role_id___post"];
-    /** Delete Role By Id */
-    delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
+  "/api/v1/sysadmin/tenants/": {
+    /** Get Tenants */
+    get: operations["get_tenants_api_v1_sysadmin_tenants__get"];
+    /** Create Tenant */
+    post: operations["create_tenant_api_v1_sysadmin_tenants__post"];
+  };
+  "/api/v1/sysadmin/tenants/{id}/": {
+    /** Update Tenant */
+    post: operations["update_tenant_api_v1_sysadmin_tenants__id___post"];
+    /** Delete Tenant By Id */
+    delete: operations["delete_tenant_by_id_api_v1_sysadmin_tenants__id___delete"];
+  };
+  "/api/v1/sysadmin/predefined-roles/": {
+    /** Get Predefined Roles */
+    get: operations["get_predefined_roles_api_v1_sysadmin_predefined_roles__get"];
+  };
+  "/api/v1/sysadmin/crawl-all-weekly-websites/": {
+    /** Crawl All Weekly Websites */
+    post: operations["crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post"];
+  };
+  "/api/v1/sysadmin/embedding-models/": {
+    /** Get Embedding Models */
+    get: operations["get_embedding_models_api_v1_sysadmin_embedding_models__get"];
+  };
+  "/api/v1/sysadmin/completion-models/": {
+    /** Get Completion Models */
+    get: operations["get_completion_models_api_v1_sysadmin_completion_models__get"];
+  };
+  "/api/v1/sysadmin/tenants/{id}/completion-models/{completion_model_id}/": {
+    /** Enable Completion Model */
+    post: operations["enable_completion_model_api_v1_sysadmin_tenants__id__completion_models__completion_model_id___post"];
+  };
+  "/api/v1/sysadmin/tenants/{id}/embedding-models/{embedding_model_id}/": {
+    /** Enable Embedding Model */
+    post: operations["enable_embedding_model_api_v1_sysadmin_tenants__id__embedding_models__embedding_model_id___post"];
+  };
+  "/api/v1/sysadmin/allowed-origins/": {
+    /** Get Origins */
+    get: operations["get_origins_api_v1_sysadmin_allowed_origins__get"];
+    /** Add Origin */
+    post: operations["add_origin_api_v1_sysadmin_allowed_origins__post"];
+  };
+  "/api/v1/sysadmin/allowed-origins/{id}/": {
+    /** Delete Origin */
+    delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
+  };
+  "/api/v1/modules/": {
+    /** Get Modules */
+    get: operations["get_modules_api_v1_modules__get"];
+    /** Add Module */
+    post: operations["add_module_api_v1_modules__post"];
+  };
+  "/api/v1/modules/{tenant_id}/": {
+    /**
+     * Add Module To Tenant
+     * @description Value is a list of module `id`'s to add to the `tenant_id`.
+     */
+    post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
   };
   "/version": {
     /** Get Version */
@@ -1010,6 +1072,35 @@ export interface components {
         [key: string]: string;
       }[];
     };
+    /** AllowedOriginCreate */
+    AllowedOriginCreate: {
+      /** Url */
+      url: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
+    /** AllowedOriginInDB */
+    AllowedOriginInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Url */
+      url: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
     /** AllowedOriginPublic */
     AllowedOriginPublic: {
       /** Created At */
@@ -1030,6 +1121,17 @@ export interface components {
       truncated_key: string;
       /** Key */
       key: string;
+    };
+    /** ApiKeyInDB */
+    ApiKeyInDB: {
+      /** Truncated Key */
+      truncated_key: string;
+      /** Key */
+      key: string;
+      /** User Id */
+      user_id: string | null;
+      /** Assistant Id */
+      assistant_id: string | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -1639,6 +1741,11 @@ export interface components {
       name: string;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["CollectionMetadata"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
     };
     /** CollectionUpdate */
     CollectionUpdate: {
@@ -2157,6 +2264,41 @@ export interface components {
      * @enum {string}
      */
     EmbeddingModelFamily: "openai" | "mini_lm" | "e5";
+    /** EmbeddingModelLegacy */
+    EmbeddingModelLegacy: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+    };
     /** EmbeddingModelPublic */
     EmbeddingModelPublic: {
       /** Created At */
@@ -2308,6 +2450,14 @@ export interface components {
        * @default NOT_PROVIDED
        */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** EmbeddingModelUpdateFlags */
+    EmbeddingModelUpdateFlags: {
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean | null;
     };
     /**
      * ErrorCodes
@@ -2621,6 +2771,11 @@ export interface components {
        */
       id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
       metadata: components["schemas"]["GroupMetadata"];
     };
     /** HTTPValidationError */
@@ -3069,6 +3224,31 @@ export interface components {
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
     };
+    /** ModuleBase */
+    ModuleBase: {
+      /** Name */
+      name: components["schemas"]["Modules"] | string;
+    };
+    /** ModuleInDB */
+    ModuleInDB: {
+      /** Name */
+      name: components["schemas"]["Modules"] | string;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+    };
+    /**
+     * Modules
+     * @description Any change to these enums will result in database changes
+     * @enum {string}
+     */
+    Modules: "eu_hosting" | "intric-applications" | "SWE Models";
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -3239,6 +3419,19 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[AllowedOriginInDB] */
+    PaginatedResponse_AllowedOriginInDB_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["AllowedOriginInDB"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[AllowedOriginPublic] */
     PaginatedResponse_AllowedOriginPublic_: {
       /**
@@ -3298,6 +3491,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[EmbeddingModelLegacy] */
+    PaginatedResponse_EmbeddingModelLegacy_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["EmbeddingModelLegacy"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -3395,13 +3601,13 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[PredefinedRolePublic] */
-    PaginatedResponse_PredefinedRolePublic_: {
+    /** PaginatedResponse[ModuleInDB] */
+    PaginatedResponse_ModuleInDB_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["PredefinedRolePublic"][];
+      items: components["schemas"]["ModuleInDB"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -3415,19 +3621,6 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
-    /** PaginatedResponse[RolePublic] */
-    PaginatedResponse_RolePublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["RolePublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -3499,6 +3692,19 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[TenantInDB] */
+    PaginatedResponse_TenantInDB_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["TenantInDB"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[TranscriptionModelPublic] */
     PaginatedResponse_TranscriptionModelPublic_: {
       /**
@@ -3532,6 +3738,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["UserGroupPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[UserInDB] */
+    PaginatedResponse_UserInDB_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["UserInDB"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -3689,11 +3908,21 @@ export interface components {
       | "admin"
       | "websites"
       | "integration_knowledge_list";
-    /** PermissionPublic */
-    PermissionPublic: {
-      name: components["schemas"]["Permission"];
-      /** Description */
-      description: string;
+    /** PredefinedRoleInDB */
+    PredefinedRoleInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Name */
+      name: string;
+      /** Permissions */
+      permissions: components["schemas"]["Permission"][];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
     };
     /** PredefinedRolePublic */
     PredefinedRolePublic: {
@@ -3828,12 +4057,26 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
-    /** RoleCreateRequest */
-    RoleCreateRequest: {
+    /** RoleInDB */
+    RoleInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /** Name */
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /** RolePublic */
     RolePublic: {
@@ -3850,18 +4093,6 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-    };
-    /** RoleUpdateRequest */
-    RoleUpdateRequest: {
-      /** Name */
-      name?: string | null;
-      /** Permissions */
-      permissions?: components["schemas"]["Permission"][] | null;
-    };
-    /** RolesPaginatedResponse */
-    RolesPaginatedResponse: {
-      roles: components["schemas"]["PaginatedResponse_RolePublic_"];
-      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -4263,6 +4494,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
       applications: components["schemas"]["Applications"];
     };
     /** SpaceMember */
@@ -4307,6 +4540,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
       applications: components["schemas"]["Applications"];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
@@ -4354,6 +4589,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
     };
     /**
      * Status
@@ -4469,6 +4706,76 @@ export interface components {
       /** Description */
       description?: string | null;
     };
+    /** TenantBase */
+    TenantBase: {
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name?: string | null;
+      /**
+       * Quota Limit
+       * @description Size in bytes. Default is 10 GB
+       * @default 10737418240
+       */
+      quota_limit?: number;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /** @default active */
+      state?: components["schemas"]["TenantState"];
+      /**
+       * Security Enabled
+       * @default false
+       */
+      security_enabled?: boolean;
+    };
+    /** TenantInDB */
+    TenantInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Privacy Policy */
+      privacy_policy?: string | null;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Quota Limit */
+      quota_limit: number;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /** @default active */
+      state?: components["schemas"]["TenantState"];
+      /**
+       * Security Enabled
+       * @default false
+       */
+      security_enabled?: boolean;
+      /**
+       * Modules
+       * @default []
+       */
+      modules?: components["schemas"]["ModuleInDB"][];
+    };
     /** TenantIntegration */
     TenantIntegration: {
       /** Id */
@@ -4534,6 +4841,22 @@ export interface components {
      * @enum {string}
      */
     TenantState: "active" | "suspended";
+    /** TenantUpdatePublic */
+    TenantUpdatePublic: {
+      /** Display Name */
+      display_name?: string | null;
+      /** Quota Limit */
+      quota_limit?: number | null;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /** Provisioning */
+      provisioning?: boolean | null;
+      state?: components["schemas"]["TenantState"] | null;
+      /** Security Enabled */
+      security_enabled?: boolean | null;
+    };
     /** TokenUsageSummary */
     TokenUsageSummary: {
       /**
@@ -4757,6 +5080,38 @@ export interface components {
        */
       predefined_roles?: components["schemas"]["ModelId"][];
     };
+    /** UserAddSuperAdmin */
+    UserAddSuperAdmin: {
+      /**
+       * Email
+       * Format: email
+       */
+      email: string;
+      /** Username */
+      username?: string | null;
+      /** Password */
+      password?: string | null;
+      /**
+       * Quota Limit
+       * @description Size in bytes
+       */
+      quota_limit?: number | null;
+      /**
+       * Roles
+       * @default []
+       */
+      roles?: components["schemas"]["ModelId"][];
+      /**
+       * Predefined Roles
+       * @default []
+       */
+      predefined_roles?: components["schemas"]["ModelId"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
     /** UserAdminView */
     UserAdminView: {
       /**
@@ -4795,6 +5150,81 @@ export interface components {
       predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
+    };
+    /** UserCreated */
+    UserCreated: {
+      /**
+       * Email
+       * Format: email
+       */
+      email: string;
+      /** Username */
+      username?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Password */
+      password?: string | null;
+      /** Salt */
+      salt?: string | null;
+      /**
+       * Used Tokens
+       * @default 0
+       */
+      used_tokens?: number;
+      /**
+       * Email Verified
+       * @default false
+       */
+      email_verified?: boolean;
+      /**
+       * Is Active
+       * @default true
+       */
+      is_active?: boolean;
+      state: components["schemas"]["UserState"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Quota Limit */
+      quota_limit?: number | null;
+      /**
+       * Roles
+       * @default []
+       */
+      roles?: components["schemas"]["RoleInDB"][];
+      /**
+       * Predefined Roles
+       * @default []
+       */
+      predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["UserGroupInDBRead"][];
+      tenant: components["schemas"]["TenantInDB"];
+      api_key: components["schemas"]["ApiKey"] | null;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      access_token: components["schemas"]["AccessToken"] | null;
+      /** Modules */
+      modules: readonly string[];
+      /** User Groups Ids */
+      user_groups_ids: readonly number[];
+      /** Permissions */
+      permissions: readonly components["schemas"]["Permission"][];
     };
     /** UserCreatedAdminView */
     UserCreatedAdminView: {
@@ -4841,6 +5271,20 @@ export interface components {
       /** Name */
       name: string;
     };
+    /** UserGroupInDBRead */
+    UserGroupInDBRead: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
     /** UserGroupPublic */
     UserGroupPublic: {
       /** Created At */
@@ -4883,6 +5327,80 @@ export interface components {
        * @default []
        */
       users?: components["schemas"]["ModelId"][];
+    };
+    /** UserInDB */
+    UserInDB: {
+      /**
+       * Email
+       * Format: email
+       */
+      email: string;
+      /** Username */
+      username?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Password */
+      password?: string | null;
+      /** Salt */
+      salt?: string | null;
+      /**
+       * Used Tokens
+       * @default 0
+       */
+      used_tokens?: number;
+      /**
+       * Email Verified
+       * @default false
+       */
+      email_verified?: boolean;
+      /**
+       * Is Active
+       * @default true
+       */
+      is_active?: boolean;
+      state: components["schemas"]["UserState"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Quota Limit */
+      quota_limit?: number | null;
+      /**
+       * Roles
+       * @default []
+       */
+      roles?: components["schemas"]["RoleInDB"][];
+      /**
+       * Predefined Roles
+       * @default []
+       */
+      predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["UserGroupInDBRead"][];
+      tenant: components["schemas"]["TenantInDB"];
+      api_key?: components["schemas"]["ApiKeyInDB"] | null;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Modules */
+      modules: readonly string[];
+      /** User Groups Ids */
+      user_groups_ids: readonly number[];
+      /** Permissions */
+      permissions: readonly components["schemas"]["Permission"][];
     };
     /** UserIntegration */
     UserIntegration: {
@@ -5498,6 +6016,11 @@ export interface components {
         };
       };
     };
+    /**
+     * IntricEventType
+     * @enum {string}
+     */
+    IntricEventType: "generating_image";
   };
   responses: never;
   parameters: never;
@@ -6199,6 +6722,28 @@ export interface operations {
       404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Space Info Blobs */
+  get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get: {
+    parameters: {
+      path: {
+        space_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_InfoBlobPublicNoText_"];
         };
       };
       /** @description Validation Error */
@@ -7451,28 +7996,6 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Get Prompts */
-  get_prompts_api_v1_assistants__id__prompts__get: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["PaginatedResponse_PromptSparse_"];
-        };
       };
       /** @description Validation Error */
       422: {
@@ -10097,6 +10620,17 @@ export interface operations {
       };
     };
   };
+  /** Get Organization Space */
+  get_organization_space_api_v1_spaces_type_organization__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+    };
+  };
   /** Get Dashboard */
   get_dashboard_api_v1_dashboard__get: {
     parameters: {
@@ -11147,72 +11681,39 @@ export interface operations {
       };
     };
   };
-  /** Get Permissions */
-  get_permissions_api_v1_roles_permissions__get: {
+  /** Get All Users */
+  get_all_users_api_v1_sysadmin_users__get: {
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["PermissionPublic"][];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
         };
       };
     };
   };
-  /** Get Roles */
-  get_roles_api_v1_roles__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolesPaginatedResponse"];
-        };
-      };
-    };
-  };
-  /** Create Role */
-  create_role_api_v1_roles__post: {
+  /** Register New User */
+  register_new_user_api_v1_sysadmin_users__post: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["RoleCreateRequest"];
+        "application/json": components["schemas"]["UserAddSuperAdmin"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["RolePublic"];
+          "application/json": components["schemas"]["UserCreated"];
         };
       };
-      /** @description Validation Error */
-      422: {
+      /** @description Bad Request */
+      400: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
-    };
-  };
-  /** Get Role By Id */
-  get_role_by_id_api_v1_roles__role_id___get: {
-    parameters: {
-      path: {
-        role_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolePublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
+      /** @description Unauthorized */
+      401: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -11225,23 +11726,147 @@ export interface operations {
       };
     };
   };
-  /** Update Role */
-  update_role_api_v1_roles__role_id___post: {
+  /** Get User */
+  get_user_api_v1_sysadmin_users__user_id___get: {
     parameters: {
       path: {
-        role_id: string;
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserInDB"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update User
+   * @description Omitted fields are not updated.
+   */
+  update_user_api_v1_sysadmin_users__user_id___post: {
+    parameters: {
+      path: {
+        user_id: string;
       };
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["RoleUpdateRequest"];
+        "application/json": components["schemas"]["UserUpdatePublic"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["RolePublic"];
+          "application/json": components["schemas"]["UserInDB"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete User */
+  delete_user_api_v1_sysadmin_users__user_id___delete: {
+    parameters: {
+      path: {
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Tenants */
+  get_tenants_api_v1_sysadmin_tenants__get: {
+    parameters: {
+      query?: {
+        domain?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_TenantInDB_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Create Tenant */
+  create_tenant_api_v1_sysadmin_tenants__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantBase"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantInDB"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Tenant */
+  update_tenant_api_v1_sysadmin_tenants__id___post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantUpdatePublic"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantInDB"];
         };
       };
       /** @description Not Found */
@@ -11258,24 +11883,275 @@ export interface operations {
       };
     };
   };
-  /** Delete Role By Id */
-  delete_role_by_id_api_v1_roles__role_id___delete: {
+  /** Delete Tenant By Id */
+  delete_tenant_by_id_api_v1_sysadmin_tenants__id___delete: {
     parameters: {
       path: {
-        role_id: string;
+        id: string;
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["RolePublic"];
+          "application/json": components["schemas"]["TenantInDB"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Predefined Roles */
+  get_predefined_roles_api_v1_sysadmin_predefined_roles__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /** Crawl All Weekly Websites */
+  crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /** Get Embedding Models */
+  get_embedding_models_api_v1_sysadmin_embedding_models__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_EmbeddingModelLegacy_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /** Get Completion Models */
+  get_completion_models_api_v1_sysadmin_completion_models__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_CompletionModelPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /** Enable Completion Model */
+  enable_completion_model_api_v1_sysadmin_tenants__id__completion_models__completion_model_id___post: {
+    parameters: {
+      path: {
+        id: string;
+        completion_model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompletionModelUpdateFlags"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Enable Embedding Model */
+  enable_embedding_model_api_v1_sysadmin_tenants__id__embedding_models__embedding_model_id___post: {
+    parameters: {
+      path: {
+        id: string;
+        embedding_model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmbeddingModelUpdateFlags"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublicLegacy"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Origins */
+  get_origins_api_v1_sysadmin_allowed_origins__get: {
+    parameters: {
+      query?: {
+        tenant_id?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_AllowedOriginInDB_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Add Origin */
+  add_origin_api_v1_sysadmin_allowed_origins__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AllowedOriginCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AllowedOriginInDB"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete Origin */
+  delete_origin_api_v1_sysadmin_allowed_origins__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Modules */
+  get_modules_api_v1_modules__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
+        };
+      };
+    };
+  };
+  /** Add Module */
+  add_module_api_v1_modules__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModuleBase"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModuleInDB"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Add Module To Tenant
+   * @description Value is a list of module `id`'s to add to the `tenant_id`.
+   */
+  add_module_to_tenant_api_v1_modules__tenant_id___post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelId"][];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantInDB"];
         };
       };
       /** @description Validation Error */

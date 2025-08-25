@@ -117,17 +117,15 @@ class WebsiteCRUDService:
 
         return website
 
-    async def delete_website(self, id: UUID) -> bool:
-        space = await self.space_service.get_space_by_website(id)
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
+    async def delete_website(self, id: UUID) -> None:
+        owner_space = await self.space_service.get_space_by_website(id)
+        owner_actor = self.actor_manager.get_space_actor_from_space(space=owner_space)
 
-        if not actor.can_delete_websites():
+        if not owner_actor.can_delete_websites():
             raise UnauthorizedException()
 
-        website = space.get_website(website_id=id)
-        space.remove_website(website)
-
-        await self.space_repo.update(space=space)
+        await self.space_repo.hard_delete_website(website_id=id, owner_space_id=owner_space.id)
+        
 
     async def crawl_website(self, id: UUID) -> bool:
         space = await self.space_service.get_space_by_website(id)

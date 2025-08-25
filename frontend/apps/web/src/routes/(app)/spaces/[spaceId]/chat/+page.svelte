@@ -69,7 +69,7 @@
 <Page.Root tabController={currentTab}>
   <Page.Header>
     {#if chat.partner.type === "default-assistant"}
-      <Page.Title truncate={true} title="Personal assistant"></Page.Title>
+      <Page.Title truncate={true} title="Personal assistants"></Page.Title>
     {:else}
       <Page.Title truncate={true} parent={{ href: `/spaces/${$currentSpace.routeId}/assistants` }}>
         <AssistantSwitcher></AssistantSwitcher>

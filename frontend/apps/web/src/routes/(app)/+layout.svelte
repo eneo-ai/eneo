@@ -41,6 +41,11 @@
 
   $: contentLink = $page.url.pathname + "#content";
   $: currentRoute = $page.url.pathname;
+
+  $: isPersonal = currentRoute.startsWith("/spaces/personal");
+  $: isOrganization = currentRoute.startsWith("/spaces/organization");
+  $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
+
 </script>
 
 <a
@@ -90,17 +95,11 @@
       </Button>
     </div>
     <nav class="flex h-[3.25rem] w-full overflow-x-auto">
-      <a
-        href="/spaces/personal/chat"
-        data-current={currentRoute.startsWith("/spaces/personal") ? "page" : undefined}>Personal</a
-      >
-      <a
-        href="/spaces/list"
-        data-current={currentRoute.startsWith("/spaces") &&
-        !currentRoute.startsWith("/spaces/personal")
-          ? "page"
-          : undefined}>Spaces</a
-      >
+      <a href="/spaces/personal/chat" data-current={isPersonal ? "page" : undefined}>Personal</a>
+      <a href="/spaces/list" data-current={isSpacesGeneric ? "page" : undefined}>Spaces</a>
+      {#if user.hasPermission("admin")}
+        <a href="/spaces/organization/knowledge" data-current={isOrganization ? "page" : undefined}>Organization</a>
+      {/if}
 
       <div aria-hidden="true" class="flex-grow"></div>
 

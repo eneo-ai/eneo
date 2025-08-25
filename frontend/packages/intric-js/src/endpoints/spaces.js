@@ -90,6 +90,18 @@ export function initSpaces(client) {
     },
 
     /**
+     * Get the user's organization space
+     * @returns {Promise<Space>} Full info about the organization space
+     * @throws {IntricError}
+     * */
+    getOrganizationSpace: async () => {
+      const res = await client.fetch("/api/v1/spaces/type/organization/", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
      * Update an existing space.
      * @param {Object} params
      * @param {{id: string}} params.space The space you want to update

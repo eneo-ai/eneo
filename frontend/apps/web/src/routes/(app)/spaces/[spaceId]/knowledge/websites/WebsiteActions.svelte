@@ -18,10 +18,12 @@
     state: { currentSpace, accessibleSpaces }
   } = getSpacesManager();
 
+  $: isOrgSpace = $currentSpace.organization === true;
+  
   async function deleteWebsite() {
     isProcessing = true;
     try {
-      await intric.websites.delete(website);
+      await intric.websites.delete({ id: website.id });
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
@@ -82,15 +84,17 @@
       Edit</Button
     >
     {#if website.permissions?.includes("delete")}
-      <Button
-        is={item}
-        on:click={() => {
-          $showMoveDialog = true;
-        }}
-        padding="icon-leading"
-      >
-        <IconMove size="sm" />Move</Button
-      >
+      {#if !isOrgSpace}
+        <Button
+          is={item}
+          on:click={() => {
+            $showMoveDialog = true;
+          }}
+          padding="icon-leading"
+        >
+          <IconMove size="sm" />Move</Button
+        >
+      {/if}
       <Button
         is={item}
         variant="destructive"

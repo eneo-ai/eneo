@@ -12,7 +12,18 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const collections = derived(currentSpace, ($currentSpace) => $currentSpace.knowledge.groups);
+  const ownedCollections = derived(currentSpace, ($currentSpace) =>
+    $currentSpace.knowledge.groups.filter(c => c.space_id === $currentSpace.id)
+  );
+
+  //Kan användas för att visa länkade knowledge(collections) men då måste det vara readOnly för att inte ändra org baserad knowledge.
+  const linkedCollections = derived(currentSpace, ($currentSpace) =>
+    $currentSpace.knowledge.groups.filter(c => c.space_id !== $currentSpace.id)
+  );
+
+
+  const collections = ownedCollections; 
+  
   const embeddingModels = derived(currentSpace, ($currentSpace) => {
     const modelsInSpace = $currentSpace.embedding_models.map((model) => model.id);
     const modelsInCollections = $currentSpace.knowledge.groups.map((collection) => {

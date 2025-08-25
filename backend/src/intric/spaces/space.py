@@ -46,6 +46,7 @@ class Space:
         self,
         id: UUID | None,
         tenant_id: UUID | None,
+        tenant_space_id: UUID | None,
         user_id: UUID | None,
         name: str,
         description: str | None,
@@ -67,6 +68,7 @@ class Space:
     ):
         self.id = id
         self.tenant_id = tenant_id
+        self.tenant_space_id = tenant_space_id
         self.user_id = user_id
         self.name = name
         self.description = description
@@ -92,11 +94,16 @@ class Space:
     def is_personal(self):
         return self.user_id is not None
 
+    def is_organization(self):
+        return (self.user_id is None) and (self.tenant_space_id is None)
+    
     def is_embedding_model_in_space(self, embedding_model_id: UUID | None) -> bool:
         return embedding_model_id in [model.id for model in self.embedding_models]
 
     def is_completion_model_in_space(self, completion_model_id: UUID | None) -> bool:
-        return completion_model_id in [model.id for model in self.completion_models]
+        if completion_model_id is None:
+            return False
+        return any(m.id == completion_model_id for m in self.completion_models)
 
     def is_transcription_model_in_space(self, transcription_model_id: UUID | None) -> bool:
         return transcription_model_id in [model.id for model in self.transcription_models]
@@ -358,12 +365,14 @@ class Space:
         if not self.is_embedding_model_in_space(website.embedding_model.id):
             raise BadRequestException("Embedding model is not in the space")
 
+        if any(w.id == website.id for w in self.websites):
+            return
+
         self.websites.append(website)
 
     def remove_website(self, website: "Website"):
         for assistant in self.assistants:
-            if website in assistant.websites:
-                assistant.websites.remove(website)
+            assistant.websites = [w for w in assistant.websites if w.id != website.id]
 
         self.websites.remove(website)
 
@@ -377,8 +386,12 @@ class Space:
         if assistant.id in [a.id for a in self.assistants]:
             raise BadRequestException("Assistant is already in the space")
 
-        if not self.is_completion_model_in_space(assistant.completion_model.id):
-            raise BadRequestException("Completion model is not in the space")
+        cm = getattr(assistant, "completion_model", None)
+        if cm is None or getattr(cm, "id", None) is None:
+            raise BadRequestException("Assistant has no completion model assigned")
+
+        if not self.is_completion_model_in_space(cm.id):
+            self.add_completion_model(cm)
 
         self.assistants.append(assistant)
 
@@ -389,21 +402,24 @@ class Space:
 
         self.assistants.remove(assistant)
 
-    def add_collection(self, collection: "Collection"):
-        if collection.id in [_collection.id for _collection in self.collections]:
-            raise BadRequestException("Collection is already in the space")
 
+    def add_collection_owner_move(self, collection: "Collection"):
+        """Byter ägare på en collection till detta space (uppdaterar FK i DB). 
+        Använd INTE för import/delning."""
+
+        if collection.id in [_c.id for _c in self.collections]:
+            raise BadRequestException("Collection is already owned by the space")
         if not self.is_embedding_model_in_space(collection.embedding_model.id):
             raise BadRequestException("Embedding model is not in the space")
-
         self.collections.append(collection)
-
+        
     def remove_collection(self, collection: "Collection"):
         for assistant in self.assistants:
-            if collection in assistant.collections:
-                assistant.collections.remove(collection)
+            assistant.collections = [
+                c for c in assistant.collections if c.id != collection.id
+            ]
 
-        self.collections.remove(collection)
+        self.collections = [c for c in self.collections if c.id != collection.id]
 
     def can_use_knowledge(
         self, knowledge: list[Union["Website", "Collection", "IntegrationKnowledge"]]
@@ -508,3 +524,15 @@ class Space:
             return
         if self.security_classification.is_greater_than(model.security_classification):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+
+    def add_completion_model(self, model: "CompletionModel"):
+        if model is None or getattr(model, "id", None) is None:
+            raise BadRequestException("Invalid completion model")
+
+        if hasattr(model, "can_access") and not model.can_access:
+            raise BadRequestException("Completion model is not accessible")
+
+        if any(m.id == model.id for m in self.completion_models):
+            return
+
+        self.completion_models.append(model)

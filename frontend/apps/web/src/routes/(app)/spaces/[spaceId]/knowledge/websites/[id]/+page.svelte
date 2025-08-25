@@ -46,12 +46,14 @@
       <Page.TabTrigger tab="crawls">Crawls</Page.TabTrigger>
       <Page.TabTrigger tab="blobs">Indexed content</Page.TabTrigger>
     </Page.Tabbar>
-    <CrawlCreateRun
-      website={data.website}
-      isDisabled={data.crawlRuns.some(
-        (run) => run.status === "in progress" || run.status === "queued"
-      )}
-    ></CrawlCreateRun>
+    {#if !data.readonly}
+      <CrawlCreateRun
+        website={data.website}
+        isDisabled={data.crawlRuns.some(
+          (run) => run.status === "in progress" || run.status === "queued"
+        )}
+      ></CrawlCreateRun>
+    {/if}
   </Page.Header>
   <Page.Main>
     <Page.Tab id="crawls">

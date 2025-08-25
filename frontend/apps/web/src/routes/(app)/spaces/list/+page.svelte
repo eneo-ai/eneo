@@ -11,7 +11,7 @@
   import SpacesTable from "./SpacesTable.svelte";
 
   const {
-    state: { accessibleSpaces }
+    state: { nonOrgSpaces }
   } = getSpacesManager();
 </script>
 
@@ -22,6 +22,6 @@
   </Page.Header>
 
   <Page.Main>
-    <SpacesTable spaces={accessibleSpaces}></SpacesTable>
+    <SpacesTable spaces={nonOrgSpaces}></SpacesTable>
   </Page.Main>
 </Page.Root>

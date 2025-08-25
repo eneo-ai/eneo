@@ -1,4 +1,5 @@
 from uuid import UUID
+from typing import Optional
 
 import sqlalchemy as sa
 from sqlalchemy.orm import defer, selectinload
@@ -68,6 +69,10 @@ class InfoBlobRepository:
             )
             embedding_model_id = integration_knowledge.embedding_model_id
 
+        else:
+            # Skydd mot none
+            raise ValueError("InfoBlob must reference a group, website, or integration_knowledge")
+        
         info_blob_to_db = InfoBlobAddToDB(
             **info_blob.model_dump(),
             embedding_model_id=embedding_model_id,
@@ -203,3 +208,106 @@ class InfoBlobRepository:
         stmt = sa.select(InfoBlobs.title).where(InfoBlobs.website_id == website_id)
         result = await self.session.scalars(stmt)
         return list(result)
+
+    def _apply_space_scope(
+        self,
+        stmt: sa.Select,
+        *,
+        space_ids: list[UUID],
+        include_groups: bool = True,
+        include_websites: bool = True,
+        include_integrations: bool = True,
+    ) -> sa.Select:
+        """
+        Begränsa InfoBlobs via källornas space_id. Joina bara det som behövs.
+        """
+        predicates = []
+
+        if include_groups:
+            # LEFT JOIN så att vi kan OR:a flera källtyper samtidigt
+            stmt = stmt.join(
+                CollectionsTable,
+                CollectionsTable.id == InfoBlobs.group_id,
+                isouter=True,
+            )
+            predicates.append(CollectionsTable.space_id.in_(space_ids))
+
+        if include_websites:
+            stmt = stmt.join(
+                Websites,
+                Websites.id == InfoBlobs.website_id,
+                isouter=True,
+            )
+            predicates.append(Websites.space_id.in_(space_ids))
+
+        if include_integrations:
+            stmt = stmt.join(
+                IntegrationKnowledge,
+                IntegrationKnowledge.id == InfoBlobs.integration_knowledge_id,
+                isouter=True,
+            )
+            predicates.append(IntegrationKnowledge.space_id.in_(space_ids))
+
+        if predicates:
+            stmt = stmt.where(sa.or_(*predicates))
+
+        return stmt
+    
+    async def list_by_space_ids(
+        self,
+        space_ids: list[UUID],
+        *,
+        include_groups: bool = True,
+        include_websites: bool = True,
+        include_integrations: bool = True,
+        limit: Optional[int] = None,
+        order_desc: bool = True,
+        load_text: bool = False,
+    ) -> list[InfoBlobInDB]:
+        """
+        Returnerar InfoBlobs vars källa (group/website/integration) ligger i något av space_ids.
+        """
+        stmt = sa.select(InfoBlobs)
+        if order_desc:
+            stmt = stmt.order_by(InfoBlobs.created_at.desc())
+        else:
+            stmt = stmt.order_by(InfoBlobs.created_at.asc())
+
+        stmt = self._apply_space_scope(
+            stmt,
+            space_ids=space_ids,
+            include_groups=include_groups,
+            include_websites=include_websites,
+            include_integrations=include_integrations,
+        )
+
+        stmt = stmt.options(selectinload(InfoBlobs.group))
+        stmt = stmt.options(selectinload(InfoBlobs.embedding_model))
+        stmt = stmt.options(selectinload(InfoBlobs.website))
+        if not load_text:
+            stmt = stmt.options(defer(InfoBlobs.text))
+        if limit:
+            stmt = stmt.limit(limit)
+
+        return await self.delegate.get_models_from_query(stmt)
+
+    async def count_by_space_ids(
+        self,
+        space_ids: list[UUID],
+        *,
+        include_groups: bool = True,
+        include_websites: bool = True,
+        include_integrations: bool = True,
+    ) -> int:
+        """
+        Antal blobs tillgängliga inom de angivna spaces (egen + org).
+        """
+        stmt = sa.select(sa.func.count()).select_from(InfoBlobs)
+        stmt = self._apply_space_scope(
+            stmt,
+            space_ids=space_ids,
+            include_groups=include_groups,
+            include_websites=include_websites,
+            include_integrations=include_integrations,
+        )
+        return int(await self.session.scalar(stmt) or 0)

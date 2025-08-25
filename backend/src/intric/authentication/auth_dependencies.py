@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import Depends, Security
+from fastapi import Depends, Security, HTTPException, status
 
 from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_service import AuthService
@@ -9,6 +9,8 @@ from intric.main.logging import get_logger
 from intric.server.dependencies.auth_definitions import API_KEY_HEADER, OAUTH2_SCHEME
 from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
+from intric.roles.permissions import Permission, validate_permission
+from intric.main.exceptions import UnauthorizedException
 
 logger = get_logger(__name__)
 
@@ -60,3 +62,11 @@ def get_api_key(hashed: bool = True):
         return await auth_service.get_api_key(api_key, hash_key=hashed)
 
     return _get_api_key
+
+def require_permission(permission: Permission):
+    async def _dep(user: UserInDB = Depends(get_current_active_user)):
+        try:
+            validate_permission(user, permission) 
+        except UnauthorizedException as e:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    return _dep

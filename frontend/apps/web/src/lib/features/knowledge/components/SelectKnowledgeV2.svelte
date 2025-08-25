@@ -60,9 +60,19 @@
   });
 
   const {
-    state: { currentSpace }
+    state: { currentSpace, nonOrgSpaces, organizationSpaceId }
   } = getSpacesManager();
 
+  function ownerSpaceId(item: any): string | undefined {
+    return (
+      item?.space_id ??
+      item?.spaceId ??
+      item?.space?.id ??
+      item?.metadata?.space_id ??
+      item?.metadata?.spaceId
+    );
+  }
+  
   function addItem(
     item:
       | { website: WebsiteSparse }
@@ -70,13 +80,19 @@
       | { integrationKnowledge: IntegrationKnowledge }
   ) {
     if ("collection" in item && selectedCollections) {
-      selectedCollections = [...selectedCollections, item.collection];
+      if (!selectedCollections.some(c => c.id === item.collection.id)) {
+        selectedCollections = [...selectedCollections, item.collection];
+      }
     }
     if ("website" in item && selectedWebsites) {
-      selectedWebsites = [...selectedWebsites, item.website];
+      if (!selectedWebsites.some(w => w.id === item.website.id)) {
+        selectedWebsites = [...selectedWebsites, item.website];
+      }
     }
     if ("integrationKnowledge" in item && selectedIntegrationKnowledge) {
-      selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, item.integrationKnowledge];
+      if (!selectedIntegrationKnowledge.some(k => k.id === item.integrationKnowledge.id)) {
+        selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, item.integrationKnowledge];
+      }
     }
   }
 
@@ -91,14 +107,68 @@
     $inputValue
   );
 
-  $: sections = Object.values(availableKnowledge.sections);
+  $: sectionEntries = Object.entries(availableKnowledge.sections).map(([modelId, section]) => {
+    const dedupe = <T extends { id: string }>(arr: T[] = []) => {
+      const seen = new Set<string>();
+      return arr.filter(x => (seen.has(x.id) ? false : (seen.add(x.id), true)));
+    };
+    return [
+      modelId,
+      {
+        ...section,
+        groups: dedupe(section.groups),
+        websites: dedupe(section.websites),
+        integrationKnowledge: dedupe(section.integrationKnowledge)
+      }
+    ] as const;
+  });
 
   $: enabledModels = $currentSpace.embedding_models.map((model) => model.id);
+
+  $: partitionedSections = sectionEntries.flatMap(([modelId, section]) => {
+  const split = (arr: any[] = []) => {
+    const local: any[] = [];
+    const org: any[] = [];
+    for (const item of arr) {
+      const sid = ownerSpaceId(item);
+      if (sid === $currentSpace?.id) {
+        local.push(item);
+      } else if ($organizationSpaceId && sid === $organizationSpaceId) {
+        org.push(item);
+      }
+    }
+    return { local, org };
+  };
+
+  const g = split(section.groups);
+  const w = split(section.websites);
+  const k = split(section.integrationKnowledge);
+
+  const mk = (origin: "Local" | "Organization", groups: any[], websites: any[], integrationKnowledge: any[]) => ({
+    ...section,
+    origin,
+    groups,
+    websites,
+    integrationKnowledge,
+    availableItemsCount:
+      (groups?.length ?? 0) + (websites?.length ?? 0) + (integrationKnowledge?.length ?? 0)
+  });
+
+  const out: Array<[string, any]> = [];
+  if (g.local.length || w.local.length || k.local.length)
+    out.push([`${modelId}::local`, mk("Local", g.local, w.local, k.local)]);
+  if ($organizationSpaceId && (g.org.length || w.org.length || k.org.length))
+    out.push([`${modelId}::org`, mk("Organization", g.org, w.org, k.org)]);
+
+  return out;
+});
+
 </script>
 
 {#if selectedCollections}
-  {#each selectedCollections as collection (collection.id)}
+  {#each selectedCollections as collection (`group:${collection.id}`)}
     {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
+    {console.log("info_blobs", collection.metadata )}
     <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
       {#if isItemModelEnabled}
         <IconCollections />
@@ -134,7 +204,7 @@
 {/if}
 
 {#if selectedWebsites}
-  {#each selectedWebsites as website (website.id)}
+  {#each selectedWebsites as website (`website:${website.id}`)}
     {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
     <div class="knowledge-item">
       {#if isItemModelEnabled}
@@ -160,7 +230,7 @@
 {/if}
 
 {#if selectedIntegrationKnowledge}
-  {#each selectedIntegrationKnowledge as knowledge (knowledge.id)}
+  {#each selectedIntegrationKnowledge as knowledge (`integration:${knowledge.id}`)}
     {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
     <div class="knowledge-item">
       {#if isItemModelEnabled}
@@ -218,80 +288,80 @@
   </button>
 {/if}
 
-<div
-  class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
+<div class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
   class:inDialog
   {...$menu}
   use:menu
 >
-  {#if sections.length > 0}
-    {#each sections as section (section)}
-      <div {...$group(section.name)} use:group class="flex w-full flex-col">
-        <div
-          class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
-          {...$groupLabel(section.name)}
-          use:groupLabel
+  {#if partitionedSections.length > 0}
+    {#each partitionedSections as [key, section] (key)}
+      <div {...$group(section.name + '-' + section.origin)} use:group class="flex w-full flex-col">
+      <div
+        class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
+        {...$groupLabel(section.name + '-' + section.origin)}
+        use:groupLabel
+      >
+        <span>
+          {#if availableKnowledge.showHeaders}
+            {section.name}
+          {:else}
+            Select a knowledge source
+          {/if}
+        </span>
+
+        <span class="flex-grow"></span>
+
+        <span
+          class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger"
+          class:label-blue={section.origin === 'Local'}
+          class:label-warning={section.origin === 'Organization'}
         >
-          {availableKnowledge.showHeaders ? section.name : "Select a knowledge source"}
-        </div>
+          {section.origin}
+        </span>
+      </div>
+
         {#if !section.isEnabled}
           <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
         {:else if !section.isCompatible}
           <p class="knowledge-message">
-            The sources embedded by this model are not compatible with the currently selected
-            knowledge.
+            The sources embedded by this model are not compatible with the currently selected knowledge.
           </p>
         {:else if section.availableItemsCount === 0}
           <p class="knowledge-message">No more sources available.</p>
         {:else}
-          {#each section.groups as collection (collection.id)}
-            <div
-              class="knowledge-item cursor-pointer"
-              {...$option({ value: { collection } })}
-              use:option
-            >
+          {#each section.groups as collection (`group:${collection.id}`)}
+            <div class="knowledge-item cursor-pointer" {...$option({ value: { collection } })} use:option>
               <div class="flex max-w-full flex-grow items-center gap-3">
                 <IconCollections />
                 <span class="truncate">{collection.name}</span>
               </div>
               <div class="flex-grow"></div>
-
-              {#if collection.metadata.num_info_blobs > 0}
-                <span
-                  class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
-                  >{collection.metadata.num_info_blobs} files</span
-                >
-              {:else}
-                <span
-                  class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
-                  >Empty</span
-                >
-              {/if}
-            </div>
+                {#if collection.metadata.num_info_blobs > 0}
+                  <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                    {collection.metadata.num_info_blobs} files
+                  </span>
+                {:else}
+                  <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                    Empty
+                  </span>
+                {/if}
+              </div>
           {/each}
-          {#each section.websites as website (website.id)}
-            <div
-              class="knowledge-item cursor-pointer"
-              {...$option({ value: { website } })}
-              use:option
-            >
+
+          {#each section.websites as website (`website:${website.id}`)}
+            <div class="knowledge-item cursor-pointer" {...$option({ value: { website } })} use:option>
               <div class="flex max-w-full flex-grow items-center gap-3">
                 <IconWeb />
-                <span class=" truncate">{formatWebsiteName(website)}</span>
+                <span class="truncate">{formatWebsiteName(website)}</span>
               </div>
             </div>
           {/each}
-          {#each section.integrationKnowledge as integrationKnowledge (integrationKnowledge.id)}
-            <div
-              class="knowledge-item cursor-pointer"
-              {...$option({ value: { integrationKnowledge } })}
-              use:option
-            >
-              <div class="flex max-w-full flex-grow items-center gap-3">
-                <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type}
-                ></IntegrationVendorIcon>
 
-                <span class=" truncate">{integrationKnowledge.name}</span>
+          {#each section.integrationKnowledge as integrationKnowledge (`integration:${integrationKnowledge.id}`)}
+            <div class="knowledge-item cursor-pointer" {...$option({ value: { integrationKnowledge } })} use:option>
+              <div class="flex max-w-full flex-grow items-center gap-3">
+                <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type} />
+                <span class="truncate">{integrationKnowledge.name}</span>
               </div>
             </div>
           {/each}
@@ -299,9 +369,7 @@
       </div>
     {/each}
   {:else}
-    <p class="knowledge-message">
-      This spaces does not have any selectable knowledge sources configured.
-    </p>
+    <p class="knowledge-message">This spaces does not have any selectable knowledge sources configured.</p>
   {/if}
 </div>
 

@@ -3,6 +3,7 @@ name = "intric"
 version = "0.1.0"
 description = ""
 authors = ["inooLabs"]
+packages = [{ include = "intric", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -37,7 +38,7 @@ arq = "^0"
 soundfile = "^0.12.1"
 audioread = "^3.0.1"
 pydantic-extra-types = "^2.6.0"
-bcrypt = "^4.1.2"
+bcrypt = ">=4.1.2,<4.2.0"
 passlib = "^1.7.4"
 dependency-injector = "^4.41.0"
 docx2python = "^2.10.1"

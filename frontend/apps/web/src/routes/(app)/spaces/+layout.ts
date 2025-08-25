@@ -7,10 +7,23 @@
 export const load = async (event) => {
   const { intric } = await event.parent();
 
-  const [spaces, currentSpace] = await Promise.all([
+  const orgPromise = intric.spaces
+    .getOrganizationSpace()
+    .catch((e) => {
+      if (e?.status === 403 || e?.response?.status === 403) return null;
+      throw e;
+    });
+
+  const [spaces, currentSpace, organizationSpace] = await Promise.all([
     intric.spaces.list(),
-    intric.spaces.getPersonalSpace()
+    intric.spaces.getPersonalSpace(),
+    orgPromise,
   ]);
 
-  return { spaces, currentSpace, loadedAt: new Date().toUTCString() };
+  return {
+    spaces,
+    currentSpace,
+    organizationSpace, 
+    loadedAt: new Date().toUTCString(),
+  };
 };
