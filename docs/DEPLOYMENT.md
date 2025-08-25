@@ -4,6 +4,22 @@ This guide provides a streamlined, step-by-step process to deploy Eneo in a prod
 
 > **Note**: For local development, please see the [INSTALLATION.md](./INSTALLATION.md) guide.
 
+## 📁 Required Files Location
+
+All deployment files (`docker-compose.yml` and environment templates) are located in the [`docs/deployment/`](https://github.com/eneo-ai/eneo/tree/develop/docs/deployment) folder:
+
+```bash
+# Clone the repository and navigate to deployment folder
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo/docs/deployment/
+
+# You'll find these files:
+# - docker-compose.yml
+# - env_backend.template
+# - env_frontend.template
+# - env_db.template
+```
+
 ## 📋 Prerequisites
 
 Before you begin, ensure you have the following:

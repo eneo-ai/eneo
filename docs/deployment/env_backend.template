@@ -16,24 +16,28 @@ GEMINI_API_KEY=
 AZURE_API_KEY=
 AZURE_ENDPOINT=
 AZURE_API_VERSION=2024-02-15-preview
-AZURE_MODEL_DEPLOYMENT=gpt-4
+AZURE_MODEL_DEPLOYMENT=gpt-4o
 
 ###############
-# REQUIRED: Security Settings - MUST BE CHANGED!
+# REQUIRED: Security Settings - MUST BE CHANGED! 
+# Ensure to have it the same in the frontend
 ###############
 # Generate with: openssl rand -hex 32
 JWT_SECRET=
 URL_SIGNING_KEY=
 
 ###############
-# Database Configuration (Default for Docker Compose)
+# Database Connection settings (Default for Docker Compose)
 ###############
-POSTGRES_HOST=db
+POSTGRES_HOST=db              # Docker service name
 POSTGRES_PORT=5432
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=changeme
+POSTGRES_PASSWORD=changeme    # Must match env_db.env
 POSTGRES_DB=eneo
 
+# Redis connection settings
+REDIS_HOST=redis              # Docker service name
+REDIS_PORT=6379
 ###############
 # Redis Configuration (Default for Docker Compose)
 ###############
@@ -54,6 +58,7 @@ JWT_ALGORITHM=HS256
 ###############
 USING_ACCESS_MANAGEMENT=True
 USING_CRAWL=True
+#Set this to True if you intend to use azure models.
 USING_AZURE_MODELS=False
 
 ###############
@@ -61,6 +66,8 @@ USING_AZURE_MODELS=False
 ###############
 UPLOAD_MAX_FILE_SIZE=10485760          # 10MB
 TRANSCRIPTION_MAX_FILE_SIZE=10485760   # 10MB
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=
+UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=
 MAX_IN_QUESTION=1
 
 ###############
@@ -99,3 +106,96 @@ NODE_ENV=production
 
 # Worker Configuration
 # NUM_WORKERS=3
+API_KEY_HEADER_NAME=
+
+API_KEY_LENGTH=
+
+# [OPTIONAL] Enable automatic request throttling (default: True)
+AUTOTHROTTLE_ENABLED=
+
+# [OPTIONAL] Maximum items to crawl before stopping (default: 20000)
+CLOSESPIDER_ITEMCOUNT=
+
+# [OPTIONAL] Confluence client ID for integration
+CONFLUENCE_CLIENT_ID=
+
+# [OPTIONAL] Confluence client secret for integration
+CONFLUENCE_CLIENT_SECRET=
+
+# Web crawling settings
+# [OPTIONAL] Maximum crawl duration in seconds (default: 14400 = 4 hours)
+CRAWL_MAX_LENGTH=
+
+# [OPTIONAL] Enable development mode (default: False)
+DEV=
+
+# [OPTIONAL] Flux API key for image generation
+FLUX_API_KEY=
+
+# [OPTIONAL] Self-hosted embedding service URL
+INFINITY_URL=
+
+# Marketplace and internal services
+# [OPTIONAL] Internal marketplace API key
+INTRIC_MARKETPLACE_API_KEY=
+
+# [OPTIONAL] Internal marketplace URL
+INTRIC_MARKETPLACE_URL=
+
+# [OPTIONAL] Internal super API key
+INTRIC_SUPER_API_KEY=
+
+# [OPTIONAL] Internal super duper API key
+INTRIC_SUPER_DUPER_API_KEY=
+
+JWT_TOKEN_PREFIX=
+
+# [OPTIONAL] Mistral AI API key
+MISTRAL_API_KEY=
+
+# [CONDITIONAL] Required if using MobilityGuard authentication
+MOBILITYGUARD_CLIENT_ID=
+
+# [CONDITIONAL] Required if using MobilityGuard authentication
+MOBILITYGUARD_CLIENT_SECRET=
+
+# Authentication dependencies
+# [CONDITIONAL] Required if using MobilityGuard authentication
+MOBILITYGUARD_DISCOVERY_ENDPOINT=
+
+# [OPTIONAL] MobilityGuard tenant ID
+MOBILITYGUARD_TENANT_ID=
+
+# Integrations and callbacks
+# [OPTIONAL] OAuth callback URL for integrations
+OAUTH_CALLBACK_URL=
+
+# [OPTIONAL] Respect robots.txt files (default: True)
+OBEY_ROBOTS=
+
+# [OPTIONAL] OVHCloud API key
+OVHCLOUD_API_KEY=
+
+# [OPTIONAL] SharePoint client ID for integration
+SHAREPOINT_CLIENT_ID=
+
+# [OPTIONAL] SharePoint client secret for integration
+SHAREPOINT_CLIENT_SECRET=
+
+# [OPTIONAL] Tavily API key for web search
+TAVILY_API_KEY=
+
+# [OPTIONAL] Enable testing mode (default: False)
+TESTING=
+
+# [OPTIONAL] Enable Identity and Access Management (default: False)
+USING_IAM=
+
+# [OPTIONAL] Enable image generation features (default: False)
+USING_IMAGE_GENERATION=
+
+# [OPTIONAL] vLLM API key
+VLLM_API_KEY=
+
+# [OPTIONAL] vLLM model service URL
+VLLM_MODEL_URL=
