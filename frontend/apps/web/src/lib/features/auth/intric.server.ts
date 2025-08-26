@@ -29,6 +29,7 @@ export async function loginWithIntric(username: string, password: string): Promi
   });
 
   if (!response.ok) {
+    console.error("Unable to call backend service. Error: %s", response.statusText);
     return false;
   }
 
