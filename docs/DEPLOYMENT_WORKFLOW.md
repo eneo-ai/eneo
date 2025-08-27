@@ -19,7 +19,7 @@ We use a Git Flow-inspired workflow with automatic image builds and tag-based de
 ```mermaid
 graph LR
     A[Feature Branch] -->|PR| B[develop]
-    B -->|Push| C[Build :dev image]
+    B -->|Push| C[Build :develop image]
     C -->|Image Update| D[Deploy to Dev]
     B -->|PR| E[main]
     E -->|Push| F[Build :main image]
@@ -34,7 +34,7 @@ We maintain three environments:
 
 | Environment | Purpose | Branch/Tag | Image Tag | Deployment Method |
 |------------|---------|------------|-----------|-------------------|
-| **Development** | Latest features, may be unstable | `develop` | `:dev` | Auto (on image update) |
+| **Development** | Latest features, may be unstable | `develop` | `:develop` | Auto (on image update) |
 | **Testing** | Pre-production testing | `main` | `:main` | Auto (on image update) |
 | **Production** | Live system | `v*` tags | `:v1.0.0` | Manual trigger |
 
@@ -76,17 +76,19 @@ gitGraph
     commit id: "initial"
     branch develop
     checkout develop
-    commit id: "dev setup"
     branch feature/new-feature
     checkout feature/new-feature
     commit id: "add feature"
     commit id: "fix tests"
     checkout develop
     merge feature/new-feature
+    branch feature/another-feature
+    checkout feature/another-feature
     commit id: "other work"
+    checkout develop
+    merge feature/another-feature
     checkout main
     merge develop
-    commit id: "ready for testing"
     commit id: "v1.0.0" tag: "v1.0.0"
 ```
 
@@ -120,9 +122,8 @@ git push origin feature/your-feature-name
 #### 3. After PR Approval
 
 Once merged to develop:
-- ✅ GitHub Actions automatically builds Docker images tagged `:dev`
-- ✅ Images are automatically deployed to dev environment
-- ✅ Team can test at dev.example.com
+- ✅ GitHub Actions automatically builds Docker images tagged `:develop`
+- ✅ Images are automatically deployed to internal dev environment
 
 #### 4. Promote to Testing
 
@@ -138,8 +139,8 @@ git push origin main
 
 After merge to main:
 - ✅ GitHub Actions automatically builds Docker images tagged `:main`
-- ✅ Images are automatically deployed to testing environment
-- ✅ QA team can test at testing.example.com
+- ✅ Images are automatically deployed to internal testing environment
+- ✅ QA team can test
 
 ## Release Process
 
@@ -288,21 +289,21 @@ git push origin v1.0.1
 
 | Source | Docker Tags | Purpose |
 |--------|------------|---------|
-| `develop` branch | `:dev`, `:develop-{sha}` | Development testing |
+| `develop` branch | `:develop`, `:develop-{sha}` | Development testing |
 | `main` branch | `:main`, `:main-{sha}` | Pre-production testing |
-| `v*` tags | `:v1.0.0`, `:1.0`, `:latest` | Production releases |
+| `v*` tags | `:v1.0.0`, `:latest` | Production releases |
 
 ### Image Locations
 
 ```bash
 # Backend Images
-ghcr.io/eneo-ai/eneo-backend:dev      # Latest from develop
+ghcr.io/eneo-ai/eneo-backend:develop  # Latest from develop
 ghcr.io/eneo-ai/eneo-backend:main     # Latest from main
 ghcr.io/eneo-ai/eneo-backend:v1.0.0   # Specific release
 ghcr.io/eneo-ai/eneo-backend:latest   # Latest release
 
 # Frontend Images
-ghcr.io/eneo-ai/eneo-frontend:dev     # Latest from develop
+ghcr.io/eneo-ai/eneo-frontend:develop # Latest from develop
 ghcr.io/eneo-ai/eneo-frontend:main    # Latest from main
 ghcr.io/eneo-ai/eneo-frontend:v1.0.0  # Specific release
 ghcr.io/eneo-ai/eneo-frontend:latest  # Latest release
@@ -373,6 +374,3 @@ docker images | grep eneo
 ```
 
 ---
-
-*Last updated: [Date]*
-*Questions? Contact the platform team*

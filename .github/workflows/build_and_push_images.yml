@@ -4,12 +4,12 @@ name: Build and Push Docker Images
 # Deployment is handled by external systems that watch for image updates.
 #
 # Workflow Summary:
-# - develop branch → :dev image tag → external system deploys to dev
+# - develop branch → :develop image tag → external system deploys to dev
 # - main branch → :main image tag → external system deploys to testing
 # - v* tags → version image tags → external system handles production deployment
 #
 # Image Tags Created:
-# - Push to develop: ghcr.io/org/repo:dev, ghcr.io/org/repo:develop-abc1234
+# - Push to develop: ghcr.io/org/repo:develop, ghcr.io/org/repo:develop-abc1234
 # - Push to main: ghcr.io/org/repo:main, ghcr.io/org/repo:main-def5678
 # - Tag v1.0.0: ghcr.io/org/repo:v1.0.0, ghcr.io/org/repo:1.0, ghcr.io/org/repo:latest
 
@@ -74,12 +74,12 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
           tags: |
             # Branch-based tags
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
+
             type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
             # Git SHA for traceability (always included)
@@ -105,12 +105,12 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
           tags: |
             # Branch-based tags
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
+
             type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
             # Git SHA for traceability (always included)
@@ -157,8 +157,8 @@ jobs:
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "### Development Environment Build" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:dev\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:dev\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           fi
