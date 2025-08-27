@@ -73,7 +73,10 @@ We maintain three environments:
 
 ```mermaid
 gitGraph
-    commit id: "develop"
+    commit id: "initial"
+    branch develop
+    checkout develop
+    commit id: "dev setup"
     branch feature/new-feature
     checkout feature/new-feature
     commit id: "add feature"
