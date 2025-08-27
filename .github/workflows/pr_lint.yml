@@ -51,11 +51,11 @@ jobs:
             exit 0
           fi
 
-          VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor)/"
+          VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor|ci)/"
 
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "❌ Branch name '$BRANCH_NAME' does not follow naming convention."
-            echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, or refactor/"
+            echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, refactor/, or ci/"
             exit 1
           fi
 
