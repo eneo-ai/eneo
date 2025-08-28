@@ -83,7 +83,8 @@ jobs:
             type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
             # Git SHA for traceability (always included)
-            type=sha,prefix={{branch}}-,format=short
+            type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
+            type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push backend Docker image
         uses: docker/build-push-action@v5
@@ -113,7 +114,8 @@ jobs:
             type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
             # Git SHA for traceability (always included)
-            type=sha,prefix={{branch}}-,format=short
+            type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
+            type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push frontend Docker image
         uses: docker/build-push-action@v5
