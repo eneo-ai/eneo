@@ -1823,6 +1823,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1873,6 +1875,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1950,6 +1954,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -2013,6 +2019,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -7549,6 +7557,8 @@ export interface operations {
                 reasoning: boolean;
                 /** Base Url */
                 base_url?: string | null;
+                /** Litellm Model Name */
+                litellm_model_name?: string | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -7844,6 +7854,8 @@ export interface operations {
                 reasoning: boolean;
                 /** Base Url */
                 base_url?: string | null;
+                /** Litellm Model Name */
+                litellm_model_name?: string | null;
                 /**
                  * Is Org Enabled
                  * @default false

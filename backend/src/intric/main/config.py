@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     intric_super_api_key: Optional[str] = None
     intric_super_duper_api_key: Optional[str] = None
 
+    # LiteLLM Proxy
+    litellm_proxy_url: str = "http://litellm:4000/v1"
+    litellm_master_key: str = "litellm-master-key"
+
     # Infrastructure dependencies
     postgres_user: str
     postgres_host: str

@@ -38,6 +38,14 @@
       });
     }
 
+    if ("litellm_model_name" in model && model.litellm_model_name) {
+      labels.push({
+        tooltip: "This model uses LiteLLM proxy",
+        label: "LiteLLM",
+        color: "blue"
+      });
+    }
+
     if (model.hosting !== null) {
       labels.push({
         tooltip: "Region this model is hosted in",

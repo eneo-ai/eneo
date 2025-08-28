@@ -1,5 +1,5 @@
 completion_models:
-  
+
   - name: 'gpt-4-turbo'
     nickname: 'GPT-4'
     family: 'openai'
@@ -137,7 +137,7 @@ completion_models:
     org: Anthropic
     vision: true
     reasoning: false
-  
+
   - name: 'claude-3-haiku-20240307'
     nickname: 'Claude 3 Haiku'
     family: 'claude'
@@ -173,6 +173,7 @@ completion_models:
     org: Anthropic
     vision: true
     reasoning: false
+    litellm_model_name: 'anthropic/claude-3-7-latest'
 
   - name: 'gpt-4-azure'
     nickname: 'GPT-4 (Azure)'
@@ -241,7 +242,7 @@ completion_models:
     open_source: true
     nr_billion_parameters: 70
     hf_link: 'https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct'
-  
+
   - name: 'mistral-large-latest'
     nickname: 'Mistral Large'
     family: 'mistral'
@@ -272,7 +273,7 @@ completion_models:
 
 
 embedding_models:
-  
+
   - name: 'text-embedding-3-small'
     family: 'openai'
     open_source: false

@@ -59,6 +59,14 @@ class CompletionService:
         self.context_builder = context_builder
 
     def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+        # Route models with litellm_model_name to LiteLLM proxy
+        if hasattr(model, 'litellm_model_name') and model.litellm_model_name:
+            from intric.completion_models.infrastructure.adapters.litellm_model_adapter import (
+                LiteLLMAdapter,
+            )
+            return LiteLLMAdapter(model)
+        
+        # Otherwise use existing adapter based on family
         adapter_class = self._adapters.get(model.family.value)
         if not adapter_class:
             raise ValueError(f"No adapter found for modelfamily {model.family.value}")
