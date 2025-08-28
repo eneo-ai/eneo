@@ -35,6 +35,123 @@ class UserTokenUsageAnalyzer:
     def __init__(self, session: "AsyncSession"):
         self.session = session
 
+    def _build_questions_query(self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", user_id: "UUID" = None):
+        """
+        Build the questions query for token usage calculation.
+
+        Args:
+            tenant_id: The tenant ID to filter by
+            start_date: The start date for the analysis period
+            end_date: The end date for the analysis period
+            user_id: Optional user ID to filter by (for single user queries)
+
+        Returns:
+            A SQLAlchemy select query for questions token usage
+        """
+        query = (
+            select(
+                Users.id.label("user_id"),
+                Users.username.label("username"),
+                Users.email.label("email"),
+                func.sum(Questions.num_tokens_question).label("input_tokens"),
+                func.sum(Questions.num_tokens_answer).label("output_tokens"),
+                func.count(Questions.id).label("request_count"),
+            )
+            .join(Sessions, Users.id == Sessions.user_id)
+            .join(Questions,
+                (Questions.session_id == Sessions.id) &
+                (Questions.tenant_id == tenant_id) &
+                (Questions.created_at >= start_date) &
+                (Questions.created_at <= end_date)
+            )
+            .where(Users.tenant_id == tenant_id)
+        )
+
+        if user_id:
+            query = query.where(Users.id == user_id)
+
+        return query.group_by(Users.id, Users.username, Users.email)
+
+    def _build_app_runs_query(self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", user_id: "UUID" = None):
+        """
+        Build the app runs query for token usage calculation.
+
+        Args:
+            tenant_id: The tenant ID to filter by
+            start_date: The start date for the analysis period
+            end_date: The end date for the analysis period
+            user_id: Optional user ID to filter by (for single user queries)
+
+        Returns:
+            A SQLAlchemy select query for app runs token usage
+        """
+        query = (
+            select(
+                Users.id.label("user_id"),
+                Users.username.label("username"),
+                Users.email.label("email"),
+                func.sum(AppRuns.num_tokens_input).label("input_tokens"),
+                func.sum(AppRuns.num_tokens_output).label("output_tokens"),
+                func.count(AppRuns.id).label("request_count"),
+            )
+            .join(AppRuns,
+                (AppRuns.user_id == Users.id) &
+                (AppRuns.tenant_id == tenant_id) &
+                (AppRuns.created_at >= start_date) &
+                (AppRuns.created_at <= end_date)
+            )
+            .where(Users.tenant_id == tenant_id)
+        )
+
+        if user_id:
+            query = query.where(Users.id == user_id)
+
+        return query.group_by(Users.id, Users.username, Users.email)
+
+    def _build_combined_usage_query(self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", user_id: "UUID" = None):
+        """
+        Build the combined usage query that merges questions and app runs data.
+
+        Args:
+            tenant_id: The tenant ID to filter by
+            start_date: The start date for the analysis period
+            end_date: The end date for the analysis period
+            user_id: Optional user ID to filter by (for single user queries)
+
+        Returns:
+            A SQLAlchemy select query for combined token usage
+        """
+        questions_query = self._build_questions_query(tenant_id, start_date, end_date, user_id)
+        app_runs_query = self._build_app_runs_query(tenant_id, start_date, end_date, user_id)
+
+        # Combine the results from both queries using union_all
+        combined_usage_query = union_all(questions_query, app_runs_query).alias("combined_usage")
+
+        # Sum up the input/output tokens and request counts
+        base_query = select(
+            combined_usage_query.c.user_id,
+            combined_usage_query.c.username,
+            combined_usage_query.c.email,
+            func.sum(combined_usage_query.c.input_tokens).label("input_tokens"),
+            func.sum(combined_usage_query.c.output_tokens).label("output_tokens"),
+            func.sum(combined_usage_query.c.request_count).label("request_count"),
+            (func.sum(combined_usage_query.c.input_tokens) +
+             func.sum(combined_usage_query.c.output_tokens)).label("total_tokens"),
+        ).group_by(
+            combined_usage_query.c.user_id,
+            combined_usage_query.c.username,
+            combined_usage_query.c.email,
+        )
+
+        if not user_id:
+            # Only add HAVING clause for multi-user queries to filter out users with no usage
+            base_query = base_query.having(
+                (func.sum(combined_usage_query.c.input_tokens) +
+                 func.sum(combined_usage_query.c.output_tokens)) > 0
+            )
+
+        return base_query
+
     async def get_user_token_usage(
         self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", page: int = 1, per_page: int = 15, sort_by: str = "total_tokens", sort_order: str = "desc"
     ) -> UserTokenUsageSummary:
@@ -55,53 +172,8 @@ class UserTokenUsageAnalyzer:
         """
         logger.info(f"Getting user token usage for tenant {tenant_id} with sort_by={sort_by} and sort_order={sort_order}")
 
-        # Base query for user token usage
-        base_query = select(
-            Users.id.label("user_id"),
-            Users.username.label("username"),
-            Users.email.label("email"),
-            (
-                func.coalesce(func.sum(Questions.num_tokens_question), 0) +
-                func.coalesce(func.sum(AppRuns.num_tokens_input), 0)
-            ).label("input_tokens"),
-            (
-                func.coalesce(func.sum(Questions.num_tokens_answer), 0) +
-                func.coalesce(func.sum(AppRuns.num_tokens_output), 0)
-            ).label("output_tokens"),
-            (
-                func.coalesce(func.count(Questions.id), 0) +
-                func.coalesce(func.count(AppRuns.id), 0)
-            ).label("request_count"),
-             (func.coalesce(func.sum(Questions.num_tokens_question), 0) +
-             func.coalesce(func.sum(Questions.num_tokens_answer), 0) +
-             func.coalesce(func.sum(AppRuns.num_tokens_input), 0) +
-             func.coalesce(func.sum(AppRuns.num_tokens_output), 0)).label("total_tokens"),
-        ).select_from(
-            Users.__table__
-            .outerjoin(Sessions.__table__, Sessions.user_id == Users.id)
-            .outerjoin(Questions.__table__, 
-                (Questions.session_id == Sessions.id) &
-                (Questions.tenant_id == tenant_id) &
-                (Questions.created_at >= start_date) &
-                (Questions.created_at <= end_date)
-            )
-            .outerjoin(AppRuns.__table__,
-                (AppRuns.user_id == Users.id) &
-                (AppRuns.tenant_id == tenant_id) &
-                (AppRuns.created_at >= start_date) &
-                (AppRuns.created_at <= end_date)
-            )
-        ).where(
-            Users.tenant_id == tenant_id
-        ).group_by(
-            Users.id, Users.username, Users.email
-        ).having(
-            # Only include users with actual token usage
-            (func.coalesce(func.sum(Questions.num_tokens_question), 0) +
-             func.coalesce(func.sum(Questions.num_tokens_answer), 0) +
-             func.coalesce(func.sum(AppRuns.num_tokens_input), 0) +
-             func.coalesce(func.sum(AppRuns.num_tokens_output), 0)) > 0
-        )
+        # Build the base query using the helper method
+        base_query = self._build_combined_usage_query(tenant_id, start_date, end_date)
 
         # Get the total count of users
         count_query = select(func.count()).select_from(base_query.alias("count_query"))
@@ -189,66 +261,30 @@ class UserTokenUsageAnalyzer:
     ) -> UserTokenUsage:
         """
         Get token usage summary for a single user efficiently.
-        
+
         Args:
             tenant_id: The tenant ID to filter by
             user_id: The user ID to get summary for
             start_date: The start date for the analysis period
             end_date: The end date for the analysis period
-            
+
         Returns:
             A UserTokenUsage object for the specific user
         """
         logger.info(f"Getting single user summary for user {user_id} in tenant {tenant_id}")
-        
-        # Query for specific user's token usage
-        query = select(
-            Users.id.label("user_id"),
-            Users.username.label("username"),
-            Users.email.label("email"),
-            (
-                func.coalesce(func.sum(Questions.num_tokens_question), 0) +
-                func.coalesce(func.sum(AppRuns.num_tokens_input), 0)
-            ).label("input_tokens"),
-            (
-                func.coalesce(func.sum(Questions.num_tokens_answer), 0) +
-                func.coalesce(func.sum(AppRuns.num_tokens_output), 0)
-            ).label("output_tokens"),
-            (
-                func.coalesce(func.count(Questions.id), 0) +
-                func.coalesce(func.count(AppRuns.id), 0)
-            ).label("request_count"),
-        ).select_from(
-            Users.__table__
-            .outerjoin(Sessions.__table__, Sessions.user_id == Users.id)
-            .outerjoin(Questions.__table__, 
-                (Questions.session_id == Sessions.id) &
-                (Questions.tenant_id == tenant_id) &
-                (Questions.created_at >= start_date) &
-                (Questions.created_at <= end_date)
-            )
-            .outerjoin(AppRuns.__table__,
-                (AppRuns.user_id == Users.id) &
-                (AppRuns.tenant_id == tenant_id) &
-                (AppRuns.created_at >= start_date) &
-                (AppRuns.created_at <= end_date)
-            )
-        ).where(
-            (Users.tenant_id == tenant_id) &
-            (Users.id == user_id)
-        ).group_by(
-            Users.id, Users.username, Users.email
-        )
-        
+
+        # Build the base query using the helper method
+        query = self._build_combined_usage_query(tenant_id, start_date, end_date, user_id)
+
         result = await self.session.execute(query)
         row = result.first()
-        
+
         if not row:
             raise ValueError(f"User with ID {user_id} not found in tenant {tenant_id}")
-        
+
         # Get model breakdown for this user
         model_breakdown = await self._get_user_model_breakdown(tenant_id, user_id, start_date, end_date)
-        
+
         return UserTokenUsage(
             user_id=row.user_id,
             username=row.username,
@@ -277,7 +313,7 @@ class UserTokenUsageAnalyzer:
         Internal method to get model breakdown for a specific user.
         This reuses the existing TokenUsageAnalyzer pattern but filters by user_id.
         """
-        
+
         # Get token usage from questions (chat messages) for this user - join through sessions
         questions_query = (
             select(
