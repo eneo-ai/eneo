@@ -33,6 +33,18 @@ services:
     volumes:
       - redis_data:/data
 
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    networks:
+      - eneo
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml
+    env_file:
+      - .env.litellm
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
+
 volumes:
   postgres_data:
   redis_data:

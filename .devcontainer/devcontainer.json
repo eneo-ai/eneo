@@ -38,6 +38,7 @@
 	},
 	"remoteEnv": {
 		"VIRTUAL_ENV": "/workspace/backend/.venv",
-		"PATH": "/workspace/backend/.venv/bin:${containerEnv:PATH}"
+		"PATH": "/workspace/backend/.venv/bin:${containerEnv:PATH}",
+		"ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
 	}
 }
