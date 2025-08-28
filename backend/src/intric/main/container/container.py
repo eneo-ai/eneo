@@ -153,7 +153,6 @@ from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
 from intric.limits.limit_service import LimitService
 from intric.main.aiohttp_client import aiohttp_client
-from intric.main.config import SETTINGS
 from intric.modules.module_repo import ModuleRepository
 from intric.predefined_roles.predefined_role_service import PredefinedRolesService
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
@@ -212,6 +211,7 @@ from intric.tenants.tenant_repo import TenantRepository
 from intric.tenants.tenant_service import TenantService
 from intric.token_usage.application.token_usage_service import TokenUsageService
 from intric.token_usage.infrastructure.token_usage_analyzer import TokenUsageAnalyzer
+from intric.token_usage.infrastructure.user_token_usage_analyzer import UserTokenUsageAnalyzer
 from intric.transcription_models.application import TranscriptionModelCRUDService
 from intric.transcription_models.domain import TranscriptionModelRepository
 from intric.transcription_models.domain.transcription_model_service import (
@@ -825,10 +825,15 @@ class Container(containers.DeclarativeContainer):
         TokenUsageAnalyzer,
         session=session,
     )
+    user_token_usage_analyzer = providers.Factory(
+        UserTokenUsageAnalyzer,
+        session=session,
+    )
     token_usage_service = providers.Factory(
         TokenUsageService,
         user=user,
         token_usage_analyzer=token_usage_analyzer,
+        user_token_usage_analyzer=user_token_usage_analyzer,
     )
 
     # Worker

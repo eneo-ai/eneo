@@ -1,16 +1,11 @@
-from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from intric.main.config import SETTINGS
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.templates.assistant_template.api.assistant_template_models import (
-    AssistantTemplateCreate,
     AssistantTemplateListPublic,
-    AssistantTemplatePublic,
-    AssistantTemplateUpdate,
 )
 
 router = APIRouter()

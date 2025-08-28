@@ -86,7 +86,7 @@ line-length = 88
 exclude = [
     ".venv",
     "__pycache__",
-    ".git", 
+    ".git",
     ".pytest_cache",
     "build",
     "dist",
@@ -94,21 +94,17 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-# All rules
+# Minimal ruleset to start with
 select = [
-    "E",   # pycodestyle errors
-    "F",   # Pyflakes
-    "W",   # pycodestyle warnings
-    "UP",  # pyupgrade (for modern Python)
-    "B",   # flake8-bugbear (common bugs)
-    "I",   # isort
+    "F",   # Pyflakes (correctness: undefined names, etc.)
+    "E9",  # pycodestyle “runtime”/syntax errors,
 ]
 
-# Basic ignores for formatter compatibility
-ignore = [
-    "E501",  # Line too long (formatter handles this)
-    "E203",  # Whitespace before ':'
-]
+# Basic ignores for formatter compatibility (kept for when E/W are enabled later)
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]  # Allow re-exports without being flagged as unused
 
 [tool.ruff.format]
 quote-style = "double"

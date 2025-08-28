@@ -39,6 +39,8 @@ LOGLEVEL=INFO
 # MobilityGuard SSO (if using)
 # MOBILITY_GUARD_AUTH=
 
+# MobilityGuard client ID - must match the MOBILITYGUARD_CLIENT_ID in your backend configuration
+# MOBILITYGUARD_CLIENT_ID="your-client-id" #Hardcoded now but will be changed in the next release.
 # Force legacy authentication
 # FORCE_LEGACY_AUTH=false
 
@@ -50,3 +52,11 @@ LOGLEVEL=INFO
 
 # Support contact email
 # SUPPORT_EMAIL=support@your-domain.com
+
+# MOBILITYGUARD_CLIENT_ID="your-client-id"
+# ZITADEL_INSTANCE_URL="https://your-zitadel-instance.com"
+# ZITADEL_PROJECT_CLIENT_ID="your-zitadel-client-id"
+# SHOW_HELP_CENTER=False
+# REQUEST_INTEGRATION_FORM_URL="https://..."
+# HELP_CENTER_URL="https://www.eneo.ai/en/external-support-assistant"
+# SALES_EMAIL="sales@eneo.ai"
