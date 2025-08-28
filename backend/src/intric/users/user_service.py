@@ -78,7 +78,7 @@ class UserService:
         if user.password is None:
             raise AuthenticationException("User has not enabled username and password login")
 
-        if not self.auth_service.verify_password(password, user.salt, user.password):
+        if not self.auth_service.verify_password(password, user.password):
             raise AuthenticationException("Wrong password")
 
         # Check if the user or tenant state prevents login

@@ -3,7 +3,6 @@ import subprocess
 
 import bcrypt
 import psycopg2
-from passlib.context import CryptContext
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,12 +17,7 @@ class Settings(BaseSettings):
     postgres_port: int
     postgres_db: str
 
-
 settings = Settings()
-
-
-logging.getLogger("passlib").setLevel(logging.ERROR)
-
 
 # Alembic command
 def run_alembic_migrations():
@@ -34,13 +28,12 @@ def run_alembic_migrations():
         print(f"Error running alembic migrations: {e}")
         exit(1)
 
-
 # Password hashing
-def hash_password(password):
-    salt = bcrypt.gensalt().decode()
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    return pwd_context.hash(password + salt), salt
-
+def create_salt_and_hashed_password(plaintext_password: str):
+    pwd_bytes = plaintext_password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+    return salt.decode(), hashed_password.decode('utf-8')
 
 # Add tenant and user
 def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_password):
@@ -67,7 +60,7 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
         user = cur.fetchone()
 
         if user is None:
-            hashed_pass, salt = hash_password(user_password)
+            salt, hashed_pass = create_salt_and_hashed_password(user_password)
             add_user_query = sql.SQL(
                 "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
             )
@@ -117,35 +110,46 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             )
             cur.execute(assign_role_to_user_query, (user_id, predefined_role_id))
 
-        # Add completion model if it doesn't exist - FIXED: Added reasoning column
-        check_model_query = sql.SQL("SELECT id FROM completion_models WHERE name = %s")
-        cur.execute(check_model_query, ("gpt-4o",))
-        model = cur.fetchone()
+        # Check if any completion model exists and assign it to the user
+        check_completion_models_query = sql.SQL(
+            "SELECT id FROM completion_models limit 1"
+        )
+        cur.execute(check_completion_models_query)
+        completion_model = cur.fetchone()
 
-        if model is None:
-            add_model_query = sql.SQL(
-                """INSERT INTO completion_models 
-                (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
-            )
-            cur.execute(
-                add_model_query,
-                (
-                    "gpt-4o",
-                    "GPT-4o",
-                    "openai",
-                    128000,
-                    "stable",
-                    "usa",
-                    "OpenAI's latest and greatest model, trained on both text and images.",
-                    "OpenAI",
-                    True,   # vision
-                    False,  # reasoning - gpt-4o is not a reasoning model
-                ),
-            )
-            model_id = cur.fetchone()[0]
+        if completion_model is None:
+            # Check if gpt-4o exists
+            check_model_query = sql.SQL("SELECT id FROM completion_models WHERE name = %s")
+            cur.execute(check_model_query, ("gpt-4o",))
+            model = cur.fetchone()
+
+            # Add completion model if none exist
+            if model is None:
+                add_model_query = sql.SQL(
+                    """INSERT INTO completion_models 
+                    (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
+                )
+                cur.execute(
+                    add_model_query,
+                    (
+                        "gpt-4o",
+                        "GPT-4o",
+                        "openai",
+                        128000,
+                        "stable",
+                        "usa",
+                        "OpenAI's latest and greatest model, trained on both text and images.",
+                        "OpenAI",
+                        True,
+                        False,
+                    ),
+                )
+                model_id = cur.fetchone()[0]
+            else:
+                model_id = model[0]
         else:
-            model_id = model[0]
+            model_id = completion_model[0]
 
         # Enable the completion model for the tenant
         check_model_setting_query = sql.SQL(
@@ -165,8 +169,9 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
 
         conn.commit()
         cur.close()
+        print("Great! Your Tenant and User are all set up.")
     except Exception as e:
-        print(f"Error adding tenant and user: {e.__traceback__}")
+        print(f"Error adding tenant and user: {e}")
         conn.rollback()
 
 
@@ -193,8 +198,6 @@ if __name__ == "__main__":
         "user@example.com",
         "Password1!",
     )
-
-    print("Great! Your Tenant and User are all set up.")
 
     # Close the connection
     conn.close()
