@@ -812,6 +812,33 @@ export interface paths {
      */
     get: operations["get_token_usage_api_v1_token_usage__get"];
   };
+  "/api/v1/token-usage/users": {
+    /**
+     * Get User Token Usage
+     * @description Get token usage statistics aggregated by user for the specified date range.
+     * If no dates are provided, returns token usage for the last 30 days.
+     * Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     */
+    get: operations["get_user_token_usage_api_v1_token_usage_users_get"];
+  };
+  "/api/v1/token-usage/users/{user_id}/summary": {
+    /**
+     * Get User Summary
+     * @description Get summary for a specific user without fetching all users.
+     * If no dates are provided, returns summary for the last 30 days.
+     * Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     */
+    get: operations["get_user_summary_api_v1_token_usage_users__user_id__summary_get"];
+  };
+  "/api/v1/token-usage/users/{user_id}": {
+    /**
+     * Get User Model Breakdown
+     * @description Get model breakdown for a specific user within the specified date range.
+     * If no dates are provided, returns model breakdown for the last 30 days.
+     * Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     */
+    get: operations["get_user_model_breakdown_api_v1_token_usage_users__user_id__get"];
+  };
   "/api/v1/security-classifications/": {
     /**
      * List Security Classifications
@@ -3924,6 +3951,22 @@ export interface components {
        */
       id: string;
     };
+    /** PredefinedRoleInDB */
+    PredefinedRoleInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Name */
+      name: string;
+      /** Permissions */
+      permissions: components["schemas"]["Permission"][];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+    };
     /** PredefinedRolePublic */
     PredefinedRolePublic: {
       /** Created At */
@@ -4057,6 +4100,27 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
+    /** RoleInDB */
+    RoleInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Permissions */
+      permissions: components["schemas"]["Permission"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
     /** RoleInDB */
     RoleInDB: {
       /** Created At */
@@ -5489,6 +5553,12 @@ export interface components {
        */
       quota_used?: number;
     };
+    /**
+     * UserSortBy
+     * @description Enum for user token usage sorting options
+     * @enum {string}
+     */
+    UserSortBy: "total_tokens" | "username" | "input_tokens" | "output_tokens" | "requests";
     /** UserSparse */
     UserSparse: {
       /** Created At */
@@ -5513,6 +5583,93 @@ export interface components {
      * @enum {string}
      */
     UserState: "invited" | "active" | "inactive" | "deleted";
+    /** UserTokenUsage */
+    UserTokenUsage: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Username */
+      username: string;
+      /** Email */
+      email: string;
+      /**
+       * Total Input Tokens
+       * @description Total input tokens used by this user
+       */
+      total_input_tokens: number;
+      /**
+       * Total Output Tokens
+       * @description Total output tokens used by this user
+       */
+      total_output_tokens: number;
+      /**
+       * Total Tokens
+       * @description Total tokens (input + output)
+       */
+      total_tokens: number;
+      /**
+       * Total Requests
+       * @description Total number of requests made by this user
+       */
+      total_requests: number;
+      /**
+       * Models Used
+       * @description Models used by this user with their usage
+       */
+      models_used: components["schemas"]["ModelUsage"][];
+    };
+    /** UserTokenUsageSummary */
+    UserTokenUsageSummary: {
+      /**
+       * Users
+       * @description List of users with their token usage
+       */
+      users: components["schemas"]["UserTokenUsage"][];
+      /**
+       * Start Date
+       * Format: date-time
+       */
+      start_date: string;
+      /**
+       * End Date
+       * Format: date-time
+       */
+      end_date: string;
+      /**
+       * Total Users
+       * @description Total number of users with token usage
+       */
+      total_users: number;
+      /**
+       * Total Input Tokens
+       * @description Total input tokens across all users
+       */
+      total_input_tokens: number;
+      /**
+       * Total Output Tokens
+       * @description Total output tokens across all users
+       */
+      total_output_tokens: number;
+      /**
+       * Total Tokens
+       * @description Total tokens across all users
+       */
+      total_tokens: number;
+      /**
+       * Total Requests
+       * @description Total requests across all users
+       */
+      total_requests: number;
+    };
+    /**
+     * UserTokenUsageSummaryDetail
+     * @description Response model for single user detail endpoint
+     */
+    UserTokenUsageSummaryDetail: {
+      user: components["schemas"]["UserTokenUsage"];
+    };
     /** UserUpdatePublic */
     UserUpdatePublic: {
       /** Email */
@@ -11123,6 +11280,110 @@ export interface operations {
         start_date?: string | null;
         /** @description End date for token usage data (defaults to current time).Time defaults to 00:00:00. */
         end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TokenUsageSummary"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Token Usage
+   * @description Get token usage statistics aggregated by user for the specified date range.
+   * If no dates are provided, returns token usage for the last 30 days.
+   * Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+   */
+  get_user_token_usage_api_v1_token_usage_users_get: {
+    parameters: {
+      query?: {
+        /** @description Start date for token usage data (defaults to 30 days ago).Time defaults to 00:00:00. */
+        start_date?: string | null;
+        /** @description End date for token usage data (defaults to current time).Time defaults to 00:00:00. */
+        end_date?: string | null;
+        /** @description Page number for pagination. */
+        page?: number;
+        /** @description Number of items per page. */
+        per_page?: number;
+        /** @description Field to sort by. */
+        sort_by?: components["schemas"]["UserSortBy"];
+        /** @description Sort order (asc or desc). */
+        sort_order?: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserTokenUsageSummary"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Summary
+   * @description Get summary for a specific user without fetching all users.
+   * If no dates are provided, returns summary for the last 30 days.
+   * Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+   */
+  get_user_summary_api_v1_token_usage_users__user_id__summary_get: {
+    parameters: {
+      query?: {
+        /** @description Start date for token usage data (defaults to 30 days ago).Time defaults to 00:00:00. */
+        start_date?: string | null;
+        /** @description End date for token usage data (defaults to current time).Time defaults to 00:00:00. */
+        end_date?: string | null;
+      };
+      path: {
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserTokenUsageSummaryDetail"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Model Breakdown
+   * @description Get model breakdown for a specific user within the specified date range.
+   * If no dates are provided, returns model breakdown for the last 30 days.
+   * Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+   */
+  get_user_model_breakdown_api_v1_token_usage_users__user_id__get: {
+    parameters: {
+      query?: {
+        /** @description Start date for token usage data (defaults to 30 days ago).Time defaults to 00:00:00. */
+        start_date?: string | null;
+        /** @description End date for token usage data (defaults to current time).Time defaults to 00:00:00. */
+        end_date?: string | null;
+      };
+      path: {
+        user_id: string;
       };
     };
     responses: {

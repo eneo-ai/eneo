@@ -12,6 +12,7 @@
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
   export let tokenStats: TokenUsageSummary;
+
   $: models = tokenStats.models.toSorted((a, b) =>
     (a.model_org ?? "").localeCompare(b.model_org ?? "")
   );
@@ -23,9 +24,9 @@
   const table = Table.createWithResource(visibleItems);
 
   const viewModel = table.createViewModel([
-    table.column({
+    table.columnPrimary({
       header: "Name",
-      accessor: (item) => item,
+      value: (item) => item.model_nickname,
       cell: (item) => {
         return createRender(ModelNameAndVendor, {
           model: {
@@ -76,4 +77,10 @@
       showAllItems = !showAllItems;
     }}>{showAllItems ? "Show only 10 models" : `Show all ${models.length} models`}</Button
   >
+{/if}
+
+{#if models.length === 0}
+    <div class="text-center py-12">
+        <p class="text-gray-500">No model usage data available for this period</p>
+    </div>
 {/if}
