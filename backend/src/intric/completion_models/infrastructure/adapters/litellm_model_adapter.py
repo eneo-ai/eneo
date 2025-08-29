@@ -16,7 +16,6 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 )
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
-from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -27,8 +26,6 @@ TOKENS_RESERVED_FOR_COMPLETION = 1000
 class LiteLLMAdapter(CompletionModelAdapter):
     def __init__(self, model: CompletionModel):
         self.model = model
-        self.base_url = get_settings().litellm_proxy_url
-        self.api_key = get_settings().litellm_master_key
 
     def _get_kwargs(self, kwargs: ModelKwargs | None):
         if kwargs is None:
@@ -134,8 +131,6 @@ class LiteLLMAdapter(CompletionModelAdapter):
             response = await acompletion(
                 model=self.model.litellm_model_name,
                 messages=query,
-                base_url=self.base_url,
-                api_key=self.api_key,
                 **self._get_kwargs(model_kwargs),
             )
 
@@ -166,8 +161,6 @@ class LiteLLMAdapter(CompletionModelAdapter):
             response_stream = await acompletion(
                 model=self.model.litellm_model_name,
                 messages=query,
-                base_url=self.base_url,
-                api_key=self.api_key,
                 stream=True,
                 tools=tools if tools else None,
                 **self._get_kwargs(model_kwargs),
