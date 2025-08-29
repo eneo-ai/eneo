@@ -22,7 +22,7 @@
 <Dialog.Root bind:isOpen>
   {#if includeTrigger}
     <Dialog.Trigger let:trigger asFragment>
-      <Button variant="primary" is={trigger}>Create space</Button>
+      <Button variant="primary" is={trigger}>Create spaces</Button>
     </Dialog.Trigger>
   {/if}
   <Dialog.Content width="medium" form>
