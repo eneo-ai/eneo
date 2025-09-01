@@ -17,7 +17,7 @@
   export let selectedWebsites: WebsiteSparse[] | undefined = undefined;
   /** Bind this variable if you want to be able to select collections aka groups */
   export let selectedCollections: GroupSparse[] | undefined = undefined;
-  /** Bind this variable if you want to be able to select collections aka groups */
+  /** Bind this variable if you want to be able to select integration knowledge */
   export let selectedIntegrationKnowledge:
     | Omit<IntegrationKnowledge[], "tenant_id" | "user_integration_id" | "space_id">
     | undefined = undefined;
@@ -28,10 +28,17 @@
    * and set a z-index of 5000, so it is always on top. Helps to prevent clipping to scroll parent inside a dialog.
    */
   export let inDialog = false;
+  export let originMode: "personal" | "organization" | "both" = "both";
 
   const {
-    elements: { input, menu, group, groupLabel, option },
-    states: { open, inputValue }
+    elements: {
+      input: inputPersonal,
+      menu: menuPersonal,
+      group: groupPersonal,
+      groupLabel: groupLabelPersonal,
+      option: optionPersonal
+    },
+    states: { open: openPersonal, inputValue: inputValuePersonal }
   } = createCombobox<
     | { website: WebsiteSparse }
     | { collection: GroupSparse }
@@ -46,14 +53,42 @@
       placement: "bottom"
     },
     onSelectedChange({ next }) {
-      if (next) {
-        addItem(next.value);
-      }
-      inputElement.blur();
-      $inputValue = "";
-      setTimeout(() => {
-        triggerButton.focus();
-      }, 1);
+      if (next) addItem(next.value);
+      inputPersonalEl?.blur();
+      $inputValuePersonal = "";
+      setTimeout(() => personalTriggerBtn?.focus(), 1);
+      return undefined;
+    },
+    portal: inDialog ? "body" : null
+  });
+
+  const {
+    elements: {
+      input: inputOrg,
+      menu: menuOrg,
+      group: groupOrg,
+      groupLabel: groupLabelOrg,
+      option: optionOrg
+    },
+    states: { open: openOrg, inputValue: inputValueOrg }
+  } = createCombobox<
+    | { website: WebsiteSparse }
+    | { collection: GroupSparse }
+    | { integrationKnowledge: IntegrationKnowledge }
+  >({
+    forceVisible: false,
+    loop: true,
+    positioning: {
+      sameWidth: true,
+      fitViewport: true,
+      flip: false,
+      placement: "bottom"
+    },
+    onSelectedChange({ next }) {
+      if (next) addItem(next.value);
+      inputOrgEl?.blur();
+      $inputValueOrg = "";
+      setTimeout(() => orgTriggerBtn?.focus(), 1);
       return undefined;
     },
     portal: inDialog ? "body" : null
@@ -72,7 +107,17 @@
       item?.metadata?.spaceId
     );
   }
-  
+
+  function isPersonalItem(item: any) {
+    const sid = ownerSpaceId(item);
+    if (!sid) return true; 
+    return sid === $currentSpace?.id;
+  }
+  function isOrgItem(item: any) {
+    const sid = ownerSpaceId(item);
+    return $organizationSpaceId && sid === $organizationSpaceId;
+  }
+
   function addItem(
     item:
       | { website: WebsiteSparse }
@@ -96,15 +141,24 @@
     }
   }
 
-  let inputElement: HTMLInputElement;
-  let triggerButton: HTMLButtonElement;
+  let inputPersonalEl: HTMLInputElement;
+  let personalTriggerBtn: HTMLButtonElement;
+  let inputOrgEl: HTMLInputElement;
+  let orgTriggerBtn: HTMLButtonElement;
 
-  $: availableKnowledge = getAvailableKnowledge(
-    $currentSpace,
-    selectedWebsites,
-    selectedCollections,
-    selectedIntegrationKnowledge,
-    $inputValue
+  $: activeFilter =
+    originMode === "organization"
+      ? $inputValueOrg
+      : originMode === "personal"
+      ? $inputValuePersonal
+      : ($openPersonal ? $inputValuePersonal : $inputValueOrg);
+
+    $: availableKnowledge = getAvailableKnowledge(
+      $currentSpace,
+      selectedWebsites,
+      selectedCollections,
+      selectedIntegrationKnowledge,
+      activeFilter
   );
 
   $: sectionEntries = Object.entries(availableKnowledge.sections).map(([modelId, section]) => {
@@ -126,257 +180,403 @@
   $: enabledModels = $currentSpace.embedding_models.map((model) => model.id);
 
   $: partitionedSections = sectionEntries.flatMap(([modelId, section]) => {
-  const split = (arr: any[] = []) => {
-    const local: any[] = [];
-    const org: any[] = [];
-    for (const item of arr) {
-      const sid = ownerSpaceId(item);
-      if (sid === $currentSpace?.id) {
-        local.push(item);
-      } else if ($organizationSpaceId && sid === $organizationSpaceId) {
-        org.push(item);
+    const split = (arr: any[] = []) => {
+      const personal: any[] = [];
+      const org: any[] = [];
+      for (const item of arr) {
+        const sid = ownerSpaceId(item);
+        if (sid === $currentSpace?.id) personal.push(item);
+        else if ($organizationSpaceId && sid === $organizationSpaceId) org.push(item);
       }
-    }
-    return { local, org };
-  };
+      return { personal, org };
+    };
 
-  const g = split(section.groups);
-  const w = split(section.websites);
-  const k = split(section.integrationKnowledge);
+    const g = split(section.groups);
+    const w = split(section.websites);
+    const k = split(section.integrationKnowledge);
 
-  const mk = (origin: "Local" | "Organization", groups: any[], websites: any[], integrationKnowledge: any[]) => ({
-    ...section,
-    origin,
-    groups,
-    websites,
-    integrationKnowledge,
-    availableItemsCount:
-      (groups?.length ?? 0) + (websites?.length ?? 0) + (integrationKnowledge?.length ?? 0)
+    const mk = (
+      origin: "Personal" | "Organization",
+      groups: any[],
+      websites: any[],
+      integrationKnowledge: any[]
+    ) => ({
+      ...section,
+      origin,
+      groups,
+      websites,
+      integrationKnowledge,
+      availableItemsCount:
+        (groups?.length ?? 0) + (websites?.length ?? 0) + (integrationKnowledge?.length ?? 0)
+    });
+
+    const out: Array<[string, any]> = [];
+    if (g.personal.length || w.personal.length || k.personal.length)
+      out.push([`${modelId}::personal`, mk("Personal", g.personal, w.personal, k.personal)]);
+    if ($organizationSpaceId && (g.org.length || w.org.length || k.org.length))
+      out.push([`${modelId}::org`, mk("Organization", g.org, w.org, k.org)]);
+
+    return out;
   });
 
-  const out: Array<[string, any]> = [];
-  if (g.local.length || w.local.length || k.local.length)
-    out.push([`${modelId}::local`, mk("Local", g.local, w.local, k.local)]);
-  if ($organizationSpaceId && (g.org.length || w.org.length || k.org.length))
-    out.push([`${modelId}::org`, mk("Organization", g.org, w.org, k.org)]);
+  $: partitionedSectionsPersonal = partitionedSections.filter(([, s]) => s.origin === "Personal");
+  $: partitionedSectionsOrg = partitionedSections.filter(([, s]) => s.origin === "Organization");
 
-  return out;
-});
+  $: selectedCollectionsPersonal = (selectedCollections ?? []).filter(isPersonalItem);
+  $: selectedCollectionsOrg = (selectedCollections ?? []).filter(isOrgItem);
+
+  $: selectedWebsitesPersonal = (selectedWebsites ?? []).filter(isPersonalItem);
+  $: selectedWebsitesOrg = (selectedWebsites ?? []).filter(isOrgItem);
+  
+  $: selectedIntegrationKnowledgePersonal = (selectedIntegrationKnowledge ?? []).filter(isPersonalItem);
+  $: selectedIntegrationKnowledgeOrg = (selectedIntegrationKnowledge ?? []).filter(isOrgItem);
 
 </script>
+{#if originMode !== "organization"}
+  <section class="knowledge-selected">
 
-{#if selectedCollections}
-  {#each selectedCollections as collection (`group:${collection.id}`)}
-    {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
-    {console.log("info_blobs", collection.metadata )}
-    <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
-      {#if isItemModelEnabled}
-        <IconCollections />
-      {:else}
-        <IconCancel />
-      {/if}
-      <span class="truncate px-2">{collection.name}</span>
-      {#if !isItemModelEnabled}
-        <span>(model disabled)</span>
-      {/if}
-      <div class="flex-grow"></div>
-      {#if collection.metadata.num_info_blobs > 0}
-        <span
-          class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
-          >{collection.metadata.num_info_blobs} files</span
-        >
-      {:else}
-        <span
-          class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
-          >Empty</span
-        >
-      {/if}
-      <Button
-        variant="destructive"
-        padding="icon"
-        on:click={() => {
-          selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
-          if ($open) inputElement.focus();
-        }}><IconTrash /></Button
-      >
-    </div>
-  {/each}
-{/if}
-
-{#if selectedWebsites}
-  {#each selectedWebsites as website (`website:${website.id}`)}
-    {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
-    <div class="knowledge-item">
-      {#if isItemModelEnabled}
-        <IconWeb />
-      {:else}
-        <IconCancel />
-      {/if}
-      <span class="truncate px-2">{formatWebsiteName(website)}</span>
-      {#if !isItemModelEnabled}
-        <span>(model disabled)</span>
-      {/if}
-      <div class="flex-grow"></div>
-      <Button
-        variant="destructive"
-        padding="icon"
-        on:click={() => {
-          selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
-          if ($open) inputElement.focus();
-        }}><IconTrash /></Button
-      >
-    </div>
-  {/each}
-{/if}
-
-{#if selectedIntegrationKnowledge}
-  {#each selectedIntegrationKnowledge as knowledge (`integration:${knowledge.id}`)}
-    {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
-    <div class="knowledge-item">
-      {#if isItemModelEnabled}
-        <IntegrationVendorIcon size="sm" type={knowledge.integration_type}></IntegrationVendorIcon>
-      {:else}
-        <IconCancel />
-      {/if}
-      <span class="truncate px-2">{knowledge.name}</span>
-      {#if !isItemModelEnabled}
-        <span>(model disabled)</span>
-      {/if}
-      <div class="flex-grow"></div>
-      <Button
-        variant="destructive"
-        padding="icon"
-        on:click={() => {
-          selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter(
-            (item) => item.id !== knowledge.id
-          );
-          if ($open) inputElement.focus();
-        }}><IconTrash /></Button
-      >
-    </div>
-  {/each}
-{/if}
-
-{#if $open}
-  <div class="border-default relative mt-2 h-12 w-full overflow-clip rounded-lg border">
-    <input
-      bind:this={inputElement}
-      name="knowledgeFilter"
-      class="absolute inset-0 rounded-lg pl-[4.2rem] text-lg"
-      {...$input}
-      use:input
-    />
-
-    <label
-      for="knowledgeFilter"
-      class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg"
-      >Filter:</label
-    >
-  </div>
-{:else}
-  <button
-    bind:this={triggerButton}
-    {...aria}
-    class="border-default hover:bg-hover-default relative mt-2 flex h-12 w-full items-center justify-center gap-1 overflow-clip rounded-lg border"
-    on:click={async () => {
-      $open = true;
-      await tick();
-      inputElement.focus();
-    }}
-  >
-    <IconPlus class="min-w-7" />Add knowledge
-  </button>
-{/if}
-
-<div class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
-  class:inDialog
-  {...$menu}
-  use:menu
->
-  {#if partitionedSections.length > 0}
-    {#each partitionedSections as [key, section] (key)}
-      <div {...$group(section.name + '-' + section.origin)} use:group class="flex w-full flex-col">
-      <div
-        class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
-        {...$groupLabel(section.name + '-' + section.origin)}
-        use:groupLabel
-      >
-        <span>
-          {#if availableKnowledge.showHeaders}
-            {section.name}
-          {:else}
-            Select a knowledge source
-          {/if}
-        </span>
-
-        <span class="flex-grow"></span>
-
-        <span
-          class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger"
-          class:label-blue={section.origin === 'Local'}
-          class:label-warning={section.origin === 'Organization'}
-        >
-          {section.origin}
-        </span>
-      </div>
-
-        {#if !section.isEnabled}
-          <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
-        {:else if !section.isCompatible}
-          <p class="knowledge-message">
-            The sources embedded by this model are not compatible with the currently selected knowledge.
-          </p>
-        {:else if section.availableItemsCount === 0}
-          <p class="knowledge-message">No more sources available.</p>
+    {#each selectedCollectionsPersonal as collection (`group:${collection.id}`)}
+      {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
+      <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
+        {#if isItemModelEnabled}
+          <IconCollections />
         {:else}
-          {#each section.groups as collection (`group:${collection.id}`)}
-            <div class="knowledge-item cursor-pointer" {...$option({ value: { collection } })} use:option>
-              <div class="flex max-w-full flex-grow items-center gap-3">
-                <IconCollections />
-                <span class="truncate">{collection.name}</span>
-              </div>
-              <div class="flex-grow"></div>
-                {#if collection.metadata.num_info_blobs > 0}
-                  <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                    {collection.metadata.num_info_blobs} files
-                  </span>
-                {:else}
-                  <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                    Empty
-                  </span>
-                {/if}
-              </div>
-          {/each}
-
-          {#each section.websites as website (`website:${website.id}`)}
-            <div class="knowledge-item cursor-pointer" {...$option({ value: { website } })} use:option>
-              <div class="flex max-w-full flex-grow items-center gap-3">
-                <IconWeb />
-                <span class="truncate">{formatWebsiteName(website)}</span>
-              </div>
-            </div>
-          {/each}
-
-          {#each section.integrationKnowledge as integrationKnowledge (`integration:${integrationKnowledge.id}`)}
-            <div class="knowledge-item cursor-pointer" {...$option({ value: { integrationKnowledge } })} use:option>
-              <div class="flex max-w-full flex-grow items-center gap-3">
-                <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type} />
-                <span class="truncate">{integrationKnowledge.name}</span>
-              </div>
-            </div>
-          {/each}
+          <IconCancel />
         {/if}
+        <span class="truncate px-2">{collection.name}</span>
+        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+        <div class="flex-grow"></div>
+        {#if collection.metadata.num_info_blobs > 0}
+          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+            {collection.metadata.num_info_blobs} files
+          </span>
+        {:else}
+          <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+            Empty
+          </span>
+        {/if}
+        <Button variant="destructive" padding="icon" on:click={() => {
+          selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
+          if ($openPersonal) inputPersonalEl?.focus();
+          if ($openOrg)      inputOrgEl?.focus();
+        }}><IconTrash /></Button>
       </div>
     {/each}
-  {:else}
-    <p class="knowledge-message">This spaces does not have any selectable knowledge sources configured.</p>
+
+    {#each selectedWebsitesPersonal as website (`website:${website.id}`)}
+      {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
+      <div class="knowledge-item">
+        {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
+        <span class="truncate px-2">{formatWebsiteName(website)}</span>
+        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+        <div class="flex-grow"></div>
+        <Button variant="destructive" padding="icon" on:click={() => {
+          selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
+          if ($openPersonal) inputPersonalEl?.focus();
+          if ($openOrg)      inputOrgEl?.focus();
+        }}><IconTrash /></Button>
+      </div>
+    {/each}
+
+    {#each selectedIntegrationKnowledgePersonal as knowledge (`integration:${knowledge.id}`)}
+      {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
+      <div class="knowledge-item">
+        {#if isItemModelEnabled}
+          <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
+        {:else}
+          <IconCancel />
+        {/if}
+        <span class="truncate px-2">{knowledge.name}</span>
+        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+        <div class="flex-grow"></div>
+        <Button variant="destructive" padding="icon" on:click={() => {
+          selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter((item) => item.id !== knowledge.id);
+          if ($openPersonal) inputPersonalEl?.focus();
+          if ($openOrg)      inputOrgEl?.focus();
+        }}><IconTrash /></Button>
+      </div>
+    {/each}
+  </section>
+{/if}
+
+{#if originMode !== "personal"}
+  {#if $organizationSpaceId}
+  <section class="knowledge-selected">
+    {#each selectedCollectionsOrg as collection (`group:${collection.id}`)}
+      {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
+      <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
+        {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
+        <span class="truncate px-2">{collection.name}</span>
+        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+        <div class="flex-grow"></div>
+        {#if collection.metadata.num_info_blobs > 0}
+          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+            {collection.metadata.num_info_blobs} files
+          </span>
+        {:else}
+          <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+            Empty
+          </span>
+        {/if}
+        <Button variant="destructive" padding="icon" on:click={() => {
+          selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
+          if ($openPersonal) inputPersonalEl?.focus();
+          if ($openOrg)      inputOrgEl?.focus();
+        }}><IconTrash /></Button>
+      </div>
+    {/each}
+
+    {#each selectedWebsitesOrg as website (`website:${website.id}`)}
+      {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
+      <div class="knowledge-item">
+        {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
+        <span class="truncate px-2">{formatWebsiteName(website)}</span>
+        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+        <div class="flex-grow"></div>
+        <Button variant="destructive" padding="icon" on:click={() => {
+          selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
+          if ($openPersonal) inputPersonalEl?.focus();
+          if ($openOrg)      inputOrgEl?.focus();
+        }}><IconTrash /></Button>
+      </div>
+    {/each}
+
+    {#each selectedIntegrationKnowledgeOrg as knowledge (`integration:${knowledge.id}`)}
+      {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
+      <div class="knowledge-item">
+        {#if isItemModelEnabled}
+          <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
+        {:else}
+          <IconCancel />
+        {/if}
+        <span class="truncate px-2">{knowledge.name}</span>
+        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+        <div class="flex-grow"></div>
+        <Button variant="destructive" padding="icon" on:click={() => {
+          selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter((item) => item.id !== knowledge.id);
+          if ($openPersonal) inputPersonalEl?.focus();
+          if ($openOrg)      inputOrgEl?.focus();
+        }}><IconTrash /></Button>
+      </div>
+    {/each}
+  </section>
   {/if}
-</div>
+{/if}
+
+{#if originMode !== "organization"}
+  <section class="knowledge-section">
+    {#if $openPersonal}
+      <div class="border-default relative mt-2 h-12 w-full overflow-clip rounded-lg border">
+        <input
+          bind:this={inputPersonalEl}
+          name="knowledgeFilterPersonal"
+          class="absolute inset-0 rounded-lg pl-[4.2rem] text-lg"
+          {...$inputPersonal}
+          use:inputPersonal
+        />
+        <label for="knowledgeFilterPersonal" class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg">
+          Filter:
+        </label>
+      </div>
+    {:else}
+      <button
+        bind:this={personalTriggerBtn}
+        {...aria}
+        class="border-default hover:bg-hover-default relative mt-2 flex h-12 w-full items-center justify-center gap-1 overflow-clip rounded-lg border"
+        on:click={async () => {
+          $openPersonal = true;
+          await tick();
+          inputPersonalEl?.focus();
+          $openOrg = false;
+        }}
+      >
+        <IconPlus class="min-w-7" />Add knowledge (Personal)
+      </button>
+    {/if}
+
+    <div class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
+        class:inDialog
+        {...$menuPersonal}
+        use:menuPersonal>
+      {#if partitionedSectionsPersonal.length > 0}
+        {#each partitionedSectionsPersonal as [key, section] (key)}
+          <div {...$groupPersonal(section.name + '-Personal')} use:groupPersonal class="flex w-full flex-col">
+            <div class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
+                {...$groupLabelPersonal(section.name + '-Personal')}
+                use:groupLabelPersonal>
+              <span>
+                {#if availableKnowledge.showHeaders}{section.name}{:else}Select a knowledge source{/if}
+              </span>
+              <span class="flex-grow"></span>
+              <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-blue">
+                Personal
+              </span>
+            </div>
+
+            {#if !section.isEnabled}
+              <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
+            {:else if !section.isCompatible}
+              <p class="knowledge-message">The sources embedded by this model are not compatible with the currently selected knowledge.</p>
+            {:else if section.availableItemsCount === 0}
+              <p class="knowledge-message">No more sources available.</p>
+            {:else}
+              {#each section.groups as collection (`group:${collection.id}`)}
+                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { collection } })} use:optionPersonal>
+                  <div class="flex max-w-full flex-grow items-center gap-3">
+                    <IconCollections />
+                    <span class="truncate">{collection.name}</span>
+                  </div>
+                  <div class="flex-grow"></div>
+                  {#if collection.metadata.num_info_blobs > 0}
+                    <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                      {collection.metadata.num_info_blobs} files
+                    </span>
+                  {:else}
+                    <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                      Empty
+                    </span>
+                  {/if}
+                </div>
+              {/each}
+
+              {#each section.websites as website (`website:${website.id}`)}
+                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { website } })} use:optionPersonal>
+                  <div class="flex max-w-full flex-grow items-center gap-3">
+                    <IconWeb />
+                    <span class="truncate">{formatWebsiteName(website)}</span>
+                  </div>
+                </div>
+              {/each}
+
+              {#each section.integrationKnowledge as integrationKnowledge (`integration:${integrationKnowledge.id}`)}
+                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { integrationKnowledge } })} use:optionPersonal>
+                  <div class="flex max-w-full flex-grow items-center gap-3">
+                    <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type} />
+                    <span class="truncate">{integrationKnowledge.name}</span>
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        {/each}
+      {:else}
+        <p class="knowledge-message">No Personal sources available.</p>
+      {/if}
+    </div>
+  </section>
+{/if}
+
+{#if originMode !== "personal"}
+  <section class="knowledge-section">
+    {#if $openOrg}
+      <div class="border-default relative mt-2 h-12 w-full overflow-clip rounded-lg border">
+        <input
+          bind:this={inputOrgEl}
+          name="knowledgeFilterOrg"
+          class="absolute inset-0 rounded-lg pl-[4.2rem] text-lg"
+          {...$inputOrg}
+          use:inputOrg
+        />
+        <label for="knowledgeFilterOrg" class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg">
+          Filter:
+        </label>
+      </div>
+    {:else}
+      <button
+        bind:this={orgTriggerBtn}
+        {...aria}
+        class="border-default hover:bg-hover-default relative mt-2 flex h-12 w-full items-center justify-center gap-1 overflow-clip rounded-lg border"
+        on:click={async () => {
+          $openOrg = true;
+          await tick();
+          inputOrgEl?.focus();
+          $openPersonal = false;
+        }}
+      >
+        <IconPlus class="min-w-7" />Add knowledge (Organization)
+      </button>
+    {/if}
+
+    <div class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
+        class:inDialog
+        {...$menuOrg}
+        use:menuOrg>
+      {#if partitionedSectionsOrg.length > 0}
+        {#each partitionedSectionsOrg as [key, section] (key)}
+          <div {...$groupOrg(section.name + '-Organization')} use:groupOrg class="flex w-full flex-col">
+            <div class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
+                {...$groupLabelOrg(section.name + '-Organization')}
+                use:groupLabelOrg>
+              <span>
+                {#if availableKnowledge.showHeaders}{section.name}{:else}Select a knowledge source{/if}
+              </span>
+              <span class="flex-grow"></span>
+              <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-warning">
+                Organization
+              </span>
+            </div>
+
+            {#if !section.isEnabled}
+              <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
+            {:else if !section.isCompatible}
+              <p class="knowledge-message">The sources embedded by this model are not compatible with the currently selected knowledge.</p>
+            {:else if section.availableItemsCount === 0}
+              <p class="knowledge-message">No more sources available.</p>
+            {:else}
+              {#each section.groups as collection (`group:${collection.id}`)}
+                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { collection } })} use:optionOrg>
+                  <div class="flex max-w-full flex-grow items-center gap-3">
+                    <IconCollections />
+                    <span class="truncate">{collection.name}</span>
+                  </div>
+                  <div class="flex-grow"></div>
+                  {#if collection.metadata.num_info_blobs > 0}
+                    <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                      {collection.metadata.num_info_blobs} files
+                    </span>
+                  {:else}
+                    <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                      Empty
+                    </span>
+                  {/if}
+                </div>
+              {/each}
+
+              {#each section.websites as website (`website:${website.id}`)}
+                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { website } })} use:optionOrg>
+                  <div class="flex max-w-full flex-grow items-center gap-3">
+                    <IconWeb />
+                    <span class="truncate">{formatWebsiteName(website)}</span>
+                  </div>
+                </div>
+              {/each}
+
+              {#each section.integrationKnowledge as integrationKnowledge (`integration:${integrationKnowledge.id}`)}
+                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { integrationKnowledge } })} use:optionOrg>
+                  <div class="flex max-w-full flex-grow items-center gap-3">
+                    <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type} />
+                    <span class="truncate">{integrationKnowledge.name}</span>
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        {/each}
+      {:else}
+        <p class="knowledge-message">No Organization sources available.</p>
+      {/if}
+    </div>
+  </section>
+ {/if}
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
   p.knowledge-message {
     @apply text-muted flex min-h-16 items-center justify-center px-4 text-center;
+  }
+
+  .knowledge-help {
+    @apply text-muted mb-2;
   }
 
   .knowledge-item {
@@ -391,6 +591,14 @@
 
   div[data-disabled] {
     @apply opacity-30 hover:bg-transparent;
+  }
+
+  .knowledge-section, .knowledge-selected {
+    @apply mt-6;
+  }
+
+  .section-title {
+    @apply text-base font-semibold;
   }
 
   div.inDialog {
