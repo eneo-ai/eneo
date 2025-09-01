@@ -1,5 +1,4 @@
 completion_models:
-
   - name: 'gpt-4-turbo'
     nickname: 'GPT-4'
     family: 'openai'
@@ -114,22 +113,25 @@ completion_models:
     vision: true
     reasoning: false
 
-  - name: 'gpt-5'
-    nickname: 'GPT-5'
-    family: 'openai'
+  - name: 'gpt-5-azure'
+    nickname: 'GPT-5 (Azure)'
+    family: 'azure'
     token_limit: 200000
     is_deprecated: false
     stability: 'stable'
-    hosting: 'usa'
-    description: OpenAI's most advanced model featuring enhanced reasoning capabilities, verbosity control, and massive 200K token context window.
-    org: OpenAI
+    hosting: 'swe'
+    deployment_name: 'gpt-5'
+    description: Microsoft Azure's hosted GPT-5 model via LiteLLM - supports advanced reasoning, verbosity control, and massive 200K token context.
+    org: Microsoft
     vision: true
     reasoning: true
-    litellm_model_name: 'gpt-5'
+    litellm_model_name: 'azure/gpt-5'
     default_settings:
       temperature: 1.0
-      verbosity: 'medium'
+      top_p: 0.95
       reasoning_effort: 'medium'
+      verbosity: 'medium'
+      max_completion_tokens: 8192
 
   - name: 'claude-3-opus-latest'
     nickname: 'Claude 3 Opus'
@@ -190,7 +192,6 @@ completion_models:
     org: Anthropic
     vision: true
     reasoning: false
-    litellm_model_name: 'anthropic/claude-3-7-sonnet-20250219'
 
   - name: 'gpt-4-azure'
     nickname: 'GPT-4 (Azure)'

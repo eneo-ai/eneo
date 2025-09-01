@@ -15,7 +15,6 @@
 # .env
 .env
 */**/.env
-.devcontainer/.env.litellm
 
 # docker
 

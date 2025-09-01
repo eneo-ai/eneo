@@ -1825,6 +1825,10 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Default Settings */
+      default_settings?: {
+        [key: string]: unknown;
+      } | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1877,6 +1881,10 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Default Settings */
+      default_settings?: {
+        [key: string]: unknown;
+      } | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1898,6 +1906,11 @@ export interface components {
        */
       is_locked?: boolean;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Supports Verbosity
+       * @default false
+       */
+      supports_verbosity?: boolean;
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -1956,6 +1969,10 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Default Settings */
+      default_settings?: {
+        [key: string]: unknown;
+      } | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1977,6 +1994,11 @@ export interface components {
        */
       is_locked?: boolean;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Supports Verbosity
+       * @default false
+       */
+      supports_verbosity?: boolean;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -2021,6 +2043,10 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Default Settings */
+      default_settings?: {
+        [key: string]: unknown;
+      } | null;
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -3196,6 +3222,18 @@ export interface components {
       temperature?: number | null;
       /** Top P */
       top_p?: number | null;
+      /** Reasoning Effort */
+      reasoning_effort?: string | null;
+      /** Max Reasoning Tokens */
+      max_reasoning_tokens?: number | null;
+      /** Max Thinking Tokens */
+      max_thinking_tokens?: number | null;
+      /** Verbosity */
+      verbosity?: string | null;
+      /** Max Completion Tokens */
+      max_completion_tokens?: number | null;
+      /** Max Tokens */
+      max_tokens?: number | null;
     };
     /**
      * ModelOrg
@@ -7559,6 +7597,10 @@ export interface operations {
                 base_url?: string | null;
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
+                /** Default Settings */
+                default_settings?: {
+                  [key: string]: unknown;
+                } | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -7582,6 +7624,11 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /**
+                 * Supports Verbosity
+                 * @default false
+                 */
+                supports_verbosity?: boolean;
               };
               /** FilePublic */
               FilePublic: {
@@ -7856,6 +7903,10 @@ export interface operations {
                 base_url?: string | null;
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
+                /** Default Settings */
+                default_settings?: {
+                  [key: string]: unknown;
+                } | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -7879,6 +7930,11 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /**
+                 * Supports Verbosity
+                 * @default false
+                 */
+                supports_verbosity?: boolean;
               };
               /** FilePublic */
               FilePublic: {
