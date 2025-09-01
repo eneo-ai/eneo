@@ -25,13 +25,54 @@ TOKENS_RESERVED_FOR_COMPLETION = 1000
 
 class LiteLLMAdapter(CompletionModelAdapter):
     def __init__(self, model: CompletionModel):
+        logger.info(f"Initializing LiteLLMAdapter for model: {model.name}")
         self.model = model
 
-    def _get_kwargs(self, kwargs: ModelKwargs | None):
-        if kwargs is None:
-            return {}
+    def _get_model_defaults(self) -> ModelKwargs:
+        """Create ModelKwargs from model's default parameters."""
+        return ModelKwargs(
+            temperature=self.model.default_temperature,
+            top_p=self.model.default_top_p,
+            reasoning_effort=self.model.default_reasoning_effort,
+            max_reasoning_tokens=self.model.default_max_reasoning_tokens,
+            max_thinking_tokens=self.model.default_max_thinking_tokens,
+            verbosity=self.model.default_verbosity,
+            max_completion_tokens=self.model.default_max_completion_tokens,
+        )
 
-        return kwargs.model_dump(exclude_none=True)
+    def _merge_kwargs(self, request_kwargs: ModelKwargs | None) -> ModelKwargs:
+        """Merge model defaults with request parameters (request overrides defaults)."""
+        defaults = self._get_model_defaults()
+
+        if request_kwargs is None:
+            return defaults
+
+        # Create merged kwargs by updating defaults with non-None values from request
+        merged_data = defaults.model_dump(exclude_none=True)
+        request_data = request_kwargs.model_dump(exclude_none=True)
+        merged_data.update(request_data)
+
+        return ModelKwargs(**merged_data)
+
+    def _get_kwargs(self, kwargs: ModelKwargs | None):
+        # Merge model defaults with request parameters
+        merged_kwargs = self._merge_kwargs(kwargs)
+        params = merged_kwargs.model_dump(exclude_none=True)
+
+        # Handle reasoning-specific parameters
+        if not self.model.reasoning:
+            # Remove reasoning parameters for non-reasoning models
+            params.pop('max_thinking_tokens', None)
+            params.pop('reasoning_effort', None)
+            params.pop('max_reasoning_tokens', None)
+
+        # Handle GPT-5 specific parameters
+        model_name = getattr(self.model, 'litellm_model_name', '') or ''
+        if 'gpt-5' not in model_name.lower():
+            # Remove GPT-5 specific parameters for other models
+            params.pop('verbosity', None)
+
+        return params
 
     def get_token_limit_of_model(self):
         return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION

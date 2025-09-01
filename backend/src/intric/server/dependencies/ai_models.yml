@@ -114,6 +114,19 @@ completion_models:
     vision: true
     reasoning: false
 
+  - name: 'gpt-5'
+    nickname: 'GPT-5'
+    family: 'openai'
+    token_limit: 200000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: OpenAI's most advanced model featuring enhanced reasoning capabilities, verbosity control, and massive 200K token context window.
+    org: OpenAI
+    vision: true
+    reasoning: true
+    litellm_model_name: 'gpt-5'
+
   - name: 'claude-3-opus-latest'
     nickname: 'Claude 3 Opus'
     family: 'claude'

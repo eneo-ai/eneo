@@ -15,6 +15,12 @@
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
   export let aria: AriaProps = { "aria-label": "Select model behaviour" };
+  export let selectedModel: any = null; // CompletionModel from the parent
+  
+  // Determine which parameters to show based on model capabilities
+  $: showReasoningEffort = selectedModel?.reasoning ?? false;
+  $: showVerbosity = selectedModel?.supports_verbosity ?? false;
+  $: showMaxTokens = true; // All models support this
 
   const {
     elements: { trigger, menu, option },
@@ -40,12 +46,30 @@
     }
   });
 
-  // This function will only be called on direct user input of custom temperature
+  // This function will only be called on direct user input of custom parameters
   // If the selected value is not a named value, it will set the Kwargs
   // This can't be a declarative statement with $: as it would fire in too many situations
   let customTemp: number = 1;
+  let customReasoningEffort: string = "";
+  let customVerbosity: string = "";
+  let customMaxTokens: number | null = null;
+  
   function maybeSetKwArgsCustom() {
-    const args = { temperature: customTemp, top_p: null };
+    // Start with existing kwArgs to preserve server structure
+    const args = { ...kwArgs };
+    
+    // Update only the values that changed
+    args.temperature = customTemp;
+    if (customReasoningEffort) {
+      args.reasoning_effort = customReasoningEffort;
+    }
+    if (customVerbosity) {
+      args.verbosity = customVerbosity;
+    }
+    if (customMaxTokens) {
+      args.max_completion_tokens = customMaxTokens;
+    }
+    
     if (getBehaviour(args) === "custom") {
       kwArgs = args;
     }
@@ -63,12 +87,19 @@
       $selected = { value: behaviour };
     }
 
-    if (
-      behaviour === "custom" &&
-      currentKwArgs.temperature &&
-      currentKwArgs.temperature !== customTemp
-    ) {
-      customTemp = currentKwArgs.temperature;
+    if (behaviour === "custom") {
+      if (currentKwArgs.temperature && currentKwArgs.temperature !== customTemp) {
+        customTemp = currentKwArgs.temperature;
+      }
+      if (currentKwArgs.reasoning_effort !== customReasoningEffort) {
+        customReasoningEffort = currentKwArgs.reasoning_effort || "";
+      }
+      if (currentKwArgs.verbosity !== customVerbosity) {
+        customVerbosity = currentKwArgs.verbosity || "";
+      }
+      if (currentKwArgs.max_completion_tokens !== customMaxTokens) {
+        customMaxTokens = currentKwArgs.max_completion_tokens || null;
+      }
     }
   }
 
@@ -115,6 +146,7 @@
 </div>
 
 {#if $selected?.value === "custom"}
+  <!-- Temperature Control -->
   <div
     class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
   >
@@ -142,6 +174,83 @@
       hiddenLabel={true}
     ></Input.Number>
   </div>
+
+  <!-- Reasoning Effort Control (for reasoning models) -->
+  {#if showReasoningEffort}
+  <div
+    class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
+  >
+    <div class="flex items-center gap-2">
+      <p class="w-24" aria-label="Reasoning effort setting">Reasoning</p>
+      <Tooltip
+        text="How much reasoning effort to apply (Default: medium)\nHigher effort improves accuracy but increases response time."
+      >
+        <IconQuestionMark class="text-muted hover:text-primary" />
+      </Tooltip>
+    </div>
+    <select 
+      bind:value={customReasoningEffort}
+      on:change={maybeSetKwArgsCustom}
+      class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
+    >
+      <option value="">Default</option>
+      <option value="minimal">Minimal</option>
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+    </select>
+  </div>
+  {/if}
+
+  <!-- Verbosity Control (for GPT-5) -->
+  {#if showVerbosity}
+  <div
+    class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
+  >
+    <div class="flex items-center gap-2">
+      <p class="w-24" aria-label="Verbosity setting">Verbosity</p>
+      <Tooltip
+        text="Control response verbosity (Default: medium)\nHigher verbosity provides more detailed explanations."
+      >
+        <IconQuestionMark class="text-muted hover:text-primary" />
+      </Tooltip>
+    </div>
+    <select 
+      bind:value={customVerbosity}
+      on:change={maybeSetKwArgsCustom}
+      class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
+    >
+      <option value="">Default</option>
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+    </select>
+  </div>
+  {/if}
+
+  <!-- Max Completion Tokens Control -->
+  {#if showMaxTokens}
+  <div
+    class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
+  >
+    <div class="flex items-center gap-2">
+      <p class="w-24" aria-label="Max tokens setting">Max Tokens</p>
+      <Tooltip
+        text="Maximum tokens in the response (Default: model default)\nLeave empty to use the model's default setting.\nLower values create shorter responses."
+      >
+        <IconQuestionMark class="text-muted hover:text-primary" />
+      </Tooltip>
+    </div>
+    <Input.Number
+      bind:value={customMaxTokens}
+      onInput={maybeSetKwArgsCustom}
+      min={1}
+      max={200000}
+      placeholder="-"
+      hiddenLabel={true}
+    ></Input.Number>
+  </div>
+  {/if}
 {/if}
 
 {#if isDisabled}

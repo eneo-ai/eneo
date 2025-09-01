@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
 from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
@@ -74,6 +74,13 @@ class CompletionModelBase(BaseModel):
     reasoning: bool
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    
+    # Default model parameters (normalized for LiteLLM)
+    default_temperature: Optional[float] = None
+    default_top_p: Optional[float] = None
+    default_reasoning_effort: Optional[str] = None  # Works across all providers
+    default_verbosity: Optional[str] = None         # GPT-5 specific
+    default_max_completion_tokens: Optional[int] = None  # Universal token limit
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -100,6 +107,7 @@ class CompletionModelPublic(CompletionModel):
     can_access: bool = False
     is_locked: bool = True
     security_classification: Optional[SecurityClassificationPublic] = None
+    supports_verbosity: bool = False
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -124,6 +132,11 @@ class CompletionModelPublic(CompletionModel):
             reasoning=completion_model.reasoning,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
+            default_temperature=completion_model.default_temperature,
+            default_top_p=completion_model.default_top_p,
+            default_reasoning_effort=completion_model.default_reasoning_effort,
+            default_verbosity=completion_model.default_verbosity,
+            default_max_completion_tokens=completion_model.default_max_completion_tokens,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -132,6 +145,7 @@ class CompletionModelPublic(CompletionModel):
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,
             ),
+            supports_verbosity=completion_model.supports_verbosity(),
         )
 
 
@@ -163,8 +177,56 @@ class Context(BaseModel):
 
 
 class ModelKwargs(BaseModel):
+    # Basic parameters
     temperature: Optional[float] = None
     top_p: Optional[float] = None
+    
+    # Reasoning parameters
+    reasoning_effort: Optional[str] = None  # "minimal", "low", "medium", "high" (OpenAI o1/o3/GPT-5)
+    max_reasoning_tokens: Optional[int] = None  # OpenAI o1/o3
+    max_thinking_tokens: Optional[int] = None  # Claude 3.5 Sonnet/Haiku
+    
+    # GPT-5 specific parameters
+    verbosity: Optional[str] = None  # "low", "medium", "high"
+    
+    # General parameters
+    max_completion_tokens: Optional[int] = None
+    max_tokens: Optional[int] = None
+    
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v):
+        if v is not None and (v < 0 or v > 2):
+            raise ValueError('temperature must be between 0 and 2')
+        return v
+    
+    @field_validator('top_p')
+    @classmethod
+    def validate_top_p(cls, v):
+        if v is not None and (v < 0 or v > 1):
+            raise ValueError('top_p must be between 0 and 1')
+        return v
+    
+    @field_validator('reasoning_effort')
+    @classmethod
+    def validate_reasoning_effort(cls, v):
+        if v is not None and v not in ["minimal", "low", "medium", "high"]:
+            raise ValueError('reasoning_effort must be one of: minimal, low, medium, high')
+        return v
+    
+    @field_validator('verbosity')
+    @classmethod
+    def validate_verbosity(cls, v):
+        if v is not None and v not in ["low", "medium", "high"]:
+            raise ValueError('verbosity must be one of: low, medium, high')
+        return v
+    
+    @field_validator('max_reasoning_tokens', 'max_thinking_tokens', 'max_completion_tokens', 'max_tokens')
+    @classmethod
+    def validate_token_limits(cls, v):
+        if v is not None and v < 1:
+            raise ValueError('token limits must be positive integers')
+        return v
 
 
 class CompletionModelSparse(CompletionModelBase, InDB):

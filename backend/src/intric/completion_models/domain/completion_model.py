@@ -23,6 +23,26 @@ if TYPE_CHECKING:
 
 
 class CompletionModel(AIModel):
+    def supports_temperature(self) -> bool:
+        """Most models support temperature control"""
+        return True
+    
+    def supports_top_p(self) -> bool:
+        """Most models support top_p control"""  
+        return True
+    
+    def supports_reasoning_effort(self) -> bool:
+        """Only reasoning models (o1, o3, Claude thinking modes) support reasoning effort"""
+        return self.reasoning
+    
+    def supports_verbosity(self) -> bool:
+        """Only GPT-5 supports verbosity control"""
+        return "gpt-5" in self.name.lower()
+    
+    def supports_max_completion_tokens(self) -> bool:
+        """All models support max completion tokens"""
+        return True
+    
     def __init__(
         self,
         user: "UserInDB",
@@ -49,6 +69,12 @@ class CompletionModel(AIModel):
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         security_classification: Optional[SecurityClassification] = None,
+        # Default model parameters (normalized for LiteLLM)
+        default_temperature: Optional[float] = None,
+        default_top_p: Optional[float] = None,
+        default_reasoning_effort: Optional[str] = None,
+        default_verbosity: Optional[str] = None,
+        default_max_completion_tokens: Optional[int] = None,
     ):
         super().__init__(
             user=user,
@@ -77,6 +103,13 @@ class CompletionModel(AIModel):
         self.token_limit = token_limit
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
+        
+        # Default model parameters (normalized for LiteLLM)
+        self.default_temperature = default_temperature
+        self.default_top_p = default_top_p
+        self.default_reasoning_effort = default_reasoning_effort
+        self.default_verbosity = default_verbosity
+        self.default_max_completion_tokens = default_max_completion_tokens
 
     @classmethod
     def create_from_db(
@@ -129,4 +162,10 @@ class CompletionModel(AIModel):
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),
+            # Default model parameters (normalized for LiteLLM)
+            default_temperature=completion_model_db.default_temperature,
+            default_top_p=completion_model_db.default_top_p,
+            default_reasoning_effort=completion_model_db.default_reasoning_effort,
+            default_verbosity=completion_model_db.default_verbosity,
+            default_max_completion_tokens=completion_model_db.default_max_completion_tokens,
         )

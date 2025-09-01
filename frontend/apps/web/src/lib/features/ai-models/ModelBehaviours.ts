@@ -19,6 +19,13 @@ export type ModelBehaviour = keyof typeof behaviours;
 export type ModelKwArgs = {
   temperature?: number | null | undefined;
   top_p?: number | null | undefined;
+  reasoning_effort?: string | null | undefined;
+  verbosity?: string | null | undefined;
+  max_completion_tokens?: number | null | undefined;
+  // Additional fields returned by server (for compatibility)
+  max_reasoning_tokens?: number | null | undefined;
+  max_thinking_tokens?: number | null | undefined;
+  max_tokens?: number | null | undefined;
 };
 
 export const behaviourList = Object.keys(behaviours) as ModelBehaviour[];
@@ -32,6 +39,12 @@ export function getBehaviour(
     | {
         temperature?: number | null;
         top_p?: number | null;
+        reasoning_effort?: string | null;
+        verbosity?: string | null;
+        max_completion_tokens?: number | null;
+        max_reasoning_tokens?: number | null;
+        max_thinking_tokens?: number | null;
+        max_tokens?: number | null;
       }
     | undefined
     | null
