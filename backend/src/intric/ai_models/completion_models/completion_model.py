@@ -75,12 +75,37 @@ class CompletionModelBase(BaseModel):
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
     
-    # Default model parameters (normalized for LiteLLM)
-    default_temperature: Optional[float] = None
-    default_top_p: Optional[float] = None
-    default_reasoning_effort: Optional[str] = None  # Works across all providers
-    default_verbosity: Optional[str] = None         # GPT-5 specific
-    default_max_completion_tokens: Optional[int] = None  # Universal token limit
+    # Default model parameters (stored as JSONB for flexibility)
+    default_settings: Optional[dict] = None
+    
+    # Convenience properties for accessing default settings
+    @property
+    def default_temperature(self) -> Optional[float]:
+        return self.default_settings.get('temperature') if self.default_settings else None
+    
+    @property 
+    def default_top_p(self) -> Optional[float]:
+        return self.default_settings.get('top_p') if self.default_settings else None
+        
+    @property
+    def default_reasoning_effort(self) -> Optional[str]:
+        return self.default_settings.get('reasoning_effort') if self.default_settings else None
+        
+    @property
+    def default_verbosity(self) -> Optional[str]:
+        return self.default_settings.get('verbosity') if self.default_settings else None
+        
+    @property
+    def default_max_completion_tokens(self) -> Optional[int]:
+        return self.default_settings.get('max_completion_tokens') if self.default_settings else None
+        
+    @property
+    def default_max_reasoning_tokens(self) -> Optional[int]:
+        return self.default_settings.get('max_reasoning_tokens') if self.default_settings else None
+        
+    @property
+    def default_max_thinking_tokens(self) -> Optional[int]:
+        return self.default_settings.get('max_thinking_tokens') if self.default_settings else None
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -132,11 +157,7 @@ class CompletionModelPublic(CompletionModel):
             reasoning=completion_model.reasoning,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
-            default_temperature=completion_model.default_temperature,
-            default_top_p=completion_model.default_top_p,
-            default_reasoning_effort=completion_model.default_reasoning_effort,
-            default_verbosity=completion_model.default_verbosity,
-            default_max_completion_tokens=completion_model.default_max_completion_tokens,
+            default_settings=completion_model.default_settings,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,

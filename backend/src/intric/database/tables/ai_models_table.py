@@ -2,6 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
@@ -31,12 +32,8 @@ class CompletionModels(BasePublic):
     base_url: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
     
-    # Default model parameters (normalized for LiteLLM)
-    default_temperature: Mapped[Optional[float]] = mapped_column()
-    default_top_p: Mapped[Optional[float]] = mapped_column()
-    default_reasoning_effort: Mapped[Optional[str]] = mapped_column()
-    default_verbosity: Mapped[Optional[str]] = mapped_column()
-    default_max_completion_tokens: Mapped[Optional[int]] = mapped_column()
+    # Default model parameters (stored as JSONB for flexibility)
+    default_settings: Mapped[Optional[dict]] = mapped_column(JSONB)
 
 
 class CompletionModelSettings(BaseCrossReference):

@@ -126,6 +126,10 @@ completion_models:
     vision: true
     reasoning: true
     litellm_model_name: 'gpt-5'
+    default_settings:
+      temperature: 1.0
+      verbosity: 'medium'
+      reasoning_effort: 'medium'
 
   - name: 'claude-3-opus-latest'
     nickname: 'Claude 3 Opus'

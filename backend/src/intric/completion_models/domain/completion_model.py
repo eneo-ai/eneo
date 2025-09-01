@@ -43,6 +43,35 @@ class CompletionModel(AIModel):
         """All models support max completion tokens"""
         return True
     
+    # Convenience properties for accessing default settings
+    @property
+    def default_temperature(self) -> Optional[float]:
+        return self.default_settings.get('temperature')
+    
+    @property 
+    def default_top_p(self) -> Optional[float]:
+        return self.default_settings.get('top_p')
+        
+    @property
+    def default_reasoning_effort(self) -> Optional[str]:
+        return self.default_settings.get('reasoning_effort')
+        
+    @property
+    def default_verbosity(self) -> Optional[str]:
+        return self.default_settings.get('verbosity')
+        
+    @property
+    def default_max_completion_tokens(self) -> Optional[int]:
+        return self.default_settings.get('max_completion_tokens')
+    
+    @property
+    def default_max_reasoning_tokens(self) -> Optional[int]:
+        return self.default_settings.get('max_reasoning_tokens')
+        
+    @property
+    def default_max_thinking_tokens(self) -> Optional[int]:
+        return self.default_settings.get('max_thinking_tokens')
+    
     def __init__(
         self,
         user: "UserInDB",
@@ -69,12 +98,8 @@ class CompletionModel(AIModel):
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         security_classification: Optional[SecurityClassification] = None,
-        # Default model parameters (normalized for LiteLLM)
-        default_temperature: Optional[float] = None,
-        default_top_p: Optional[float] = None,
-        default_reasoning_effort: Optional[str] = None,
-        default_verbosity: Optional[str] = None,
-        default_max_completion_tokens: Optional[int] = None,
+        # Default model parameters (stored as JSONB for flexibility)
+        default_settings: Optional[dict] = None,
     ):
         super().__init__(
             user=user,
@@ -104,12 +129,8 @@ class CompletionModel(AIModel):
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
         
-        # Default model parameters (normalized for LiteLLM)
-        self.default_temperature = default_temperature
-        self.default_top_p = default_top_p
-        self.default_reasoning_effort = default_reasoning_effort
-        self.default_verbosity = default_verbosity
-        self.default_max_completion_tokens = default_max_completion_tokens
+        # Default model parameters (stored as JSONB for flexibility)
+        self.default_settings = default_settings or {}
 
     @classmethod
     def create_from_db(
@@ -162,10 +183,6 @@ class CompletionModel(AIModel):
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),
-            # Default model parameters (normalized for LiteLLM)
-            default_temperature=completion_model_db.default_temperature,
-            default_top_p=completion_model_db.default_top_p,
-            default_reasoning_effort=completion_model_db.default_reasoning_effort,
-            default_verbosity=completion_model_db.default_verbosity,
-            default_max_completion_tokens=completion_model_db.default_max_completion_tokens,
+            # Default model parameters (stored as JSONB for flexibility)
+            default_settings=completion_model_db.default_settings,
         )

@@ -52,7 +52,7 @@
   let customTemp: number = 1;
   let customReasoningEffort: string = "";
   let customVerbosity: string = "";
-  let customMaxTokens: number | null = null;
+  let customMaxTokens: number = 0;
   
   function maybeSetKwArgsCustom() {
     // Start with existing kwArgs to preserve server structure
@@ -66,9 +66,13 @@
     if (customVerbosity) {
       args.verbosity = customVerbosity;
     }
-    if (customMaxTokens) {
+    if (customMaxTokens > 0) {
       args.max_completion_tokens = customMaxTokens;
+    } else {
+      // 0 or null means no limit
+      args.max_completion_tokens = null;
     }
+    
     
     if (getBehaviour(args) === "custom") {
       kwArgs = args;
@@ -97,13 +101,22 @@
       if (currentKwArgs.verbosity !== customVerbosity) {
         customVerbosity = currentKwArgs.verbosity || "";
       }
-      if (currentKwArgs.max_completion_tokens !== customMaxTokens) {
-        customMaxTokens = currentKwArgs.max_completion_tokens || null;
+      const currentMaxTokens = currentKwArgs.max_completion_tokens || 0;
+      if (currentMaxTokens !== customMaxTokens) {
+        customMaxTokens = currentMaxTokens;
       }
     }
   }
 
   $: watchChanges(kwArgs);
+  
+  // Reactive approach for max tokens changes (since event handlers don't work reliably)
+  let previousMaxTokens = customMaxTokens;
+  $: if (customMaxTokens !== previousMaxTokens) {
+    previousMaxTokens = customMaxTokens;
+    maybeSetKwArgsCustom();
+  }
+  
 </script>
 
 <button
@@ -236,17 +249,16 @@
     <div class="flex items-center gap-2">
       <p class="w-24" aria-label="Max tokens setting">Max Tokens</p>
       <Tooltip
-        text="Maximum tokens in the response (Default: model default)\nLeave empty to use the model's default setting.\nLower values create shorter responses."
+        text="Maximum tokens in the response (Default: model default)\nSet to 0 for no limit.\nLower values create shorter responses."
       >
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
     </div>
     <Input.Number
       bind:value={customMaxTokens}
-      onInput={maybeSetKwArgsCustom}
-      min={1}
+      step={1}
       max={200000}
-      placeholder="-"
+      min={0}
       hiddenLabel={true}
     ></Input.Number>
   </div>

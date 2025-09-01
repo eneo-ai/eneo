@@ -111,9 +111,6 @@ class LiteLLMAdapter(CompletionModelAdapter):
         if not context.function_definitions:
             return []
 
-        if not self.model.vision:
-            return []
-
         return [
             {
                 "type": "function",
