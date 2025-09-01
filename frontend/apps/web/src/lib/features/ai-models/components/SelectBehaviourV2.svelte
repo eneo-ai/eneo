@@ -27,7 +27,7 @@
     helpers: { isSelected },
     states: { selected }
   } = createSelect<ModelBehaviour>({
-    defaultSelected: { value: getBehaviour(kwArgs) },
+    defaultSelected: { value: getBehaviour(kwArgs, selectedModel) },
     positioning: {
       placement: "bottom",
       fitViewport: true,
@@ -35,13 +35,31 @@
     },
     portal: null,
     onSelectedChange: ({ next }) => {
-      const args = next?.value ? getKwargs(next.value) : getKwargs("default");
-      // If the user selects "custom", we want to keep the current kwargs settings if they already are custom
-      // However, if they are not, then we initialise with a default custom setting
-      const customArgs =
-        getBehaviour(kwArgs) === "custom" ? kwArgs : { temperature: 1, top_p: null };
-      // keep in mind: setting the kwargs will trigger the `watchKwArgs` function
-      kwArgs = args ? args : customArgs;
+      if (!next?.value) return next;
+      
+      if (next.value === "custom") {
+        // If selecting custom, preserve current settings if already custom, otherwise initialize
+        const newArgs = getBehaviour(kwArgs, selectedModel) === "custom" ? kwArgs : { temperature: 1, top_p: null };
+        kwArgs = newArgs;
+      } else {
+        // For non-custom behaviors, merge preset values with current structure
+        const presetValues = getKwargs(next.value, selectedModel) || getKwargs("default", selectedModel);
+        
+        // Create new object that preserves the current structure but updates preset fields
+        const newArgs = { ...kwArgs };
+        Object.entries(presetValues).forEach(([key, value]) => {
+          newArgs[key] = value;
+        });
+        
+        // Only update kwArgs if the values would actually be different
+        const currentStr = JSON.stringify(kwArgs);
+        const newStr = JSON.stringify(newArgs);
+        
+        if (currentStr !== newStr) {
+          kwArgs = newArgs;
+        }
+      }
+      
       return next;
     }
   });
@@ -74,7 +92,7 @@
     }
     
     
-    if (getBehaviour(args) === "custom") {
+    if (getBehaviour(args, selectedModel) === "custom") {
       kwArgs = args;
     }
   }
@@ -85,7 +103,7 @@
       return;
     }
 
-    const behaviour = getBehaviour(currentKwArgs);
+    const behaviour = getBehaviour(currentKwArgs, selectedModel);
 
     if ($selected?.value !== behaviour) {
       $selected = { value: behaviour };
