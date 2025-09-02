@@ -3198,8 +3198,8 @@ export interface components {
       top_p?: number | null;
       /** Reasoning Effort */
       reasoning_effort?: string | null;
-      /** Max Completion Tokens */
-      max_completion_tokens?: number | null;
+      /** Verbosity */
+      verbosity?: string | null;
       /** Response Format */
       response_format?: {
         [key: string]: unknown;
