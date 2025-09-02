@@ -13,7 +13,6 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
 from intric.logging.logging import LoggingDetails
-from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -28,15 +27,11 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         
         logger.info(f"[LiteLLM] Initializing adapter for model: {model.name} -> {self.litellm_model}")
         
-        # Set up Azure configuration if needed
-        if self.litellm_model and self.litellm_model.startswith('azure/'):
-            logger.info(f"[LiteLLM] Configuring Azure settings for {self.litellm_model}")
-            litellm.api_key = get_settings().azure_api_key
-            litellm.api_base = get_settings().azure_endpoint
-            litellm.api_version = get_settings().azure_api_version
-            logger.info(f"[LiteLLM] Azure config: base_url={get_settings().azure_endpoint}, version={get_settings().azure_api_version}")
-        else:
-            logger.info(f"[LiteLLM] No Azure configuration needed for {self.litellm_model}")
+        # LiteLLM will automatically detect and use environment variables:
+        # - AZURE_API_KEY
+        # - AZURE_API_BASE  
+        # - AZURE_API_VERSION
+        # when the model name starts with 'azure/'
 
     def _get_kwargs(self, kwargs: ModelKwargs | None):
         if kwargs is None:
