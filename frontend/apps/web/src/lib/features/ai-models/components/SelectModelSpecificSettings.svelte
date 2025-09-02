@@ -10,18 +10,18 @@
   // Show reasoning effort for models that support reasoning
   $: showReasoningEffort = selectedModel?.reasoning === true;
   
-  // Show max tokens for models that use LiteLLM or specific models that support it
-  $: showMaxTokens = selectedModel?.litellm_model_name || selectedModel?.name?.toLowerCase().includes('gpt-5');
+  // Show verbosity for models that use LiteLLM or specific models that support it
+  $: showVerbosity = selectedModel?.litellm_model_name || selectedModel?.name?.toLowerCase().includes('gpt-5');
   
   // Local state for the custom parameters
   let customReasoningEffort: string = "";
-  let customMaxTokens: number = 0;
+  let customVerbosity: string = "";
   let initialized = false;
   
   // Initialize custom values from kwArgs only once
   $: if (kwArgs && !initialized) {
     customReasoningEffort = kwArgs.reasoning_effort || "";
-    customMaxTokens = kwArgs.max_completion_tokens || 0;
+    customVerbosity = kwArgs.verbosity || "";
     initialized = true;
   }
   
@@ -35,20 +35,20 @@
       delete args.reasoning_effort;
     }
     
-    // Update max completion tokens
-    if (customMaxTokens > 0) {
-      args.max_completion_tokens = customMaxTokens;
+    // Update verbosity
+    if (customVerbosity) {
+      args.verbosity = customVerbosity;
     } else {
-      delete args.max_completion_tokens;
+      delete args.verbosity;
     }
     
     kwArgs = args;
   }
   
-  // Reactive updates for max tokens (since event handlers don't work reliably)
-  let previousMaxTokens = customMaxTokens;
-  $: if (customMaxTokens !== previousMaxTokens) {
-    previousMaxTokens = customMaxTokens;
+  // Reactive updates for verbosity (since event handlers don't work reliably)
+  let previousVerbosity = customVerbosity;
+  $: if (customVerbosity !== previousVerbosity) {
+    previousVerbosity = customVerbosity;
     updateKwArgs();
   }
 </script>
@@ -81,25 +81,28 @@
 </div>
 {/if}
 
-<!-- Max Completion Tokens Control -->
-{#if showMaxTokens}
+<!-- Verbosity Control -->
+{#if showVerbosity}
 <div
   class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
 >
   <div class="flex items-center gap-2">
-    <p class="w-24" aria-label="Max tokens setting">Max Tokens</p>
+    <p class="w-24" aria-label="Verbosity setting">Verbosity</p>
     <Tooltip
-      text="Maximum tokens in the response (Default: model default)\nSet to 0 for no limit.\nLower values create shorter responses."
+      text="Controls response length and detail level (Default: medium)\nLow: Concise and to the point\nMedium: Balanced detail\nHigh: Comprehensive and detailed"
     >
       <IconQuestionMark class="text-muted hover:text-primary" />
     </Tooltip>
   </div>
-  <Input.Number
-    bind:value={customMaxTokens}
-    step={1}
-    max={200000}
-    min={0}
-    hiddenLabel={true}
-  ></Input.Number>
+  <select 
+    bind:value={customVerbosity}
+    on:change={updateKwArgs}
+    class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
+  >
+    <option value="">Default</option>
+    <option value="low">Low</option>
+    <option value="medium">Medium</option>
+    <option value="high">High</option>
+  </select>
 </div>
 {/if}

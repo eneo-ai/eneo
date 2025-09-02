@@ -20,7 +20,7 @@ export type ModelKwArgs = {
   temperature?: number | null | undefined;
   top_p?: number | null | undefined;
   reasoning_effort?: string | null | undefined;
-  max_completion_tokens?: number | null | undefined;
+  verbosity?: string | null | undefined;
   response_format?: object | null | undefined;
   presence_penalty?: number | null | undefined;
   frequency_penalty?: number | null | undefined;

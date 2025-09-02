@@ -166,7 +166,7 @@ class ModelKwargs(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     reasoning_effort: Optional[str] = None
-    max_completion_tokens: Optional[int] = None
+    verbosity: Optional[str] = None
     response_format: Optional[dict] = None
     presence_penalty: Optional[float] = None
     frequency_penalty: Optional[float] = None
