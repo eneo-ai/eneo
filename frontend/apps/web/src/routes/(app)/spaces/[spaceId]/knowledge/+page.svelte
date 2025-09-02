@@ -18,7 +18,7 @@
 
   let selectedTab = writable<string>();
   let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
-
+  let isOrgSpace = $currentSpace.organization;
   $: userCanSeeCollections = $currentSpace.hasPermission("read", "collection");
   $: userCanSeeWebsites = $currentSpace.hasPermission("read", "website");
   $: userCanSeeIntegrations =
@@ -42,7 +42,7 @@
       {#if userCanSeeWebsites}
         <Page.TabTrigger tab="websites">Websites</Page.TabTrigger>
       {/if}
-      {#if userCanSeeIntegrations}
+      {#if isOrgSpace && userCanSeeIntegrations}
         <Page.TabTrigger tab="integrations">Integrations</Page.TabTrigger>
       {/if}
     </Page.Tabbar>
