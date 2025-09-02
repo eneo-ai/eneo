@@ -45,29 +45,11 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         
         # Get all kwargs from the model
         all_kwargs = kwargs.model_dump(exclude_none=True)
-        logger.info(f"[LiteLLM] {self.litellm_model}: Raw kwargs from model: {all_kwargs}")
+        logger.info(f"[LiteLLM] {self.litellm_model}: Parameters being sent: {all_kwargs}")
         
-        # Try to get supported parameters for this specific model
-        try:
-            supported_params = litellm.get_supported_openai_params(model=self.litellm_model)
-            logger.info(f"[LiteLLM] {self.litellm_model}: Supported parameters: {supported_params}")
-            
-            # Filter kwargs to only include supported parameters
-            filtered_kwargs = {k: v for k, v in all_kwargs.items() if k in supported_params}
-            
-            if filtered_kwargs != all_kwargs:
-                unsupported = set(all_kwargs.keys()) - set(filtered_kwargs.keys())
-                logger.info(f"[LiteLLM] {self.litellm_model}: Filtered out unsupported parameters: {unsupported}")
-            
-            logger.info(f"[LiteLLM] {self.litellm_model}: Final filtered kwargs: {filtered_kwargs}")
-            return filtered_kwargs
-            
-        except Exception as e:
-            logger.warning(f"[LiteLLM] {self.litellm_model}: Could not get supported params: {e}")
-            # Fallback: try to send all parameters and let LiteLLM/API handle validation
-            # This ensures we don't accidentally block valid parameters due to discovery issues
-            logger.info(f"[LiteLLM] {self.litellm_model}: Using all kwargs as fallback: {all_kwargs}")
-            return all_kwargs
+        # Pass all parameters directly to LiteLLM
+        # Let the API handle parameter validation
+        return all_kwargs
 
     def get_token_limit_of_model(self):
         return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION

@@ -1,5 +1,5 @@
 completion_models:
-  
+
   - name: 'gpt-4-turbo'
     nickname: 'GPT-4'
     family: 'openai'
@@ -137,7 +137,7 @@ completion_models:
     org: Anthropic
     vision: true
     reasoning: false
-  
+
   - name: 'claude-3-haiku-20240307'
     nickname: 'Claude 3 Haiku'
     family: 'claude'
@@ -233,8 +233,8 @@ completion_models:
     stability: 'experimental'
     is_deprecated: false
     hosting: 'swe'
-    deployment_name: 'gpt-5-preview'
-    litellm_model_name: 'azure/gpt-5-preview'
+    deployment_name: 'gpt-5'
+    litellm_model_name: 'azure/gpt-5'
     description: Next-generation GPT-5 model with advanced reasoning and multimodal capabilities via LiteLLM.
     org: Microsoft
     vision: true
@@ -255,7 +255,7 @@ completion_models:
     open_source: true
     nr_billion_parameters: 70
     hf_link: 'https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct'
-  
+
   - name: 'mistral-large-latest'
     nickname: 'Mistral Large'
     family: 'mistral'
@@ -286,7 +286,7 @@ completion_models:
 
 
 embedding_models:
-  
+
   - name: 'text-embedding-3-small'
     family: 'openai'
     open_source: false
