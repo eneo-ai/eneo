@@ -1823,6 +1823,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1873,6 +1875,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -1950,6 +1954,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -2013,6 +2019,8 @@ export interface components {
       reasoning: boolean;
       /** Base Url */
       base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -3188,6 +3196,20 @@ export interface components {
       temperature?: number | null;
       /** Top P */
       top_p?: number | null;
+      /** Reasoning Effort */
+      reasoning_effort?: string | null;
+      /** Max Completion Tokens */
+      max_completion_tokens?: number | null;
+      /** Response Format */
+      response_format?: {
+        [key: string]: unknown;
+      } | null;
+      /** Presence Penalty */
+      presence_penalty?: number | null;
+      /** Frequency Penalty */
+      frequency_penalty?: number | null;
+      /** Top K */
+      top_k?: number | null;
     };
     /**
      * ModelOrg
@@ -7549,6 +7571,8 @@ export interface operations {
                 reasoning: boolean;
                 /** Base Url */
                 base_url?: string | null;
+                /** Litellm Model Name */
+                litellm_model_name?: string | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -7844,6 +7868,8 @@ export interface operations {
                 reasoning: boolean;
                 /** Base Url */
                 base_url?: string | null;
+                /** Litellm Model Name */
+                litellm_model_name?: string | null;
                 /**
                  * Is Org Enabled
                  * @default false

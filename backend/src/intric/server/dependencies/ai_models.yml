@@ -226,6 +226,20 @@ completion_models:
     vision: false
     reasoning: true
 
+  - name: 'gpt-5-azure'
+    nickname: 'GPT-5 (Azure)'
+    family: 'azure'
+    token_limit: 200000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-preview'
+    litellm_model_name: 'azure/gpt-5-preview'
+    description: Next-generation GPT-5 model with advanced reasoning and multimodal capabilities via LiteLLM.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
   - name: 'Meta-Llama-3_3-70B-Instruct'
     nickname: 'Llama 3.3'
     family: 'ovhcloud'
