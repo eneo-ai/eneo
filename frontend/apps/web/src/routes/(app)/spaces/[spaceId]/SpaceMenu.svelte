@@ -88,7 +88,7 @@
       label="Members"
     />
   {/if}
-  {#if !isOrgSpace && $currentSpace.hasPermission("edit", "space")}
+  {#if $currentSpace.hasPermission("edit", "space")}
     <Navigation.Link
       href="/spaces/{$currentSpace.routeId}/settings"
       isActive={section === "settings"}

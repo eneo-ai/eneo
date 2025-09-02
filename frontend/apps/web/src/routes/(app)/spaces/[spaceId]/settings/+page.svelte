@@ -35,6 +35,7 @@
   let isDeleting = $state(false);
   let showStillDeletingMessage = $state(false);
   let deletionMessageTimeout: ReturnType<typeof setTimeout>;
+  let isOrgSpace = $currentSpace.organization;
 
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
@@ -69,11 +70,12 @@
 
   <Page.Main>
     <Settings.Page>
+      {#if !isOrgSpace}
       <Settings.Group title="General">
         <EditNameAndDescription></EditNameAndDescription>
         <SpaceStorageOverview></SpaceStorageOverview>
       </Settings.Group>
-
+      {/if}
       <Settings.Group title="Advanced settings">
         {#if data.isSecurityEnabled}
           <ChangeSecurityClassification
@@ -93,7 +95,7 @@
         ></SelectTranscriptionModels>
       </Settings.Group>
 
-      {#if $currentSpace.permissions?.includes("delete")}
+      {#if !isOrgSpace && $currentSpace.permissions?.includes("delete")}
         <Settings.Group title="Danger zone">
           <Settings.Row title="Delete space" description="Delete this space and all its resources.">
             <Dialog.Root alert openController={showDeleteDialog}>
