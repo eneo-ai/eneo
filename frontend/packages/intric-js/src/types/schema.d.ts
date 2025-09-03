@@ -2333,6 +2333,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -2414,6 +2416,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Is Org Enabled
        * @default false
