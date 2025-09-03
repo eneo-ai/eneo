@@ -318,3 +318,14 @@ embedding_models:
     hf_link: 'https://huggingface.co/intfloat/multilingual-e5-large'
     description: Microsoft's open-source multilingual embedding model, matching the performance of OpenAI's embedding models while supporting multiple languages.
     org: Microsoft
+  - name: 'text-embedding-3-large-azure'
+    family: 'openai'
+    open_source: false
+    dimensions: 3072
+    max_input: 8191
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'swe'
+    litellm_model_name: 'azure/text-embedding-3-large'
+    description: Microsoft Azure's hosted version of OpenAI's text-embedding-3-large model, offering high-dimensional embeddings via Azure.
+    org: Microsoft

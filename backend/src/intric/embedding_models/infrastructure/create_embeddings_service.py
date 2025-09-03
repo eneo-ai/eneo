@@ -3,6 +3,9 @@ from typing import TYPE_CHECKING
 from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.embedding_models.infrastructure.adapters.e5_embeddings import E5Adapter
+from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
+    LiteLLMEmbeddingAdapter,
+)
 from intric.embedding_models.infrastructure.adapters.openai_embeddings import (
     OpenAIEmbeddingAdapter,
 )
@@ -21,6 +24,11 @@ class CreateEmbeddingsService:
         }
 
     def _get_adapter(self, model: "EmbeddingModel") -> EmbeddingModelAdapter:
+        # Check for LiteLLM model first
+        if model.litellm_model_name:
+            return LiteLLMEmbeddingAdapter(model)
+        
+        # Fall back to existing family-based selection
         adapter_class = self._adapters.get(model.family.value)
         if not adapter_class:
             raise ValueError(f"No adapter found for hosting {model.family.value}")

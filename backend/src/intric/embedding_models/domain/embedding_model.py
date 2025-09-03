@@ -45,6 +45,7 @@ class EmbeddingModel(AIModel):
         max_input: int,
         dimensions: Optional[int],
         security_classification: Optional[SecurityClassification],
+        litellm_model_name: Optional[str] = None,
     ):
         super().__init__(
             user=user,
@@ -67,6 +68,7 @@ class EmbeddingModel(AIModel):
 
         self.max_input = max_input
         self.dimensions = dimensions
+        self.litellm_model_name = litellm_model_name
 
     @classmethod
     def to_domain(
@@ -106,6 +108,7 @@ class EmbeddingModel(AIModel):
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),
+            litellm_model_name=db_model.litellm_model_name,
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):
