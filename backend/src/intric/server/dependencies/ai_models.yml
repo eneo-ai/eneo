@@ -240,6 +240,34 @@ completion_models:
     vision: true
     reasoning: true
 
+  - name: 'gpt-5-mini-azure'
+    nickname: 'GPT-5 mini (Azure)'
+    family: 'azure'
+    token_limit: 200000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-mini'
+    litellm_model_name: 'azure/gpt-5-mini'
+    description: Compact version of GPT-5 model optimized for faster processing while maintaining advanced reasoning capabilities via Azure.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
+  - name: 'gpt-5-nano-azure'
+    nickname: 'GPT-5 nano (Azure)'
+    family: 'azure'
+    token_limit: 200000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-nano'
+    litellm_model_name: 'azure/gpt-5-nano'
+    description: Ultra-compact variant of GPT-5 optimized for maximum efficiency while maintaining reasoning capabilities via Azure.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
   - name: 'Meta-Llama-3_3-70B-Instruct'
     nickname: 'Llama 3.3'
     family: 'ovhcloud'
