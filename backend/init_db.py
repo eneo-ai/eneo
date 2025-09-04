@@ -198,7 +198,7 @@ if __name__ == "__main__":
         settings.default_user_name is None or
         settings.default_user_email is None or
         settings.default_user_password is None):
-        print("Note! One or more environment variables for default tenant and user are not set. Skipping creation of default user.")
+        print("Note! One or more environment variables for default tenant and user are not set. Skipping creation of default tenant and user.")
     else:
         add_tenant_user(
             conn,
