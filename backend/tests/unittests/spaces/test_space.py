@@ -13,6 +13,7 @@ def space():
     return Space(
         id=None,
         tenant_id=None,
+        tenant_space_id=None,
         user_id=None,
         name=MagicMock(),
         description=None,

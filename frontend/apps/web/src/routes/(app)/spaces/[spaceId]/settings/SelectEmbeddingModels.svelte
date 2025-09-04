@@ -29,6 +29,8 @@
   );
 
   let loading = new Set<string>();
+  let isOrgSpace = $currentSpace.organization;
+
   async function toggleModel(model: EmbeddingModel) {
     loading.add(model.id);
     loading = loading;
@@ -71,9 +73,15 @@
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
+      {#if isOrgSpace}
+        <span class="font-bold">Hint:&nbsp;</span>Remember to choose the correct embedding model
+          when creating a new collection. This is important for the end user, as it is not possible
+          to mix knowledge stored with different embedding models.
+      {:else}
         <span class="font-bold">Hint:&nbsp;</span>We strongly recommend to only activate one
-        embedding model per space. Data embedded with different models is not compatible with each
-        other.
+          embedding model per space. Data embedded with different models is not compatible with each
+          other.
+      {/if}
       </p>
     {/if}
   </svelte:fragment>

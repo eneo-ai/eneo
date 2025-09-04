@@ -97,7 +97,6 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     latest_crawl: Optional[CrawlRunPublic]
     embedding_model: EmbeddingModelPublic
     metadata: WebsiteMetadata
-
     @classmethod
     def from_domain(cls, website: Website):
         latest_crawl = (

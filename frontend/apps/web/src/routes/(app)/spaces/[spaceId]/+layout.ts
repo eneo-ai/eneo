@@ -4,26 +4,33 @@
     Licensed under the MIT License.
 */
 
+import type { LayoutLoad } from "./$types";
 import type { Space } from "@intric/intric-js";
 
-export const load = async (event) => {
-  const { intric, currentSpace: personalSpace, loadedAt } = await event.parent();
-
+export const load: LayoutLoad = async (event) => {
+  const { intric, currentSpace: parentSpace, organizationSpace, loadedAt } = await event.parent();
   const spaceId = event.params.spaceId;
 
-  // We want to prevent reloading the personal space (and creating a waterfall)
-  // if it was already loaded by the parent layout function within a reasonable time delte (aka below 1500ms).
+  let currentSpace: Space = parentSpace;
   const loadDelta = new Date().getTime() - new Date(loadedAt).getTime();
 
-  let currentSpace: Space;
-
   if (!spaceId || spaceId === "personal") {
-    currentSpace = loadDelta < 1500 ? personalSpace : await intric.spaces.getPersonalSpace();
+    currentSpace = loadDelta < 1500 ? parentSpace : await intric.spaces.getPersonalSpace();
+
+  } else if (
+    spaceId === "organization" || 
+    spaceId === organizationSpace?.id
+  ) {
+    currentSpace =
+      loadDelta < 1500 && organizationSpace
+        ? organizationSpace
+        : await intric.spaces.getOrganizationSpace();
   } else {
     currentSpace = await intric.spaces.get({ id: spaceId });
   }
 
   return {
-    currentSpace
+    currentSpace,
+    organizationSpaceId: organizationSpace?.id ?? null
   };
 };

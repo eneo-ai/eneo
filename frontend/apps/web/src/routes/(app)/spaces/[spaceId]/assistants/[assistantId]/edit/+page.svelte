@@ -197,8 +197,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Knowledge"
-          description="Select additional knowledge sources that this assistant will be able to search for relevant answers."
+          title="Personal knowledge"
+          description="Select additional sources from your personal space that this assistant will be able to search for relevant answers."
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
@@ -209,10 +209,31 @@
           }}
         >
           <SelectKnowledgeV2
+            originMode="personal"
             bind:selectedWebsites={$update.websites}
             bind:selectedCollections={$update.groups}
             bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-          ></SelectKnowledgeV2>
+          />
+        </Settings.Row>
+
+        <Settings.Row
+          title="Organization knowledge"
+          description="Select additional sources from your organization's space that this assistant will be able to search for relevant answers."
+          hasChanges={$currentChanges.diff.groups !== undefined ||
+            $currentChanges.diff.websites !== undefined ||
+            $currentChanges.diff.integration_knowledge_list !== undefined}
+          revertFn={() => {
+            discardChanges("groups");
+            discardChanges("websites");
+            discardChanges("integration_knowledge_list");
+          }}
+        >
+          <SelectKnowledgeV2
+            originMode="organization"
+            bind:selectedWebsites={$update.websites}
+            bind:selectedCollections={$update.groups}
+            bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+          />
         </Settings.Row>
       </Settings.Group>
 

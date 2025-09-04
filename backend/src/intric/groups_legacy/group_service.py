@@ -87,20 +87,14 @@ class GroupService:
 
         if embedding_model_id is None:
             if space.is_personal():
-                embedding_model = (
-                    await self.ai_models_service.get_latest_available_embedding_model()
-                )
+                embedding_model = await self.ai_models_service.get_latest_available_embedding_model()
             else:
                 embedding_model = space.get_latest_embedding_model()
-
             if embedding_model is None:
                 raise BadRequestException(
-                    "Can not create a group in a space that does not have "
-                    "an embedding model enabled"
+                    "Can not create a group in a space that does not have an embedding model enabled"
                 )
-
             embedding_model_id = embedding_model.id
-
         elif not space.is_embedding_model_in_space(embedding_model_id):
             raise UnauthorizedException("Embedding model is not available in the space")
 
@@ -112,7 +106,11 @@ class GroupService:
             embedding_model_id=embedding_model_id,
         )
 
-        return await self.repo.create_group(group_create)
+        group = await self.repo.create_group(group_create)
+
+        await self.repo.link_group_to_space(group_id=group.id, space_id=space_id)
+
+        return group
 
     async def get_groups_for_user(self) -> list[Group]:
         return await self.repo.get_groups_by_user(self.user.id)
@@ -198,7 +196,7 @@ class GroupService:
     async def get_counts_for_groups(self, groups: list[Group]):
         return [await self.get_count_for_group(group) for group in groups]
 
-    async def move_group_to_space(
+    async def move_group_owner_to_space(
         self,
         group_id: UUID,
         space_id: UUID,
@@ -213,20 +211,55 @@ class GroupService:
 
         if not source_actor.can_delete_collections():
             raise UnauthorizedException("User does not have permissions to move group from space")
-
         if not target_actor.can_create_collections():
-            raise UnauthorizedException(
-                "User does not have permission to create groups in the space"
+            raise UnauthorizedException("User does not have permission to create groups in the space")
+        if not target_space.is_embedding_model_in_space(group.embedding_model.id):
+            raise BadRequestException(
+                f"Space does not have embedding model {group.embedding_model.name} enabled."
             )
+        if source_space.id == space_id:
+            return group
+
+        group_in_db = await self.repo.move_group_owner(
+            group_id=group_id, new_owner_space_id=space_id
+        )
+
+        await self.repo.unlink_group_from_all_spaces(group_id=group_id)
+        await self.repo.link_group_to_space(group_id=group_id, space_id=space_id)
+
+        await self.repo.remove_group_from_all_assistants(
+            group_id=group_id, assistant_ids=assistant_ids
+        )
+        await self.repo.remove_group_from_all_services(group_id=group_id, service_ids=service_ids)
+
+        return group_in_db
+
+    async def get_groups_for_space(self, space_id: UUID) -> list[Group]:
+        space = await self.space_service.get_space(space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_read_collections():
+            raise UnauthorizedException()
+        return await self.repo.get_groups_by_space(space_id)
+
+    async def import_group_to_space(
+        self,
+        group_id: UUID,
+        space_id: UUID,
+    ):
+        source_space = await self.space_repo.get_space_by_collection(collection_id=group_id)
+        group = source_space.get_collection(collection_id=group_id)
+        target_space = await self.space_service.get_space(space_id)
+
+        source_actor = self.actor_manager.get_space_actor_from_space(source_space)
+        target_actor = self.actor_manager.get_space_actor_from_space(target_space)
+        if not source_actor.can_read_collections():
+            raise UnauthorizedException("User cannot read group in source space")
+        if not target_actor.can_create_collections():
+            raise UnauthorizedException("User cannot import into target space")
 
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
                 f"Space does not have embedding model {group.embedding_model.name} enabled."
             )
 
-        await self.repo.add_group_to_space(group_id=group_id, space_id=space_id)
-
-        await self.repo.remove_group_from_all_assistants(
-            group_id=group_id, assistant_ids=assistant_ids
-        )
-        await self.repo.remove_group_from_all_services(group_id=group_id, service_ids=service_ids)
+        await self.repo.link_group_to_space(group_id=group_id, space_id=space_id)
