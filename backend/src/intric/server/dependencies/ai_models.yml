@@ -229,7 +229,7 @@ completion_models:
   - name: 'gpt-5-azure'
     nickname: 'GPT-5 (Azure)'
     family: 'azure'
-    token_limit: 200000
+    token_limit: 400000
     stability: 'experimental'
     is_deprecated: false
     hosting: 'swe'
@@ -243,7 +243,7 @@ completion_models:
   - name: 'gpt-5-mini-azure'
     nickname: 'GPT-5 mini (Azure)'
     family: 'azure'
-    token_limit: 200000
+    token_limit: 400000
     stability: 'experimental'
     is_deprecated: false
     hosting: 'swe'
@@ -257,7 +257,7 @@ completion_models:
   - name: 'gpt-5-nano-azure'
     nickname: 'GPT-5 nano (Azure)'
     family: 'azure'
-    token_limit: 200000
+    token_limit: 400000
     stability: 'experimental'
     is_deprecated: false
     hosting: 'swe'
