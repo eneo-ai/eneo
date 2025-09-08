@@ -25,8 +25,8 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
     def __init__(self, model: CompletionModel):
         super().__init__(model)
         
-        # Get provider configuration (handles both family and litellm_model_name detection)
-        provider = LiteLLMProviderRegistry.get_provider_for_model(model.family, model.litellm_model_name)
+        # Get provider configuration based on litellm_model_name
+        provider = LiteLLMProviderRegistry.get_provider_for_model(model.litellm_model_name)
         
         # Only apply custom configuration if needed
         if provider.needs_custom_config():

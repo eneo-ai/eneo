@@ -25,10 +25,10 @@ logger = get_logger(__name__)
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     def __init__(self, model: "EmbeddingModel"):
         super().__init__(model)
-        
-        # Get provider configuration (handles both family and litellm_model_name detection)
-        provider = LiteLLMProviderRegistry.get_provider_for_model(model.family, model.litellm_model_name)
-        
+
+        # Get provider configuration based on litellm_model_name
+        provider = LiteLLMProviderRegistry.get_provider_for_model(model.litellm_model_name)
+
         # Only apply custom configuration if needed
         if provider.needs_custom_config():
             self.litellm_model = provider.get_litellm_model(model.litellm_model_name)
@@ -38,7 +38,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Standard LiteLLM behavior for supported providers
             self.litellm_model = model.litellm_model_name
             self.api_config = {}
-        
+
         logger.info(f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}")
 
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
@@ -66,7 +66,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     )
     async def _get_embeddings(self, texts: list[str]):
         try:
-            # Prepare the parameters for the embeddings  
+            # Prepare the parameters for the embeddings
             params = {"input": texts, "model": self.litellm_model}
 
             # If dimensions exists on the model, add it to the parameters
