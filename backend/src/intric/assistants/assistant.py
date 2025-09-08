@@ -10,6 +10,7 @@ from intric.assistants.api.assistant_models import AssistantType
 from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.completion_service import CompletionService
+from intric.embedding_models.domain.model_compatibility import ModelCompatibility
 from intric.files.file_models import File, FileInfo, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -92,15 +93,32 @@ class Assistant(Entity):
         self._metadata_json = metadata_json
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
-        embedding_model_id_set = set([item.embedding_model.id for item in items])
-        if len(embedding_model_id_set) != 1 or (
-            self.embedding_model_id is not None
-            and embedding_model_id_set.pop() != self.embedding_model_id
-        ):
-            raise BadRequestException(
-                """All websites or groups or integration_knowledge_list
-                    must have the same embedding model"""
-            )
+        # Get all embedding model names from items
+        embedding_model_names = [item.embedding_model.name for item in items]
+        
+        # Check if all models are compatible using the model compatibility system
+        if embedding_model_names:
+            first_model_identifier = ModelCompatibility.get_model_identifier(embedding_model_names[0])
+            
+            for model_name in embedding_model_names:
+                model_identifier = ModelCompatibility.get_model_identifier(model_name)
+                if model_identifier != first_model_identifier:
+                    raise BadRequestException(
+                        f"All collections and websites must use compatible embedding models. "
+                        f"Found incompatible models: {model_name} is not compatible with {embedding_model_names[0]}"
+                    )
+        
+        # If assistant already has collections/websites, validate compatibility
+        if self.embedding_model_name is not None:
+            assistant_model_identifier = ModelCompatibility.get_model_identifier(self.embedding_model_name)
+            
+            for model_name in embedding_model_names:
+                model_identifier = ModelCompatibility.get_model_identifier(model_name)
+                if model_identifier != assistant_model_identifier:
+                    raise BadRequestException(
+                        f"Cannot add {model_name} to assistant using {self.embedding_model_name}. "
+                        f"Models are not compatible."
+                    )
 
     def _set_collections_and_websites(
         self, collections: list["Collection"] | None, websites: list["Website"] | None
@@ -142,6 +160,18 @@ class Assistant(Entity):
 
         if self.collections:
             return self.collections[0].embedding_model.id
+    
+    @property
+    def embedding_model_name(self):
+        """Get the name of the embedding model used by this assistant"""
+        if not self.websites and not self.collections:
+            return None
+
+        if self.websites:
+            return self.websites[0].embedding_model.name
+
+        if self.collections:
+            return self.collections[0].embedding_model.name
 
     @property
     def attachments(self):
