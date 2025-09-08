@@ -117,6 +117,48 @@
           class="w-32"
           on:click={async () => {
             cancelUploadsAndClearQueue();
+            
+            // Clean up incompatible parameters when switching models
+            if ($update.completion_model_kwargs && $currentChanges.diff.completion_model) {
+              const cleanedKwargs = { ...$update.completion_model_kwargs };
+              
+              // If model changed, reset to safe defaults for the new model
+              const newModel = $update.completion_model;
+              const originalModel = $resource.completion_model;
+              
+              // Check if we switched between different model families/types
+              const modelChanged = newModel?.id !== originalModel?.id;
+              
+              if (modelChanged) {
+                // Reset model-specific parameters that may not be compatible
+                
+                // Remove reasoning_effort if new model doesn't support reasoning
+                if (!newModel?.reasoning) {
+                  delete cleanedKwargs.reasoning_effort;
+                }
+                
+                // Remove verbosity if new model doesn't support it
+                const supportsVerbosity = newModel?.litellm_model_name || 
+                                         newModel?.name?.toLowerCase().includes('gpt-5');
+                if (!supportsVerbosity) {
+                  delete cleanedKwargs.verbosity;
+                }
+                
+                // Reset behavior parameters to safe defaults when switching model types
+                // This prevents temperature/top_p values from one model being sent to another
+                const originalHasSpecialParams = originalModel?.reasoning || originalModel?.litellm_model_name;
+                const newHasSpecialParams = newModel?.reasoning || newModel?.litellm_model_name;
+                
+                if (originalHasSpecialParams !== newHasSpecialParams) {
+                  // Reset to default behavior when switching between normal and special-param models
+                  cleanedKwargs.temperature = null;
+                  cleanedKwargs.top_p = null;
+                }
+              }
+              
+              $update.completion_model_kwargs = cleanedKwargs;
+            }
+            
             await saveChanges();
             showSavesChangedNotice = true;
             setTimeout(() => {
