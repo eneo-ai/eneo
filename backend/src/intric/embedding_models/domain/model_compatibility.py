@@ -14,19 +14,7 @@ class ModelCompatibility:
         "multilingual-e5-large": [
             "multilingual-e5-large",
             "multilingual-e5-large-berget",
-        ],
-        "text-embedding-3-small": [
-            "text-embedding-3-small",
-            "text-embedding-3-small-berget",
-        ],
-        "text-embedding-3-large": [
-            "text-embedding-3-large",
-            "text-embedding-3-large-azure",
-            "text-embedding-3-large-berget",
-        ],
-        "text-embedding-ada-002": [
-            "text-embedding-ada-002",
-        ],
+        ]
     }
 
     @classmethod

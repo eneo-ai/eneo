@@ -8,6 +8,15 @@ from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED
 
 
+def create_embedding_model_mock(id=1, name="test-model", dimensions=None):
+    """Helper to create properly configured embedding model mocks"""
+    mock = MagicMock()
+    mock.id = id
+    mock.name = name
+    mock.dimensions = dimensions
+    return mock
+
+
 @pytest.fixture
 def assistant():
     return Assistant(
@@ -53,8 +62,10 @@ def test_can_not_add_groups_with_different_embedding_models(
 
 
 def test_can_add_websites_with_same_embedding_model(assistant: Assistant):
-    website_1 = MagicMock(embedding_model=MagicMock(id=1))
-    website_2 = MagicMock(embedding_model=MagicMock(id=1))
+    embedding_model = create_embedding_model_mock(id=1, name="test-model")
+
+    website_1 = MagicMock(embedding_model=embedding_model)
+    website_2 = MagicMock(embedding_model=embedding_model)
 
     assistant.update(websites=[website_1, website_2])
 
@@ -63,8 +74,10 @@ def test_can_add_websites_with_same_embedding_model(assistant: Assistant):
 
 
 def test_can_add_groups_with_same_embedding_model(assistant: Assistant):
-    group_1 = MagicMock(embedding_model=MagicMock(id=1))
-    group_2 = MagicMock(embedding_model=MagicMock(id=1))
+    embedding_model = create_embedding_model_mock(id=1, name="test-model")
+
+    group_1 = MagicMock(embedding_model=embedding_model)
+    group_2 = MagicMock(embedding_model=embedding_model)
 
     assistant.update(collections=[group_1, group_2])
 
@@ -75,16 +88,18 @@ def test_can_add_groups_with_same_embedding_model(assistant: Assistant):
 def test_can_not_add_groups_and_websites_if_not_same_embedding_model(
     assistant: Assistant,
 ):
-    websites = [MagicMock(embedding_model=MagicMock(id=1))]
-    groups = [MagicMock(embedding_model=MagicMock(id=2))]
+    websites = [MagicMock(embedding_model=create_embedding_model_mock(id=1, name="test-model-1"))]
+    groups = [MagicMock(embedding_model=create_embedding_model_mock(id=2, name="test-model-2"))]
 
     with pytest.raises(BadRequestException):
         assistant.update(collections=groups, websites=websites)
 
 
 def test_can_add_groups_and_websites_if_same_embedding_model(assistant: Assistant):
-    websites = [MagicMock(embedding_model=MagicMock(id=1))]
-    groups = [MagicMock(embedding_model=MagicMock(id=1))]
+    embedding_model = create_embedding_model_mock(id=1, name="test-model")
+
+    websites = [MagicMock(embedding_model=embedding_model)]
+    groups = [MagicMock(embedding_model=embedding_model)]
 
     assistant.update(collections=groups, websites=websites)
 
@@ -95,8 +110,8 @@ def test_can_add_groups_and_websites_if_same_embedding_model(assistant: Assistan
 def test_can_not_add_groups_if_not_same_embedding_model_as_previous_websites(
     assistant: Assistant,
 ):
-    assistant.websites = [MagicMock(embedding_model=MagicMock(id=1))]
-    groups = [MagicMock(embedding_model=MagicMock(id=2))]
+    assistant.websites = [MagicMock(embedding_model=create_embedding_model_mock(id=1, name="test-model-1"))]
+    groups = [MagicMock(embedding_model=create_embedding_model_mock(id=2, name="test-model-2"))]
 
     with pytest.raises(BadRequestException):
         assistant.update(collections=groups)
@@ -105,8 +120,8 @@ def test_can_not_add_groups_if_not_same_embedding_model_as_previous_websites(
 def test_can_not_add_websites_if_not_same_embedding_model_as_previous_groups(
     assistant: Assistant,
 ):
-    assistant.collections = [MagicMock(embedding_model=MagicMock(id=1))]
-    websites = [MagicMock(embedding_model=MagicMock(id=2))]
+    assistant.collections = [MagicMock(embedding_model=create_embedding_model_mock(id=1, name="test-model-1"))]
+    websites = [MagicMock(embedding_model=create_embedding_model_mock(id=2, name="test-model-2"))]
 
     with pytest.raises(BadRequestException):
         assistant.update(websites=websites)
@@ -228,3 +243,24 @@ def test_update_metadata_json(assistant: Assistant):
 
     assistant.update(metadata_json=NOT_PROVIDED)
     assert assistant.metadata_json is None
+
+
+def test_can_not_add_websites_with_different_dimensions(assistant: Assistant):
+    """Test that models with different dimensions are rejected even if names are compatible"""
+    website_1 = MagicMock(embedding_model=create_embedding_model_mock(id=1, name="multilingual-e5-large", dimensions=512))
+    website_2 = MagicMock(embedding_model=create_embedding_model_mock(id=2, name="multilingual-e5-large-berget", dimensions=3072))
+
+    with pytest.raises(BadRequestException, match="embedding models with the same dimensions"):
+        assistant.update(websites=[website_1, website_2])
+
+
+def test_can_add_cross_provider_compatible_models_with_same_dimensions(assistant: Assistant):
+    """Test that cross-provider compatible models work when dimensions match"""
+    # Using models from our compatibility map with same underlying dimensions
+    website_1 = MagicMock(embedding_model=create_embedding_model_mock(id=1, name="multilingual-e5-large", dimensions=1024))
+    website_2 = MagicMock(embedding_model=create_embedding_model_mock(id=2, name="multilingual-e5-large-berget", dimensions=1024))
+
+    # This should work because they're in the same compatibility family
+    assistant.update(websites=[website_1, website_2])
+
+    assert assistant.websites == [website_1, website_2]
