@@ -10,7 +10,6 @@ from intric.assistants.api.assistant_models import AssistantType
 from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.embedding_models.domain.model_compatibility import ModelCompatibility
 from intric.files.file_models import File, FileInfo, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -93,82 +92,15 @@ class Assistant(Entity):
         self._metadata_json = metadata_json
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
-        if not items:
-            return
-            
-        # Try name-based compatibility first (for cross-provider support)
-        try:
-            embedding_models = [item.embedding_model for item in items]
-            embedding_model_names = [model.name for model in embedding_models]
-            
-            # Check if all models are compatible using the model compatibility system
-            first_model_identifier = ModelCompatibility.get_model_identifier(embedding_model_names[0])
-            
-            for i, model_name in enumerate(embedding_model_names):
-                model_identifier = ModelCompatibility.get_model_identifier(model_name)
-                if model_identifier != first_model_identifier:
-                    raise BadRequestException(
-                        f"All collections and websites must use compatible embedding models. "
-                        f"Found incompatible models: {model_name} is not compatible with {embedding_model_names[0]}"
-                    )
-            
-            # Check dimensions compatibility for name-compatible models
-            dimensions_list = [model.dimensions for model in embedding_models]
-            # Remove None values for comparison, but track if any are None
-            non_none_dimensions = [d for d in dimensions_list if d is not None]
-            
-            if non_none_dimensions and len(set(non_none_dimensions)) > 1:
-                raise BadRequestException(
-                    f"All collections and websites must use embedding models with the same dimensions. "
-                    f"Found models with different dimensions: {dict(zip(embedding_model_names, dimensions_list))}"
-                )
-            
-            # If assistant already has collections/websites, validate compatibility
-            if self.embedding_model_name is not None:
-                assistant_model_identifier = ModelCompatibility.get_model_identifier(self.embedding_model_name)
-                
-                for i, model_name in enumerate(embedding_model_names):
-                    model_identifier = ModelCompatibility.get_model_identifier(model_name)
-                    if model_identifier != assistant_model_identifier:
-                        raise BadRequestException(
-                            f"Cannot add {model_name} to assistant using {self.embedding_model_name}. "
-                            f"Models are not compatible."
-                        )
-                
-                # Check dimensions compatibility with existing assistant models
-                if hasattr(self, '_websites') and self._websites:
-                    existing_dimensions = self._websites[0].embedding_model.dimensions
-                elif hasattr(self, '_collections') and self._collections:
-                    existing_dimensions = self._collections[0].embedding_model.dimensions
-                else:
-                    existing_dimensions = None
-                
-                if existing_dimensions is not None and non_none_dimensions:
-                    if existing_dimensions not in non_none_dimensions:
-                        raise BadRequestException(
-                            f"Cannot add models with dimensions {non_none_dimensions[0]} to assistant "
-                            f"using models with dimensions {existing_dimensions}. Dimensions must match."
-                        )
-                        
-        except AttributeError:
-            # Fall back to ID-based validation for backwards compatibility (e.g., mocks in tests)
-            embedding_model_ids = [item.embedding_model.id for item in items]
-            
-            # Check if all IDs are the same
-            if len(set(embedding_model_ids)) > 1:
-                raise BadRequestException(
-                    f"All collections and websites must use the same embedding model. "
-                    f"Found different embedding model IDs: {set(embedding_model_ids)}"
-                )
-            
-            # If assistant already has collections/websites, validate ID compatibility
-            if self.embedding_model_id is not None:
-                for item in items:
-                    if item.embedding_model.id != self.embedding_model_id:
-                        raise BadRequestException(
-                            f"Cannot add embedding model with ID {item.embedding_model.id} to assistant "
-                            f"using embedding model with ID {self.embedding_model_id}. IDs must match."
-                        )
+        embedding_model_id_set = set([item.embedding_model.id for item in items])
+        if len(embedding_model_id_set) != 1 or (
+            self.embedding_model_id is not None
+            and embedding_model_id_set.pop() != self.embedding_model_id
+        ):
+            raise BadRequestException(
+                """All websites or groups or integration_knowledge_list
+                    must have the same embedding model"""
+            )
 
     def _set_collections_and_websites(
         self, collections: list["Collection"] | None, websites: list["Website"] | None
@@ -210,18 +142,6 @@ class Assistant(Entity):
 
         if self.collections:
             return self.collections[0].embedding_model.id
-    
-    @property
-    def embedding_model_name(self):
-        """Get the name of the embedding model used by this assistant"""
-        if not self.websites and not self.collections:
-            return None
-
-        if self.websites:
-            return self.websites[0].embedding_model.name
-
-        if self.collections:
-            return self.collections[0].embedding_model.name
 
     @property
     def attachments(self):
