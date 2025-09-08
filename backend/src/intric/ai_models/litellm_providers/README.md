@@ -20,7 +20,7 @@ For providers that are natively supported by LiteLLM (OpenAI, Azure, Claude, Mis
 
 ### How It Works
 
-1. Each AI model has a `family` field indicating the API type (e.g., `openai`, `azure`, `e5`)
+1. Each AI model has a `litellm_model_name` field that determines which provider to use
 2. Models with custom providers use a `litellm_model_name` with a provider prefix (e.g., `berget/model-name`)
 3. The registry detects the provider from the prefix and returns appropriate configuration
 4. The LiteLLM adapters use the provider to configure API calls
