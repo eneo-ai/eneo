@@ -1,6 +1,6 @@
 # Database Environment Configuration for Eneo
-
 # IMPORTANT: Change the password for production!
+# Database initialization for PostgreSQL container
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=
+POSTGRES_PASSWORD=changeme  # CHANGE THIS!
 POSTGRES_DB=eneo

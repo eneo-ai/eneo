@@ -55,6 +55,7 @@ sentry-sdk = {version = "2.8.0", extras = ["fastapi"]}
 mistralai = "^1.5.0"
 tavily-python = "^0.5.1"
 greenlet = "^3.2.2"
+litellm = "^1.76.1"
 
 [tool.poetry.scripts]
 start = "src.intric.server.main:start"

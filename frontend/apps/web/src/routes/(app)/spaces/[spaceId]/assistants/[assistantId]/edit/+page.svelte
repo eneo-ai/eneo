@@ -11,6 +11,7 @@
   import AssistantSettingsAttachments from "./AssistantSettingsAttachments.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import dayjs from "dayjs";
@@ -39,6 +40,28 @@
   });
 
   let cancelUploadsAndClearQueue: () => void;
+
+  // Behavior-specific change detection for models with model-specific parameters
+  $: hasBehaviorChanges = (() => {
+    if (!$currentChanges.diff.completion_model_kwargs) return false;
+    
+    // For reasoning models or LiteLLM models, only show behavior changes if behavior-relevant fields changed
+    const hasModelSpecificParams = $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name;
+    if (hasModelSpecificParams) {
+      const original = $resource.completion_model_kwargs || {};
+      const updated = $update.completion_model_kwargs || {};
+      
+      // Only check temperature and top_p for behavior changes
+      const behaviorFieldsChanged = 
+        original.temperature !== updated.temperature || 
+        original.top_p !== updated.top_p;
+      
+      return behaviorFieldsChanged;
+    }
+    
+    // For regular models, show changes if any kwargs changed
+    return true;
+  })();
 
   beforeNavigate((navigate) => {
     if (
@@ -236,7 +259,7 @@
         <Settings.Row
           title="Model behaviour"
           description="Select a preset for how this model should behave, or configure its parameters manually."
-          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+          hasChanges={hasBehaviorChanges}
           revertFn={() => {
             discardChanges("completion_model_kwargs");
           }}
@@ -244,10 +267,27 @@
         >
           <SelectBehaviourV2
             bind:kwArgs={$update.completion_model_kwargs}
+            selectedModel={$update.completion_model}
             isDisabled={!supportsTemperature($update.completion_model?.name)}
             {aria}
           ></SelectBehaviourV2>
         </Settings.Row>
+
+        {#if $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name}
+        <Settings.Row
+          title="Model settings"
+          description="Configure model-specific parameters for advanced control over the response."
+          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+          revertFn={() => {
+            discardChanges("completion_model_kwargs");
+          }}
+        >
+          <SelectModelSpecificSettings
+            bind:kwArgs={$update.completion_model_kwargs}
+            selectedModel={$update.completion_model}
+          ></SelectModelSpecificSettings>
+        </Settings.Row>
+        {/if}
       </Settings.Group>
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}

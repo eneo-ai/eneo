@@ -11,7 +11,7 @@
 [![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg)](#contributing)
 [![Contributors](https://img.shields.io/github/contributors/eneo-ai/eneo)](https://github.com/eneo-ai/eneo/graphs/contributors)
 
-[Getting Started](#-getting-started) • [Features](#-features) • [Documentation](#-documentation) • [Architecture](#️-architecture) • [Contributing](#-contributing)
+[🌐 Website](https://eneo.ai/) • [Getting Started](#-getting-started) • [Features](#-key-features) • [Documentation](#-documentation) • [Contributing](#-contributing)
 
 </div>
 
@@ -19,264 +19,151 @@
 
 ## 🏛️ What is Eneo?
 
-Eneo is an open-source AI platform specifically designed for Swedish public sector organizations to deploy and manage AI assistants while maintaining complete control over data, security, and algorithms. Originally developed by Sundsvall Municipality and Ånge Municipality, Eneo embodies the principle that **"Generative AI must not be a technology for the few, but a technology for everyone."**
+Eneo is an open-source AI platform designed for Swedish public sector organizations to deploy and manage AI assistants while maintaining complete control over data, security, and algorithms. 
 
-### Why Eneo?
+Originally developed by Sundsvall Municipality and Ånge Municipality, Eneo embodies the principle that **"Generative AI must not be a technology for the few, but a technology for everyone."**
 
-- **🏛️ Public Sector First**: Built specifically for municipal and government organizations with their unique needs and constraints
-- **🔒 Data Sovereignty**: Complete control over your data and AI infrastructure - no data leaves your environment
-- **🌐 Model Agnostic**: Support for multiple AI providers (OpenAI, Anthropic, Azure, local models) without vendor lock-in
-- **🤝 Democratic AI**: Open governance through user association of public sector organizations
-- **📋 Compliance Ready**: Built-in support for GDPR and EU AI Act with audit trails and security classifications
-- **🔓 Fully Open Source**: AGPL v3 licensed for maximum transparency and community ownership
+### Why Choose Eneo?
+
+- **🔒 Data Sovereignty** - Your data never leaves your environment
+- **🤝 Model Agnostic** - Use OpenAI, Anthropic, Azure, or local models
+- **🏛️ Public Sector Focus** - Built for municipal and government needs
+- **📋 Compliance Ready** - GDPR and EU AI Act support built-in
+- **🔓 True Open Source** - AGPL v3 licensed with no vendor lock-in
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-### 🤖 AI Assistant Management
-- Create and customize AI assistants for specific organizational needs
-- Support for multiple AI providers (OpenAI, Anthropic, Azure, local models)
-- System prompts and behavior customization
-- Assistant-specific API access for integrations
-
-### 🏢 Collaborative Spaces
-- **Shared Workspaces**: Team collaboration within organizations
-- **Role-based Access**: Admin, Editor, Viewer roles with granular permissions
-- **Cross-organizational Sharing**: (**TBA** - planned feature)
-- **Production Management**: Mark assistants as published for broader visibility
-
-### 📚 Knowledge Management
-- **Document Processing**: PDF, Word, PowerPoint, Excel (CSV) etc with intelligent chunking
-- **Web Crawling**: Automated content extraction from websites (Scrapy library)
-- **Vector Search**: Semantic search using PostgreSQL with pgvector
-- **Real-time Processing**: Background task system for file processing
-
-### ⚡ Real-time Capabilities
-- **Streaming Chat**: Server-Sent Events for real-time AI responses
-- **WebSocket Updates**: Live status updates for background tasks
-- **Background Processing**: Async document processing and web crawling with the worker service
-
-### 🌍 Multi-language Support
-- Swedish (base locale) and English interface with type-safe translations
-- Seamless language switching without URL changes - language preference stored in cookies
-- Live language switching without page reload
-- Cookie-based locale persistence
+- **AI Assistant Management** - Create and customize assistants for specific organizational needs
+- **Collaborative Spaces** - Team workspaces with role-based access control
+- **Knowledge Management** - Process documents, crawl websites, semantic search
+- **Real-time Chat** - Streaming responses with background task processing
+- **Multi-language** - Swedish and English interface with seamless switching
+- **API First** - Full API documentation and type-safe integration
 
 ---
 
 ## 🚀 Getting Started
 
-Choose your path based on your needs:
+### For Production Deployment
 
-### 🚀 **For Production Deployment**
-
-Ready to deploy Eneo for your organization? Our comprehensive production guide provides a step-by-step walkthrough for a secure and scalable setup.
-
-📖 **[View the Full Production Deployment Guide](docs/DEPLOYMENT.md)**
-
-### 🔧 **For Developers**
-**Want to contribute or customize Eneo?**
-
-**🎯 Choose Your Development Path:**
-
-**🐳 DevContainer (Recommended for beginners)**
-- ✅ Pre-configured environment with all dependencies
-- ✅ Consistent across all machines
-- 🔧 **Prerequisites:** Docker Desktop + VS Code + Dev Containers extension
+Deploy Eneo in your organization with Docker Compose:
 
 ```bash
-git clone https://github.com/eneo-ai/eneo
+# Clone and navigate to deployment files
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo/docs/deployment/
+
+# Configure and deploy
+cp env_backend.template env_backend.env
+cp env_frontend.template env_frontend.env
+# ... configure your environment ...
+docker compose up -d
+```
+
+📖 **[Full Production Guide →](docs/DEPLOYMENT.md)**
+
+### For Developers
+
+Set up your development environment with VS Code DevContainer:
+
+```bash
+git clone https://github.com/eneo-ai/eneo.git
 cd eneo && code .
 # Click "Reopen in Container" when prompted
-# If no prompt: Ctrl+Shift+P → "Dev Containers: Reopen in Container"
 ```
 
-**💻 Manual Setup (For experienced developers)**
-- ⚡ Full control over your environment  
-- 🔧 Requires: Python ≥3.10, Docker, Node ≥v20, pnpm 8.9.0
-- 📺 Need 3 terminals for full functionality
-
-```bash
-git clone https://github.com/eneo-ai/eneo
-cd eneo
-# Setup backend, frontend, and worker (see detailed guide below)
-```
-
-**🌐 Access Your Development Environment:**
 - **Platform**: http://localhost:3000
-- **API Documentation**: http://localhost:8123/docs  
+- **API Docs**: http://localhost:8123/docs
 - **Default Login**: `user@example.com` / `Password1!`
 
-> ⚠️ **Note:** File uploads and web scraping require the worker service
-
-📖 **[Complete Development Guide](docs/INSTALLATION.md)** - Detailed setup instructions  
-🤝 **[Contributing Guide](docs/CONTRIBUTING.md)** - Coding standards and workflow
+📖 **[Development Setup Guide →](docs/INSTALLATION.md)**
 
 ---
 
-### 🖼️ Platform Overview
+## 🖼️ Platform Preview
 
 <div align="center">
-<img src="docs/assets/eneo_startpage.png" alt="Eneo Personal Assistant Interface" width="800"/>
-<p><em>Personal AI Assistant with customizable models and real-time chat interface</em></p>
+<img src="docs/assets/eneo_startpage.png" alt="Eneo Personal Assistant Interface" width="700"/>
+<p><em>Personal AI Assistant Interface</em></p>
 </div>
 
 <div align="center">
-<img src="docs/assets/eneo_space.png" alt="Eneo Collaborative Spaces" width="800"/>
-<p><em>Collaborative spaces for team-based AI development and deployment</em></p>
+<img src="docs/assets/eneo_space.png" alt="Eneo Collaborative Spaces" width="700"/>
+<p><em>Team Collaboration Spaces</em></p>
 </div>
-
-### ⚡ **Quick Production Deployment Details**
-
-**Prerequisites:** Docker, Docker Compose, AI provider API key
-
-**Security Requirements:**
-- Generate unique JWT_SECRET: `openssl rand -hex 32`
-- Replace all default passwords immediately
-- Update `your-domain.com` in configuration files
-
-**Access Points:**
-- **Platform**: https://your-domain.com
-- **API Documentation**: https://your-domain.com/docs  
-- **Default Login**: `user@example.com` / `Password1!`
-
-> 🔐 **Important**: Change default credentials immediately after first login!
 
 ---
 
 ## 🏗️ Architecture
 
-Eneo follows a modern microservices architecture with clean separation of concerns:
+Modern microservices architecture with clean separation of concerns:
+
+- **Frontend**: SvelteKit, TypeScript, Tailwind CSS
+- **Backend**: FastAPI (Python 3.11+), SQLAlchemy
+- **Database**: PostgreSQL with pgvector
+- **Cache/Queue**: Redis with ARQ workers
+- **Deployment**: Docker Compose with Traefik
 
 <details>
-<summary>🔍 Click to view architecture diagram</summary>
-<img src="docs/assets/eneo_architecture.png" alt="Eneo Architecture Diagram" width=800/>
-
+<summary>View Architecture Diagram</summary>
+<img src="docs/assets/eneo_architecture.png" alt="Eneo Architecture" width="700"/>
 </details>
-
-### Technology Stack
-
-- **Frontend**: SvelteKit with TypeScript, Tailwind CSS
-- **Backend**: FastAPI (Python 3.11+) with SQLAlchemy
-- **Database**: PostgreSQL 13 with pgvector extension
-- **Cache/Queue**: Redis with ARQ task processing
-- **Deployment**: Docker Compose with Traefik reverse proxy
-- **AI Integration**: Multi-provider support (OpenAI, Anthropic, Azure, etc.)
 
 ---
 
 ## 📚 Documentation
 
-| Document | Purpose |
-|----------|---------|
-| **[Installation Guide](docs/INSTALLATION.md)** | Development environment setup |
-| **[Deployment Guide](docs/DEPLOYMENT.md)** | Production deployment |
-| **[Architecture Guide](docs/ARCHITECTURE.md)** | Technical architecture overview |
-| **[Contributing Guide](docs/CONTRIBUTING.md)** | Development workflow |
-| **[Troubleshooting](docs/TROUBLESHOOTING.md)** | Common issues and solutions |
-| **[Security Guide](docs/SECURITY.md)** | Security practices |
-
-### API Documentation
-- **Development**: http://localhost:8123/docs
-- **Production**: https://your-domain.com/docs
-- **OpenAPI Schema**: Auto-generated from FastAPI
-- **Type Safety**: Full TypeScript types for frontend integration
+| Guide | Description |
+|-------|-------------|
+| **[Installation](docs/INSTALLATION.md)** | Development environment setup |
+| **[Deployment](docs/DEPLOYMENT.md)** | Production deployment guide |
+| **[Architecture](docs/ARCHITECTURE.md)** | Technical architecture details |
+| **[Contributing](docs/CONTRIBUTING.md)** | Contribution guidelines |
+| **[Security](docs/SECURITY.md)** | Security practices |
 
 ---
 
-## 🔧 Contributing
+## 🤝 Contributing
 
-Eneo is developed by the Swedish public sector for the global community. Contributions are welcome from municipalities, organizations, and individuals who share our vision of democratic AI.
+We welcome contributions from municipalities, organizations, and developers who share our vision of democratic AI.
 
-> 📋 **Important**: Before contributing, review our [Contribution Standards](docs/CONTRIBUTING.md#-contribution-standards-and-requirements) to ensure your PR aligns with platform goals.
+### Quick Start
 
-### Quick Contribution Guide
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
-1. **Fork** the repository
-2. **Create** a feature branch
-3. **Follow** coding standards (see [Contributing Guide](docs/CONTRIBUTING.md))
-4. **Write tests** for new functionality
-5. **Submit** a pull request
-
-### Development Standards
-- **Python**: PEP 8, type hints, comprehensive testing
-- **TypeScript**: ESLint configuration, strict type checking
-- **Architecture**: Domain-driven design patterns
-- **Testing**: Unit and integration test coverage
-
-For detailed guidelines, see our [Contributing Guide](docs/CONTRIBUTING.md).
+See our **[Contributing Guide](docs/CONTRIBUTING.md)** for detailed guidelines.
 
 ---
 
-## 🤝 Community & Governance
+## 🏛️ Community & Governance
 
 ### Democratic Control
-Eneo is governed by a user association of public sector organizations, ensuring that development priorities align with public interest rather than commercial goals.
 
-### User Association
-- **Digital Collaboration**: Join our collaboration space for municipalities
-- **Knowledge Sharing**: Share experiences and best practices
-- **Collective Development**: Influence platform direction through democratic participation
+Eneo is governed by a user association of public sector organizations, ensuring development priorities align with public interest rather than commercial goals.
 
-**Contact**: `digitalisering@sundsvall.se` for collaboration space access (public sector organizations only)
+### Get Involved
 
-### Open Source Commitment
-- **License**: AGPL v3 ensures all improvements remain open
-- **No Vendor Lock-in**: Use any AI provider or deployment method
-- **Community Driven**: Decisions made collectively by user association
-
----
-
-## 📈 Use Cases
-
-### Municipal Applications
-- **Citizen Services**: AI assistants for municipal websites
-- **Internal Operations**: Administrative support and automation
-- **Cross-municipal Collaboration**: Share AI applications between municipalities
-- **Compliance Management**: Built-in GDPR and AI Act compliance tools
-
-### Enterprise Applications
-- **Knowledge Management**: Organizational knowledge bases with AI search
-- **Customer Support**: AI-powered assistance with internal data
-- **Document Processing**: Automated analysis and summarization
-- **Integration Platform**: Connect with existing enterprise systems
-
----
-
-## 🔒 Security & Compliance
-
-- **Data Protection**: GDPR-compliant by design
-- **EU AI Act Ready**: Built-in compliance features
-- **Audit Trails**: Comprehensive logging and tracking
-- **Security Classifications**: Data sensitivity handling
-- **Access Control**: Role-based permissions and multi-tenancy
-
----
-
-## 🆘 Support & Help
-
-**Get Help:**
-- **🐛 Bug Reports**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
-- **💬 Community Discussion**: [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)  
-- **📖 Documentation**: [docs/](docs/) folder for comprehensive guides
-- **📧 Municipal Collaboration**: digitalisering@sundsvall.se (public sector organizations)
-
-**Response Times:**
-- **Community**: Best effort response via GitHub
-- **Municipal Partners**: Priority support for public sector organizations
+- **Public Sector Organizations**: Contact `digitalisering@sundsvall.se` for collaboration
+- **Developers**: Join our [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
+- **Bug Reports**: Submit via [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+- **Website**: https://eneo.ai/
+- **Forum**: https://forum.eneo.ai/ (requires government or municipality email)
+- **Chat**: https://chat.eneo.ai/ (requires government or municipality email)
 
 ---
 
 ## 🙏 Acknowledgments
 
-Eneo builds on the success of [Open ePlatform](https://www.openeplatform.org/), another Swedish municipal open-source project used by 200+ municipalities since 2010.
+**Developed by**: Sundsvall Municipality & Ånge Municipality, Sweden 🇸🇪
 
-**Original Development**: Sundsvall Municipality & Ånge Municipality, Sweden 🇸🇪
+**Inspired by**: [Open ePlatform](https://www.openeplatform.org/) - Successfully used by 200+ Swedish municipalities since 2010
 
-**Inspiration**: Learning from Open ePlatform's success in creating sustainable municipal collaboration
-
-**Acknowledgment**: We extend our thanks to InooLabs AB (Now Intric AB) for their foundational contributions to Intric (now Eneo).
+**Special Thanks**: InooLabs AB (now Intric AB) for foundational contributions
 
 ---
 
@@ -286,18 +173,10 @@ Eneo builds on the success of [Open ePlatform](https://www.openeplatform.org/), 
 Eneo - Democratic AI Platform for the Public Sector
 Copyright (C) 2023-2025 Sundsvall Municipality & Ånge Municipality
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
+Licensed under GNU Affero General Public License v3.0
 ```
 
-See [LICENSE](LICENSE) for the complete AGPL v3 license text.
+See [LICENSE](LICENSE) for full license text.
 
 ---
 
@@ -307,13 +186,15 @@ See [LICENSE](LICENSE) for the complete AGPL v3 license text.
 
 *Empowering democratic access to AI technology*
 
-[🌐 Project Website](#) • [📧 Contact](mailto:digitalisering@sundsvall.se) • [💬 Community](https://github.com/eneo-ai/eneo/issues)
+[🌐 Website](https://eneo.ai/) • [🫱🏻‍🫲🏽 Forum](https://forum.eneo.ai/) • [💬 Chat](https://chat.eneo.ai/) • [📧 Contact](mailto:digitalisering@sundsvall.se) • [💬 Discussions](https://github.com/eneo-ai/eneo/discussions) • [🐛 Issues](https://github.com/eneo-ai/eneo/issues)
+<br/>
+<sub>Forum and Chat require a government or municipality email.</sub>
 
 </div>
 
 ---
 
-## **🚀 Development Branch**
+## 🚀 Development Branch
 
-**This branch contains the latest development features and CI/CD enhancements.**  
-**Used for testing new features before merging to production.**
+This branch contains the latest development features and CI/CD enhancements.  
+Used for testing new features before merging to production.

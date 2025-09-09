@@ -6,6 +6,9 @@ from intric.completion_models.infrastructure.adapters.azure_model_adapter import
 from intric.completion_models.infrastructure.adapters.claude_model_adapter import (
     ClaudeModelAdapter,
 )
+from intric.completion_models.infrastructure.adapters.litellm_model_adapter import (
+    LiteLLMModelAdapter,
+)
 from intric.completion_models.infrastructure.adapters.mistral_model_adapter import (
     MistralModelAdapter,
 )

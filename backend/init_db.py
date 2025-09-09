@@ -5,6 +5,7 @@ import bcrypt
 import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
 
 # Configuration
@@ -16,6 +17,12 @@ class Settings(BaseSettings):
     postgres_password: str
     postgres_port: int
     postgres_db: str
+
+    default_tenant_name: Optional[str] = None
+    default_tenant_quota_limit: Optional[int] = None
+    default_user_name: Optional[str] = None
+    default_user_email: Optional[str] = None
+    default_user_password: Optional[str] = None
 
 settings = Settings()
 
@@ -52,6 +59,7 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             cur.execute(add_tenant_query, (tenant_name, quota_limit, "active"))
             tenant_id = cur.fetchone()[0]
         else:
+            print(f"Tenant {tenant_name} already exists. Using existing tenant.")
             tenant_id = tenant[0]
 
         # Check if user already exists
@@ -70,6 +78,7 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             )
             user_id = cur.fetchone()[0]
         else:
+            print(f"User {user_email} already exists. Using existing user.")
             user_id = user[0]
 
         # Check if "Owner" role already exists
@@ -153,7 +162,7 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
 
         # Enable the completion model for the tenant
         check_model_setting_query = sql.SQL(
-            """SELECT 1 FROM completion_model_settings 
+            """SELECT 1 FROM completion_model_settings
             WHERE completion_model_id = %s AND tenant_id = %s"""
         )
         cur.execute(check_model_setting_query, (model_id, tenant_id))
@@ -161,8 +170,8 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
 
         if model_setting is None:
             enable_model_query = sql.SQL(
-                """INSERT INTO completion_model_settings 
-                (completion_model_id, tenant_id, is_org_enabled, is_org_default) 
+                """INSERT INTO completion_model_settings
+                (completion_model_id, tenant_id, is_org_enabled, is_org_default)
                 VALUES (%s, %s, %s, %s)"""
             )
             cur.execute(enable_model_query, (model_id, tenant_id, True, True))
@@ -189,15 +198,21 @@ if __name__ == "__main__":
         password=settings.postgres_password,
     )
 
-    # Add tenant and user
-    add_tenant_user(
-        conn,
-        "ExampleTenant",
-        "10737418240",
-        "ExampleUser",
-        "user@example.com",
-        "Password1!",
-    )
+    if (settings.default_tenant_name is None or
+        settings.default_tenant_quota_limit is None or
+        settings.default_user_name is None or
+        settings.default_user_email is None or
+        settings.default_user_password is None):
+        print("Note! One or more environment variables for default tenant and user are not set. Skipping creation of default tenant and user.")
+    else:
+        add_tenant_user(
+            conn,
+            settings.default_tenant_name,
+            settings.default_tenant_quota_limit,
+            settings.default_user_name,
+            settings.default_user_email,
+            settings.default_user_password,
+        )
 
     # Close the connection
     conn.close()

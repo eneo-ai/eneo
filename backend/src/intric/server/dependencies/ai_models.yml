@@ -1,5 +1,5 @@
 completion_models:
-  
+
   - name: 'gpt-4-turbo'
     nickname: 'GPT-4'
     family: 'openai'
@@ -137,7 +137,7 @@ completion_models:
     org: Anthropic
     vision: true
     reasoning: false
-  
+
   - name: 'claude-3-haiku-20240307'
     nickname: 'Claude 3 Haiku'
     family: 'claude'
@@ -226,6 +226,48 @@ completion_models:
     vision: false
     reasoning: true
 
+  - name: 'gpt-5-azure'
+    nickname: 'GPT-5 (Azure)'
+    family: 'azure'
+    token_limit: 400000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5'
+    litellm_model_name: 'azure/gpt-5'
+    description: Next-generation GPT-5 model with advanced reasoning and multimodal capabilities via LiteLLM.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
+  - name: 'gpt-5-mini-azure'
+    nickname: 'GPT-5 mini (Azure)'
+    family: 'azure'
+    token_limit: 400000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-mini'
+    litellm_model_name: 'azure/gpt-5-mini'
+    description: Compact version of GPT-5 model optimized for faster processing while maintaining advanced reasoning capabilities via Azure.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
+  - name: 'gpt-5-nano-azure'
+    nickname: 'GPT-5 nano (Azure)'
+    family: 'azure'
+    token_limit: 400000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-nano'
+    litellm_model_name: 'azure/gpt-5-nano'
+    description: Ultra-compact variant of GPT-5 optimized for maximum efficiency while maintaining reasoning capabilities via Azure.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
   - name: 'Meta-Llama-3_3-70B-Instruct'
     nickname: 'Llama 3.3'
     family: 'ovhcloud'
@@ -241,7 +283,7 @@ completion_models:
     open_source: true
     nr_billion_parameters: 70
     hf_link: 'https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct'
-  
+
   - name: 'mistral-large-latest'
     nickname: 'Mistral Large'
     family: 'mistral'
@@ -272,7 +314,7 @@ completion_models:
 
 
 embedding_models:
-  
+
   - name: 'text-embedding-3-small'
     family: 'openai'
     open_source: false
@@ -303,4 +345,15 @@ embedding_models:
     hosting: 'eu'
     hf_link: 'https://huggingface.co/intfloat/multilingual-e5-large'
     description: Microsoft's open-source multilingual embedding model, matching the performance of OpenAI's embedding models while supporting multiple languages.
+    org: Microsoft
+  - name: 'text-embedding-3-large-azure'
+    family: 'openai'
+    open_source: false
+    dimensions: 3072
+    max_input: 8191
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'swe'
+    litellm_model_name: 'azure/text-embedding-3-large'
+    description: Microsoft Azure's hosted version of OpenAI's text-embedding-3-large model, offering high-dimensional embeddings via Azure.
     org: Microsoft
