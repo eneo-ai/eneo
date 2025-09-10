@@ -149,7 +149,6 @@ class AdminService:
             raise BadRequestException("Cannot deactivate your own admin account")
 
         # Update user state to INACTIVE
-        user_update = UserUpdate(id=user_in_db.id, state=UserState.INACTIVE)
         result = await self.user_service.update_user(user_in_db.id, UserUpdatePublic(state=UserState.INACTIVE))
         
         logger.info(f"Successfully deactivated user {username} in tenant {self.user.tenant_id}")
@@ -172,7 +171,6 @@ class AdminService:
             raise BadRequestException("You do not have access to manage users on another tenant")
 
         # Reactivate user: set to ACTIVE and clear deleted_at if present
-        update_data = {"state": UserState.ACTIVE}
         if user_in_db.deleted_at is not None:
             # Clear deletion timestamp when reactivating from DELETED state
             logger.info(f"Clearing deletion timestamp for user {username} during reactivation")
