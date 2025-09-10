@@ -2,6 +2,7 @@ from typing import Optional
 
 from .base_provider import BaseLiteLLMProvider
 from .berget_provider import BergetProvider
+from .infinity_provider import InfinityProvider
 
 
 class LiteLLMProviderRegistry:
@@ -30,6 +31,10 @@ class LiteLLMProviderRegistry:
         # Check for Berget models by litellm_model_name prefix
         if litellm_model_name and litellm_model_name.startswith("berget/"):
             return BergetProvider()
+        
+        # Check for Infinity models by litellm_model_name prefix
+        if litellm_model_name and litellm_model_name.startswith("infinity/"):
+            return InfinityProvider()
         
         # Default provider for standard LiteLLM-supported providers
         return cls._default_provider

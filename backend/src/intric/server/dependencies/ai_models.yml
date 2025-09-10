@@ -367,3 +367,13 @@ embedding_models:
     hosting: 'swe'
     description: Microsoft's E5 multilingual embedding model hosted by Berget.ai in Sweden for EU compliance.
     org: Berget
+  - name: 'multilingual-e5-large-local'
+    family: 'e5'
+    litellm_model_name: 'infinity/intfloat/multilingual-e5-large-instruct'
+    open_source: true
+    max_input: 8191
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'eu'
+    description: Microsoft's E5 multilingual embedding model hosted by Berget.ai in Sweden for EU compliance.
+    org: Berget
