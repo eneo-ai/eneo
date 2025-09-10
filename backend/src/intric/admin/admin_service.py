@@ -11,7 +11,6 @@ from intric.users.user import (
     UserAddSuperAdmin,
     UserInDB,
     UserState,
-    UserUpdate,
     UserUpdatePublic,
 )
 from intric.users.user_repo import UsersRepository
