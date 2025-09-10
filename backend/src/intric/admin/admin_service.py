@@ -1,5 +1,6 @@
 from intric.admin.admin_models import PrivacyPolicy
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException, UniqueUserException
+from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import (
@@ -10,6 +11,8 @@ from intric.users.user import (
 )
 from intric.users.user_repo import UsersRepository
 from intric.users.user_service import UserService
+
+logger = get_logger(__name__)
 
 
 class AdminService:
@@ -27,36 +30,93 @@ class AdminService:
 
     @validate_permissions(Permission.ADMIN)
     async def get_tenant_users(self):
-        return await self.user_repo.get_all_users(self.user.tenant_id)
+        logger.info(f"Admin user {self.user.username} listing all users in tenant {self.user.tenant_id}")
+        
+        users = await self.user_repo.get_all_users(self.user.tenant_id)
+        
+        logger.info(f"Successfully retrieved {len(users)} users for tenant {self.user.tenant_id}")
+        return users
 
     @validate_permissions(Permission.ADMIN)
     async def register_tenant_user(self, user: UserAddAdmin):
+        logger.info(f"Admin user {self.user.username} creating user {user.username} in tenant {self.user.tenant_id}")
+        
+        # Check for duplicate username in tenant (including soft-deleted users)
+        existing_user_by_username = await self.user_repo.get_user_by_username(user.username)
+        if existing_user_by_username and existing_user_by_username.tenant_id == self.user.tenant_id:
+            logger.warning(f"Username {user.username} already exists in tenant {self.user.tenant_id}")
+            raise UniqueUserException(f"Username '{user.username}' is already taken")
+        
+        # Check for duplicate email in tenant (including soft-deleted users)
+        existing_user_by_email = await self.user_repo.get_user_by_email(user.email)
+        if existing_user_by_email and existing_user_by_email.tenant_id == self.user.tenant_id:
+            logger.warning(f"Email {user.email} already exists in tenant {self.user.tenant_id}")
+            raise UniqueUserException(f"Email '{user.email}' is already registered")
+        
         user_with_tenant = UserAddSuperAdmin(
             **user.model_dump(), tenant_id=self.user.tenant_id
         )
 
-        return await self.user_service.register(user_with_tenant)
+        result = await self.user_service.register(user_with_tenant)
+        logger.info(f"Successfully created user {user.username} in tenant {self.user.tenant_id}")
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def update_tenant_user(self, username: str, user: UserUpdatePublic):
+        logger.info(f"Admin user {self.user.username} updating user {username} in tenant {self.user.tenant_id}")
+        
         user_in_db = await self.user_repo.get_user_by_username(username)
 
-        if user_in_db is None or user_in_db.tenant_id != self.user.tenant_id:
-            raise NotFoundException()
+        if user_in_db is None:
+            logger.warning(f"User {username} not found")
+            raise NotFoundException(f"User '{username}' not found in your tenant")
+        
+        if user_in_db.tenant_id != self.user.tenant_id:
+            logger.warning(f"Cross-tenant access attempt: admin {self.user.username} tried to access user {username} in tenant {user_in_db.tenant_id}")
+            raise BadRequestException("You do not have access to remove or add users on another tenant")
+        
+        # Check if user is soft-deleted
+        if user_in_db.deleted_at is not None:
+            logger.warning(f"Attempt to update soft-deleted user {username}")
+            raise NotFoundException(f"User '{username}' not found in your tenant")
+        
+        # Check for duplicate email if email is being updated
+        if user.email is not None and user.email != user_in_db.email:
+            existing_user_by_email = await self.user_repo.get_user_by_email(user.email)
+            if existing_user_by_email and existing_user_by_email.tenant_id == self.user.tenant_id and existing_user_by_email.id != user_in_db.id:
+                logger.warning(f"Email {user.email} already exists in tenant {self.user.tenant_id}")
+                raise UniqueUserException(f"Email '{user.email}' is already registered")
 
-        return await self.user_service.update_user(user_in_db.id, user)
+        result = await self.user_service.update_user(user_in_db.id, user)
+        logger.info(f"Successfully updated user {username} in tenant {self.user.tenant_id}")
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def delete_tenant_user(self, username: str):
+        logger.info(f"Admin user {self.user.username} attempting to delete user {username} in tenant {self.user.tenant_id}")
+        
         user_in_db = await self.user_repo.get_user_by_username(username)
 
-        if user_in_db is None or user_in_db.tenant_id != self.user.tenant_id:
-            raise NotFoundException()
+        if user_in_db is None:
+            logger.warning(f"User {username} not found")
+            raise NotFoundException(f"User '{username}' not found in your tenant")
+        
+        if user_in_db.tenant_id != self.user.tenant_id:
+            logger.warning(f"Cross-tenant deletion attempt: admin {self.user.username} tried to delete user {username} in tenant {user_in_db.tenant_id}")
+            raise BadRequestException("You do not have access to remove or add users on another tenant")
 
         if user_in_db.id == self.user.id:
-            raise BadRequestException("You can not delete yourself.")
+            logger.warning(f"Self-deletion attempt: admin {self.user.username} tried to delete themselves")
+            raise BadRequestException("Cannot delete your own user account")
+        
+        # Check if user is already soft-deleted
+        if user_in_db.deleted_at is not None:
+            logger.warning(f"Attempt to delete already soft-deleted user {username}")
+            raise NotFoundException(f"User '{username}' not found in your tenant")
 
-        return await self.user_service.delete_user(user_in_db.id)
+        result = await self.user_service.delete_user(user_in_db.id)
+        logger.info(f"Successfully soft-deleted user {username} in tenant {self.user.tenant_id}")
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def update_privacy_policy(self, privacy_policy: PrivacyPolicy):
