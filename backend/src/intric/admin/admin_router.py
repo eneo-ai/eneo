@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from intric.admin.admin_models import PrivacyPolicy
+from intric.admin.admin_models import PrivacyPolicy, UserDeletedListItem, UserStateListItem
 from intric.main.container.container import Container
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.server import protocol
@@ -170,6 +170,176 @@ async def delete_user(username: str, container: Container = Depends(get_containe
     success = await service.delete_tenant_user(username)
 
     return DeleteResponse(success=success)
+
+
+@router.post(
+    "/users/{username}/deactivate",
+    response_model=UserAdminView,
+    summary="Deactivate user (temporary leave)",
+    description="Sets user state to INACTIVE for temporary unavailability such as sick leave, vacation, or parental leave. User cannot login but account data is fully preserved. This is reversible through reactivation.",
+    responses={
+        200: {"description": "User successfully deactivated"},
+        400: {"description": "Cannot deactivate yourself or cross-tenant access attempt"},
+        401: {"description": "Authentication required (invalid or missing API key)"},
+        403: {"description": "Admin permissions required"},
+        404: {"description": "User not found in your tenant"},
+    }
+)
+async def deactivate_user(
+    username: str, 
+    container: Container = Depends(get_container(with_user=True))
+):
+    """
+    Deactivate a user account for temporary leave.
+    
+    Path parameter:
+    - username: The username of the user to deactivate
+    
+    This operation:
+    - Sets user state to INACTIVE
+    - Prevents the user from logging in
+    - Preserves all account data and settings
+    - Records timestamp for external tracking
+    - Is fully reversible through reactivation
+    
+    Use cases:
+    - Employee sick leave
+    - Extended vacation or sabbatical
+    - Parental leave
+    - Training or educational leave
+    - Temporary disciplinary suspension
+    
+    Restrictions:
+    - You cannot deactivate your own admin account
+    - User must exist in your tenant
+    - User must not be from another tenant
+    """
+    service = container.admin_service()
+    user = await service.deactivate_tenant_user(username)
+    
+    return UserAdminView(**user.model_dump())
+
+
+@router.post(
+    "/users/{username}/reactivate",
+    response_model=UserAdminView,
+    summary="Reactivate user (return to active)",
+    description="Sets user state to ACTIVE from any previous state (INACTIVE or DELETED). Restores full system access and clears deletion timestamps if present. Use for employees returning from leave or rare rehire cases.",
+    responses={
+        200: {"description": "User successfully reactivated"},
+        400: {"description": "Cross-tenant access attempt"},
+        401: {"description": "Authentication required (invalid or missing API key)"},
+        403: {"description": "Admin permissions required"},
+        404: {"description": "User not found in your tenant"},
+    }
+)
+async def reactivate_user(
+    username: str,
+    container: Container = Depends(get_container(with_user=True))
+):
+    """
+    Reactivate a user account to restore full access.
+    
+    Path parameter:
+    - username: The username of the user to reactivate
+    
+    This operation:
+    - Sets user state to ACTIVE
+    - Restores login capability immediately
+    - Clears deletion timestamp if user was DELETED
+    - Records timestamp for external tracking
+    - Works from any previous state (INACTIVE or DELETED)
+    
+    Use cases:
+    - Employee returning from sick leave
+    - End of vacation or sabbatical
+    - Return from parental leave
+    - End of training period
+    - Rare rehire of previously departed employee
+    
+    Restrictions:
+    - User must exist in your tenant
+    - User must not be from another tenant
+    """
+    service = container.admin_service()
+    user = await service.reactivate_tenant_user(username)
+    
+    return UserAdminView(**user.model_dump())
+
+
+@router.get(
+    "/users/inactive",
+    response_model=list[UserStateListItem],
+    summary="List inactive users",
+    description="Returns all users in INACTIVE state within your tenant. These are employees on temporary leave who cannot login but are still employed. Use for tracking who is temporarily unavailable.",
+    responses={
+        200: {"description": "List of inactive users successfully retrieved"},
+        401: {"description": "Authentication required (invalid or missing API key)"},
+        403: {"description": "Admin permissions required"},
+    }
+)
+async def get_inactive_users(container: Container = Depends(get_container(with_user=True))):
+    """
+    Get all users currently in INACTIVE state.
+    
+    This endpoint returns employees who are:
+    - On sick leave
+    - Taking vacation or sabbatical
+    - On parental leave
+    - In training or education programs
+    - Under temporary disciplinary suspension
+    
+    Each user entry includes:
+    - Username and email for identification
+    - Current state (always 'inactive' for this list)
+    - Timestamp when they were deactivated
+    
+    Use this for:
+    - Tracking who is temporarily unavailable
+    - Workforce planning and capacity management
+    - Leave duration tracking (via external systems)
+    """
+    service = container.admin_service()
+    return await service.get_inactive_tenant_users()
+
+
+@router.get(
+    "/users/deleted",
+    response_model=list[UserDeletedListItem],
+    summary="List deleted users", 
+    description="Returns all users in DELETED state within your tenant. These are employees who have left the organization and cannot login. Records are preserved for audit purposes and potential cleanup by external systems.",
+    responses={
+        200: {"description": "List of deleted users successfully retrieved"},
+        401: {"description": "Authentication required (invalid or missing API key)"},
+        403: {"description": "Admin permissions required"},
+    }
+)
+async def get_deleted_users(container: Container = Depends(get_container(with_user=True))):
+    """
+    Get all users currently in DELETED state.
+    
+    This endpoint returns employees who have:
+    - Quit or resigned
+    - Been terminated or fired
+    - Retired from the organization
+    - Transferred to different systems/departments
+    
+    Each user entry includes:
+    - Username and email for identification
+    - Current state (always 'deleted' for this list)
+    - Timestamp when they were deleted (for compliance tracking)
+    
+    Use this for:
+    - Tracking departed employees
+    - Compliance monitoring (90-day rules, GDPR)
+    - Audit trail maintenance
+    - Planning permanent data cleanup
+    
+    Note: External systems handle business logic for when to
+    permanently delete these records based on their own policies.
+    """
+    service = container.admin_service()
+    return await service.get_deleted_tenant_users()
 
 
 @router.post("/privacy-policy/", response_model=TenantPublic)
