@@ -22,8 +22,6 @@ RUN poetry config virtualenvs.create false \
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-# Ensure Poetry never tries to create virtualenvs
-ENV POETRY_VIRTUALENVS_CREATE=false
 
 # Handle tiktoken to be able to run in disconnected mode
 ENV TIKTOKEN_CACHE_DIR=/tiktoken
