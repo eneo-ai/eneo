@@ -232,3 +232,25 @@ class AdminService:
         
         logger.info(f"Successfully retrieved {len(deleted_list)} deleted users for tenant {self.user.tenant_id}")
         return deleted_list
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_tenant_user(self, username: str):
+        """Retrieve single user details by username within tenant"""
+        logger.info(f"Admin user {self.user.username} retrieving user {username} in tenant {self.user.tenant_id}")
+        
+        user_in_db = await self.user_repo.get_user_by_username(username)
+
+        if user_in_db is None:
+            logger.warning(f"User {username} not found")
+            raise NotFoundException(f"User '{username}' not found in your tenant")
+        
+        if user_in_db.tenant_id != self.user.tenant_id:
+            logger.warning(f"Cross-tenant access attempt: admin {self.user.username} tried to access user {username} in tenant {user_in_db.tenant_id}")
+            raise BadRequestException("You do not have access to remove or add users on another tenant")
+        
+        if user_in_db.deleted_at is not None:
+            logger.warning(f"Attempt to access soft-deleted user {username}")
+            raise NotFoundException(f"User '{username}' not found in your tenant")
+
+        logger.info(f"Successfully retrieved user {username} in tenant {self.user.tenant_id}")
+        return user_in_db
