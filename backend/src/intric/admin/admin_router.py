@@ -83,6 +83,58 @@ async def register_user(
     return user_admin_view
 
 
+@router.get(
+    "/users/{username}/", 
+    response_model=UserAdminView,
+    summary="Get user details",
+    description="Retrieves a single user's complete details using their username. User must exist in your tenant and not be soft-deleted. Returns the same detailed information format as other admin endpoints.",
+    responses={
+        200: {"description": "User details successfully retrieved"},
+        400: {"description": "Cross-tenant access attempt"},
+        401: {"description": "Authentication required (invalid or missing API key)"},
+        403: {"description": "Admin permissions required"},
+        404: {"description": "User not found in your tenant (may be soft-deleted)"},
+    }
+)
+async def get_user(
+    username: str,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Retrieve a single user's details by username.
+    
+    Path parameter:
+    - username: The username of the user to retrieve
+    
+    Returns complete user information including:
+    - Basic details (username, email, creation/update timestamps)
+    - Status information (state, active status, email verification)
+    - Usage statistics (token consumption, quota limits)
+    - Role and group memberships
+    
+    Example response:
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "username": "emma.andersson",
+      "email": "emma.andersson@municipality.se", 
+      "state": "ACTIVE",
+      "used_tokens": 1250,
+      "is_active": true,
+      "roles": [],
+      "user_groups": []
+    }
+    
+    Note: This endpoint is useful for external systems that need to check individual user status
+    without fetching the entire user list, providing better performance for single-user lookups.
+    """
+    service = container.admin_service()
+    user = await service.get_tenant_user(username)
+
+    user_admin_view = UserAdminView(**user.model_dump())
+
+    return user_admin_view
+
+
 @router.post(
     "/users/{username}/", 
     response_model=UserAdminView,
