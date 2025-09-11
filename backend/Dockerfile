@@ -16,6 +16,7 @@ COPY ./pyproject.toml ./poetry.lock ./
 
 COPY . /code/
 
+# Install ALL dependencies (including dev dependencies for init_db.py)
 RUN poetry config virtualenvs.create false \
   && poetry install --no-interaction --no-ansi
 
@@ -26,6 +27,9 @@ ENV PYTHONUNBUFFERED=1
 ENV TIKTOKEN_CACHE_DIR=/tiktoken
 RUN mkdir /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
+
+# CRITICAL: Give ownership to UID 1000 BEFORE switching user
+RUN chown -R 1000:1000 /code /tiktoken
 
 # Run as unpriviledged user
 USER 1000
