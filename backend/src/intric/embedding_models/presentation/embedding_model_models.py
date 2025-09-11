@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -70,3 +71,9 @@ class EmbeddingModelSecurityStatus(EmbeddingModelPublic):
 class EmbeddingModelUpdate(BaseModel):
     is_org_enabled: bool | NotProvided = NOT_PROVIDED
     security_classification: ModelId | None | NotProvided = NOT_PROVIDED
+
+
+class EmbeddingModelMigrationRequest(BaseModel):
+    old_embedding_model_id: UUID
+    new_embedding_model_id: UUID
+    group_limit: Optional[int] = None

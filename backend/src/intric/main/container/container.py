@@ -48,6 +48,9 @@ from intric.database.database import AsyncSession
 from intric.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
+from intric.embedding_models.application.embedding_model_migration_service import (
+    EmbeddingModelMigrationService,
+)
 from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
 from intric.embedding_models.infrastructure.create_embeddings_service import (
     CreateEmbeddingsService,
@@ -527,6 +530,12 @@ class Container(containers.DeclarativeContainer):
         JobService,
         user=user,
         job_repo=job_repo,
+    )
+    embedding_model_migration_service = providers.Factory(
+        EmbeddingModelMigrationService,
+        user=user,
+        embedding_model_repo=embedding_model_repo2,
+        job_service=job_service,
     )
     file_size_service = providers.Factory(
         FileSizeService,

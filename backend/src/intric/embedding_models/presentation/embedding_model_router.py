@@ -2,7 +2,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from intric.jobs.job_models import JobPublic
+
 from intric.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelMigrationRequest,
     EmbeddingModelPublic,
     EmbeddingModelUpdate,
 )
@@ -57,3 +60,22 @@ async def update_embedding_model(
     )
 
     return EmbeddingModelPublic.from_domain(model)
+
+
+@router.post(
+    "/migrate",
+    response_model=JobPublic,
+    responses=responses.get_responses([400]),
+)
+async def migrate_embedding_model(
+    request: EmbeddingModelMigrationRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.embedding_model_migration_service()
+    job = await service.start_migration(
+        old_embedding_model_id=request.old_embedding_model_id,
+        new_embedding_model_id=request.new_embedding_model_id,
+        group_limit=request.group_limit,
+    )
+
+    return JobPublic.from_db(job)

@@ -34,3 +34,9 @@ class UploadInfoBlob(UploadTask):
 
 class Transcription(UploadTask):
     pass
+
+
+class EmbeddingModelMigrationTask(TaskParams):
+    old_embedding_model_id: UUID
+    new_embedding_model_id: UUID
+    group_limit: Optional[int] = None
