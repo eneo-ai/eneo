@@ -182,7 +182,7 @@ async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    user_service = container.prop_user_service()
+    user_service = container.user_service()
 
     return await user_service.invite_user(user_invite)
 
@@ -193,7 +193,7 @@ async def update_user(
     user_update: PropUserUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    user_service = container.prop_user_service()
+    user_service = container.user_service()
 
     return await user_service.update_user(user_id=id, prop_user_update=user_update)
 
@@ -202,7 +202,7 @@ async def update_user(
 async def delete_user(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
-    user_service = container.prop_user_service()
+    user_service = container.user_service()
 
     await user_service.delete_user(user_id=id)
 
