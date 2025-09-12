@@ -336,16 +336,19 @@ embedding_models:
     description: OpenAI's previous generation embedding model, still widely used and supported.
     org: OpenAI
 
+  # Previously hosted via Intric (gpu2.intric.ai), now served for EU compliance via Berget.ai hosting
   - name: 'multilingual-e5-large'
     family: 'e5'
     open_source: true
     max_input: 8191
     is_deprecated: false
     stability: 'experimental'
-    hosting: 'eu'
+    hosting: 'swe'
     hf_link: 'https://huggingface.co/intfloat/multilingual-e5-large'
-    description: Microsoft's open-source multilingual embedding model, matching the performance of OpenAI's embedding models while supporting multiple languages.
+    description: Microsoft's E5 multilingual embedding model hosted by Berget.ai in Sweden for EU compliance.
     org: Microsoft
+    litellm_model_name: 'berget/intfloat/multilingual-e5-large'
+
   - name: 'text-embedding-3-large-azure'
     family: 'openai'
     open_source: false
@@ -356,14 +359,3 @@ embedding_models:
     hosting: 'swe'
     description: Microsoft Azure's hosted version of OpenAI's text-embedding-3-large model, offering high-dimensional embeddings via Azure.
     org: Microsoft
-
-  - name: 'multilingual-e5-large-berget'
-    family: 'e5'
-    litellm_model_name: 'berget/intfloat/multilingual-e5-large'
-    open_source: true
-    max_input: 8191
-    is_deprecated: false
-    stability: 'stable'
-    hosting: 'swe'
-    description: Microsoft's E5 multilingual embedding model hosted by Berget.ai in Sweden for EU compliance.
-    org: Berget
