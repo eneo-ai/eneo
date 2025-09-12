@@ -15,7 +15,7 @@ import { createCodePair, encodeState, setFrontendAuthCookie } from "./auth.serve
 import { getRequestEvent } from "$app/server";
 
 const MobilityguardCookie = "mobilityguard-verifier" as const;
-const scopes = ["openid", "email"];
+const scopes = ["openid", "email", "profile"];
 
 export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }) {
   // Only generate an url if the environment is correctly set
@@ -73,7 +73,7 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
   const body = JSON.stringify({
     code,
     code_verifier,
-    scope: scopes.join("+"),
+    scope: scopes.join(" "),
     redirect_uri: `${event.url.origin}/login/callback`
   });
 

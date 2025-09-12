@@ -201,10 +201,14 @@ class AuthService:
         # get the pyjwt algorithm object
         alg_obj = jwt.get_algorithm_by_name(header["alg"])
 
-        # compute at_hash, then validate / assert
-        digest = alg_obj.compute_hash_digest(access_token.encode())
-        at_hash = base64.urlsafe_b64encode(digest[: (len(digest) // 2)]).rstrip(b"=")
-        assert at_hash.decode() == payload["at_hash"]
+        if "at_hash" in payload:
+            # compute at_hash, then validate / assert
+            digest = alg_obj.compute_hash_digest(access_token.encode())
+            at_hash = base64.urlsafe_b64encode(digest[: (len(digest) // 2)]).rstrip(b"=")
+            logger.debug(f"Verifying hash")
+            assert at_hash.decode() == payload["at_hash"]
+        else:
+            logger.debug("No hash in ID token. Skipping at_hash check.")
 
         return payload
 

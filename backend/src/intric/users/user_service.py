@@ -108,7 +108,7 @@ class UserService:
                 client_id=SETTINGS.mobilityguard_client_id,
                 options={"verify_iat": False},
             )
-        except Exception:
+        except Exception as e:
             raise AuthenticationException()
 
         user_in_db = await self.repo.get_user_by_email(email)
@@ -128,6 +128,8 @@ class UserService:
 
             new_user = UserAdd(
                 email=email,
+                password=None,
+                salt=None,
                 username=username.lower(),
                 tenant_id=tenant_id,
                 predefined_roles=[ModelId(id=user_role.id)],
