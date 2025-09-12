@@ -13,8 +13,6 @@ from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
-from intric.server.websockets.websocket_models import WS_MODELS
-from intric.sessions.session import SSE_MODELS, SSE_ENUMS
 
 logger = get_logger(__name__)
 
@@ -45,22 +43,26 @@ def get_application():
         openapi_schema = get_openapi(
             title=api_documentation.TITLE,
             version=SETTINGS.app_version,
-            summary=api_documentation.SUMMARY,
+            description=api_documentation.SUMMARY,
             tags=api_documentation.TAGS_METADATA,
             routes=app.routes,
         )
 
-        # Adding websocket models to the schema
-        for model in WS_MODELS + SSE_MODELS:
-            openapi_schema["components"]["schemas"][model.__name__] = model.model_json_schema(
-                ref_template=f"#/components/schemas/{model.__name__}/$defs/{{model}}"
-            )
+        # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
+        if "components" not in openapi_schema:
+            openapi_schema["components"] = {}
+        if "schemas" not in openapi_schema["components"]:
+            openapi_schema["components"]["schemas"] = {}
 
-        # Adding SSE enums to the schema
-        for enum_type in SSE_ENUMS:
-            from pydantic import TypeAdapter
-            adapter = TypeAdapter(enum_type)
-            openapi_schema["components"]["schemas"][enum_type.__name__] = adapter.json_schema()
+        # Import the actual IntricEventType enum
+        from intric.sessions.session import IntricEventType
+
+        # Add the missing schema if it's not already there
+        if "IntricEventType" not in openapi_schema["components"]["schemas"]:
+            openapi_schema["components"]["schemas"]["IntricEventType"] = {
+                "type": "string",
+                "enum": [item.value for item in IntricEventType]
+            }
 
         # WSO2 API Manager compatibility
         openapi_schema["openapi"] = "3.0.0"
