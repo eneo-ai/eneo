@@ -78,4 +78,4 @@ async def migrate_embedding_model(
         group_limit=request.group_limit,
     )
 
-    return JobPublic.from_db(job)
+    return job
