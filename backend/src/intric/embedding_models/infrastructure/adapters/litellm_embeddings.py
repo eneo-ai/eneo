@@ -9,6 +9,7 @@ from tenacity import (
 )
 
 from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
+from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.main.exceptions import BadRequestException, OpenAIException
@@ -44,7 +45,11 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
         for chunked_chunks in self._chunk_chunks(chunks):
-            texts_for_chunks = [chunk.text for chunk in chunked_chunks]
+            # Add "passage:" prefix for E5 models, use text directly for others
+            if self.model.family == ModelFamily.E5:
+                texts_for_chunks = [f"passage: {chunk.text}" for chunk in chunked_chunks]
+            else:
+                texts_for_chunks = [chunk.text for chunk in chunked_chunks]
 
             logger.debug(f"[LiteLLM] Embedding a chunk of {len(chunked_chunks)} chunks")
 
@@ -54,7 +59,12 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         return chunk_embedding_list
 
     async def get_embedding_for_query(self, query: str):
-        truncated_query = query[: self.model.max_input]
+        # Add "query:" prefix for E5 models, use query directly for others
+        if self.model.family == ModelFamily.E5:
+            truncated_query = f"query: {query[: self.model.max_input]}"
+        else:
+            truncated_query = query[: self.model.max_input]
+        
         embeddings = await self._get_embeddings([truncated_query])
         return embeddings[0]
 
