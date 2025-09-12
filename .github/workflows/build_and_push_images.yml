@@ -1,11 +1,25 @@
-name: Build and Push Production Images
+name: Build and Push Docker Images
+
+# This workflow ONLY builds and pushes Docker images to GitHub Container Registry.
+# Deployment is handled by external systems that watch for image updates.
+#
+# Workflow Summary:
+# - develop branch → :develop image tag → external system deploys to dev
+# - main branch → :main image tag → external system deploys to testing
+# - v* tags → version image tags → external system handles production deployment
+#
+# Image Tags Created:
+# - Push to develop: ghcr.io/org/repo:develop, ghcr.io/org/repo:develop-abc1234
+# - Push to main: ghcr.io/org/repo:main, ghcr.io/org/repo:main-def5678
+# - Tag v1.0.0: ghcr.io/org/repo:v1.0.0, ghcr.io/org/repo:1.0, ghcr.io/org/repo:latest
 
 on:
   push:
     branches:
       - main
-  release:
-    types: [published]
+      - develop
+    tags:
+      - 'v*'  # Triggered when version tags are pushed
 
 env:
   REGISTRY: ghcr.io
@@ -13,21 +27,22 @@ env:
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
 
 jobs:
-  build-and-push-production:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
       attestations: write
       id-token: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history including tags for version calculation
-          
-      - name: Fetch all tags
-        run: git fetch --all --tags --force
+          fetch-depth: 0  # Fetch full history for tags
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -35,36 +50,42 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      # Determine version tag
-      - name: Get version
-        id: version
+
+      - name: Determine build context
+        id: build-context
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION=${{ github.event.release.tag_name }}
+          if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "Building production version: $VERSION"
+            echo "is-release=true" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            # Get highest version tag (not most recent chronologically)
-            LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n 1 || echo "v0.0.0")
-            # Extract version numbers
-            VERSION_PARTS=(${LATEST_TAG//v/})
-            VERSION_PARTS=(${VERSION_PARTS//./ })
-            PATCH=$((${VERSION_PARTS[2]} + 1))
-            VERSION="v${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$PATCH"
+            echo "Building main branch for testing environment"
+            echo "is-release=false" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "Building develop branch for dev environment"
+            echo "is-release=false" >> $GITHUB_OUTPUT
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
-          
-      # Backend
+
+      # Backend build and push
       - name: Extract backend metadata
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.VERSION }}
-            type=sha,prefix={{branch}}-,format=short
-          
+            # Branch-based tags
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+
+            # Version tags (only for releases)
+            type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
+
+            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
+
+            # Git SHA for traceability (always included)
+            type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
+            type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
+
       - name: Build and push backend Docker image
         uses: docker/build-push-action@v5
         with:
@@ -73,18 +94,29 @@ jobs:
           push: true
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
-          
-      # Frontend
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Frontend build and push
       - name: Extract frontend metadata
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.VERSION }}
-            type=sha,prefix={{branch}}-,format=short
-          
+            # Branch-based tags
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+
+            # Version tags (only for releases)
+            type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
+
+            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
+
+            # Git SHA for traceability (always included)
+            type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
+            type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
+
       - name: Build and push frontend Docker image
         uses: docker/build-push-action@v5
         with:
@@ -93,18 +125,40 @@ jobs:
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
-      
-      # Create git tag if building from main (not release)
-      - name: Create git tag
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Summary of what was built
+      - name: Build Summary
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          # Check if tag already exists to make this idempotent
-          if git rev-parse ${{ steps.version.outputs.VERSION }} >/dev/null 2>&1; then
-            echo "Tag ${{ steps.version.outputs.VERSION }} already exists, skipping tag creation"
-          else
-            echo "Creating and pushing new tag ${{ steps.version.outputs.VERSION }}"
-            git tag ${{ steps.version.outputs.VERSION }}
-            git push origin ${{ steps.version.outputs.VERSION }}
+          echo "## 🐳 Docker Images Built and Pushed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "### Production Release: $VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Backend:**" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Frontend:**" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Ready for production deployment" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "### Testing Environment Build" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🧪 Images will be deployed to testing environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "### Development Environment Build" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           fi

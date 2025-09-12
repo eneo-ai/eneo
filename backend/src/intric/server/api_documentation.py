@@ -39,7 +39,7 @@ TAGS_METADATA = [
         ),
         "externalDocs": {
             "description": "Services documentation (coming soon)",
-            "url": "https://www.intric.ai/documentation/services",
+            "url": "https://www.eneo.ai/",
         },
     },
     {
@@ -86,7 +86,7 @@ TAGS_METADATA = [
     },
     {
         "name": "admin",
-        "description": "Admin operations. Use this to manage your tenant.",
+        "description": "Tenant Admin operations. Manage users, settings, and resources within your specific tenant/organization. Requires admin account API key for your tenant. For system-wide administration across all tenants, see Sysadmin endpoints.",
     },
     {
         "name": "settings",
@@ -97,8 +97,7 @@ TAGS_METADATA = [
     {
         "name": "sysadmin",
         "description": (
-            "Sysadmin operations. Use the super api key in order to access these"
-            " operations."
+            "System Administration operations. Manage the entire Eneo installation across all tenants using the INTRIC_SUPER_API_KEY environment variable. Create/manage tenants, system-wide settings, and cross-tenant operations. For single tenant management (users, settings within your organization), see Tenant Admin endpoints."
         ),
     },
     {

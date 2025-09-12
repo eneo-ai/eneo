@@ -20,3 +20,6 @@
 
 # venv
 .venv/
+
+# claude
+.claude/*.local.json

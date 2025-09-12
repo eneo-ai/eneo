@@ -19,28 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     name: Validate PR title and branch
     steps:
-      - name: Validate semantic PR title
-        uses: amannn/action-semantic-pull-request@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            docs
-            style
-            refactor
-            test
-            chore
-            perf
-            ci
-          requireScope: false
-          subjectPattern: ^(?![A-Z]).+$
-          subjectPatternError: |
-            The subject "{subject}" found in the pull request title "{title}"
-            didn't match the configured pattern. Please ensure that the subject
-            doesn't start with an uppercase character.
-
       - name: Check branch naming
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
@@ -51,11 +29,11 @@ jobs:
             exit 0
           fi
 
-          VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor)/"
+          VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor|ci)/"
 
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "❌ Branch name '$BRANCH_NAME' does not follow naming convention."
-            echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, or refactor/"
+            echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, refactor/, or ci/"
             exit 1
           fi
 

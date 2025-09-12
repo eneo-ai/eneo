@@ -47,6 +47,7 @@ class CompletionModel(AIModel):
         is_org_default: bool,
         reasoning: bool,
         base_url: Optional[str] = None,
+        litellm_model_name: Optional[str] = None,
         security_classification: Optional[SecurityClassification] = None,
     ):
         super().__init__(
@@ -69,6 +70,7 @@ class CompletionModel(AIModel):
         )
 
         self.base_url = base_url
+        self.litellm_model_name = litellm_model_name
         self.is_org_default = is_org_default
         self.reasoning = reasoning
         self.vision = vision
@@ -123,6 +125,7 @@ class CompletionModel(AIModel):
             is_org_default=is_org_default,
             reasoning=completion_model_db.reasoning,
             base_url=completion_model_db.base_url,
+            litellm_model_name=completion_model_db.litellm_model_name,
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),
