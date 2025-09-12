@@ -62,6 +62,23 @@ def get_application():
             adapter = TypeAdapter(enum_type)
             openapi_schema["components"]["schemas"][enum_type.__name__] = adapter.json_schema()
 
+        # WSO2 API Manager compatibility
+        openapi_schema["openapi"] = "3.0.0"
+        
+        # Ensure security schemes exist for WSO2
+        openapi_schema.setdefault("components", {}).setdefault("securitySchemes", {}).update({
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
+            },
+            "ApiKeyAuth": {
+                "type": "apiKey",
+                "in": "header", 
+                "name": SETTINGS.api_key_header_name
+            }
+        })
+
         app.openapi_schema = openapi_schema
         return app.openapi_schema
 
