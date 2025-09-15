@@ -64,23 +64,6 @@ def get_application():
                 "enum": [item.value for item in IntricEventType]
             }
 
-        # WSO2 API Manager compatibility
-        openapi_schema["openapi"] = "3.0.0"
-        
-        # Ensure security schemes exist for WSO2
-        openapi_schema.setdefault("components", {}).setdefault("securitySchemes", {}).update({
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT"
-            },
-            "ApiKeyAuth": {
-                "type": "apiKey",
-                "in": "header", 
-                "name": SETTINGS.api_key_header_name
-            }
-        })
-
         app.openapi_schema = openapi_schema
         return app.openapi_schema
 
