@@ -3219,7 +3219,15 @@ export interface components {
      * ModelOrg
      * @enum {string}
      */
-    ModelOrg: "OpenAI" | "Meta" | "Microsoft" | "Anthropic" | "Mistral" | "KBLab" | "Google";
+    ModelOrg:
+      | "OpenAI"
+      | "Meta"
+      | "Microsoft"
+      | "Anthropic"
+      | "Mistral"
+      | "KBLab"
+      | "Google"
+      | "Berget";
     /**
      * ModelStability
      * @enum {string}
@@ -7675,7 +7683,8 @@ export interface operations {
                 | "Anthropic"
                 | "Mistral"
                 | "KBLab"
-                | "Google";
+                | "Google"
+                | "Berget";
               /**
                * ModelStability
                * @enum {string}
@@ -7972,7 +7981,8 @@ export interface operations {
                 | "Anthropic"
                 | "Mistral"
                 | "KBLab"
-                | "Google";
+                | "Google"
+                | "Berget";
               /**
                * ModelStability
                * @enum {string}
