@@ -19,8 +19,7 @@ COPY . /code/
 
 # Install ALL dependencies and fix packaging
 RUN poetry config virtualenvs.create false \
-  && poetry install --no-interaction --no-ansi \
-  && pip install --force-reinstall packaging==25.0
+  && poetry install --no-interaction --no-ansi
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -33,7 +32,9 @@ RUN mkdir /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
 
 # CRITICAL: Give ownership to UID 1000 BEFORE switching user
-RUN chown -R 1000:1000 /code /tiktoken
+RUN chown -R 1000:1000 /code /tiktoken \
+  && mkdir -p /.cache/pypoetry \
+  && chown -R 1000:1000 /.cache
 
 # Run as unprivileged user
 USER 1000
