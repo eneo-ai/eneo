@@ -12,6 +12,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
+from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
 from intric.logging.logging import LoggingDetails
 from intric.main.logging import get_logger
 
@@ -23,7 +24,19 @@ TOKENS_RESERVED_FOR_COMPLETION = 1000
 class LiteLLMModelAdapter(CompletionModelAdapter):
     def __init__(self, model: CompletionModel):
         super().__init__(model)
-        self.litellm_model = model.litellm_model_name
+        
+        # Get provider configuration based on litellm_model_name
+        provider = LiteLLMProviderRegistry.get_provider_for_model(model.litellm_model_name)
+        
+        # Only apply custom configuration if needed
+        if provider.needs_custom_config():
+            self.litellm_model = provider.get_litellm_model(model.litellm_model_name)
+            self.api_config = provider.get_api_config()
+            logger.info(f"[LiteLLM] Using custom provider config for {model.name}: {list(self.api_config.keys())}")
+        else:
+            # Standard LiteLLM behavior for supported providers
+            self.litellm_model = model.litellm_model_name
+            self.api_config = {}
         
         logger.info(f"[LiteLLM] Initializing adapter for model: {model.name} -> {self.litellm_model}")
         
@@ -109,6 +122,11 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         messages = self.create_query_from_context(context=context)
         kwargs = self._get_kwargs(model_kwargs)
         
+        # Add provider-specific API configuration
+        if self.api_config:
+            kwargs.update(self.api_config)
+            logger.info(f"[LiteLLM] {self.litellm_model}: Adding provider config: {list(self.api_config.keys())}")
+        
         logger.info(f"[LiteLLM] {self.litellm_model}: Making completion request with {len(messages)} messages and kwargs: {kwargs}")
         
         try:
@@ -133,6 +151,11 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
     async def _get_response_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None) -> AsyncGenerator[Completion, None]:
         messages = self.create_query_from_context(context=context)
         kwargs = self._get_kwargs(model_kwargs)
+        
+        # Add provider-specific API configuration
+        if self.api_config:
+            kwargs.update(self.api_config)
+            logger.info(f"[LiteLLM] {self.litellm_model}: Adding provider config for streaming: {list(self.api_config.keys())}")
         
         logger.info(f"[LiteLLM] {self.litellm_model}: Making streaming completion request with {len(messages)} messages and kwargs: {kwargs}")
         

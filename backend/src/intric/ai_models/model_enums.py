@@ -30,3 +30,4 @@ class ModelOrg(str, Enum):
     MISTRAL = "Mistral"
     KBLAB = "KBLab"
     GOOGLE = "Google"
+    BERGET = "Berget"
