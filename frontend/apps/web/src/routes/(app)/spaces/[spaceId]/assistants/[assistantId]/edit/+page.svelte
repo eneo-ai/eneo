@@ -18,6 +18,7 @@
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { page } from "$app/state";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
+  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { m } from "$lib/paraglide/messages";
 
   export let data;
