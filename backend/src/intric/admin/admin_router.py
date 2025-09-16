@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends
+from typing import List
 
 from intric.admin.admin_models import PrivacyPolicy, UserDeletedListItem, UserStateListItem
 from intric.main.container.container import Container
+from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
+from intric.predefined_roles.predefined_role import PredefinedRoleInDB
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.tenants.tenant import TenantPublic
@@ -13,6 +16,7 @@ from intric.users.user import (
     UserUpdatePublic,
 )
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 
@@ -392,6 +396,100 @@ async def get_deleted_users(container: Container = Depends(get_container(with_us
     """
     service = container.admin_service()
     return await service.get_deleted_tenant_users()
+
+
+@router.get(
+    "/predefined-roles/",
+    response_model=List[PredefinedRoleInDB],
+    summary="Get predefined roles for tenant",
+    description="Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.",
+    responses={
+        200: {
+            "description": "List of predefined roles successfully retrieved",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": "550e8400-e29b-41d4-a716-446655440001",
+                            "name": "Owner",
+                            "permissions": ["admin", "AI", "assistants", "group_chats"],
+                            "created_at": "2024-01-15T10:30:00Z",
+                            "updated_at": "2024-01-15T10:30:00Z"
+                        },
+                        {
+                            "id": "550e8400-e29b-41d4-a716-446655440002",
+                            "name": "AI Configurator",
+                            "permissions": ["AI", "assistants"],
+                            "created_at": "2024-01-15T10:30:00Z",
+                            "updated_at": "2024-01-15T10:30:00Z"
+                        }
+                    ]
+                }
+            }
+        },
+        401: {"description": "Authentication required (invalid or missing API key)"},
+        403: {"description": "Admin permissions required (owner role)"},
+        500: {"description": "Internal server error while fetching predefined roles"},
+    }
+)
+async def get_predefined_roles(container: Container = Depends(get_container(with_user=True))):
+    """
+    Get all predefined roles available for your tenant.
+
+    This endpoint returns the predefined roles that can be assigned to users
+    when creating or updating user accounts. The response format matches the
+    sysadmin endpoint for API consistency.
+
+    Predefined roles include:
+    - **Owner**: Full admin permissions including user management
+    - **AI Configurator**: AI and assistant configuration permissions
+    - **User**: Basic user permissions for using assistants
+
+    ## Important Notes
+
+    - This endpoint requires admin (owner) permissions
+    - Returns the same roles for all tenants (future: tenant-specific filtering)
+    - Role IDs are stable and can be cached client-side
+    - Use these IDs in POST /api/v1/admin/users/ for user provisioning
+
+    ## Response Format
+
+    Returns an array of PredefinedRoleInDB objects containing:
+    - `id`: UUID of the role (use this when assigning roles)
+    - `name`: Human-readable name of the role
+    - `permissions`: List of permission strings granted by this role
+    - `created_at`: Timestamp when the role was created
+    - `updated_at`: Timestamp when the role was last modified
+    """
+    # Get admin service and validate permissions
+    admin_service = container.admin_service()
+    user = admin_service.user
+
+    # Log the request for audit trail
+    logger.info(
+        f"Admin user '{user.username}' (ID: {user.id}) from tenant '{user.tenant_id}' "
+        f"is retrieving predefined roles"
+    )
+
+    # Validate admin permissions (will raise UnauthorizedException if not admin)
+    await admin_service.validate_admin_permission()
+
+    # Get the predefined roles service
+    predefined_role_service = container.predefined_role_service()
+
+    # Fetch all predefined roles
+    roles = await predefined_role_service.get_predefined_roles()
+
+    # Log successful retrieval
+    logger.info(
+        f"Successfully retrieved {len(roles)} predefined roles for admin user "
+        f"'{user.username}' in tenant '{user.tenant_id}'. "
+        f"Roles: {[role.name for role in roles]}"
+    )
+
+    # Future enhancement: Filter roles based on tenant subscription/features
+    # For now, return all roles as per requirements
+    return roles
 
 
 @router.post("/privacy-policy/", response_model=TenantPublic)

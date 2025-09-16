@@ -254,3 +254,15 @@ class AdminService:
 
         logger.info(f"Successfully retrieved user {username} in tenant {self.user.tenant_id}")
         return user_in_db
+
+    @validate_permissions(Permission.ADMIN)
+    async def validate_admin_permission(self):
+        """
+        Validate that the current user has admin permissions.
+        This method is used by endpoints that need permission checking
+        but handle their own business logic.
+        """
+        logger.info(f"Admin permission validated for user {self.user.username} in tenant {self.user.tenant_id}")
+        # The decorator handles the actual validation
+        # This method just serves as a permission gate
+        return True
