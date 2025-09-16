@@ -75,6 +75,17 @@
   }
 
   $: watchChanges(kwArgs);
+
+  // Track previous disabled state to only reset on transition
+  let previousDisabledState = finalIsDisabled;
+  $: {
+    // Only reset when transitioning from enabled to disabled
+    if (finalIsDisabled && !previousDisabledState) {
+      $selected = { value: "default" };
+      kwArgs = getKwargs("default") || { temperature: null, top_p: null };
+    }
+    previousDisabledState = finalIsDisabled;
+  }
 </script>
 
 <button

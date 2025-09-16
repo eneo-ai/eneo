@@ -144,16 +144,8 @@
                   delete cleanedKwargs.verbosity;
                 }
                 
-                // Reset behavior parameters to safe defaults when switching model types
-                // This prevents temperature/top_p values from one model being sent to another
-                const originalHasSpecialParams = originalModel?.reasoning || originalModel?.litellm_model_name;
-                const newHasSpecialParams = newModel?.reasoning || newModel?.litellm_model_name;
-                
-                if (originalHasSpecialParams !== newHasSpecialParams) {
-                  // Reset to default behavior when switching between normal and special-param models
-                  cleanedKwargs.temperature = null;
-                  cleanedKwargs.top_p = null;
-                }
+                // Note: Behavior parameter reset is now handled by SelectBehaviourV2 component
+                // when models are switched, so we don't need to reset them here during save
               }
               
               $update.completion_model_kwargs = cleanedKwargs;
