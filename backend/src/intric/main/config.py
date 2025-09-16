@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     flux_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
+    berget_api_key: Optional[str] = None
     intric_marketplace_api_key: Optional[str] = None
     intric_marketplace_url: Optional[str] = None
     intric_super_api_key: Optional[str] = None
