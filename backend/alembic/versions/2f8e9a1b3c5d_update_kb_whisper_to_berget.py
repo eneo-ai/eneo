@@ -1,7 +1,7 @@
 # flake8: noqa
 
 """update kb whisper to berget
-Revision ID: update_kb_whisper_to_berget
+Revision ID: 2f8e9a1b3c5d
 Revises: f6ae7dc6c04f
 Create Date: 2025-09-15 12:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic
-revision = 'update_kb_whisper_to_berget'
+revision = '2f8e9a1b3c5d'
 down_revision = 'f6ae7dc6c04f'
 branch_labels = None
 depends_on = None
