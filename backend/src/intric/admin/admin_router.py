@@ -3,7 +3,6 @@ from typing import List
 
 from intric.admin.admin_models import PrivacyPolicy, UserDeletedListItem, UserStateListItem
 from intric.main.container.container import Container
-from intric.main.exceptions import UnauthorizedException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.predefined_roles.predefined_role import PredefinedRoleInDB
@@ -445,22 +444,6 @@ async def get_predefined_roles(container: Container = Depends(get_container(with
     - **Owner**: Full admin permissions including user management
     - **AI Configurator**: AI and assistant configuration permissions
     - **User**: Basic user permissions for using assistants
-
-    ## Usage Example
-
-    Use the role IDs from this endpoint when creating users:
-
-    ```python
-    # First, get available roles
-    roles = await get_predefined_roles()
-    owner_role_id = next(r.id for r in roles if r.name == "Owner")
-
-    # Then use in user creation
-    new_user = {
-        "email": "admin@example.com",
-        "predefined_roles": [owner_role_id]
-    }
-    ```
 
     ## Important Notes
 
