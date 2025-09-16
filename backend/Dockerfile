@@ -23,8 +23,6 @@ RUN poetry config virtualenvs.create false \
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-# Disable virtualenv creation via environment variable
-ENV POETRY_VIRTUALENVS_CREATE=false
 
 # Handle tiktoken
 ENV TIKTOKEN_CACHE_DIR=/tiktoken
