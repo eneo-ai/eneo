@@ -70,12 +70,17 @@ async def login_with_mobilityguard(
     jwks_endpoint = endpoints["jwks_uri"]
     signing_algos = endpoints["id_token_signing_alg_values_supported"]
 
+    _data = openid_connect_login.model_dump()
+    _data["client_id"] = settings.mobilityguard_client_id
+    _data["scope"] = "openid profile email"
+
     # Exchange code for a token
     async with aiohttp_client().post(
         token_endpoint,
-        data=openid_connect_login.model_dump(),
+        #data=openid_connect_login.model_dump(),
+        data=_data,
         auth=aiohttp.BasicAuth(
-            openid_connect_login.client_id,
+            settings.mobilityguard_client_id,
             settings.mobilityguard_client_secret,
         ),
     ) as resp:

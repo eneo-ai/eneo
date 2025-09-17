@@ -17,6 +17,9 @@ from intric.database.tables.widget_table import Widgets
 from intric.main.exceptions import UniqueException
 from intric.main.models import ModelId
 from intric.users.user import UserAdd, UserInDB, UserState, UserUpdate
+from intric.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class UsersRepository:
@@ -187,6 +190,8 @@ class UsersRepository:
 
             return UserInDB.model_validate(entry_in_db)
         except IntegrityError as e:
+            orig = e.orig
+            logger.debug("Original database insertion error: %s", orig)
             raise UniqueException("User already exists.") from e
 
     async def update(self, user: UserUpdate):
