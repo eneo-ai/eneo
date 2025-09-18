@@ -32,7 +32,7 @@ function getEnvValue(key: string, defaultValue?: string): string | undefined {
  * @returns Object with all environment configuration values
  */
 export function getEnvironmentConfig() {
-  const baseUrl = getEnvValue("INTRIC_BACKEND_URL", "https://api.intric.ai");
+  const baseUrl = getEnvValue("INTRIC_BACKEND_URL");
   const authUrl = getEnvValue("ZITADEL_INSTANCE_URL");
 
   // Version tracking for preview deployments
