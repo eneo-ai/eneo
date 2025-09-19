@@ -432,7 +432,7 @@ class UserService:
         correlation_id = correlation_id or "no-correlation-id"
 
         logger.info(
-            "OIDC: Checking user and tenant state",
+            "Checking user and tenant state",
             extra={
                 "correlation_id": correlation_id,
                 "user_id": str(user_in_db.id),
@@ -471,7 +471,7 @@ class UserService:
             raise TenantSuspendedException()
 
         logger.info(
-            "OIDC: User and tenant state check passed",
+            "User and tenant state check passed",
             extra={
                 "correlation_id": correlation_id,
                 "user_id": str(user_in_db.id),
