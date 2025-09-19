@@ -1,11 +1,16 @@
 export const LoginErrorCode = {
-  NO_VERIFIER: "No code verifier found. Please check if cookies are enabled in your browser.",
-  NO_TOKEN: "Couldn't get token response from instance.",
-  DECODE_ERROR: "Failed to decode response.",
-  NO_CONFIG: "No config found in environment."
+  NO_VERIFIER: "Authentication session expired. Please ensure cookies are enabled and try again.",
+  NO_TOKEN: "Failed to authenticate with Eneo. Please try again.",
+  DECODE_ERROR: "Invalid authentication response received. Please try again.",
+  NO_CONFIG: "Authentication service is not properly configured. Please contact your administrator.",
+  INVALID_CREDENTIALS: "Invalid username or password. Please check your credentials.",
+  USER_INACTIVE: "Your account is inactive. Please contact your administrator.",
+  TENANT_SUSPENDED: "Your organization's access is suspended. Please contact your administrator.",
+  NETWORK_ERROR: "Network error during authentication. Please check your connection and try again.",
+  SERVER_ERROR: "Authentication service is temporarily unavailable. Please try again later."
 } as const;
 
-export const providers = ["zitadel"] as const;
+export const providers = ["zitadel", "mobilityguard", "oidc"] as const;
 
 export class LoginError extends Error {
   code: keyof typeof LoginErrorCode;
