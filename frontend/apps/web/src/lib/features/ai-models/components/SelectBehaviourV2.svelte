@@ -19,6 +19,13 @@
   export let selectedModel: any = null; // CompletionModel from the parent
   export let aria: AriaProps = { "aria-label": m.select_model_behaviour() };
 
+  const behaviourLabels: Record<ModelBehaviour, string> = {
+    creative: m.creative(),
+    default: (m as any)["default"](),
+    deterministic: m.deterministic(),
+    custom: m.custom()
+  };
+
   // Check if model has custom parameters that should override behavior presets
   // For reasoning models, disable behavior controls as they have model-specific parameters
   $: hasModelSpecificParams = selectedModel?.reasoning || selectedModel?.litellm_model_name;
@@ -118,7 +125,7 @@
   class:text-secondary={finalIsDisabled}
   class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
 >
-  <span class="capitalize">{$selected?.value ?? m.no_behaviour_found()}</span>
+  <span class="capitalize">{$selected?.value ? behaviourLabels[$selected?.value] : m.no_behaviour_found()}</span>
   <IconChevronDown />
 </button>
 
@@ -139,7 +146,7 @@
       use:option
     >
       <span class="capitalize">
-        {behavior}
+        {behaviourLabels[behavior]}
       </span>
       <div class="check {$isSelected(behavior) ? 'block' : 'hidden'}">
         <IconCheck class="text-positive-default" />

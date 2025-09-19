@@ -215,7 +215,7 @@
       inputElement.focus();
     }}
   >
-    <IconPlus class="min-w-7" />Add knowledge
+    <IconPlus class="min-w-7" />{m.add_knowledge()}
   </button>
 {/if}
 

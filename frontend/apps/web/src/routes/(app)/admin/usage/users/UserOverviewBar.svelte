@@ -8,6 +8,7 @@
   import { Settings } from "$lib/components/layout";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
+  import { m } from "$lib/paraglide/messages";
   import type { UserTokenUsageSummary } from "@intric/intric-js";
 
   type Props = {
@@ -24,19 +25,19 @@
 
     return [
       {
-        label: "High Usage Users",
+        label: m.high_usage_users(),
         userCount: high.length,
         tokenCount: high.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-red"
       },
       {
-        label: "Medium Usage Users",
+        label: m.medium_usage_users(),
         userCount: medium.length,
         tokenCount: medium.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-yellow"
       },
       {
-        label: "Low Usage Users",
+        label: m.low_usage_users(),
         userCount: low.length,
         tokenCount: low.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-green"
@@ -46,8 +47,8 @@
 </script>
 
 <Settings.Row
-  title="User summary"
-  description="See how many tokens your organization's users have been consuming broken down by usage level."
+  title={m.user_summary()}
+  description={m.user_summary_description()}
 >
   <div class="flex flex-col gap-4">
     <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full lg:mt-2">
@@ -70,7 +71,7 @@
           <p>
             <span class="font-medium">{item.label}</span>: {formatNumber(
               item.userCount
-            )} users, {formatNumber(item.tokenCount, "compact")} tokens
+            )} {m.users()}, {formatNumber(item.tokenCount, "compact")} {m.tokens()}
           </p>
         </div>
       {/each}

@@ -9,6 +9,7 @@
   import { createRender } from "svelte-headless-table";
   import { Button, Table } from "@intric/ui";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
+  import { m } from "$lib/paraglide/messages";
   import UsageBadgeWrapper from "./UsageBadgeWrapper.svelte";
 
   interface Props {
@@ -29,7 +30,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "User",
+      header: m.user(),
       value: (item) => item.username,
       cell: (item) => {
         return createRender(Table.ButtonCell, {
@@ -42,7 +43,7 @@
     }),
 
     table.column({
-      header: "Usage Level",
+      header: m.usage_level(),
       accessor: (item) => item.total_requests,
       id: "usage_level",
       cell: (item) => {
@@ -53,28 +54,28 @@
     }),
 
     table.column({
-      header: "Input tokens",
+      header: m.input_tokens(),
       accessor: "total_input_tokens",
       id: "input_tokens",
       cell: (item) => formatNumber(item.value),
     }),
 
     table.column({
-      header: "Output tokens",
+      header: m.output_tokens(),
       accessor: "total_output_tokens",
       id: "output_tokens",
       cell: (item) => formatNumber(item.value),
     }),
 
     table.column({
-      header: "Total tokens",
+      header: m.total_tokens(),
       accessor: "total_tokens",
       id: "total_tokens",
       cell: (item) => formatNumber(item.value),
     }),
 
     table.column({
-      header: "Requests",
+      header: m.requests(),
       accessor: "total_requests",
       id: "requests",
       cell: (item) => formatNumber(item.value),
@@ -102,14 +103,14 @@
       disabled={page === 1}
       onclick={() => onPageChange(1)}
     >
-      First
+      {m.first()}
     </Button>
     <Button
       variant="outlined"
       disabled={page === 1}
       onclick={() => onPageChange(page - 1)}
     >
-      Previous
+      {m.previous()}
     </Button>
     <div class="px-4 py-2">{page} / {Math.ceil(totalUsers / perPage)}</div>
     <Button
@@ -117,14 +118,14 @@
       disabled={page * perPage >= totalUsers}
       onclick={() => onPageChange(page + 1)}
     >
-      Next
+      {m.next()}
     </Button>
     <Button
       variant="outlined"
       disabled={page * perPage >= totalUsers}
       onclick={() => onPageChange(Math.ceil(totalUsers / perPage))}
     >
-      Last
+      {m.last()}
     </Button>
   </div>
 {/if}
@@ -137,7 +138,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
       </svg>
     </div>
-    <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No User Activity</h3>
-    <p class="text-gray-500 dark:text-gray-400">No users have token usage in the selected time period.</p>
+    <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">{m.no_user_activity()}</h3>
+    <p class="text-gray-500 dark:text-gray-400">{m.no_users_token_usage_period()}</p>
   </div>
 {/if}

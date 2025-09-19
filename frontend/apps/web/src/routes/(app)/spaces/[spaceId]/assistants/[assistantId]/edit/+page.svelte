@@ -219,7 +219,7 @@
         >
           <div slot="toolbar" class="text-secondary">
             <PromptVersionDialog
-              title="Prompt history for {$resource.name}"
+              title="{m.prompt_history_for({ name: $resource.name })}"
               loadPromptVersionHistory={() => {
                 return data.intric.assistants.listPrompts({ id: data.assistant.id });
               }}
