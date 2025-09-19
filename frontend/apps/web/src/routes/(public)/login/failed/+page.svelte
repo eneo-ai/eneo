@@ -13,13 +13,20 @@
   <div class="box w-[400px] justify-center">
     <h1 class="flex justify-center">
       <EneoWordMark class="text-brand-intric h-16 w-20"></EneoWordMark>
-      <span class="hidden">Intric</span>
+      <span class="hidden">Eneo</span>
     </h1>
 
     <div aria-live="polite">
-      <div class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg">
-        Failed to login to intric.
-        {data.message}
+      <div class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg">
+        <strong>Failed to login to Eneo</strong>
+        <div class="mt-2">
+          {data.message || "An unexpected error occurred during authentication."}
+        </div>
+        {#if data.details}
+          <div class="text-sm mt-2 opacity-80">
+            Details: {data.details}
+          </div>
+        {/if}
       </div>
     </div>
 

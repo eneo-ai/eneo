@@ -52,9 +52,51 @@
           <div
             class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
           >
-            The selected login method was not successful. Please use a different login method or try
-            again later.
-          </div>{/if}
+            <strong>Authentication Failed</strong>
+            Unable to complete login. This could be due to:
+            <ul class="list-disc list-inside mt-1">
+              <li>Invalid credentials</li>
+              <li>Account restrictions</li>
+              <li>System configuration issues</li>
+            </ul>
+            Please try again or contact your administrator.
+          </div>
+        {:else if message === "mobilityguard_oauth_error"}
+          <div
+            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>Authentication Provider Error</strong>
+            The authentication service encountered an issue. Please try again.
+          </div>
+        {:else if message === "mobilityguard_access_denied"}
+          <div
+            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>Access Denied</strong>
+            You don't have permission to access Eneo. Please contact your administrator.
+          </div>
+        {:else if message === "mobilityguard_invalid_request"}
+          <div
+            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>Invalid Request</strong>
+            The login request was invalid. Please clear your browser cache and try again.
+          </div>
+        {:else if message === "no_code_received" || message === "no_state_received"}
+          <div
+            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>Login Process Interrupted</strong>
+            The authentication process was incomplete. Please ensure cookies are enabled and try again.
+          </div>
+        {:else if message && message.includes("error")}
+          <div
+            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>Login Failed</strong>
+            An error occurred during authentication. Please try again or contact support.
+          </div>
+        {/if}
       </div>
 
       <form

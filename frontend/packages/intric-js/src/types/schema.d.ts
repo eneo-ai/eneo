@@ -516,36 +516,72 @@ export interface paths {
   };
   "/api/v1/admin/users/": {
     /**
-     * Get Users
-     * @deprecated
+     * List all users in tenant
+     * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
      */
     get: operations["get_users_api_v1_admin_users__get"];
     /**
-     * Register User
-     * @deprecated
+     * Create new user in tenant
+     * @description Creates a new user account within your tenant. The user will be created with the provided credentials and automatically associated with your organization. Returns user details including a new API key for the user.
      */
     post: operations["register_user_api_v1_admin_users__post"];
   };
   "/api/v1/admin/users/{username}/": {
     /**
-     * Update User
-     * @deprecated
-     * @description Omitted fields are not updated.
+     * Get user details
+     * @description Retrieves a single user's complete details using their username. User must exist in your tenant and not be soft-deleted. Returns the same detailed information format as other admin endpoints.
+     */
+    get: operations["get_user_api_v1_admin_users__username___get"];
+    /**
+     * Update existing user
+     * @description Updates an existing user's details using their username. Only fields provided in the request body will be updated. User must exist in your tenant and not be soft-deleted.
      */
     post: operations["update_user_api_v1_admin_users__username___post"];
   };
   "/api/v1/admin/users/{username}": {
     /**
-     * Delete User
-     * @deprecated
+     * Soft delete user
+     * @description Soft deletes a user by setting deleted_at timestamp and UserState.DELETED. The user's record is preserved for audit purposes but they can no longer authenticate. This operation is irreversible through the API.
      */
     delete: operations["delete_user_api_v1_admin_users__username__delete"];
   };
-  "/api/v1/admin/privacy-policy/": {
+  "/api/v1/admin/users/{username}/deactivate": {
     /**
-     * Update Privacy Policy
-     * @deprecated
+     * Deactivate user (temporary leave)
+     * @description Sets user state to INACTIVE for temporary unavailability such as sick leave, vacation, or parental leave. User cannot login but account data is fully preserved. This is reversible through reactivation.
      */
+    post: operations["deactivate_user_api_v1_admin_users__username__deactivate_post"];
+  };
+  "/api/v1/admin/users/{username}/reactivate": {
+    /**
+     * Reactivate user (return to active)
+     * @description Sets user state to ACTIVE from any previous state (INACTIVE or DELETED). Restores full system access and clears deletion timestamps if present. Use for employees returning from leave or rare rehire cases.
+     */
+    post: operations["reactivate_user_api_v1_admin_users__username__reactivate_post"];
+  };
+  "/api/v1/admin/users/inactive": {
+    /**
+     * List inactive users
+     * @description Returns all users in INACTIVE state within your tenant. These are employees on temporary leave who cannot login but are still employed. Use for tracking who is temporarily unavailable.
+     */
+    get: operations["get_inactive_users_api_v1_admin_users_inactive_get"];
+  };
+  "/api/v1/admin/users/deleted": {
+    /**
+     * List deleted users
+     * @description Returns all users in DELETED state within your tenant. These are employees who have left the organization and cannot login. Records are preserved for audit purposes and potential cleanup by external systems.
+     */
+    get: operations["get_deleted_users_api_v1_admin_users_deleted_get"];
+  };
+  "/api/v1/admin/predefined-roles/": {
+    /**
+     * Get predefined roles for tenant
+     * @description Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.
+     */
+    get: operations["get_predefined_roles_api_v1_admin_predefined_roles__get"];
+  };
+  "/api/v1/admin/privacy-policy/": {
+    /** Update Privacy Policy */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
   };
   "/api/v1/jobs/": {
@@ -1050,6 +1086,13 @@ export interface paths {
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
   };
+  "/api/v1/api-docs": {
+    /**
+     * Get OpenAPI specification
+     * @description Returns the complete OpenAPI 3.0 specification for this API. Compatible with WSO2 API Manager.
+     */
+    get: operations["get_api_documentation_api_v1_api_docs_get"];
+  };
   "/api/v1/roles/permissions/": {
     /** Get Permissions */
     get: operations["get_permissions_api_v1_roles_permissions__get"];
@@ -1067,6 +1110,10 @@ export interface paths {
     post: operations["update_role_api_v1_roles__role_id___post"];
     /** Delete Role By Id */
     delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
+  };
+  "/healthz": {
+    /** Get Healthz */
+    get: operations["get_healthz_healthz_get"];
   };
   "/version": {
     /** Get Version */
@@ -3318,11 +3365,8 @@ export interface components {
       code_verifier: string;
       /** Redirect Uri */
       redirect_uri: string;
-      /**
-       * Client Id
-       * @default intric
-       */
-      client_id?: string;
+      /** Client Id */
+      client_id: string;
       /**
        * Grant Type
        * @default authorization_code
@@ -3334,7 +3378,7 @@ export interface components {
        */
       scope?: string;
       /** Nonce */
-      nonce?: string;
+      nonce?: string | null;
     };
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
@@ -5164,24 +5208,33 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
-      /** Password */
+      /**
+       * Password
+       * @description User password (minimum 7 characters)
+       */
       password?: string | null;
       /**
        * Quota Limit
-       * @description Size in bytes
+       * @description Storage limit in bytes (minimum 1000 bytes = 1KB)
        */
       quota_limit?: number | null;
       /**
        * Roles
+       * @description List of custom role IDs to assign to the user
        * @default []
        */
       roles?: components["schemas"]["ModelId"][];
       /**
        * Predefined Roles
+       * @description List of predefined role IDs to assign to the user
        * @default []
        */
       predefined_roles?: components["schemas"]["ModelId"][];
@@ -5191,24 +5244,33 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
-      /** Password */
+      /**
+       * Password
+       * @description User password (minimum 7 characters)
+       */
       password?: string | null;
       /**
        * Quota Limit
-       * @description Size in bytes
+       * @description Storage limit in bytes (minimum 1000 bytes = 1KB)
        */
       quota_limit?: number | null;
       /**
        * Roles
+       * @description List of custom role IDs to assign to the user
        * @default []
        */
       roles?: components["schemas"]["ModelId"][];
       /**
        * Predefined Roles
+       * @description List of predefined role IDs to assign to the user
        * @default []
        */
       predefined_roles?: components["schemas"]["ModelId"][];
@@ -5223,9 +5285,13 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
       /** Created At */
       created_at?: string | null;
@@ -5262,9 +5328,13 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
       /**
        * Id
@@ -5324,6 +5394,11 @@ export interface components {
        * @default 0
        */
       quota_used?: number;
+      /**
+       * Deleted At
+       * @description Timestamp when user was soft-deleted (null for active users)
+       */
+      deleted_at?: string | null;
       access_token: components["schemas"]["AccessToken"] | null;
       /** Modules */
       modules: readonly string[];
@@ -5337,9 +5412,13 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
       /** Created At */
       created_at?: string | null;
@@ -5371,6 +5450,33 @@ export interface components {
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
       api_key: components["schemas"]["ApiKey"];
+    };
+    /**
+     * UserDeletedListItem
+     * @description User information for deleted users list operations
+     */
+    UserDeletedListItem: {
+      /**
+       * Username
+       * @description User's unique username
+       */
+      username: string;
+      /**
+       * Email
+       * @description User's email address
+       */
+      email: string;
+      /**
+       * State
+       * @description User's current state (always 'deleted' for this list)
+       */
+      state: string;
+      /**
+       * Deleted At
+       * Format: date-time
+       * @description When the user was deleted (for external tracking)
+       */
+      deleted_at: string;
     };
     /** UserGroupCreateRequest */
     UserGroupCreateRequest: {
@@ -5439,9 +5545,13 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
       /**
        * Id
@@ -5501,6 +5611,11 @@ export interface components {
        * @default 0
        */
       quota_used?: number;
+      /**
+       * Deleted At
+       * @description Timestamp when user was soft-deleted (null for active users)
+       */
+      deleted_at?: string | null;
       /** Modules */
       modules: readonly string[];
       /** User Groups Ids */
@@ -5542,9 +5657,13 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
       /** Created At */
       created_at?: string | null;
@@ -5576,9 +5695,13 @@ export interface components {
       /**
        * Email
        * Format: email
+       * @description Valid email address
        */
       email: string;
-      /** Username */
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       */
       username?: string | null;
       /** Created At */
       created_at?: string | null;
@@ -5625,6 +5748,33 @@ export interface components {
      * @enum {string}
      */
     UserState: "invited" | "active" | "inactive" | "deleted";
+    /**
+     * UserStateListItem
+     * @description Minimal user information for state-based list operations
+     */
+    UserStateListItem: {
+      /**
+       * Username
+       * @description User's unique username
+       */
+      username: string;
+      /**
+       * Email
+       * @description User's email address
+       */
+      email: string;
+      /**
+       * State
+       * @description User's current state
+       */
+      state: string;
+      /**
+       * State Changed At
+       * Format: date-time
+       * @description When the user state was last changed
+       */
+      state_changed_at: string;
+    };
     /** UserTokenUsage */
     UserTokenUsage: {
       /**
@@ -5714,21 +5864,37 @@ export interface components {
     };
     /** UserUpdatePublic */
     UserUpdatePublic: {
-      /** Email */
+      /**
+       * Email
+       * @description New email address (must be unique within tenant)
+       */
       email?: string | null;
-      /** Username */
+      /**
+       * Username
+       * @description Username cannot be updated after creation
+       */
       username?: string | null;
-      /** Password */
+      /**
+       * Password
+       * @description New password (minimum 7 characters)
+       */
       password?: string | null;
       /**
        * Quota Limit
-       * @description Size in bytes
+       * @description New storage limit in bytes (minimum 1000 bytes = 1KB)
        */
       quota_limit?: number | null;
-      /** Roles */
+      /**
+       * Roles
+       * @description List of custom role IDs to assign (replaces existing roles)
+       */
       roles?: components["schemas"]["ModelId"][] | null;
-      /** Predefined Roles */
+      /**
+       * Predefined Roles
+       * @description List of predefined role IDs to assign (replaces existing predefined roles)
+       */
       predefined_roles?: components["schemas"]["ModelId"][];
+      /** @description User state (invited/active/inactive) */
       state?: components["schemas"]["UserState"] | null;
     };
     /** ValidationError */
@@ -5915,310 +6081,7 @@ export interface components {
       /** Finished At */
       finished_at: string | null;
     };
-    /** WsOutgoingWebSocketMessage */
-    WsOutgoingWebSocketMessage: {
-      type: components["schemas"]["WsOutgoingWebSocketMessage"]["$defs"]["OutGoingMessageType"];
-      /** @default null */
-      data?: components["schemas"]["WsOutgoingWebSocketMessage"]["$defs"]["MessagePayload"] | null;
-      $defs: {
-        /** MessagePayload */
-        MessagePayload: Record<string, never>;
-        /**
-         * OutGoingMessageType
-         * @enum {string}
-         */
-        OutGoingMessageType: "pong" | "app_run_updates";
-      };
-    };
-    /** WsAppRunUpdate */
-    WsAppRunUpdate: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      status: components["schemas"]["WsAppRunUpdate"]["$defs"]["Status"];
-      /**
-       * App Id
-       * @default null
-       */
-      app_id?: string | null;
-      /** @default null */
-      space?: components["schemas"]["WsAppRunUpdate"]["$defs"]["Space"] | null;
-      $defs: {
-        /** Space */
-        Space: {
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          /** Personal */
-          personal: boolean;
-        };
-        /**
-         * Status
-         * @enum {string}
-         */
-        Status: "in progress" | "queued" | "complete" | "failed" | "not found";
-      };
-    };
-    /** SSEText */
-    SSEText: {
-      /**
-       * Session Id
-       * Format: uuid
-       */
-      session_id: string;
-      /** Answer */
-      answer: string;
-      /** References */
-      references: components["schemas"]["SSEText"]["$defs"]["InfoBlobAskAssistantPublic"][];
-      $defs: {
-        /** InfoBlobAskAssistantPublic */
-        InfoBlobAskAssistantPublic: {
-          /**
-           * Created At
-           * @default null
-           */
-          created_at?: string | null;
-          /**
-           * Updated At
-           * @default null
-           */
-          updated_at?: string | null;
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          metadata: components["schemas"]["SSEText"]["$defs"]["InfoBlobMetadata"];
-          /**
-           * Group Id
-           * @default null
-           */
-          group_id?: string | null;
-          /**
-           * Website Id
-           * @default null
-           */
-          website_id?: string | null;
-          /** Score */
-          score: number;
-        };
-        /** InfoBlobMetadata */
-        InfoBlobMetadata: {
-          /**
-           * Url
-           * @default null
-           */
-          url?: string | null;
-          /**
-           * Title
-           * @default null
-           */
-          title?: string | null;
-          /**
-           * Embedding Model Id
-           * Format: uuid
-           */
-          embedding_model_id: string;
-          /** Size */
-          size: number;
-        };
-      };
-    };
-    /** SSEIntricEvent */
-    SSEIntricEvent: {
-      /**
-       * Session Id
-       * Format: uuid
-       */
-      session_id: string;
-      intric_event_type: components["schemas"]["SSEIntricEvent"]["$defs"]["IntricEventType"];
-      $defs: {
-        /**
-         * IntricEventType
-         * @enum {string}
-         */
-        IntricEventType: "generating_image";
-      };
-    };
-    /** SSEFiles */
-    SSEFiles: {
-      /**
-       * Session Id
-       * Format: uuid
-       */
-      session_id: string;
-      /** Generated Files */
-      generated_files: components["schemas"]["SSEFiles"]["$defs"]["FilePublic"][];
-      $defs: {
-        /** FilePublic */
-        FilePublic: {
-          /**
-           * Created At
-           * @default null
-           */
-          created_at?: string | null;
-          /**
-           * Updated At
-           * @default null
-           */
-          updated_at?: string | null;
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          /** Name */
-          name: string;
-          /** Mimetype */
-          mimetype: string;
-          /** Size */
-          size: number;
-          /**
-           * Transcription
-           * @default null
-           */
-          transcription?: string | null;
-        };
-      };
-    };
-    /** SSEFirstChunk */
-    SSEFirstChunk: {
-      /**
-       * Session Id
-       * Format: uuid
-       */
-      session_id: string;
-      /** Question */
-      question: string;
-      /** Answer */
-      answer: string;
-      /** Files */
-      files: components["schemas"]["SSEFirstChunk"]["$defs"]["FilePublic"][];
-      /** Generated Files */
-      generated_files: components["schemas"]["SSEFirstChunk"]["$defs"]["FilePublic"][];
-      /** References */
-      references: components["schemas"]["SSEFirstChunk"]["$defs"]["InfoBlobAskAssistantPublic"][];
-      tools: components["schemas"]["SSEFirstChunk"]["$defs"]["UseTools"];
-      /** Web Search References */
-      web_search_references: components["schemas"]["SSEFirstChunk"]["$defs"]["WebSearchResultPublic"][];
-      $defs: {
-        /** FilePublic */
-        FilePublic: {
-          /**
-           * Created At
-           * @default null
-           */
-          created_at?: string | null;
-          /**
-           * Updated At
-           * @default null
-           */
-          updated_at?: string | null;
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          /** Name */
-          name: string;
-          /** Mimetype */
-          mimetype: string;
-          /** Size */
-          size: number;
-          /**
-           * Transcription
-           * @default null
-           */
-          transcription?: string | null;
-        };
-        /** InfoBlobAskAssistantPublic */
-        InfoBlobAskAssistantPublic: {
-          /**
-           * Created At
-           * @default null
-           */
-          created_at?: string | null;
-          /**
-           * Updated At
-           * @default null
-           */
-          updated_at?: string | null;
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          metadata: components["schemas"]["SSEFirstChunk"]["$defs"]["InfoBlobMetadata"];
-          /**
-           * Group Id
-           * @default null
-           */
-          group_id?: string | null;
-          /**
-           * Website Id
-           * @default null
-           */
-          website_id?: string | null;
-          /** Score */
-          score: number;
-        };
-        /** InfoBlobMetadata */
-        InfoBlobMetadata: {
-          /**
-           * Url
-           * @default null
-           */
-          url?: string | null;
-          /**
-           * Title
-           * @default null
-           */
-          title?: string | null;
-          /**
-           * Embedding Model Id
-           * Format: uuid
-           */
-          embedding_model_id: string;
-          /** Size */
-          size: number;
-        };
-        /** ToolAssistant */
-        ToolAssistant: {
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          /** Handle */
-          handle: string;
-        };
-        /** UseTools */
-        UseTools: {
-          /** Assistants */
-          assistants: components["schemas"]["SSEFirstChunk"]["$defs"]["ToolAssistant"][];
-        };
-        /** WebSearchResultPublic */
-        WebSearchResultPublic: {
-          /**
-           * Id
-           * Format: uuid
-           */
-          id: string;
-          /** Title */
-          title: string;
-          /** Url */
-          url: string;
-        };
-      };
-    };
-    /**
-     * IntricEventType
-     * @enum {string}
-     */
+    /** @enum {string} */
     IntricEventType: "generating_image";
   };
   responses: never;
@@ -9437,22 +9300,30 @@ export interface operations {
     };
   };
   /**
-   * Get Users
-   * @deprecated
+   * List all users in tenant
+   * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
    */
   get_users_api_v1_admin_users__get: {
     responses: {
-      /** @description Successful Response */
+      /** @description List of users successfully retrieved */
       200: {
         content: {
           "application/json": components["schemas"]["PaginatedResponse_UserAdminView_"];
         };
       };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
     };
   };
   /**
-   * Register User
-   * @deprecated
+   * Create new user in tenant
+   * @description Creates a new user account within your tenant. The user will be created with the provided credentials and automatically associated with your organization. Returns user details including a new API key for the user.
    */
   register_user_api_v1_admin_users__post: {
     requestBody: {
@@ -9461,11 +9332,27 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
-      200: {
+      /** @description User successfully created */
+      201: {
         content: {
           "application/json": components["schemas"]["UserCreatedAdminView"];
         };
+      };
+      /** @description Invalid input data or validation errors */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Username or email already exists in your tenant */
+      409: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -9476,9 +9363,49 @@ export interface operations {
     };
   };
   /**
-   * Update User
-   * @deprecated
-   * @description Omitted fields are not updated.
+   * Get user details
+   * @description Retrieves a single user's complete details using their username. User must exist in your tenant and not be soft-deleted. Returns the same detailed information format as other admin endpoints.
+   */
+  get_user_api_v1_admin_users__username___get: {
+    parameters: {
+      path: {
+        username: string;
+      };
+    };
+    responses: {
+      /** @description User details successfully retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserAdminView"];
+        };
+      };
+      /** @description Cross-tenant access attempt */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description User not found in your tenant (may be soft-deleted) */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update existing user
+   * @description Updates an existing user's details using their username. Only fields provided in the request body will be updated. User must exist in your tenant and not be soft-deleted.
    */
   update_user_api_v1_admin_users__username___post: {
     parameters: {
@@ -9492,11 +9419,31 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description User successfully updated */
       200: {
         content: {
           "application/json": components["schemas"]["UserAdminView"];
         };
+      };
+      /** @description Invalid input data, validation errors, or cross-tenant access attempt */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description User not found in your tenant (may be soft-deleted) */
+      404: {
+        content: never;
+      };
+      /** @description Email already exists in your tenant */
+      409: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -9507,8 +9454,8 @@ export interface operations {
     };
   };
   /**
-   * Delete User
-   * @deprecated
+   * Soft delete user
+   * @description Soft deletes a user by setting deleted_at timestamp and UserState.DELETED. The user's record is preserved for audit purposes but they can no longer authenticate. This operation is irreversible through the API.
    */
   delete_user_api_v1_admin_users__username__delete: {
     parameters: {
@@ -9517,11 +9464,27 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description User successfully soft deleted */
       200: {
         content: {
           "application/json": components["schemas"]["DeleteResponse"];
         };
+      };
+      /** @description Cannot delete yourself or cross-tenant access attempt */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description User not found in your tenant (may already be soft-deleted) */
+      404: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -9532,9 +9495,158 @@ export interface operations {
     };
   };
   /**
-   * Update Privacy Policy
-   * @deprecated
+   * Deactivate user (temporary leave)
+   * @description Sets user state to INACTIVE for temporary unavailability such as sick leave, vacation, or parental leave. User cannot login but account data is fully preserved. This is reversible through reactivation.
    */
+  deactivate_user_api_v1_admin_users__username__deactivate_post: {
+    parameters: {
+      path: {
+        username: string;
+      };
+    };
+    responses: {
+      /** @description User successfully deactivated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserAdminView"];
+        };
+      };
+      /** @description Cannot deactivate yourself or cross-tenant access attempt */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description User not found in your tenant */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reactivate user (return to active)
+   * @description Sets user state to ACTIVE from any previous state (INACTIVE or DELETED). Restores full system access and clears deletion timestamps if present. Use for employees returning from leave or rare rehire cases.
+   */
+  reactivate_user_api_v1_admin_users__username__reactivate_post: {
+    parameters: {
+      path: {
+        username: string;
+      };
+    };
+    responses: {
+      /** @description User successfully reactivated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserAdminView"];
+        };
+      };
+      /** @description Cross-tenant access attempt */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description User not found in your tenant */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List inactive users
+   * @description Returns all users in INACTIVE state within your tenant. These are employees on temporary leave who cannot login but are still employed. Use for tracking who is temporarily unavailable.
+   */
+  get_inactive_users_api_v1_admin_users_inactive_get: {
+    responses: {
+      /** @description List of inactive users successfully retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserStateListItem"][];
+        };
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * List deleted users
+   * @description Returns all users in DELETED state within your tenant. These are employees who have left the organization and cannot login. Records are preserved for audit purposes and potential cleanup by external systems.
+   */
+  get_deleted_users_api_v1_admin_users_deleted_get: {
+    responses: {
+      /** @description List of deleted users successfully retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserDeletedListItem"][];
+        };
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get predefined roles for tenant
+   * @description Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.
+   */
+  get_predefined_roles_api_v1_admin_predefined_roles__get: {
+    responses: {
+      /** @description List of predefined roles successfully retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PredefinedRoleInDB"][];
+        };
+      };
+      /** @description Authentication required (invalid or missing API key) */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required (owner role) */
+      403: {
+        content: never;
+      };
+      /** @description Internal server error while fetching predefined roles */
+      500: {
+        content: never;
+      };
+    };
+  };
+  /** Update Privacy Policy */
   update_privacy_policy_api_v1_admin_privacy_policy__post: {
     requestBody: {
       content: {
@@ -12438,6 +12550,20 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get OpenAPI specification
+   * @description Returns the complete OpenAPI 3.0 specification for this API. Compatible with WSO2 API Manager.
+   */
+  get_api_documentation_api_v1_api_docs_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
   /** Get Permissions */
   get_permissions_api_v1_roles_permissions__get: {
     responses: {
@@ -12573,6 +12699,17 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Healthz */
+  get_healthz_healthz_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
       };
     };
