@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     app_version: str = _set_app_version()
 
+    # OpenAPI-only mode flag
+    openapi_only_mode: bool = False
+
     # Api keys and model urls
     infinity_url: Optional[str] = None
     vllm_model_url: Optional[str] = None
