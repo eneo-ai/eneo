@@ -1,8 +1,8 @@
 <script lang="ts">
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { getSelect } from "./ctx.js";
-
-  export let placeholder = "select";
+  import { getUIMessage } from "$lib/utils/messages.js";
+  export let placeholder = getUIMessage('ui_select');
   export let error = false;
 
   const {

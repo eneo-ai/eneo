@@ -72,4 +72,4 @@
   $: table.update(users);
 </script>
 
-<Table.Root {viewModel} resourceName="user"></Table.Root>
+<Table.Root {viewModel} resourceName={m.resource_users()}></Table.Root>

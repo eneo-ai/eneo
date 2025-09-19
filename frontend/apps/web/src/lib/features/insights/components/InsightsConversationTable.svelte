@@ -63,7 +63,7 @@
 >
   <Table.Root
     {viewModel}
-    resourceName="question"
+    resourceName={m.resource_questions()}
     displayAs="list"
     fitted
     actionPadding="tight"

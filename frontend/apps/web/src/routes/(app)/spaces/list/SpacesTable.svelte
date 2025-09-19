@@ -49,7 +49,7 @@
 
 <Table.Root 
   {viewModel} 
-  resourceName="space" 
+  resourceName={m.resource_spaces()} 
   gapX={1.5} 
   gapY={1.5} 
   layout="grid" 

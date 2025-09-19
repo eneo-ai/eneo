@@ -57,7 +57,7 @@
   $: table.update(visibleSpaces);
 </script>
 
-<Table.Root {viewModel} resourceName="space" displayAs="list"></Table.Root>
+<Table.Root {viewModel} resourceName={m.resource_spaces()} displayAs="list"></Table.Root>
 {#if spaces.length > 10}
   <Button
     variant="outlined"

@@ -94,7 +94,7 @@
   });
 </script>
 
-<Table.Root {viewModel} resourceName="user" displayAs="list"></Table.Root>
+<Table.Root {viewModel} resourceName={m.resource_users()} displayAs="list"></Table.Root>
 
 {#if totalUsers > perPage}
   <div class="flex justify-center items-center mt-4">

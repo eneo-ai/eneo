@@ -86,7 +86,7 @@
 
 <Table.Root
   {viewModel}
-  resourceName="assistant"
+  resourceName={m.resource_assistants()}
   displayAs="cards"
   gapX={1.5}
   gapY={1.5}

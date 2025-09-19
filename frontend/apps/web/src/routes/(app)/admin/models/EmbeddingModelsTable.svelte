@@ -113,7 +113,7 @@
   $: table.update(embeddingModels);
 </script>
 
-<Table.Root {viewModel} resourceName="model" displayAs="list">
+<Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
   {#each Object.entries(modelOrgs) as [org] (org)}
     <Table.Group filterFn={createOrgFilter(org)} title={org} />
   {/each}

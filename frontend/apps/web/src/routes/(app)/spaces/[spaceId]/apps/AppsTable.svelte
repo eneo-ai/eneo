@@ -71,7 +71,7 @@
 
 <Table.Root 
   {viewModel} 
-  resourceName="app" 
+  resourceName={m.resource_apps()} 
   displayAs="cards" 
   gapX={1.5} 
   gapY={1.5} 

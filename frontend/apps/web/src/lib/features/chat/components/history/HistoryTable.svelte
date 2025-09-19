@@ -61,5 +61,5 @@
   ]);
 </script>
 
-<Table.Root {viewModel} resourceName="session" emptyMessage={m.no_previous_sessions_found()}
+<Table.Root {viewModel} resourceName={m.resource_sessions()} emptyMessage={m.no_previous_sessions_found()}
 ></Table.Root>

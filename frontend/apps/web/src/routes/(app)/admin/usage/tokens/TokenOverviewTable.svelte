@@ -70,7 +70,7 @@
   $: table.update(visibleItems);
 </script>
 
-<Table.Root {viewModel} resourceName="model" displayAs="list"></Table.Root>
+<Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list"></Table.Root>
 {#if models.length > 10}
   <Button
     variant="outlined"

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { uid } from "uid";
+  import { getUIMessage } from "$lib/utils/messages.js";
   const id = uid(8);
 
   let containerClass = "";
@@ -25,7 +26,7 @@
           {label}
           {#if required}
             <span class="text-muted px-2 text-[0.9rem] font-normal" aria-hidden="true"
-              >(required)</span
+              >({getUIMessage("required")})</span
             >
           {/if}
         </div>
