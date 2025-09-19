@@ -122,7 +122,6 @@ async def login_with_mobilityguard(
         )
 
         async with aiohttp_client().get(settings.mobilityguard_discovery_endpoint) as resp:
-            discovery_status = resp.status
             discovery_time = time.time() - discovery_start
 
             if resp.status != 200:
