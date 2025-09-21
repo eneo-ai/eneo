@@ -649,7 +649,7 @@
   "space_description_description": "En kort beskrivning av denna yta som kommer att visas för dess användare.",
   "space_description_label": "Beskrivning",
   "space_name_description": "Ett namn för att identifiera denna yta inom din organisation.",
-  "spaces": "Ytor",
+  "spaces": "Delat",
   "stability": "Stabilitet",
   "stop_answer": "Stoppa svar",
   "stop_generating": "Stoppa generering",
