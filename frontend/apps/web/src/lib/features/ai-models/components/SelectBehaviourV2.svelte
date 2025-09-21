@@ -21,7 +21,7 @@
 
   const behaviourLabels: Record<ModelBehaviour, string> = {
     creative: m.creative(),
-    default: (m as any)["default"](),
+    default: m.default_behavior(),
     deterministic: m.deterministic(),
     custom: m.custom()
   };

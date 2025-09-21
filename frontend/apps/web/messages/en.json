@@ -689,7 +689,7 @@
   "basic": "Basic",
   "yes": "Yes",
   "creative": "Creative",
-  "default": "Default",
+  "default_behavior": "Default",
   "deterministic": "Deterministic",
   "custom": "Custom",
   "users": "Users",

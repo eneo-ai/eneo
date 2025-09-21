@@ -1141,7 +1141,7 @@
   "assistant": "Assistent",
   "download": "Ladda ner",
   "mentions": "Omnämnanden",
-  "default": "Standard",
+  "default_behavior": "Standard",
   "monday": "Måndag",
   "tuesday": "Tisdag",
   "wednesday": "Onsdag",
