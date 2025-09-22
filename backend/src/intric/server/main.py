@@ -119,20 +119,43 @@ async def custom_http_500_exception_handler(request, exc):
 async def get_healthz():
     from intric.worker.redis import get_worker_health
     from datetime import datetime, timezone
+    from fastapi import HTTPException
 
     # Get worker health status
     worker_health = await get_worker_health()
 
+    # Backend is always healthy if we can respond
+    backend_status = "healthy"
+    backend_timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Determine overall system health
+    if worker_health.status == "healthy" and backend_status == "healthy":
+        overall_status = "OK"
+        status_code = 200
+    else:
+        overall_status = "UNHEALTHY"
+        status_code = 500
+
     # Assemble health response
-    return {
-        "status": "OK",
+    response_data = {
+        "status": overall_status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "backend": {
+            "status": backend_status,
+            "last_heartbeat": backend_timestamp,
+            "details": "Backend API server operational"
+        },
         "worker": {
             "status": worker_health.status,
             "last_heartbeat": worker_health.last_heartbeat,
             "details": worker_health.details
         }
     }
+
+    if status_code == 500:
+        raise HTTPException(status_code=500, detail=response_data)
+
+    return response_data
 
 @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
 async def get_version():
