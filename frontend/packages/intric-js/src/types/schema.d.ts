@@ -1111,9 +1111,9 @@ export interface paths {
     /** Delete Role By Id */
     delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
   };
-  "/healthz": {
+  "/api/healthz": {
     /** Get Healthz */
-    get: operations["get_healthz_healthz_get"];
+    get: operations["get_healthz_api_healthz_get"];
   };
   "/version": {
     /** Get Version */
@@ -12704,7 +12704,7 @@ export interface operations {
     };
   };
   /** Get Healthz */
-  get_healthz_healthz_get: {
+  get_healthz_api_healthz_get: {
     responses: {
       /** @description Successful Response */
       200: {

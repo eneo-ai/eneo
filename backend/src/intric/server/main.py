@@ -80,7 +80,8 @@ async def custom_http_500_exception_handler(request, exc):
     # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
     # Solving this like this response:
     #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
-    response = JSONResponse(status_code=500, content={"error": "Something went wrong"})
+    response = JSONResponse(status_code=500, content={
+                            "error": "Something went wrong"})
 
     origin = request.headers.get("origin")
 
@@ -115,9 +116,51 @@ async def custom_http_500_exception_handler(request, exc):
 
     return response
 
-@app.get("/healthz")
+
+@app.get("/api/healthz")
 async def get_healthz():
-    return "OK"
+    from intric.worker.redis import get_worker_health
+    from datetime import datetime, timezone
+    from fastapi import HTTPException
+
+    # Get worker health status
+    worker_health = await get_worker_health()
+
+    # Backend is always healthy if we can respond
+    backend_status = "HEALTHY"
+    backend_timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Determine overall system health
+    if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
+        overall_status = "HEALTHY"
+        status_code = 200
+    else:
+        overall_status = "UNHEALTHY"
+        status_code = 503
+
+    # Assemble health response
+    response_data = {
+        "detail": {
+            "status": overall_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "backend": {
+                "status": backend_status,
+                "last_heartbeat": backend_timestamp,
+                "details": "Backend API server operational"
+            },
+            "worker": {
+                "status": worker_health.status,
+                "last_heartbeat": worker_health.last_heartbeat,
+                "details": worker_health.details
+            }
+        }
+    }
+
+    if status_code == 503:
+        raise HTTPException(status_code=503, detail=response_data["detail"])
+
+    return response_data
+
 
 @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
 async def get_version():
