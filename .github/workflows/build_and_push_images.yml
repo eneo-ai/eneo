@@ -18,7 +18,6 @@ on:
     branches:
       - main
       - develop
-      - ci/bundle-artifact-versions
     tags:
       - 'v*'  # Triggered when version tags are pushed
 
@@ -85,7 +84,6 @@ jobs:
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=ci-bundle-artifact-versions,enable=${{ github.ref == 'refs/heads/ci/bundle-artifact-versions' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
@@ -123,7 +121,6 @@ jobs:
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=ci-bundle-artifact-versions,enable=${{ github.ref == 'refs/heads/ci/bundle-artifact-versions' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
