@@ -132,7 +132,7 @@ async def get_healthz():
 
     # Determine overall system health
     if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
-        overall_status = "OK"
+        overall_status = "HEALTHY"
         status_code = 200
     else:
         overall_status = "UNHEALTHY"
@@ -157,7 +157,7 @@ async def get_healthz():
     }
 
     if status_code == 503:
-        raise HTTPException(status_code=503, detail=response_data)
+        raise HTTPException(status_code=503, detail=response_data["detail"])
 
     return response_data
 
