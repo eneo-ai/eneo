@@ -26,6 +26,45 @@ curl -I http://localhost:3000  # Frontend
 curl -I http://localhost:8123/version  # Backend (development)
 ```
 
+#### Health Check Endpoints
+
+Eneo provides dedicated health check endpoints for monitoring:
+
+```bash
+# Backend API health (includes worker status)
+curl http://localhost:8123/api/healthz
+
+# Frontend web health
+curl http://localhost:3000/web/healthz
+```
+
+**Backend Health Response**:
+```json
+{
+  "status": "OK",
+  "timestamp": "2025-01-20T10:30:45.123456+00:00",
+  "worker": {
+    "status": "healthy|unhealthy|unknown",
+    "last_heartbeat": "2025-01-20T10:30:45.123456+00:00",
+    "details": "Worker statistics and status"
+  }
+}
+```
+
+**Frontend Health Response**:
+```json
+{
+  "status": "OK",
+  "timestamp": "2025-01-20T10:30:45.123456+00:00",
+  "service": "frontend-web"
+}
+```
+
+**Worker Status Meanings**:
+- `healthy`: ARQ worker is running and processing jobs
+- `unhealthy`: Worker health check key expired (worker down)
+- `unknown`: Redis connection error or worker status unclear
+
 ---
 
 ## 🚀 Installation & Setup Issues
