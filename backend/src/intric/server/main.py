@@ -117,7 +117,22 @@ async def custom_http_500_exception_handler(request, exc):
 
 @app.get("/api/healthz")
 async def get_healthz():
-    return "OK"
+    from intric.worker.redis import get_worker_health
+    from datetime import datetime, timezone
+
+    # Get worker health status
+    worker_health = await get_worker_health()
+
+    # Assemble health response
+    return {
+        "status": "OK",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "worker": {
+            "status": worker_health.status,
+            "last_heartbeat": worker_health.last_heartbeat,
+            "details": worker_health.details
+        }
+    }
 
 @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
 async def get_version():
