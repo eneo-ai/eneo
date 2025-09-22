@@ -64,89 +64,6 @@ check_container_health() {
     return 0
 }
 
-# Start backend container temporarily (kept for compatibility but not used in main)
-start_backend() {
-    echo "Starting backend container..." >&2
-
-    # Pull image if needed
-    if ! docker image inspect "$BACKEND_IMAGE" >/dev/null 2>&1; then
-        echo "Pulling backend image..." >&2
-        docker pull "$BACKEND_IMAGE"
-    fi
-
-    # Use a fixed port for CI simplicity
-    local backend_port=8080
-    echo "Using port $backend_port for backend..." >&2
-
-    # Start container
-    local container_name="temp-backend-$$"
-    CONTAINER_NAME_FOR_LOGS="$container_name"  # Store for debugging
-    echo "Starting backend on port $backend_port..." >&2
-
-    docker run -d --rm \
-        --platform linux/amd64 \
-        --name "$container_name" \
-        -p "$backend_port:8000" \
-        -e OPENAPI_ONLY_MODE=true \
-        -e OPENAI_API_KEY=dummy \
-        -e ANTHROPIC_API_KEY=dummy \
-        -e POSTGRES_USER=dummy \
-        -e POSTGRES_HOST=dummy \
-        -e POSTGRES_PASSWORD=dummy \
-        -e POSTGRES_PORT=5432 \
-        -e POSTGRES_DB=dummy \
-        -e REDIS_HOST=dummy \
-        -e REDIS_PORT=6379 \
-        -e UPLOAD_FILE_TO_SESSION_MAX_SIZE=1000000 \
-        -e UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=1000000 \
-        -e UPLOAD_MAX_FILE_SIZE=1000000 \
-        -e TRANSCRIPTION_MAX_FILE_SIZE=1000000 \
-        -e MAX_IN_QUESTION=1 \
-        -e API_PREFIX=/api/v1 \
-        -e API_KEY_LENGTH=64 \
-        -e API_KEY_HEADER_NAME=dummy \
-        -e JWT_AUDIENCE=dummy \
-        -e JWT_ISSUER=dummy \
-        -e JWT_EXPIRY_TIME=86000 \
-        -e JWT_ALGORITHM=HS256 \
-        -e JWT_SECRET=dummy \
-        -e JWT_TOKEN_PREFIX=dummy \
-        -e URL_SIGNING_KEY=dummy \
-        -e NUM_WORKERS=1 \
-        "$BACKEND_IMAGE" > /dev/null
-
-    # Wait for backend OpenAPI endpoint to be ready
-    echo "Waiting for backend OpenAPI endpoint to be ready..." >&2
-    local attempt=0
-    while [ $attempt -lt 30 ]; do
-        echo "Attempt $((attempt + 1)): Testing http://localhost:$backend_port/openapi.json" >&2
-        if curl -s "http://localhost:$backend_port/openapi.json" | jq -e '.info.version' >/dev/null 2>&1; then
-            echo "Backend OpenAPI endpoint ready" >&2
-            break
-        fi
-        echo "Backend OpenAPI not ready yet, waiting..." >&2
-        sleep 3
-        attempt=$((attempt + 1))
-    done
-
-    if [ $attempt -eq 30 ]; then
-        echo "Backend failed to start" >&2
-        echo "Container status:" >&2
-        docker ps -a --filter "name=$container_name" >&2
-        echo "Container logs:" >&2
-        docker logs "$container_name" 2>&1 | tail -20 >&2
-        exit 1
-    fi
-
-    # Check container is still running
-    if ! docker ps --filter "name=$container_name" --filter "status=running" | grep -q "$container_name"; then
-        echo "Warning: Container appears to have stopped after startup" >&2
-        docker ps -a --filter "name=$container_name" >&2
-        docker logs "$container_name" 2>&1 | tail -20 >&2
-    fi
-
-    echo "$backend_port"
-}
 
 # Update intric-js types and version
 update_intric_js() {
@@ -297,37 +214,14 @@ main() {
         exit 1
     fi
 
-    # Check container is still running with enhanced monitoring
-    echo "Verifying container health after startup..." >&2
-    if ! check_container_health "$container_name" "$backend_port"; then
-        echo "ERROR: Container failed health check after startup" >&2
-        exit 1
-    fi
-
     # Get version from running backend (we already tested this works)
     echo "Extracting version from backend..."
-
-    # Health check before version extraction
-    if ! check_container_health "$container_name" "$backend_port"; then
-        echo "ERROR: Container failed health check before version extraction" >&2
-        exit 1
-    fi
-
     BUILD_VERSION=$(curl -s "http://localhost:$backend_port/openapi.json" | jq -r '.info.version')
     echo "Backend version: $BUILD_VERSION"
 
     # Verify version was extracted successfully
     if [[ -z "$BUILD_VERSION" || "$BUILD_VERSION" == "null" ]]; then
         echo "ERROR: Failed to extract version from backend API" >&2
-        echo "Checking container health..." >&2
-        check_container_health "$container_name" "$backend_port"
-        exit 1
-    fi
-
-    # Health check before updating intric-js
-    echo "Checking container health before intric-js update..." >&2
-    if ! check_container_health "$container_name" "$backend_port"; then
-        echo "ERROR: Container failed health check before intric-js update" >&2
         exit 1
     fi
 
