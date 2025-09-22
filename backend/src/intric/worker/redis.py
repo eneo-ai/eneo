@@ -32,20 +32,20 @@ async def get_worker_health() -> WorkerHealth:
         if worker_health_data:
             worker_health_str = worker_health_data.decode('utf-8')
             return WorkerHealth(
-                status="healthy",
+                status="HEALTHY",
                 last_heartbeat=datetime.now(timezone.utc).isoformat(),
                 details=worker_health_str
             )
         else:
             return WorkerHealth(
-                status="unhealthy",
+                status="UNHEALTHY",
                 last_heartbeat=None,
                 details="Worker health check key not found or expired"
             )
 
     except Exception as e:
         return WorkerHealth(
-            status="unknown",
+            status="UNKNOWN",
             last_heartbeat=None,
             details=f"Redis connection error: {str(e)}"
         )
