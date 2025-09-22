@@ -115,7 +115,7 @@ async def custom_http_500_exception_handler(request, exc):
 
     return response
 
-@app.get("/healthz")
+@app.get("/api/healthz")
 async def get_healthz():
     return "OK"
 
