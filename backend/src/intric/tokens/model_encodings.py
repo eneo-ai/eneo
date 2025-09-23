@@ -95,11 +95,11 @@ def get_encoding_for_model(model_name: str) -> str:
             # Open source models - use recent encoding
             return 'cl100k_base'
         else:
-            # Unknown family - use latest encoding
+            # Default to GPT-4 encoding for unknown families
             logger.debug(f"Unknown family '{family}' for model {model_name}, using cl100k_base")
             return 'cl100k_base'
     else:
-        # Model not in config - make educated guess based on name
+        # Fallback to pattern matching if model not in config
         logger.debug(f"Model {model_name} not in config, guessing encoding")
 
         model_lower = model_name.lower()
