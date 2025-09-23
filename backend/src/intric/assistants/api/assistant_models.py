@@ -46,6 +46,13 @@ class AssistantType(str, Enum):
     DEFAULT_ASSISTANT = "default-assistant"
 
 
+class ModelInfo(BaseModel):
+    """Information about the model used by the assistant."""
+    name: str
+    token_limit: int
+    prompt_tokens: Optional[int] = None
+
+
 # Relationship models
 class GroupWithEmbeddingModel(GroupInDBBase):
     embedding_model: Optional[EmbeddingModelLegacy] = None
@@ -202,6 +209,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     user: UserSparse
     tools: UseTools
     type: AssistantType
+    model_info: Optional[ModelInfo] = None
     description: Optional[str] = Field(
         default=None,
         description=(
