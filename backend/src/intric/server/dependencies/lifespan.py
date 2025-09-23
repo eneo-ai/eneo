@@ -20,6 +20,10 @@ async def lifespan(app: FastAPI):
 
 
 async def startup():
+    # Skip all startup dependencies when in OpenAPI-only mode
+    if SETTINGS.openapi_only_mode:
+        return
+
     aiohttp_client.start()
     sessionmanager.init(SETTINGS.database_url)
     await job_manager.init()
@@ -35,6 +39,10 @@ async def startup():
 
 
 async def shutdown():
+    # Skip all shutdown dependencies when in OpenAPI-only mode
+    if SETTINGS.openapi_only_mode:
+        return
+
     await sessionmanager.close()
     await aiohttp_client.stop()
     await job_manager.close()
