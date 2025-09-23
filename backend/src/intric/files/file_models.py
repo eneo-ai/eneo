@@ -59,6 +59,7 @@ class FilePublic(InDB):
     mimetype: str
     size: int
     transcription: Optional[str] = None
+    token_count: Optional[int] = None  # Token count for the file's content
 
 
 class AcceptedFileType(BaseModel):

@@ -3,10 +3,11 @@ from uuid import UUID
 
 from fastapi import UploadFile
 
-from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
+from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType, FilePublic
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
 from intric.main.exceptions import NotFoundException, UnauthorizedException
+from intric.tokens.token_utils import count_tokens
 from intric.users.user import UserInDB
 
 
@@ -19,13 +20,17 @@ class FileService:
     async def save_file(self, upload_file: UploadFile):
         file = await self.protocol.to_domain(upload_file)
 
-        return await self.repo.add(
+        saved_file = await self.repo.add(
             FileCreate(
                 **file.model_dump(),
                 user_id=self.user.id,
                 tenant_id=self.user.tenant_id,
             )
         )
+
+        # Don't calculate token count here - we don't know which model will be used
+        # Token counting will happen when the file is used in an assistant context
+        return saved_file
 
     async def save_image_from_bytes(
         self,
