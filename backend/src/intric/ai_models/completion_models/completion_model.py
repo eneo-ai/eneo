@@ -73,6 +73,7 @@ class CompletionModelBase(BaseModel):
     vision: bool
     reasoning: bool
     base_url: Optional[str] = None
+    litellm_model_name: Optional[str] = None
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -122,6 +123,7 @@ class CompletionModelPublic(CompletionModel):
             vision=completion_model.vision,
             reasoning=completion_model.reasoning,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -163,6 +165,12 @@ class Context(BaseModel):
 class ModelKwargs(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
+    reasoning_effort: Optional[str] = None
+    verbosity: Optional[str] = None
+    response_format: Optional[dict] = None
+    presence_penalty: Optional[float] = None
+    frequency_penalty: Optional[float] = None
+    top_k: Optional[int] = None
 
 
 class CompletionModelSparse(CompletionModelBase, InDB):

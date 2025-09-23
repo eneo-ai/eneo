@@ -26,6 +26,77 @@ curl -I http://localhost:3000  # Frontend
 curl -I http://localhost:8123/version  # Backend (development)
 ```
 
+#### Health Check Endpoints
+
+Eneo provides dedicated health check endpoints for monitoring:
+
+```bash
+# Backend API health (includes worker status)
+curl http://localhost:8123/api/healthz
+
+# Frontend web health
+curl http://localhost:3000/web/healthz
+
+# Check HTTP status codes
+curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
+```
+
+**Backend Health Response**:
+
+*Healthy System (HTTP 200)*:
+```json
+{
+  "status": "OK",
+  "timestamp": "2025-01-20T10:30:45.123456+00:00",
+  "backend": {
+    "status": "healthy",
+    "last_heartbeat": "2025-01-20T10:30:45.123456+00:00",
+    "details": "Backend API server operational"
+  },
+  "worker": {
+    "status": "healthy",
+    "last_heartbeat": "2025-01-20T10:30:45.123456+00:00",
+    "details": "Worker statistics and status"
+  }
+}
+```
+
+*Unhealthy System (HTTP 500)*:
+```json
+{
+  "status": "UNHEALTHY",
+  "timestamp": "2025-01-20T10:30:45.123456+00:00",
+  "backend": {
+    "status": "healthy",
+    "last_heartbeat": "2025-01-20T10:30:45.123456+00:00",
+    "details": "Backend API server operational"
+  },
+  "worker": {
+    "status": "unhealthy",
+    "last_heartbeat": null,
+    "details": "Worker health check key not found or expired"
+  }
+}
+```
+
+**Frontend Health Response**:
+```json
+{
+  "status": "OK",
+  "timestamp": "2025-01-20T10:30:45.123456+00:00",
+  "service": "frontend-web"
+}
+```
+
+**HTTP Status Codes**:
+- `200 OK`: All system components healthy and operational
+- `500 Internal Server Error`: Critical system components down (worker, Redis)
+
+**Worker Status Meanings**:
+- `healthy`: ARQ worker is running and processing jobs
+- `unhealthy`: Worker health check key expired (worker down)
+- `unknown`: Redis connection error or worker status unclear
+
 ---
 
 ## 🚀 Installation & Setup Issues

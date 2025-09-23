@@ -64,7 +64,7 @@ class OpenIdConnectLogin(BaseModel):
     code: str
     code_verifier: str
     redirect_uri: str
-    client_id: str = "intric"
+    client_id: str
     grant_type: str = "authorization_code"
     scope: str = "openid"
-    nonce: str = None
+    nonce: Optional[str] = None

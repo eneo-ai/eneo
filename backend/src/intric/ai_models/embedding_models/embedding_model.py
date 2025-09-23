@@ -30,6 +30,7 @@ class EmbeddingModelBase(BaseModel):
     hosting: ModelHostingLocation
     description: Optional[str] = None
     org: Optional[Orgs] = None
+    litellm_model_name: Optional[str] = None
 
 
 class EmbeddingModelCreate(EmbeddingModelBase):

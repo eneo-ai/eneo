@@ -40,6 +40,10 @@
     KBLab: {
       logo: kblabLogo,
       chartColour: "chart-moss"
+    },
+    Berget: {
+      logo: "",
+      chartColour: "chart-blue"
     }
   };
 </script>

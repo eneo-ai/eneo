@@ -14,7 +14,14 @@
 
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
+  export let selectedModel: any = null; // CompletionModel from the parent
   export let aria: AriaProps = { "aria-label": "Select model behaviour" };
+
+  // Check if model has custom parameters that should override behavior presets
+  // For reasoning models, disable behavior controls as they have model-specific parameters
+  $: hasModelSpecificParams = selectedModel?.reasoning || selectedModel?.litellm_model_name;
+  $: isDisabledDueToModelParams = !!hasModelSpecificParams;
+  $: finalIsDisabled = isDisabled || isDisabledDueToModelParams;
 
   const {
     elements: { trigger, menu, option },
@@ -52,11 +59,6 @@
   }
 
   function watchChanges(currentKwArgs: ModelKwArgs) {
-    if (isDisabled) {
-      $selected = { value: "default" };
-      return;
-    }
-
     const behaviour = getBehaviour(currentKwArgs);
 
     if ($selected?.value !== behaviour) {
@@ -73,15 +75,26 @@
   }
 
   $: watchChanges(kwArgs);
+
+  // Track previous disabled state to only reset on transition
+  let previousDisabledState = finalIsDisabled;
+  $: {
+    // Only reset when transitioning from enabled to disabled
+    if (finalIsDisabled && !previousDisabledState) {
+      $selected = { value: "default" };
+      kwArgs = getKwargs("default") || { temperature: null, top_p: null };
+    }
+    previousDisabledState = finalIsDisabled;
+  }
 </script>
 
 <button
   {...$trigger}
   {...aria}
   use:trigger
-  disabled={isDisabled}
-  class:hover:cursor-default={isDisabled}
-  class:text-secondary={isDisabled}
+  disabled={finalIsDisabled}
+  class:hover:cursor-default={finalIsDisabled}
+  class:text-secondary={finalIsDisabled}
   class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
 >
   <span class="capitalize">{$selected?.value ?? "No behaviour found"}</span>
@@ -144,7 +157,13 @@
   </div>
 {/if}
 
-{#if isDisabled}
+{#if isDisabledDueToModelParams}
+  <p
+    class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
+  >
+    <span class="font-bold">Info:&nbsp;</span>This model uses model-specific parameters instead of behavior presets.
+  </p>
+{:else if isDisabled}
   <p
     class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
   >

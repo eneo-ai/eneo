@@ -13,8 +13,6 @@ from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
-from intric.server.websockets.websocket_models import WS_MODELS
-from intric.sessions.session import SSE_MODELS, SSE_ENUMS
 
 logger = get_logger(__name__)
 
@@ -45,22 +43,26 @@ def get_application():
         openapi_schema = get_openapi(
             title=api_documentation.TITLE,
             version=SETTINGS.app_version,
-            summary=api_documentation.SUMMARY,
+            description=api_documentation.SUMMARY,
             tags=api_documentation.TAGS_METADATA,
             routes=app.routes,
         )
 
-        # Adding websocket models to the schema
-        for model in WS_MODELS + SSE_MODELS:
-            openapi_schema["components"]["schemas"][model.__name__] = model.model_json_schema(
-                ref_template=f"#/components/schemas/{model.__name__}/$defs/{{model}}"
-            )
+        # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
+        if "components" not in openapi_schema:
+            openapi_schema["components"] = {}
+        if "schemas" not in openapi_schema["components"]:
+            openapi_schema["components"]["schemas"] = {}
 
-        # Adding SSE enums to the schema
-        for enum_type in SSE_ENUMS:
-            from pydantic import TypeAdapter
-            adapter = TypeAdapter(enum_type)
-            openapi_schema["components"]["schemas"][enum_type.__name__] = adapter.json_schema()
+        # Import the actual IntricEventType enum
+        from intric.sessions.session import IntricEventType
+
+        # Add the missing schema if it's not already there
+        if "IntricEventType" not in openapi_schema["components"]["schemas"]:
+            openapi_schema["components"]["schemas"]["IntricEventType"] = {
+                "type": "string",
+                "enum": [item.value for item in IntricEventType]
+            }
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
@@ -78,7 +80,8 @@ async def custom_http_500_exception_handler(request, exc):
     # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
     # Solving this like this response:
     #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
-    response = JSONResponse(status_code=500, content={"error": "Something went wrong"})
+    response = JSONResponse(status_code=500, content={
+                            "error": "Something went wrong"})
 
     origin = request.headers.get("origin")
 
@@ -112,6 +115,51 @@ async def custom_http_500_exception_handler(request, exc):
             response.headers.add_vary_header("Origin")
 
     return response
+
+
+@app.get("/api/healthz")
+async def get_healthz():
+    from intric.worker.redis import get_worker_health
+    from datetime import datetime, timezone
+    from fastapi import HTTPException
+
+    # Get worker health status
+    worker_health = await get_worker_health()
+
+    # Backend is always healthy if we can respond
+    backend_status = "HEALTHY"
+    backend_timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Determine overall system health
+    if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
+        overall_status = "HEALTHY"
+        status_code = 200
+    else:
+        overall_status = "UNHEALTHY"
+        status_code = 503
+
+    # Assemble health response
+    response_data = {
+        "detail": {
+            "status": overall_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "backend": {
+                "status": backend_status,
+                "last_heartbeat": backend_timestamp,
+                "details": "Backend API server operational"
+            },
+            "worker": {
+                "status": worker_health.status,
+                "last_heartbeat": worker_health.last_heartbeat,
+                "details": worker_health.details
+            }
+        }
+    }
+
+    if status_code == 503:
+        raise HTTPException(status_code=503, detail=response_data["detail"])
+
+    return response_data
 
 
 @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])

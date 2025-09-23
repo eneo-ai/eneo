@@ -2,7 +2,10 @@
 
 set -e
 
-alembic upgrade head
+# Skip Alembic migrations in OpenAPI-only mode
+if [[ "${OPENAPI_ONLY_MODE,,}" != "true" ]]; then
+    alembic upgrade head
+fi
 
 if [[ -z "${NUM_WORKERS}" ]]; then
     workers=3

@@ -14,6 +14,7 @@ from intric.ai_models.model_enums import ModelFamily
 from intric.completion_models.infrastructure.adapters import (
     AzureOpenAIModelAdapter,
     ClaudeModelAdapter,
+    LiteLLMModelAdapter,
     MistralModelAdapter,
     OpenAIModelAdapter,
     OVHCloudModelAdapter,
@@ -59,6 +60,11 @@ class CompletionService:
         self.context_builder = context_builder
 
     def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+        # Check for LiteLLM model first
+        if model.litellm_model_name:
+            return LiteLLMModelAdapter(model)
+        
+        # Fall back to existing family-based selection
         adapter_class = self._adapters.get(model.family.value)
         if not adapter_class:
             raise ValueError(f"No adapter found for modelfamily {model.family.value}")

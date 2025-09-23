@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     app_version: str = _set_app_version()
 
+    # OpenAPI-only mode flag
+    openapi_only_mode: bool = False
+
     # Api keys and model urls
     infinity_url: Optional[str] = None
     vllm_model_url: Optional[str] = None
@@ -39,6 +42,7 @@ class Settings(BaseSettings):
     flux_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
+    berget_api_key: Optional[str] = None
     intric_marketplace_api_key: Optional[str] = None
     intric_marketplace_url: Optional[str] = None
     intric_super_api_key: Optional[str] = None
