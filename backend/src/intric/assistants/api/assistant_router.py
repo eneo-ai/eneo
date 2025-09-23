@@ -1,7 +1,8 @@
+import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intric.assistants.api import assistant_protocol
 from intric.assistants.api.assistant_models import (
@@ -9,7 +10,8 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
-    ModelInfo,
+    TokenEstimateResponse,
+    TokenEstimateBreakdown,
 )
 from intric.authentication.auth_models import ApiKey
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -33,6 +35,7 @@ from intric.sessions.session_protocol import (
 from intric.spaces.api.space_models import TransferApplicationRequest
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -390,8 +393,8 @@ async def publish_assistant(
 
 @router.get(
     "/{id}/token-estimate",
-    response_model=dict,
-    responses=responses.get_responses([404]),
+    response_model=TokenEstimateResponse,
+    responses=responses.get_responses([400, 404]),
     summary="Estimate token usage for text and files",
 )
 async def estimate_tokens(
@@ -399,40 +402,47 @@ async def estimate_tokens(
     text: str = Query(default="", description="User input text"),
     file_ids: str = Query(default="", description="Comma-separated file IDs"),
     container: Container = Depends(get_container(with_user=True)),
-):
+) -> TokenEstimateResponse:
     """
     Estimate token usage for the given text and files in the context of this assistant.
-    Returns the token count and percentage of the model's context window.
+
+    Returns token count, percentage of context window used, and detailed breakdown
+    to help users understand their context usage before sending messages.
     """
     from intric.tokens.token_utils import count_tokens, count_assistant_prompt_tokens
 
     service = container.assistant_service()
     file_service = container.file_service()
 
-    # Get assistant to determine model
     assistant, _ = await service.get_assistant(assistant_id=id)
 
     if not assistant.completion_model:
-        return {"error": "Assistant has no model configured"}
+        raise HTTPException(
+            status_code=400,
+            detail="Assistant has no model configured"
+        )
 
     model_name = assistant.completion_model.name
     token_limit = assistant.completion_model.token_limit
 
-    # Count prompt tokens
+    # Prompt tokens consume context that users need to account for
     prompt_tokens = 0
     if assistant.prompt and assistant.prompt.prompt:
         prompt_tokens = count_assistant_prompt_tokens(assistant.prompt.prompt, model_name)
 
-    # Count text tokens
-    text_tokens = 0
-    if text:
-        text_tokens = count_tokens(text, model_name)
-
-    # Count file tokens with per-file breakdown
+    text_tokens = count_tokens(text, model_name) if text else 0
     file_tokens = 0
     file_token_details = {}
     if file_ids:
-        file_id_list = [UUID(fid.strip()) for fid in file_ids.split(",") if fid.strip()]
+        # Parse and validate file IDs
+        file_id_list = []
+        for fid in file_ids.split(","):
+            if fid.strip():
+                try:
+                    file_id_list.append(UUID(fid.strip()))
+                except ValueError:
+                    logger.warning(f"Invalid UUID in file_ids: {fid}")
+                    continue
         if file_id_list:
             files = await file_service.get_files_by_ids(file_id_list)
             for file in files:
@@ -441,11 +451,8 @@ async def estimate_tokens(
                     try:
                         tokens = count_tokens(file.text, model_name)
                     except Exception as e:
-                        # Log error but don't fail the request
-                        import logging
-                        logger = logging.getLogger(__name__)
+                        # Don't fail the request - provide fallback estimate
                         logger.error(f"Failed to count tokens for file {file.id}: {e}")
-                        # Fallback estimation
                         tokens = len(file.text) // 4
 
                 file_tokens += tokens
@@ -454,14 +461,14 @@ async def estimate_tokens(
     total_tokens = prompt_tokens + text_tokens + file_tokens
     percentage = (total_tokens / token_limit) * 100 if token_limit > 0 else 0
 
-    return {
-        "tokens": total_tokens,
-        "percentage": round(percentage, 2),
-        "limit": token_limit,
-        "breakdown": {
-            "prompt": prompt_tokens,
-            "text": text_tokens,
-            "files": file_tokens,
-            "file_details": file_token_details,  # Per-file breakdown
-        },
-    }
+    return TokenEstimateResponse(
+        tokens=total_tokens,
+        percentage=round(percentage, 2),
+        limit=token_limit,
+        breakdown=TokenEstimateBreakdown(
+            prompt=prompt_tokens,
+            text=text_tokens,
+            files=file_tokens,
+            file_details=file_token_details
+        )
+    )

@@ -88,8 +88,8 @@
   });
 
   // Token counting logic
-  // Use more accurate approximation: average 3.8 chars per token for English text
-  const textTokens = $derived(Math.ceil($question.length / 3.8));
+  // Use balanced approximation: average 4 chars per token
+  const textTokens = $derived(Math.ceil($question.length / 4));
 
   // Store file token counts fetched from API
   let fileTokenCounts = $state<Record<string, number>>({});

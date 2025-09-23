@@ -53,6 +53,22 @@ class ModelInfo(BaseModel):
     prompt_tokens: Optional[int] = None
 
 
+class TokenEstimateBreakdown(BaseModel):
+    """Breakdown of token usage by source."""
+    prompt: int = Field(description="Tokens used by assistant prompt")
+    text: int = Field(description="Tokens used by user input text")
+    files: int = Field(description="Total tokens used by all files")
+    file_details: dict[str, int] = Field(default_factory=dict, description="Per-file token counts")
+
+
+class TokenEstimateResponse(BaseModel):
+    """Response model for token usage estimation."""
+    tokens: int = Field(description="Total token count")
+    percentage: float = Field(description="Percentage of context window used")
+    limit: int = Field(description="Model's context window limit")
+    breakdown: TokenEstimateBreakdown = Field(description="Token usage breakdown by source")
+
+
 # Relationship models
 class GroupWithEmbeddingModel(GroupInDBBase):
     embedding_model: Optional[EmbeddingModelLegacy] = None
