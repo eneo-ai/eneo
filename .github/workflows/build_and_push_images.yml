@@ -104,8 +104,8 @@ jobs:
 
       - name: Inject backend version
         run: |
-          # For develop/main, use the SHA-suffixed tag (second tag), otherwise use first tag
-          if [[ "${{ github.ref }}" == "refs/heads/develop" || "${{ github.ref }}" == "refs/heads/main" ]]; then
+          # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
+          if [[ "${{ github.ref_type }}" == "branch" ]]; then
             VERSION=$(echo "${{ steps.meta-backend.outputs.tags }}" | sed -n '2p' | cut -d':' -f2)
           else
             VERSION=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
@@ -146,8 +146,8 @@ jobs:
 
       - name: Synchronize frontend with backend
         run: |
-          # For develop/main, use the SHA-suffixed tag (second tag), otherwise use first tag
-          if [[ "${{ github.ref }}" == "refs/heads/develop" || "${{ github.ref }}" == "refs/heads/main" ]]; then
+          # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
+          if [[ "${{ github.ref_type }}" == "branch" ]]; then
             BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | sed -n '2p' | cut -d':' -f2)
           else
             BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
