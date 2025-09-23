@@ -10,6 +10,7 @@ sudo apt-get update
 sudo apt-get install -y libmagic1 ffmpeg
 
 # Install Python dependencies
+# Install specific poetry version to avoid packaging issues
 python -m pip install --no-cache-dir poetry==2.1.3
 
 cd /workspace/backend

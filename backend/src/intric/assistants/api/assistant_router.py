@@ -9,6 +9,7 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    ModelInfo,
 )
 from intric.authentication.auth_models import ApiKey
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -385,3 +386,82 @@ async def publish_assistant(
     assistant, permissions = await service.publish_assistant(assistant_id=id, publish=published)
 
     return assembler.from_assistant_to_model(assistant=assistant, permissions=permissions)
+
+
+@router.get(
+    "/{id}/token-estimate",
+    response_model=dict,
+    responses=responses.get_responses([404]),
+    summary="Estimate token usage for text and files",
+)
+async def estimate_tokens(
+    id: UUID,
+    text: str = Query(default="", description="User input text"),
+    file_ids: str = Query(default="", description="Comma-separated file IDs"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Estimate token usage for the given text and files in the context of this assistant.
+    Returns the token count and percentage of the model's context window.
+    """
+    from intric.tokens.token_utils import count_tokens, count_assistant_prompt_tokens
+
+    service = container.assistant_service()
+    file_service = container.file_service()
+
+    # Get assistant to determine model
+    assistant, _ = await service.get_assistant(assistant_id=id)
+
+    if not assistant.completion_model:
+        return {"error": "Assistant has no model configured"}
+
+    model_name = assistant.completion_model.name
+    token_limit = assistant.completion_model.token_limit
+
+    # Count prompt tokens
+    prompt_tokens = 0
+    if assistant.prompt and assistant.prompt.prompt:
+        prompt_tokens = count_assistant_prompt_tokens(assistant.prompt.prompt, model_name)
+
+    # Count text tokens
+    text_tokens = 0
+    if text:
+        text_tokens = count_tokens(text, model_name)
+
+    # Count file tokens with per-file breakdown
+    file_tokens = 0
+    file_token_details = {}
+    if file_ids:
+        file_id_list = [UUID(fid.strip()) for fid in file_ids.split(",") if fid.strip()]
+        if file_id_list:
+            files = await file_service.get_files_by_ids(file_id_list)
+            for file in files:
+                tokens = 0
+                if file.text:
+                    try:
+                        tokens = count_tokens(file.text, model_name)
+                    except Exception as e:
+                        # Log error but don't fail the request
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Failed to count tokens for file {file.id}: {e}")
+                        # Fallback estimation
+                        tokens = len(file.text) // 4
+
+                file_tokens += tokens
+                file_token_details[str(file.id)] = tokens
+
+    total_tokens = prompt_tokens + text_tokens + file_tokens
+    percentage = (total_tokens / token_limit) * 100 if token_limit > 0 else 0
+
+    return {
+        "tokens": total_tokens,
+        "percentage": round(percentage, 2),
+        "limit": token_limit,
+        "breakdown": {
+            "prompt": prompt_tokens,
+            "text": text_tokens,
+            "files": file_tokens,
+            "file_details": file_token_details,  # Per-file breakdown
+        },
+    }
