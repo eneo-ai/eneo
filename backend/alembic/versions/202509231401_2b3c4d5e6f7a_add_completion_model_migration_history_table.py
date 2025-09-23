@@ -2,7 +2,7 @@
 
 Revision ID: add_migration_history
 Revises: add_usage_stats
-Create Date: 2025-07-08 12:00:00.000000
+Create Date: 2025-09-23 14:01:00.000000
 
 """
 from alembic import op
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers, used by Alembic
-revision = "add_migration_history"
-down_revision = "add_usage_stats"
+revision = "2b3c4d5e6f7a"
+down_revision = "1a2b3c4d5e6f"
 branch_labels = None
 depends_on = None
 

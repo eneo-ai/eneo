@@ -2,7 +2,7 @@
 
 Revision ID: add_usage_stats
 Revises: 1e58cb567f44
-Create Date: 2025-07-08 09:27:00.000000
+Create Date: 2025-09-23 14:00:00.000000
 
 """
 from alembic import op
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers, used by Alembic
-revision = "add_usage_stats"
-down_revision = "1e58cb567f44"
+revision = "1a2b3c4d5e6f"
+down_revision = "2f8e9a1b3c5d"
 branch_labels = None
 depends_on = None
 
