@@ -400,70 +400,71 @@ async def migrate_completion_model_for_tenant(
         # Get required services
         tenant_repo = container.tenant_repo()
         user_repo = container.user_repo()
-        
-        # Verify tenant exists and is active
-        async with container.session().begin():
-            tenant = await tenant_repo.get(tenant_id)
-            if not tenant:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Tenant {tenant_id} not found"
-                )
-            
-            from intric.tenants.tenant import TenantState
-            if tenant.state != TenantState.ACTIVE:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Tenant {tenant_id} is not active (state: {tenant.state})"
-                )
-            
-            # Get a user from this tenant to set the context (needed for domain repo)
-            from intric.database.tables.users_table import Users
-            from sqlalchemy import select
-            
-            stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
-            result = await container.session().execute(stmt)
-            user_row = result.scalar_one_or_none()
-            
-            if not user_row:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"No users found for tenant {tenant_id}, cannot perform migration"
-                )
-            
-            # Get the user object
-            user = await user_repo.get_user_by_id(user_row.id)
-            
-            # Override container context with this user and tenant
-            from dependency_injector import providers
-            container.user.override(providers.Object(user))
-            container.tenant.override(providers.Object(tenant))
-            
-            # Get the migration service with proper context
-            migration_service = container.completion_model_migration_service()
-            
-            # Execute the migration
-            result = await migration_service.migrate_model_usage(
-                from_model_id=model_id,
-                to_model_id=migration_request.to_model_id,
-                entity_types=migration_request.entity_types,
-                user=user,
+
+        # Verify tenant exists and is active (without starting a transaction)
+        session = container.session()
+        tenant = await tenant_repo.get(tenant_id)
+        if not tenant:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=404,
+                detail=f"Tenant {tenant_id} not found"
             )
-            
-            logger.info(
-                f"Completed completion model migration for tenant {tenant_id}",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "migration_id": str(result.migration_id),
-                    "migrated_count": result.migrated_count,
-                    "duration": result.duration,
-                }
+
+        from intric.tenants.tenant import TenantState
+        if tenant.state != TenantState.ACTIVE:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tenant {tenant_id} is not active (state: {tenant.state})"
             )
-            
-            return result
+
+        # Get a user from this tenant to set the context (needed for domain repo)
+        from intric.database.tables.users_table import Users
+        from sqlalchemy import select
+
+        stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
+        result = await session.execute(stmt)
+        user_row = result.scalar_one_or_none()
+
+        if not user_row:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=f"No users found for tenant {tenant_id}, cannot perform migration"
+            )
+
+        # Get the user object
+        user = await user_repo.get_user_by_id(user_row.id)
+
+        # Override container context with this user and tenant
+        from dependency_injector import providers
+        container.user.override(providers.Object(user))
+        container.tenant.override(providers.Object(tenant))
+
+        # Get the migration service with proper context
+        migration_service = container.completion_model_migration_service()
+
+        # Execute the migration (service will handle its own transaction)
+        result = await migration_service.migrate_model_usage(
+            from_model_id=model_id,
+            to_model_id=migration_request.to_model_id,
+            entity_types=migration_request.entity_types,
+            user=user,
+            confirm_migration=migration_request.confirm_migration
+        )
+
+        logger.info(
+            f"Completed completion model migration for tenant {tenant_id}",
+            extra={
+                "tenant_id": str(tenant_id),
+                "migration_id": str(result.migration_id),
+                "migrated_count": result.migrated_count,
+                "duration": result.duration,
+            }
+        )
+
+        return result
             
     except Exception as e:
         logger.error(
@@ -596,6 +597,7 @@ async def migrate_completion_model_for_all_tenants(
                         to_model_id=migration_request.to_model_id,
                         entity_types=migration_request.entity_types,
                         user=user,
+                        confirm_migration=migration_request.confirm_migration
                     )
                     
                     successful_migrations += 1
