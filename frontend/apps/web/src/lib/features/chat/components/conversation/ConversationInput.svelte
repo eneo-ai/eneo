@@ -13,11 +13,9 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import TokenUsageBar from "$lib/features/tokens/TokenUsageBar.svelte";
-  import { getIntric } from "$lib/core/Intric";
 
   const chat = getChatService();
   const { featureFlags } = getAppContext();
-  const intric = getIntric();
 
   const {
     state: { attachments, isUploading },
@@ -66,6 +64,8 @@
     scrollToBottom();
     resetMentionInput();
     clearUploads();
+    // Reset new prompt tokens since the message was sent
+    chat.newPromptTokens = 0;
   }
 
   $effect(() => {
@@ -87,120 +87,41 @@
     return hasTools && isEnabled;
   });
 
-  // Token counting logic
-  // Use balanced approximation: average 4 chars per token
-  const textTokens = $derived(Math.ceil($question.length / 4));
-
-  // Store file token counts fetched from API
-  let fileTokenCounts = $state<Record<string, number>>({});
-
-  // Track which files we're currently fetching tokens for to avoid duplicate requests
-  let fetchingTokensFor = new Set<string>();
-
-  // Debounce timer
-  let tokenFetchTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Sum tokens from uploaded files
-  const fileTokens = $derived(
-    $attachments.reduce((sum, att) => {
-      if (att.fileRef?.id) {
-        return sum + (fileTokenCounts[att.fileRef.id] || 0);
-      }
-      return sum;
-    }, 0)
-  );
-
-  // Get model info from assistant (if available)
-  // This comes from the assistant endpoint with actual model's token_limit from ai_models.yml
+  // Get all token values directly from ChatService
+  const historyTokens = $derived(chat.historyTokens);
+  const newTokens = $derived(chat.newPromptTokens);
   const modelInfo = $derived(chat.partner?.model_info || null);
-  const promptTokens = $derived(modelInfo?.prompt_tokens || 0);
-  const tokenLimit = $derived(modelInfo?.token_limit || 0);  // No default - comes from backend
-
-  // Total tokens
-  const totalTokens = $derived(promptTokens + fileTokens + textTokens);
-
-  // Text is always approximate when typing, exact when we have file counts
+  const tokenLimit = $derived(modelInfo?.token_limit || 0);
   const isApproximate = $derived($question.length > 0);
 
-  // Fetch token counts when attachments change (debounced)
+  // Tell ChatService about the current input for token calculation
   $effect(() => {
-    const currentFileIds = $attachments
-      .filter(att => att.fileRef?.id)
-      .map(att => att.fileRef!.id);
+    const currentAttachments = $attachments
+      .filter(att => att.fileRef)
+      .map(att => ({
+        id: att.fileRef!.id,
+        size: att.fileRef!.size
+      }));
 
-    // Clean up token counts for removed files
-    const currentFileIdSet = new Set(currentFileIds);
-    for (const fileId of Object.keys(fileTokenCounts)) {
-      if (!currentFileIdSet.has(fileId)) {
-        delete fileTokenCounts[fileId];
-      }
-    }
+    // Debug logging
+    console.log('[ConversationInput] Sending to ChatService:', {
+      textLength: $question.length,
+      attachmentsCount: currentAttachments.length,
+      attachmentIds: currentAttachments.map(a => a.id)
+    });
 
-    // Find files that need token counting (new files not already being fetched)
-    const filesNeedingTokens = currentFileIds.filter(
-      id => !(id in fileTokenCounts) && !fetchingTokensFor.has(id)
-    );
-
-    if (filesNeedingTokens.length > 0 && chat.partner?.id) {
-      // Cancel any pending fetch
-      if (tokenFetchTimer) {
-        clearTimeout(tokenFetchTimer);
-      }
-
-      // Debounce the fetch to wait for all files to be added
-      tokenFetchTimer = setTimeout(() => {
-        fetchFileTokens(filesNeedingTokens);
-      }, 200); // 200ms debounce
-    }
+    chat.calculateNewPromptTokens($question, currentAttachments);
   });
 
-  async function fetchFileTokens(fileIds: string[]) {
-    if (fileIds.length === 0) return;
-
-    // Mark these files as being fetched
-    fileIds.forEach(id => fetchingTokensFor.add(id));
-
-    try {
-      // Use the intric client to make the API call
-      const response = await intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
-        method: "get",
-        params: {
-          path: { id: chat.partner.id },
-          query: {
-            file_ids: fileIds.join(','),
-            text: ''  // Empty text for now, just counting files
-          }
-        }
-      });
-
-      if (response) {
-        // Use per-file breakdown if available
-        if (response.breakdown?.file_details) {
-          // Merge new token counts with existing ones (don't overwrite all)
-          Object.assign(fileTokenCounts, response.breakdown.file_details);
-        } else if (response.breakdown?.files) {
-          // Fallback: distribute total file tokens equally
-          const tokensPerFile = Math.ceil(response.breakdown.files / fileIds.length);
-          fileIds.forEach(id => {
-            fileTokenCounts[id] = tokensPerFile;
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch token estimates:', error);
-      // Fallback: estimate based on file size if available
-      fileIds.forEach(fileId => {
-        const attachment = $attachments.find(att => att.fileRef?.id === fileId);
-        if (attachment?.fileRef?.size) {
-          // Rough estimate: 1 token per 4 bytes
-          fileTokenCounts[fileId] = Math.ceil(attachment.fileRef.size / 4);
-        }
-      });
-    } finally {
-      // Clear the fetching set for these files
-      fileIds.forEach(id => fetchingTokensFor.delete(id));
-    }
-  }
+  // Debug logging for token values
+  $effect(() => {
+    console.log('[ConversationInput] Token values:', {
+      historyTokens,
+      newTokens,
+      tokenLimit,
+      hasInput: $question.length > 0 || $attachments.length > 0
+    });
+  });
 
 </script>
 
@@ -216,7 +137,12 @@
   <!-- Token usage indicator -->
   {#if modelInfo && tokenLimit > 0}
     <div class="px-2 pt-1">
-      <TokenUsageBar tokens={totalTokens} limit={tokenLimit} isApproximate={isApproximate} />
+      <TokenUsageBar
+        tokens={newTokens}
+        limit={tokenLimit}
+        {historyTokens}
+        {isApproximate}
+      />
     </div>
   {/if}
 
