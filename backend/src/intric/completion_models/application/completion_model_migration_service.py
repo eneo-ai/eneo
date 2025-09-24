@@ -452,6 +452,9 @@ class CompletionModelMigrationService:
         if from_model.reasoning and not to_model.reasoning:
             issues.append("Target model lacks reasoning support")
 
+        # Always warn about kwargs being reset for assistants
+        issues.append("Assistant model parameters (kwargs) will be reset to defaults")
+
         return ValidationResult(
             compatible=len(issues) == 0,
             warnings=issues,
@@ -591,7 +594,11 @@ class CompletionModelMigrationService:
         # Build tenant-aware filtering condition
         tenant_condition = self._build_tenant_filter_condition(table, entity_type, tenant_id)
 
-        # Update all entities of this type
+        # For assistants, we need to handle completion_model_kwargs specially
+        if entity_type == "assistant":
+            return await self._migrate_assistants_with_kwargs(from_model_id, to_model_id, tenant_id, table, tenant_condition)
+
+        # Update all entities of this type (non-assistant entities)
         stmt = (
             update(table)
             .where(
@@ -609,6 +616,36 @@ class CompletionModelMigrationService:
         migrated_count = result.rowcount or 0
 
         self.logger.info(f"Migrated {migrated_count} {entity_type} entities from {from_model_id} to {to_model_id}")
+
+        return migrated_count
+
+    async def _migrate_assistants_with_kwargs(
+        self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID, table, tenant_condition
+    ) -> int:
+        """Migrate assistants and handle their completion_model_kwargs properly."""
+        self.logger.debug(f"Migrating assistants with kwargs handling from {from_model_id} to {to_model_id} for tenant {tenant_id}")
+
+        # Update assistants: change model and reset kwargs to avoid incompatibility
+        stmt = (
+            update(table)
+            .where(
+                and_(
+                    table.completion_model_id == from_model_id,
+                    tenant_condition,
+                )
+            )
+            .values(
+                completion_model_id=to_model_id,
+                completion_model_kwargs={}  # Reset kwargs to avoid parameter incompatibilities
+            )
+        )
+
+        self.logger.debug(f"Executing assistant migration query with kwargs reset: {stmt}")
+
+        result = await self.session.execute(stmt)
+        migrated_count = result.rowcount or 0
+
+        self.logger.info(f"Migrated {migrated_count} assistants from {from_model_id} to {to_model_id}, kwargs reset to avoid incompatibilities")
 
         return migrated_count
 
