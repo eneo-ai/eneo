@@ -258,7 +258,9 @@ export interface paths {
     /**
      * Estimate token usage for text and files
      * @description Estimate token usage for the given text and files in the context of this assistant.
-     * Returns the token count and percentage of the model's context window.
+     *
+     * Returns token count, percentage of context window used, and detailed breakdown
+     * to help users understand their context usage before sending messages.
      */
     get: operations["estimate_tokens_api_v1_assistants__id__token_estimate_get"];
   };
@@ -5910,66 +5912,55 @@ export interface components {
       security_enabled?: boolean | null;
     };
     /**
-     * TenantWithMaskedCredentials
-     * @description TenantInDB with masked API credentials for safe API responses.
-     *
-     * This model is used when returning tenant data through API endpoints
-     * to prevent exposing full API keys. The api_credentials field is
-     * automatically masked to show only the last 4 characters of each key.
-     *
-     * Example:
-     *     Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
-     *     Masked: {"openai": "...xyz"}
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
      */
-    TenantWithMaskedCredentials: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
+    TokenEstimateBreakdown: {
       /**
-       * Id
-       * Format: uuid
+       * Prompt
+       * @description Tokens used by assistant prompt
        */
-      id: string;
-      /** Privacy Policy */
-      privacy_policy?: string | null;
-      /** Name */
-      name: string;
-      /** Display Name */
-      display_name?: string | null;
-      /** Slug */
-      slug?: string | null;
-      /** Quota Limit */
-      quota_limit: number;
-      /** Domain */
-      domain?: string | null;
-      /** Zitadel Org Id */
-      zitadel_org_id?: string | null;
+      prompt: number;
       /**
-       * Provisioning
-       * @default false
+       * Text
+       * @description Tokens used by user input text
        */
-      provisioning?: boolean;
-      /** @default active */
-      state?: components["schemas"]["TenantState"];
+      text: number;
       /**
-       * Security Enabled
-       * @default false
+       * Files
+       * @description Total tokens used by all files
        */
-      security_enabled?: boolean;
+      files: number;
       /**
-       * Modules
-       * @default []
+       * File Details
+       * @description Per-file token counts
        */
-      modules?: components["schemas"]["ModuleInDB"][];
-      /** Api Credentials */
-      api_credentials?: {
-        [key: string]: unknown;
+      file_details?: {
+        [key: string]: number;
       };
-      /** Federation Config */
-      federation_config?: {
-        [key: string]: unknown;
-      };
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -9105,7 +9096,9 @@ export interface operations {
   /**
    * Estimate token usage for text and files
    * @description Estimate token usage for the given text and files in the context of this assistant.
-   * Returns the token count and percentage of the model's context window.
+   *
+   * Returns token count, percentage of context window used, and detailed breakdown
+   * to help users understand their context usage before sending messages.
    */
   estimate_tokens_api_v1_assistants__id__token_estimate_get: {
     parameters: {
@@ -9123,9 +9116,13 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */

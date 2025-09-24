@@ -201,6 +201,7 @@
       fileIds.forEach(id => fetchingTokensFor.delete(id));
     }
   }
+
 </script>
 
 <!-- This interaction is just a convenience function -->
