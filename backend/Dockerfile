@@ -9,7 +9,7 @@ RUN apt-get install -y ffmpeg
 RUN apt-get install libmagic1
 
 # Install poetry
-RUN pip install poetry
+RUN pip install poetry==2.1.3
 
 WORKDIR /code
 
@@ -28,11 +28,6 @@ ENV PYTHONUNBUFFERED=1
 ENV TIKTOKEN_CACHE_DIR=/tiktoken
 RUN mkdir /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
-
-# CRITICAL: Give ownership to UID 1000 BEFORE switching user
-RUN chown -R 1000:1000 /code /tiktoken \
-  && mkdir -p /.cache/pypoetry \
-  && chown -R 1000:1000 /.cache
 
 # Run as unprivileged user
 USER 1000
