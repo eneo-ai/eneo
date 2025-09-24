@@ -3,74 +3,139 @@
   import { AlertTriangle } from "lucide-svelte";
 
   interface Props {
-    tokens: number;
+    tokens: number; // Tokens for the NEW prompt (text + files)
     limit: number;
+    historyTokens?: number; // Tokens for the conversation HISTORY
     isApproximate?: boolean;
   }
 
-  const { tokens = 0, limit = 128000, isApproximate = false }: Props = $props();
+  const { tokens = 0, limit = 128000, historyTokens = 0, isApproximate = false }: Props = $props();
 
-  // Calculate actual percentage (can exceed 100%)
-  const actualPercentage = $derived(limit > 0 ? (tokens / limit) * 100 : 0);
+  // --- Calculations ---
+  // Use tokens directly in calculations for proper reactivity
+  const grandTotalTokens = $derived(historyTokens + tokens);
 
-  // Calculate display percentage for progress bar (capped at 100% for normal section)
-  const displayPercentage = $derived(Math.min(actualPercentage, 100));
+  const historyPercentage = $derived(limit > 0 ? (historyTokens / limit) * 100 : 0);
+  const newPercentage = $derived(limit > 0 ? (tokens / limit) * 100 : 0);
+  const totalPercentage = $derived(historyPercentage + newPercentage);
 
-  // Check if we're in overflow state
-  const isOverflow = $derived(actualPercentage > 100);
+  // Display percentages (capped at 100% for bar visualization)
+  const historyDisplayPercentage = $derived(Math.min(historyPercentage, 100));
+  const newDisplayPercentage = $derived(Math.min(newPercentage, Math.max(0, 100 - historyPercentage)));
 
-  // Calculate overflow tokens
-  const overflowTokens = $derived(Math.max(0, tokens - limit));
+  const isOverflow = $derived(totalPercentage > 100);
+  const overflowTokens = $derived(Math.max(0, grandTotalTokens - limit));
 
-  // Determine color based on percentage using design tokens
-  const colorClass = $derived(
+  // Color logic for the NEW prompt segment based on total usage
+  const newSegmentColorClass = $derived(
     isOverflow
       ? 'bg-negative-default'
-      : displayPercentage < 70
+      : totalPercentage < 70
         ? 'bg-positive-default'
-        : displayPercentage < 85
+        : totalPercentage < 85
           ? 'bg-warning-default'
-          : displayPercentage < 95
+          : totalPercentage < 95
             ? 'bg-change-indicator'
             : 'bg-negative-default'
   );
 
-  // Format numbers with locale-aware thousands separators
-  const formattedTokens = $derived(tokens.toLocaleString());
+  // History segment always has a neutral color
+  const historySegmentColorClass = 'bg-slate-400';
+
+  // --- Formatting ---
+  const formattedGrandTotal = $derived(grandTotalTokens.toLocaleString());
+  const formattedHistoryTokens = $derived(historyTokens.toLocaleString());
+  const formattedNewTokens = $derived(tokens.toLocaleString());
   const formattedLimit = $derived(limit.toLocaleString());
   const formattedOverflow = $derived(overflowTokens.toLocaleString());
 </script>
 
 <div class="token-usage-bar w-full">
-  <!-- Progress bar -->
+  <!-- Stacked progress bar -->
   <div class="relative mb-1 h-1.5 w-full overflow-hidden rounded-full bg-tertiary">
-    <!-- Normal usage section (up to 100%) -->
-    <div
-      class="absolute left-0 top-0 h-full rounded-full transition-all duration-300 ease-out {colorClass}"
-      style="width: {displayPercentage}%"
-    ></div>
+    <!-- History segment (left) -->
+    {#if historyTokens > 0}
+      <Tooltip
+        text={`${formattedHistoryTokens} tokens from conversation history`}
+        placement="top"
+        let:trigger
+        asFragment
+      >
+        <Button
+          unstyled
+          is={trigger}
+          class="absolute left-0 top-0 h-full cursor-help transition-all duration-300 ease-out {historySegmentColorClass}"
+          style="width: {historyDisplayPercentage}%"
+        />
+      </Tooltip>
+    {/if}
+
+    <!-- New prompt segment (right) -->
+    {#if tokens > 0}
+      <Tooltip
+        text={`${formattedNewTokens} tokens from new message & files`}
+        placement="top"
+        let:trigger
+        asFragment
+      >
+        <Button
+          unstyled
+          is={trigger}
+          class="absolute top-0 h-full cursor-help transition-all duration-300 ease-out {newSegmentColorClass}"
+          style="left: {historyDisplayPercentage}%; width: {newDisplayPercentage}%"
+        >
+          <!-- Vertical separator line between segments -->
+          {#if historyTokens > 0 && historyDisplayPercentage < 100}
+            <div class="absolute left-0 top-0 h-full w-px bg-primary/30"></div>
+          {/if}
+        </Button>
+      </Tooltip>
+    {/if}
 
     <!-- Overflow section (beyond 100%) -->
     {#if isOverflow}
       <div
         class="absolute left-0 top-0 h-full rounded-full bg-negative-stronger opacity-80 transition-all duration-300 ease-out"
-        style="width: {Math.min(actualPercentage, 120)}%"
+        style="width: {Math.min(totalPercentage, 120)}%"
       ></div>
     {/if}
   </div>
 
   <!-- Text display -->
   <div class="flex items-center justify-between text-xs text-secondary">
-    <div class="flex items-center gap-1">
+    <div class="flex items-center gap-1.5">
       {#if isApproximate && !isOverflow}
         <span class="text-tertiary">≈</span>
       {/if}
-      <span>{formattedTokens} / {formattedLimit} tokens</span>
+      <span>{formattedGrandTotal} / {formattedLimit} tokens</span>
+
+      <!-- Legend indicators for segments -->
+      {#if historyTokens > 0 || tokens > 0}
+        <div class="flex items-center gap-2 ml-2">
+          {#if historyTokens > 0}
+            <div class="flex items-center gap-1">
+              <div class="w-2 h-2 rounded-full {historySegmentColorClass}"></div>
+              <span class="text-[10px] text-tertiary">history</span>
+            </div>
+          {/if}
+          {#if tokens > 0}
+            <div class="flex items-center gap-1">
+              <div class="w-2 h-2 rounded-full {newSegmentColorClass}"></div>
+              <span class="text-[10px] text-tertiary">new</span>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <div class="flex items-center gap-3">
       {#if isOverflow}
-        <Tooltip text="You've exceeded the context limit. The AI may not see the oldest messages or file content." placement="top" let:trigger asFragment>
+        <Tooltip
+          text="You've exceeded the context limit. The AI may not see the oldest messages or file content."
+          placement="top"
+          let:trigger
+          asFragment
+        >
           <Button
             unstyled
             is={trigger}
@@ -85,9 +150,9 @@
       <span
         class="{isOverflow
           ? 'font-bold text-negative-stronger'
-          : displayPercentage > 85
+          : totalPercentage > 85
             ? 'font-medium text-warning'
-            : ''}">{actualPercentage.toFixed(1)}%</span
+            : ''}">{totalPercentage.toFixed(1)}%</span
       >
     </div>
   </div>
