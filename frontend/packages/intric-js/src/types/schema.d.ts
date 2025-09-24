@@ -258,7 +258,9 @@ export interface paths {
     /**
      * Estimate token usage for text and files
      * @description Estimate token usage for the given text and files in the context of this assistant.
-     * Returns the token count and percentage of the model's context window.
+     *
+     * Returns token count, percentage of context window used, and detailed breakdown
+     * to help users understand their context usage before sending messages.
      */
     get: operations["estimate_tokens_api_v1_assistants__id__token_estimate_get"];
   };
@@ -5031,6 +5033,57 @@ export interface components {
       /** Security Enabled */
       security_enabled?: boolean | null;
     };
+    /**
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
+     */
+    TokenEstimateBreakdown: {
+      /**
+       * Prompt
+       * @description Tokens used by assistant prompt
+       */
+      prompt: number;
+      /**
+       * Text
+       * @description Tokens used by user input text
+       */
+      text: number;
+      /**
+       * Files
+       * @description Total tokens used by all files
+       */
+      files: number;
+      /**
+       * File Details
+       * @description Per-file token counts
+       */
+      file_details?: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
+    };
     /** TokenUsageSummary */
     TokenUsageSummary: {
       /**
@@ -8119,7 +8172,9 @@ export interface operations {
   /**
    * Estimate token usage for text and files
    * @description Estimate token usage for the given text and files in the context of this assistant.
-   * Returns the token count and percentage of the model's context window.
+   *
+   * Returns token count, percentage of context window used, and detailed breakdown
+   * to help users understand their context usage before sending messages.
    */
   estimate_tokens_api_v1_assistants__id__token_estimate_get: {
     parameters: {
@@ -8137,9 +8192,13 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
