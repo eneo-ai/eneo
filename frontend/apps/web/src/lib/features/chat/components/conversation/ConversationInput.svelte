@@ -103,24 +103,7 @@
         size: att.fileRef!.size
       }));
 
-    // Debug logging
-    console.log('[ConversationInput] Sending to ChatService:', {
-      textLength: $question.length,
-      attachmentsCount: currentAttachments.length,
-      attachmentIds: currentAttachments.map(a => a.id)
-    });
-
     chat.calculateNewPromptTokens($question, currentAttachments);
-  });
-
-  // Debug logging for token values
-  $effect(() => {
-    console.log('[ConversationInput] Token values:', {
-      historyTokens,
-      newTokens,
-      tokenLimit,
-      hasInput: $question.length > 0 || $attachments.length > 0
-    });
   });
 
 </script>
