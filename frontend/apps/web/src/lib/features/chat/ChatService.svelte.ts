@@ -365,33 +365,39 @@ export class ChatService {
 
   // New method to calculate tokens for the message being composed
   async calculateNewPromptTokens(text: string, attachments: { id: string; size?: number }[]) {
-    console.log('[ChatService] calculateNewPromptTokens called:', {
-      textLength: text.length,
-      attachmentsCount: attachments.length,
-      hasChatPartner: !!this.#chatPartner?.id
-    });
-
     if (!this.#chatPartner?.id) {
-      console.warn('[ChatService] No chat partner ID, cannot calculate tokens');
       this.newPromptTokens = 0;
       return;
     }
 
-    // Cancel any pending calculation
+    // --- IMMEDIATE UPDATE FOR RESPONSIVE UI ---
+    // Provide instant approximation for typed text (1 token ≈ 4 characters)
+    const textTokensApproximation = Math.ceil(text.length / 4);
+
+    // Store the last known file token count to preserve it while typing
+    const currentFileTokens = this.newPromptTokens > textTokensApproximation
+      ? this.newPromptTokens - Math.ceil(text.length / 4)
+      : 0;
+
+    // Immediately update with text approximation
+    if (text.length > 0 || attachments.length === 0) {
+      // If we have text or no attachments, update immediately
+      this.newPromptTokens = textTokensApproximation + (attachments.length > 0 ? currentFileTokens : 0);
+    }
+
+    // If no input at all, reset immediately
+    if (text.trim().length === 0 && attachments.length === 0) {
+      this.newPromptTokens = 0;
+      return;
+    }
+
+    // --- DEBOUNCED API CALL FOR ACCURACY ---
     if (this.#newPromptTokenTimer) {
       clearTimeout(this.#newPromptTokenTimer);
     }
 
-    // Debounce the API call to avoid spamming while typing
     this.#newPromptTokenTimer = setTimeout(async () => {
       try {
-        // If no input, reset to 0
-        if (text.trim().length === 0 && attachments.length === 0) {
-          console.log('[ChatService] No input, resetting newPromptTokens to 0');
-          this.newPromptTokens = 0;
-          return;
-        }
-
         const fileIds = attachments.filter(att => att.id).map(att => att.id);
 
         console.log('[ChatService] Making token-estimate API call:', {
@@ -412,34 +418,28 @@ export class ChatService {
           }
         });
 
-        console.log('[ChatService] Token-estimate response:', response);
-
         if (response?.breakdown) {
           const breakdown = response.breakdown;
-          // Calculate total tokens from breakdown
+          // Calculate total tokens from breakdown - this is the accurate count
           const totalNewTokens = (breakdown.prompt || 0) + (breakdown.text || 0) + (breakdown.files || 0);
           this.newPromptTokens = totalNewTokens;
 
           console.log(
-            `[ChatService] ✅ New prompt tokens calculated: ${totalNewTokens.toLocaleString()} ` +
+            `[ChatService] ✅ Accurate token count: ${totalNewTokens.toLocaleString()} ` +
             `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${breakdown.prompt || 0})`
           );
         } else {
-          console.warn('[ChatService] No breakdown in response, using fallback');
-          // Fallback to character-based approximation
-          const textTokens = Math.ceil(text.length / 4);
+          // Fallback if API response is malformed
           const fileTokens = attachments.length * 1000;
-          this.newPromptTokens = textTokens + fileTokens;
+          this.newPromptTokens = textTokensApproximation + fileTokens;
         }
       } catch (error) {
-        console.error('[ChatService] ❌ New prompt token calculation failed:', error);
-        // Fallback to character-based approximation
-        const textTokens = Math.ceil(text.length / 4);
-        const fileTokens = attachments.length * 1000; // Rough estimate per file
-        this.newPromptTokens = textTokens + fileTokens;
-        console.log(`[ChatService] Using fallback tokens: ${this.newPromptTokens}`);
+        console.error('[ChatService] Token calculation failed, keeping approximation:', error);
+        // Keep the immediate approximation on error
+        const fileTokens = attachments.length * 1000;
+        this.newPromptTokens = textTokensApproximation + fileTokens;
       }
-    }, 300); // 300ms debounce for typing responsiveness
+    }, 300); // 300ms debounce for API accuracy
   }
 }
 

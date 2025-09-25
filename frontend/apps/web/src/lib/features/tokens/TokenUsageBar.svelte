@@ -21,7 +21,8 @@
 
   // Display percentages (capped at 100% for bar visualization)
   const historyDisplayPercentage = $derived(Math.min(historyPercentage, 100));
-  const newDisplayPercentage = $derived(Math.min(newPercentage, Math.max(0, 100 - historyPercentage)));
+  // Don't cap the new segment - let it show its full percentage even if it overflows
+  const newDisplayPercentage = $derived(newPercentage);
 
   const isOverflow = $derived(totalPercentage > 100);
   const overflowTokens = $derived(Math.max(0, grandTotalTokens - limit));
@@ -34,8 +35,8 @@
         ? 'bg-positive-default'
         : totalPercentage < 85
           ? 'bg-warning-default'
-          : totalPercentage < 95
-            ? 'bg-change-indicator'
+        : totalPercentage < 95
+            ? 'bg-[var(--change-indicator)]'
             : 'bg-negative-default'
   );
 
