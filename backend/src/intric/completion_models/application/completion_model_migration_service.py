@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, update, select, func
+from sqlalchemy import and_, update, select, func, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +28,9 @@ from intric.main.exceptions import ValidationException
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
-    from intric.completion_models.domain.completion_model_repo import CompletionModelRepository
+    from intric.completion_models.domain.completion_model_repo import (
+        CompletionModelRepository,
+    )
     from intric.users.user import User
 
 
@@ -70,27 +72,37 @@ class CompletionModelMigrationService:
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
                 "entity_types": entity_types,
-            }
+            },
         )
 
         # Validate and normalize entity_types
         if entity_types is not None:
             # Add debugging to catch the "string" issue
-            self.logger.debug(f"Raw entity_types received: {entity_types} (type: {type(entity_types)})")
+            self.logger.debug(
+                f"Raw entity_types received: {entity_types} (type: {type(entity_types)})"
+            )
 
             # Handle case where a string is passed instead of a list
             if isinstance(entity_types, str):
-                self.logger.warning(f"entity_types is a string instead of list: '{entity_types}'. Converting to list.")
+                self.logger.warning(
+                    f"entity_types is a string instead of list: '{entity_types}'. Converting to list."
+                )
                 entity_types = [entity_types]
 
             # Validate entity types
             if not isinstance(entity_types, list):
-                raise ValidationException(f"entity_types must be a list of strings, got {type(entity_types)}")
+                raise ValidationException(
+                    f"entity_types must be a list of strings, got {type(entity_types)}"
+                )
 
             # Check for invalid entity types
-            invalid_types = [t for t in entity_types if t not in ENTITY_TYPES and t != "spaces"]
+            invalid_types = [
+                t for t in entity_types if t not in ENTITY_TYPES and t != "spaces"
+            ]
             if invalid_types:
-                raise ValidationException(f"Invalid entity types: {invalid_types}. Valid types are: {ENTITY_TYPES + ['spaces']}")
+                raise ValidationException(
+                    f"Invalid entity types: {invalid_types}. Valid types are: {ENTITY_TYPES + ['spaces']}"
+                )
 
             self.logger.debug(f"Validated entity_types: {entity_types}")
 
@@ -128,7 +140,7 @@ class CompletionModelMigrationService:
                 and_(
                     CompletionModelSettings.completion_model_id == from_model_id,
                     CompletionModelSettings.tenant_id == user.tenant_id,
-                    CompletionModelSettings.is_org_enabled == True
+                    CompletionModelSettings.is_org_enabled == True,
                 )
             )
             from_settings = await self.session.execute(from_settings_stmt)
@@ -142,7 +154,7 @@ class CompletionModelMigrationService:
                 and_(
                     CompletionModelSettings.completion_model_id == to_model_id,
                     CompletionModelSettings.tenant_id == user.tenant_id,
-                    CompletionModelSettings.is_org_enabled == True
+                    CompletionModelSettings.is_org_enabled == True,
                 )
             )
             to_settings = await self.session.execute(to_settings_stmt)
@@ -157,8 +169,8 @@ class CompletionModelMigrationService:
                 extra={
                     "from_model": from_model.name,
                     "to_model": to_model.name,
-                    "tenant_id": str(user.tenant_id)
-                }
+                    "tenant_id": str(user.tenant_id),
+                },
             )
 
         except ValidationException:
@@ -170,8 +182,8 @@ class CompletionModelMigrationService:
                 extra={
                     "from_model_id": str(from_model_id),
                     "to_model_id": str(to_model_id),
-                    "error": str(e)
-                }
+                    "error": str(e),
+                },
             )
             raise ValidationException(
                 "Model validation failed: Unable to verify model availability. "
@@ -243,7 +255,7 @@ class CompletionModelMigrationService:
                         "from_model_id": str(from_model_id),
                         "to_model_id": str(to_model_id),
                         "warnings": validation_result.warnings,
-                    }
+                    },
                 )
 
             # Step 2: Execute migration transactionally
@@ -266,16 +278,18 @@ class CompletionModelMigrationService:
                             "migration_id": str(migration_id),
                             "migrated_count": migrated_count,
                             "threshold": threshold,
-                        }
+                        },
                     )
 
                     # Recalculate within the existing transaction
-                    await self.usage_service.recalculate_all_usage_stats_in_transaction(user.tenant_id)
+                    await self.usage_service.recalculate_all_usage_stats_in_transaction(
+                        user.tenant_id
+                    )
                     auto_recalculated = True
 
                     self.logger.info(
                         "Auto-recalculation completed successfully",
-                        extra={"migration_id": str(migration_id)}
+                        extra={"migration_id": str(migration_id)},
                     )
 
                 except Exception as e:
@@ -285,7 +299,7 @@ class CompletionModelMigrationService:
                             "migration_id": str(migration_id),
                             "error": str(e),
                             "error_type": type(e).__name__,
-                        }
+                        },
                     )
                     # Don't fail the migration if recalculation fails
                     requires_manual_recalculation = True
@@ -297,7 +311,7 @@ class CompletionModelMigrationService:
                         "migration_id": str(migration_id),
                         "migrated_count": migrated_count,
                         "threshold": threshold,
-                    }
+                    },
                 )
 
             duration = (datetime.utcnow() - start_time).total_seconds()
@@ -311,7 +325,7 @@ class CompletionModelMigrationService:
                     "details": result,
                     "auto_recalculated": auto_recalculated,
                     "requires_manual_recalculation": requires_manual_recalculation,
-                }
+                },
             )
 
             # Update migration history with success
@@ -323,7 +337,9 @@ class CompletionModelMigrationService:
                 failed_count=0,
                 duration_seconds=duration,
                 completed_at=datetime.utcnow(),
-                warnings=validation_result.warnings if validation_result.warnings else None,
+                warnings=validation_result.warnings
+                if validation_result.warnings
+                else None,
                 migration_details=result,
             )
 
@@ -361,7 +377,7 @@ class CompletionModelMigrationService:
                     "error_type": "database",
                     "from_model_id": str(from_model_id),
                     "to_model_id": str(to_model_id),
-                }
+                },
             )
 
             # Update migration history with failure
@@ -386,7 +402,9 @@ class CompletionModelMigrationService:
                 )
             )
 
-            raise ValidationException(f"Migration failed due to database error: {str(e)}")
+            raise ValidationException(
+                f"Migration failed due to database error: {str(e)}"
+            )
         except Exception as e:
             self.logger.error(
                 "Unexpected error during model migration",
@@ -396,7 +414,7 @@ class CompletionModelMigrationService:
                     "error_type": "unexpected",
                     "from_model_id": str(from_model_id),
                     "to_model_id": str(to_model_id),
-                }
+                },
             )
 
             # Update migration history with failure
@@ -442,7 +460,9 @@ class CompletionModelMigrationService:
 
         # Check model family compatibility
         if from_model.family != to_model.family:
-            issues.append(f"Different model families: {from_model.family} → {to_model.family}")
+            issues.append(
+                f"Different model families: {from_model.family} → {to_model.family}"
+            )
 
         # Check vision support
         if from_model.vision and not to_model.vision:
@@ -468,7 +488,9 @@ class CompletionModelMigrationService:
         total_count = 0
 
         for entity_type in entity_types:
-            count = await self._count_entities_by_type(entity_type, from_model_id, tenant_id)
+            count = await self._count_entities_by_type(
+                entity_type, from_model_id, tenant_id
+            )
             total_count += count
 
         return total_count
@@ -482,19 +504,27 @@ class CompletionModelMigrationService:
             return await self._count_spaces(model_id, tenant_id)
 
         if entity_type not in ENTITY_TABLE_MAP:
-            self.logger.warning(f"Entity type {entity_type} not found in ENTITY_TABLE_MAP")
+            self.logger.warning(
+                f"Entity type {entity_type} not found in ENTITY_TABLE_MAP"
+            )
             return 0
 
         table = ENTITY_TABLE_MAP[entity_type]
 
         # Build tenant-aware filtering condition
-        tenant_condition = self._build_tenant_filter_condition(table, entity_type, tenant_id)
+        tenant_condition = self._build_tenant_filter_condition(
+            table, entity_type, tenant_id
+        )
 
         # Build query using SQLAlchemy Core to prevent SQL injection
-        stmt = select(func.count()).select_from(table).where(
-            and_(
-                table.completion_model_id == model_id,
-                tenant_condition,
+        stmt = (
+            select(func.count())
+            .select_from(table)
+            .where(
+                and_(
+                    table.completion_model_id == model_id,
+                    tenant_condition,
+                )
             )
         )
 
@@ -553,7 +583,9 @@ class CompletionModelMigrationService:
                 await savepoint.rollback()
                 raise e
 
-    def _build_tenant_filter_condition(self, table: Any, entity_type: str, tenant_id: UUID):
+    def _build_tenant_filter_condition(
+        self, table: Any, entity_type: str, tenant_id: UUID
+    ):
         """Build appropriate tenant filtering condition based on entity type."""
         from intric.database.tables.users_table import Users
 
@@ -572,31 +604,41 @@ class CompletionModelMigrationService:
             # Spaces have direct tenant_id field
             return table.tenant_id == tenant_id
         else:
-            self.logger.warning(f"Unknown entity type for tenant filtering: {entity_type}")
+            self.logger.warning(
+                f"Unknown entity type for tenant filtering: {entity_type}"
+            )
             return True
 
     async def _migrate_entity_type(
         self, entity_type: str, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
     ) -> int:
         """Migrate entities of a specific type from one model to another."""
-        self.logger.debug(f"Migrating entity_type={entity_type}, from_model_id={from_model_id}, to_model_id={to_model_id}, tenant_id={tenant_id}")
+        self.logger.debug(
+            f"Migrating entity_type={entity_type}, from_model_id={from_model_id}, to_model_id={to_model_id}, tenant_id={tenant_id}"
+        )
 
         # Handle spaces separately due to many-to-many relationship
         if entity_type == "spaces":
             return await self._migrate_spaces(from_model_id, to_model_id, tenant_id)
 
         if entity_type not in ENTITY_TABLE_MAP:
-            self.logger.warning(f"Entity type {entity_type} not found in ENTITY_TABLE_MAP")
+            self.logger.warning(
+                f"Entity type {entity_type} not found in ENTITY_TABLE_MAP"
+            )
             return 0
 
         table = ENTITY_TABLE_MAP[entity_type]
 
         # Build tenant-aware filtering condition
-        tenant_condition = self._build_tenant_filter_condition(table, entity_type, tenant_id)
+        tenant_condition = self._build_tenant_filter_condition(
+            table, entity_type, tenant_id
+        )
 
         # For assistants, we need to handle completion_model_kwargs specially
         if entity_type == "assistant":
-            return await self._migrate_assistants_with_kwargs(from_model_id, to_model_id, tenant_id, table, tenant_condition)
+            return await self._migrate_assistants_with_kwargs(
+                from_model_id, to_model_id, tenant_id, table, tenant_condition
+            )
 
         # Update all entities of this type (non-assistant entities)
         stmt = (
@@ -615,15 +657,29 @@ class CompletionModelMigrationService:
         result = await self.session.execute(stmt)
         migrated_count = result.rowcount or 0
 
-        self.logger.info(f"Migrated {migrated_count} {entity_type} entities from {from_model_id} to {to_model_id}")
+        self.logger.info(
+            f"Migrated {migrated_count} {entity_type} entities from {from_model_id} to {to_model_id}"
+        )
 
         return migrated_count
 
     async def _migrate_assistants_with_kwargs(
-        self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID, table, tenant_condition
+        self,
+        from_model_id: UUID,
+        to_model_id: UUID,
+        tenant_id: UUID,
+        table,
+        tenant_condition,
     ) -> int:
         """Migrate assistants and handle their completion_model_kwargs properly."""
-        self.logger.debug(f"Migrating assistants with kwargs handling from {from_model_id} to {to_model_id} for tenant {tenant_id}")
+        self.logger.debug(
+            f"Migrating assistants with kwargs handling from {from_model_id} to {to_model_id} for tenant {tenant_id}"
+        )
+
+        # First, enable the target model on spaces where the source model is enabled
+        await self._ensure_target_model_enabled_on_spaces(
+            from_model_id, to_model_id, tenant_id
+        )
 
         # Update assistants: change model and reset kwargs to avoid incompatibility
         stmt = (
@@ -636,47 +692,139 @@ class CompletionModelMigrationService:
             )
             .values(
                 completion_model_id=to_model_id,
-                completion_model_kwargs={}  # Reset kwargs to avoid parameter incompatibilities
+                completion_model_kwargs={},  # Reset kwargs to avoid parameter incompatibilities
             )
         )
 
-        self.logger.debug(f"Executing assistant migration query with kwargs reset: {stmt}")
+        self.logger.debug(
+            f"Executing assistant migration query with kwargs reset: {stmt}"
+        )
 
         result = await self.session.execute(stmt)
         migrated_count = result.rowcount or 0
 
-        self.logger.info(f"Migrated {migrated_count} assistants from {from_model_id} to {to_model_id}, kwargs reset to avoid incompatibilities")
+        self.logger.info(
+            f"Migrated {migrated_count} assistants from {from_model_id} to {to_model_id}, kwargs reset to avoid incompatibilities"
+        )
 
         return migrated_count
+
+    async def _ensure_target_model_enabled_on_spaces(
+        self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
+    ) -> None:
+        """Enable target model on spaces where source model is enabled."""
+        from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
+        from sqlalchemy.dialects.postgresql import insert
+
+        self.logger.debug(
+            f"Ensuring target model {to_model_id} is enabled on spaces where source model {from_model_id} is enabled for tenant {tenant_id}"
+        )
+
+        # Find all spaces in the tenant that have the source model enabled
+        spaces_with_source_model_stmt = (
+            select(SpacesCompletionModels.space_id)
+            .select_from(SpacesCompletionModels)
+            .join(Spaces, SpacesCompletionModels.space_id == Spaces.id)
+            .where(
+                and_(
+                    SpacesCompletionModels.completion_model_id == from_model_id,
+                    Spaces.tenant_id == tenant_id,
+                )
+            )
+        )
+
+        result = await self.session.execute(spaces_with_source_model_stmt)
+        space_ids = [row.space_id for row in result.fetchall()]
+
+        if not space_ids:
+            self.logger.debug(
+                f"No spaces found with source model {from_model_id} enabled for tenant {tenant_id}"
+            )
+            return
+
+        self.logger.info(
+            f"Found {len(space_ids)} spaces with source model {from_model_id} enabled: {space_ids}, enabling target model {to_model_id}"
+        )
+
+        # Enable target model on all those spaces (using INSERT ... ON CONFLICT DO NOTHING to avoid duplicates)
+        for space_id in space_ids:
+            insert_stmt = insert(SpacesCompletionModels).values(
+                space_id=space_id, completion_model_id=to_model_id
+            )
+            # Use ON CONFLICT DO NOTHING to handle cases where target model is already enabled
+            insert_stmt = insert_stmt.on_conflict_do_nothing()
+
+            await self.session.execute(insert_stmt)
+
+        self.logger.info(
+            f"Successfully enabled target model {to_model_id} on {len(space_ids)} spaces {space_ids} for tenant {tenant_id}"
+        )
 
     async def _migrate_spaces(
         self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
     ) -> int:
         """Migrate spaces from one model to another in the many-to-many relationship."""
         from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
+        from sqlalchemy.dialects.postgresql import insert
 
-        self.logger.debug(f"Migrating spaces many-to-many relationship from {from_model_id} to {to_model_id} for tenant {tenant_id}")
+        self.logger.debug(
+            f"Migrating spaces many-to-many relationship from {from_model_id} to {to_model_id} for tenant {tenant_id}"
+        )
 
-        # Update the many-to-many relationship table
-        # This changes which model is available in each space
-        stmt = (
-            update(SpacesCompletionModels)
+        # First, find all spaces in the tenant that have the source model enabled
+        spaces_with_source_model_stmt = (
+            select(SpacesCompletionModels.space_id)
+            .select_from(SpacesCompletionModels)
+            .join(Spaces, SpacesCompletionModels.space_id == Spaces.id)
             .where(
                 and_(
                     SpacesCompletionModels.completion_model_id == from_model_id,
-                    SpacesCompletionModels.space_id.in_(
-                        select(Spaces.id).where(Spaces.tenant_id == tenant_id)
-                    ),
+                    Spaces.tenant_id == tenant_id,
                 )
             )
-            .values(completion_model_id=to_model_id)
         )
 
-        self.logger.debug(f"Executing spaces migration query: {stmt}")
+        result = await self.session.execute(spaces_with_source_model_stmt)
+        space_ids = [row.space_id for row in result.fetchall()]
 
-        result = await self.session.execute(stmt)
-        migrated_count = result.rowcount or 0
+        if not space_ids:
+            self.logger.debug(
+                f"No spaces found with source model {from_model_id} enabled for tenant {tenant_id}"
+            )
+            return 0
 
-        self.logger.info(f"Migrated {migrated_count} space-model associations from {from_model_id} to {to_model_id}")
+        self.logger.info(
+            f"Found {len(space_ids)} spaces with source model {from_model_id}: {space_ids}"
+        )
+
+        # Step 1: Ensure target model is enabled on all these spaces (INSERT with ON CONFLICT DO NOTHING)
+        for space_id in space_ids:
+            insert_stmt = insert(SpacesCompletionModels).values(
+                space_id=space_id, completion_model_id=to_model_id
+            )
+            insert_stmt = insert_stmt.on_conflict_do_nothing()
+            await self.session.execute(insert_stmt)
+
+        self.logger.info(
+            f"Enabled target model {to_model_id} on {len(space_ids)} spaces: {space_ids}"
+        )
+
+        # Step 2: Remove the old model relationships
+        delete_stmt = delete(SpacesCompletionModels).where(
+            and_(
+                SpacesCompletionModels.completion_model_id == from_model_id,
+                SpacesCompletionModels.space_id.in_(space_ids),
+            )
+        )
+
+        self.logger.info(
+            f"Removing old relationships for source model {from_model_id} on spaces: {space_ids}"
+        )
+        delete_result = await self.session.execute(delete_stmt)
+        migrated_count = delete_result.rowcount or 0
+
+        self.logger.info(
+            f"Migrated {migrated_count} space-model associations from {from_model_id} to {to_model_id} (removed old relationships)"
+        )
 
         return migrated_count
