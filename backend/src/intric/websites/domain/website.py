@@ -16,12 +16,17 @@ if TYPE_CHECKING:
 
 
 class UpdateInterval(str, Enum):
-    NEVER = "never"
-    DAILY = "daily"
-    EVERY_3_DAYS = "every_3_days"
-    WEEKLY = "weekly"
-    EVERY_2_WEEKS = "every_2_weeks"
-    MONTHLY = "monthly"
+    """
+    Website crawl update intervals.
+
+    Determines how frequently a website should be automatically crawled.
+    Each interval has a corresponding cron job that triggers crawls for websites
+    configured with that interval. All times are in Sweden timezone (CET/CEST).
+    """
+    NEVER = "never"  # Manual crawls only
+    DAILY = "daily"  # Every day at 2 AM
+    EVERY_OTHER_DAY = "every_other_day"  # Every 2 days at 2 AM
+    WEEKLY = "weekly"  # Every Friday at 11 PM
 
 
 class Website(Entity):

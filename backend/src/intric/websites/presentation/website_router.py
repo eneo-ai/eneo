@@ -36,20 +36,53 @@ async def create_website(
     return HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
-@router.get("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
+@router.get(
+    "/{id}/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([404]),
+    summary="Get website details",
+    description="Retrieve detailed information about a specific website, including its latest crawl status, configuration, and metadata."
+)
 async def get_website(id: UUID, container: Container = Depends(get_container(with_user=True))):
+    """
+    Get detailed information about a website.
+
+    Returns comprehensive website information including:
+    - Configuration (URL, crawl type, update interval)
+    - Authentication settings (without exposing credentials)
+    - Latest crawl status and metrics
+    - Associated embedding model and space information
+    """
     service = container.website_crud_service()
     website = await service.get_website(id)
 
     return WebsitePublic.from_domain(website)
 
 
-@router.post("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
+@router.post(
+    "/{id}/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([404]),
+    summary="Update website configuration",
+    description="Update website settings including URL, crawl behavior, authentication, and scheduling preferences."
+)
 async def update_website(
     id: UUID,
     website_update: WebsiteUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    """
+    Update website configuration.
+
+    Allows updating various website settings:
+    - URL and display name
+    - Crawl type (basic crawl or sitemap-based)
+    - Update interval (never, daily, every_other_day, weekly)
+    - File download preferences
+    - Authentication credentials (encrypted and stored securely)
+
+    Note: Authentication passwords are encrypted before storage and never returned in API responses.
+    """
     service = container.website_crud_service()
 
     website = await service.update_website(
@@ -77,18 +110,55 @@ async def delete_website(id: UUID, container: Container = Depends(get_container(
     "/{id}/run/",
     response_model=CrawlRunPublic,
     responses=responses.get_responses([403, 404]),
+    summary="Start website crawl",
+    description="Initiate a manual crawl of the website. The crawl runs asynchronously in the background."
 )
 async def run_crawl(id: UUID, container: Container = Depends(get_container(with_user=True))):
-    # MIT License
+    """
+    Start a manual crawl of the website.
 
+    This endpoint queues a new crawl job for the specified website. The crawl will:
+    - Process pages according to the website's crawl type (basic or sitemap)
+    - Download files if configured to do so
+    - Use authentication credentials if required
+    - Update the knowledge base with new/changed content
+    - Clean up outdated content that's no longer available
+
+    The crawl runs asynchronously and may take several minutes depending on website size.
+    Monitor progress through the crawl run status or via WebSocket notifications.
+
+    Returns:
+        CrawlRunPublic: The created crawl run with initial status information
+
+    Raises:
+        403: If user doesn't have permission to crawl this website
+        404: If website doesn't exist
+    """
     service = container.website_crud_service()
     crawl_run = await service.crawl_website(id)
 
     return CrawlRunPublic.from_domain(crawl_run)
 
 
-@router.get("/{id}/runs/", response_model=PaginatedResponse[CrawlRunPublic])
+@router.get(
+    "/{id}/runs/",
+    response_model=PaginatedResponse[CrawlRunPublic],
+    summary="Get website crawl history",
+    description="Retrieve the crawl history for a website, including status, metrics, and timing information."
+)
 async def get_crawl_runs(id: UUID, container: Container = Depends(get_container(with_user=True))):
+    """
+    Get crawl run history for a website.
+
+    Returns a paginated list of all crawl runs for the specified website,
+    ordered by creation date (most recent first). Each crawl run includes:
+    - Status (queued, in_progress, complete, failed)
+    - Metrics (pages crawled, files downloaded, failures)
+    - Timing information (start, finish times)
+    - Result location for accessing crawled content
+
+    This is useful for monitoring crawl performance and troubleshooting issues.
+    """
     service = container.website_crud_service()
     crawl_runs = await service.get_crawl_runs(id)
 

@@ -73,12 +73,16 @@ TAGS_METADATA = [
         ),
     },
     {
+        "name": "websites",
+        "description": "Website management operations. Configure websites for crawling, set authentication, update intervals, and manage crawl settings.",
+    },
+    {
         "name": "crawls",
-        "description": "Crawl operations. Use these endpoint to set up and run crawls.",
+        "description": "Website crawl operations. Start manual crawls, monitor progress, and configure crawl behavior including file downloads and authentication.",
     },
     {
         "name": "crawl-runs",
-        "description": "Crawl run operations. Use these endpoint to keep track of crawl runs.",
+        "description": "Crawl execution tracking. Monitor crawl run status, view performance metrics, and access crawl history with detailed timing and error information.",
     },
     {
         "name": "roles",

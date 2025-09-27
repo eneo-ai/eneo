@@ -24,31 +24,39 @@ async def crawl(job_id: str, params: CrawlTask, container: Container):
     return await crawl_task(job_id=job_id, params=params, container=container)
 
 
-# Daily crawl at 2 AM
+# Daily crawl at 2 AM Sweden time
+# Runs every day to crawl websites with 'daily' update interval
 @worker.cron_job(hour=2, minute=0)
 async def crawl_daily_websites(container: Container):
+    """Queue crawl tasks for all websites configured for daily updates.
+
+    This cron job triggers daily at 2 AM Sweden time and processes all websites
+    that have their update_interval set to 'daily'. Each website gets its own
+    crawl task queued in the background worker system.
+    """
     return await queue_website_crawls(container=container, interval=UpdateInterval.DAILY)
 
 
-# Every 3 days crawl at 2 AM (on days 1, 4, 7, 10, 13, 16, 19, 22, 25, 28)
-@worker.cron_job(day=(1, 4, 7, 10, 13, 16, 19, 22, 25, 28), hour=2, minute=0)
-async def crawl_every_3_days_websites(container: Container):
-    return await queue_website_crawls(container=container, interval=UpdateInterval.EVERY_3_DAYS)
+# Every other day crawl at 2 AM Sweden time (alternating days)
+# Runs on odd days of the month to provide every-other-day functionality
+@worker.cron_job(day=(1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31), hour=2, minute=0)
+async def crawl_every_other_day_websites(container: Container):
+    """Queue crawl tasks for all websites configured for every-other-day updates.
+
+    This cron job triggers every other day at 2 AM Sweden time on odd-numbered
+    days of the month. This provides a middle ground between daily and weekly crawls.
+    """
+    return await queue_website_crawls(container=container, interval=UpdateInterval.EVERY_OTHER_DAY)
 
 
-# Weekly crawl on Friday at 11 PM (keeping original time for backward compatibility)
+# Weekly crawl on Friday at 11 PM Sweden time
+# Runs weekly to crawl websites with 'weekly' update interval
 @worker.cron_job(weekday="fri", hour=23, minute=0)
 async def crawl_weekly_websites(container: Container):
+    """Queue crawl tasks for all websites configured for weekly updates.
+
+    This cron job triggers every Friday at 11 PM Sweden time and processes all
+    websites that have their update_interval set to 'weekly'. The Friday evening
+    timing ensures minimal impact on business hours.
+    """
     return await queue_website_crawls(container=container, interval=UpdateInterval.WEEKLY)
-
-
-# Every 2 weeks crawl on Friday at 11 PM (on days 1-7 and 15-21)
-@worker.cron_job(weekday="fri", day=(1, 2, 3, 4, 5, 6, 7, 15, 16, 17, 18, 19, 20, 21), hour=23, minute=0)
-async def crawl_every_2_weeks_websites(container: Container):
-    return await queue_website_crawls(container=container, interval=UpdateInterval.EVERY_2_WEEKS)
-
-
-# Monthly crawl on the 1st at 2 AM
-@worker.cron_job(day=1, hour=2, minute=0)
-async def crawl_monthly_websites(container: Container):
-    return await queue_website_crawls(container=container, interval=UpdateInterval.MONTHLY)

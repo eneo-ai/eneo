@@ -3,43 +3,62 @@
   import { Label } from "@intric/ui";
 
   export let updateInterval: WebsiteSparse["update_interval"];
-  /* TODO colours */
-  const intervalInfo: Record<string, { label: string; color: Label.LabelColor; tooltip?: string }> =
+
+  // Reactive statement to get the interval info with fallback
+  $: intervalItem = (() => {
+    const key = updateInterval ?? "error";
+    const item = intervalInfo[key];
+
+    if (!item) {
+      return intervalInfo.error;
+    }
+
+    return item;
+  })();
+  const intervalInfo: Record<string, { label: string; color: Label.LabelColor; tooltip: string }> =
     {
       daily: {
         color: "green",
         label: "Daily",
-        tooltip: "Updates every day at 2 AM"
+        tooltip: "Updates every day at 2 AM Sweden time"
       },
-      every_3_days: {
+      every_other_day: {
         color: "green",
-        label: "Every 3 days",
-        tooltip: "Updates every 3 days at 2 AM"
+        label: "Every other day",
+        tooltip: "Updates every other day at 2 AM Sweden time"
       },
       weekly: {
         color: "green",
         label: "Weekly",
-        tooltip: "Updates every Friday at 11 PM"
-      },
-      every_2_weeks: {
-        color: "green",
-        label: "Every 2 weeks",
-        tooltip: "Updates every 2 weeks on Friday at 11 PM"
-      },
-      monthly: {
-        color: "green",
-        label: "Monthly",
-        tooltip: "Updates on the 1st of each month at 2 AM"
+        tooltip: "Updates every Friday at 11 PM Sweden time"
       },
       never: {
         color: "gray",
-        label: "Never"
+        label: "Never",
+        tooltip: "No automatic updates - manual sync only"
+      },
+      // Legacy intervals (for backward compatibility)
+      every_3_days: {
+        color: "green",
+        label: "Every other day",
+        tooltip: "Updates every other day at 2 AM Sweden time (migrated from every 3 days)"
+      },
+      every_2_weeks: {
+        color: "green",
+        label: "Weekly",
+        tooltip: "Updates every Friday at 11 PM Sweden time (migrated from every 2 weeks)"
+      },
+      monthly: {
+        color: "green",
+        label: "Weekly",
+        tooltip: "Updates every Friday at 11 PM Sweden time (migrated from monthly)"
       },
       error: {
         color: "orange",
-        label: "Not found"
+        label: "Unknown interval",
+        tooltip: "Unknown update interval - please edit website settings"
       }
     };
 </script>
 
-<Label.Single item={intervalInfo[updateInterval ?? "error"]}></Label.Single>
+<Label.Single item={intervalItem}></Label.Single>

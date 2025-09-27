@@ -97,5 +97,20 @@ NODE_ENV=production
 # Web Search
 # TAVILY_API_KEY=
 
+###############
+# Crawler Configuration
+###############
+# Maximum crawl duration in seconds (default: 4 hours)
+# CRAWL_MAX_LENGTH=14400
+
+# Maximum number of pages to crawl per website (default: 20,000)
+# CLOSESPIDER_ITEMCOUNT=20000
+
+# Whether to obey robots.txt files (recommended: True)
+# OBEY_ROBOTS=True
+
+# Enable automatic throttling to be respectful to websites (recommended: True)
+# AUTOTHROTTLE_ENABLED=True
+
 # Worker Configuration
 # NUM_WORKERS=3
