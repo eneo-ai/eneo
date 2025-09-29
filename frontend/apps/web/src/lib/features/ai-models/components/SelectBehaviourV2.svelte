@@ -36,13 +36,23 @@
     },
     portal: null,
     onSelectedChange: ({ next }) => {
-      const args = next?.value ? getKwargs(next.value) : getKwargs("default");
-      // If the user selects "custom", we want to keep the current kwargs settings if they already are custom
-      // However, if they are not, then we initialise with a default custom setting
-      const customArgs =
-        getBehaviour(kwArgs) === "custom" ? kwArgs : { temperature: 1, top_p: null };
-      // keep in mind: setting the kwargs will trigger the `watchKwArgs` function
-      kwArgs = args ? args : customArgs;
+      const behaviorKwargs = next?.value ? getKwargs(next.value) : getKwargs("default");
+
+      if (behaviorKwargs) {
+        // Preserve all existing fields while only updating the behavior-relevant ones
+        kwArgs = {
+          ...kwArgs,
+          ...behaviorKwargs
+        };
+      } else {
+        // For custom behavior, preserve current kwargs if already custom, otherwise set defaults
+        const customArgs = getBehaviour(kwArgs) === "custom" ? kwArgs : {
+          ...kwArgs,
+          temperature: 1,
+          top_p: null
+        };
+        kwArgs = customArgs;
+      }
       return next;
     }
   });
@@ -54,7 +64,11 @@
   function maybeSetKwArgsCustom() {
     const args = { temperature: customTemp, top_p: null };
     if (getBehaviour(args) === "custom") {
-      kwArgs = args;
+      // Preserve all existing fields while only updating temperature and top_p
+      kwArgs = {
+        ...kwArgs,
+        ...args
+      };
     }
   }
 
@@ -82,7 +96,12 @@
     // Only reset when transitioning from enabled to disabled
     if (finalIsDisabled && !previousDisabledState) {
       $selected = { value: "default" };
-      kwArgs = getKwargs("default") || { temperature: null, top_p: null };
+      const defaultKwargs = getKwargs("default") || { temperature: null, top_p: null };
+      // Preserve all existing fields while only updating the behavior-relevant ones
+      kwArgs = {
+        ...kwArgs,
+        ...defaultKwargs
+      };
     }
     previousDisabledState = finalIsDisabled;
   }
