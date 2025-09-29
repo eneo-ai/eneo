@@ -5,6 +5,7 @@ from intric.base.base_entity import Entity
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
+from intric.websites.domain.crawler_engine import CrawlerEngine
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -36,6 +37,7 @@ class Website(Entity):
         embedding_model: "EmbeddingModel",
         size: int,
         latest_crawl: Optional["CrawlRun"],
+        crawler_engine: CrawlerEngine,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -49,6 +51,7 @@ class Website(Entity):
         self.embedding_model = embedding_model
         self.size = size
         self.latest_crawl = latest_crawl
+        self.crawler_engine = crawler_engine
 
     @classmethod
     def create(
@@ -61,6 +64,7 @@ class Website(Entity):
         crawl_type: CrawlType,
         update_interval: UpdateInterval,
         embedding_model: "EmbeddingModel",
+        crawler_engine: CrawlerEngine = CrawlerEngine.SCRAPY,
     ) -> "Website":
         return cls(
             id=None,
@@ -77,6 +81,7 @@ class Website(Entity):
             embedding_model=embedding_model,
             size=0,
             latest_crawl=None,
+            crawler_engine=crawler_engine,
         )
 
     @classmethod
@@ -100,6 +105,7 @@ class Website(Entity):
             embedding_model=embedding_model,
             size=record.size,
             latest_crawl=CrawlRun.to_domain(record.latest_crawl) if record.latest_crawl else None,
+            crawler_engine=record.crawler_engine,
         )
 
     def update(
@@ -109,6 +115,7 @@ class Website(Entity):
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
+        crawler_engine: Union[CrawlerEngine, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
         if url is not NOT_PROVIDED:
             self.url = url
@@ -120,6 +127,8 @@ class Website(Entity):
             self.crawl_type = crawl_type
         if update_interval is not NOT_PROVIDED:
             self.update_interval = update_interval
+        if crawler_engine is not NOT_PROVIDED:
+            self.crawler_engine = crawler_engine
 
         return self
 
@@ -144,6 +153,7 @@ class WebsiteSparse(Entity):
         crawl_type: CrawlType,
         update_interval: UpdateInterval,
         size: int,
+        crawler_engine: CrawlerEngine,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
@@ -156,6 +166,7 @@ class WebsiteSparse(Entity):
         self.crawl_type = crawl_type
         self.update_interval = update_interval
         self.size = size
+        self.crawler_engine = crawler_engine
 
     @classmethod
     def to_domain(cls, record: "WebsitesTable") -> "WebsiteSparse":
@@ -173,4 +184,5 @@ class WebsiteSparse(Entity):
             crawl_type=record.crawl_type,
             update_interval=record.update_interval,
             size=record.size,
+            crawler_engine=record.crawler_engine,
         )

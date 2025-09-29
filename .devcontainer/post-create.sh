@@ -10,11 +10,17 @@ sudo apt-get update
 sudo apt-get install -y libmagic1 ffmpeg
 
 # Install Python dependencies
-python -m pip install --no-cache-dir poetry
+python -m pip install --no-cache-dir poetry==2.1.3
 
 cd /workspace/backend
 python -m poetry config virtualenvs.in-project true
 python -m poetry install
+
+# Run post-installation setup for crawl4ai
+python -m poetry run crawl4ai-setup
+
+# Verify crawl4ai installation
+python -m poetry run crawl4ai-doctor
 
 # Install pre-commit globally and setup hooks
 cd /workspace

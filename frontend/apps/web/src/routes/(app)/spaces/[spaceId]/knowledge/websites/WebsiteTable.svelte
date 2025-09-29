@@ -107,6 +107,32 @@
       }
     }),
 
+    table.column({
+      accessor: "crawler_engine",
+      header: "Engine",
+      cell: (item) => {
+        const engine = item.value;
+        const isExperimental = engine === "crawl4ai";
+        return createRender(Table.BasicCell, {
+          label: isExperimental ? "Crawl4AI" : "Scrapy",
+          tooltip: isExperimental ? "Experimental AI-optimized crawler" : "Traditional web crawler",
+          customClass: isExperimental ? "text-blue-600 font-medium" : "text-gray-600"
+        });
+      },
+      plugins: {
+        sort: {
+          getSortValue(value) {
+            return value;
+          }
+        },
+        tableFilter: {
+          getFilterValue(value) {
+            return value;
+          }
+        }
+      }
+    }),
+
     table.columnActions({
       cell: (item) => {
         return createRender(WebsiteActions, { website: item.value });

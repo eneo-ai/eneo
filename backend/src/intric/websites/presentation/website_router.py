@@ -59,6 +59,7 @@ async def update_website(
         download_files=website_update.download_files,
         crawl_type=website_update.crawl_type,
         update_interval=website_update.update_interval,
+        crawler_engine=website_update.crawler_engine,
     )
 
     return WebsitePublic.from_domain(website)

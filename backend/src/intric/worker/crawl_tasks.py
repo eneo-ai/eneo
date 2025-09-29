@@ -7,6 +7,8 @@ from intric.main.logging import get_logger
 from intric.websites.crawl_dependencies.crawl_models import (
     CrawlTask,
 )
+from intric.crawler.engines import get_engine
+from intric.websites.domain.crawler_engine import CrawlerEngine
 
 logger = get_logger(__name__)
 
@@ -63,12 +65,59 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
         crawled_titles = []
 
-        async with crawler.crawl(
-            url=params.url,
-            download_files=params.download_files,
-            crawl_type=params.crawl_type,
-        ) as crawl:
-            for page in crawl.pages:
+        # Select appropriate engine based on website configuration
+        if website.crawler_engine == CrawlerEngine.SCRAPY:
+            # Use legacy Scrapy crawler for backwards compatibility
+            async with crawler.crawl(
+                url=params.url,
+                download_files=params.download_files,
+                crawl_type=params.crawl_type,
+            ) as crawl:
+                # Process Scrapy results (original logic)
+                for page in crawl.pages:
+                    num_pages += 1
+                    try:
+                        title = page.url
+                        async with session.begin_nested():
+                            await uploader.process_text(
+                                text=page.content,
+                                title=title,
+                                website_id=params.website_id,
+                                url=page.url,
+                                embedding_model=website.embedding_model,
+                            )
+                        crawled_titles.append(title)
+
+                    except Exception:
+                        logger.exception("Exception while uploading page")
+                        num_failed_pages += 1
+
+                for file in crawl.files:
+                    num_files += 1
+                    try:
+                        filename = file.stem
+                        async with session.begin_nested():
+                            await uploader.process_file(
+                                filepath=file,
+                                filename=filename,
+                                website_id=params.website_id,
+                                embedding_model=website.embedding_model,
+                            )
+
+                        crawled_titles.append(filename)
+                    except Exception:
+                        logger.exception("Exception while uploading file")
+                        num_failed_files += 1
+        else:
+            # Use new engine abstraction for crawl4ai and future engines
+            engine = get_engine(website.crawler_engine)
+
+            # Process pages from engine
+            async for page in engine.crawl(
+                url=params.url,
+                download_files=params.download_files,
+                crawl_type=params.crawl_type,
+            ):
                 num_pages += 1
                 try:
                     title = page.url
@@ -86,46 +135,54 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     logger.exception("Exception while uploading page")
                     num_failed_pages += 1
 
-            for file in crawl.files:
-                num_files += 1
-                try:
-                    filename = file.stem
-                    async with session.begin_nested():
-                        await uploader.process_file(
-                            filepath=file,
-                            filename=filename,
-                            website_id=params.website_id,
-                            embedding_model=website.embedding_model,
-                        )
+            # Process files from engine if downloading files
+            if params.download_files:
+                logger.info(f"Starting file download for {website.crawler_engine} engine")
+                async for file in engine.crawl_files(url=params.url):
+                    num_files += 1
+                    try:
+                        filename = file.stem
+                        logger.info(f"Processing downloaded file: {filename}")
+                        async with session.begin_nested():
+                            await uploader.process_file(
+                                filepath=file,
+                                filename=filename,
+                                website_id=params.website_id,
+                                embedding_model=website.embedding_model,
+                            )
 
-                    crawled_titles.append(filename)
-                except Exception:
-                    logger.exception("Exception while uploading file")
-                    num_failed_files += 1
+                        crawled_titles.append(filename)
+                        logger.info(f"Successfully processed file: {filename}")
+                    except Exception:
+                        logger.exception("Exception while uploading file")
+                        num_failed_files += 1
 
-            for title in existing_titles:
-                if title not in crawled_titles:
-                    num_deleted_blobs += 1
-                    await info_blob_repo.delete_by_title_and_website(
-                        title=title, website_id=params.website_id
-                    )
+                logger.info(f"File download completed: {num_files} files processed, {num_failed_files} failed")
 
-            await update_website_size_service.update_website_size(website_id=website.id)
+        # Clean up old content (common for both engines)
+        for title in existing_titles:
+            if title not in crawled_titles:
+                num_deleted_blobs += 1
+                await info_blob_repo.delete_by_title_and_website(
+                    title=title, website_id=params.website_id
+                )
 
-            logger.info(
-                f"Crawler finished. {num_pages} pages, {num_failed_pages} failed. "
-                f"{num_files} files, {num_failed_files} failed. "
-                f"{num_deleted_blobs} blobs deleted."
-            )
+        await update_website_size_service.update_website_size(website_id=website.id)
 
-            crawl_run = await crawl_run_repo.one(params.run_id)
-            crawl_run.update(
-                pages_crawled=num_pages,
-                files_downloaded=num_files,
-                pages_failed=num_failed_pages,
-                files_failed=num_failed_files,
-            )
-            await crawl_run_repo.update(crawl_run)
+        logger.info(
+            f"Crawler finished. {num_pages} pages, {num_failed_pages} failed. "
+            f"{num_files} files, {num_failed_files} failed. "
+            f"{num_deleted_blobs} blobs deleted."
+        )
+
+        crawl_run = await crawl_run_repo.one(params.run_id)
+        crawl_run.update(
+            pages_crawled=num_pages,
+            files_downloaded=num_files,
+            pages_failed=num_failed_pages,
+            files_failed=num_failed_files,
+        )
+        await crawl_run_repo.update(crawl_run)
 
         task_manager.result_location = f"/api/v1/websites/{params.website_id}/info-blobs/"
 

@@ -1,5 +1,33 @@
 # intric backend
 
+## Setup Instructions
+
+### Development Setup
+```bash
+cd backend
+# Install Python dependencies
+poetry install
+
+# Install crawl4ai browser dependencies (required for crawl4ai engine)
+poetry run crawl4ai-setup
+
+# Verify crawl4ai installation
+poetry run crawl4ai-doctor
+
+# Run database migration
+poetry run alembic upgrade head
+
+# Start development server
+poetry run start
+```
+
+### Production Deployment
+For production deployments, ensure the Dockerfile includes crawl4ai setup:
+```dockerfile
+RUN poetry run crawl4ai-setup
+RUN poetry run crawl4ai-doctor
+```
+
 ## Environment variables
 
 | Variable                         | Required | Explanation                                              |

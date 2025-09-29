@@ -13,7 +13,8 @@
       crawl_type: "crawl",
       download_files: undefined,
       embedding_model: undefined,
-      update_interval: "never"
+      update_interval: "never",
+      crawler_engine: "scrapy"
     } as unknown as Website;
   };
 
@@ -82,6 +83,11 @@
     { label: "Never", value: "never" },
     { label: "Every week", value: "weekly" }
   ] as { label: string; value: Website["update_interval"] }[];
+
+  const crawlerEngineOptions = [
+    { label: "Scrapy (Traditional)", value: "scrapy" },
+    { label: "Crawl4AI (Experimental)", value: "crawl4ai" }
+  ] as { label: string; value: Website["crawler_engine"] }[];
 </script>
 
 <Dialog.Root bind:isOpen={showDialog}>
@@ -135,15 +141,21 @@
 
       <div class="flex">
         <Select.Simple
-          class="border-default hover:bg-hover-dimmer w-1/2 border-b px-4 py-4"
+          class="border-default hover:bg-hover-dimmer w-1/3 border-b px-4 py-4"
           options={crawlOptions}
           bind:value={editableWebsite.crawl_type}>Crawl type</Select.Simple
         >
 
         <Select.Simple
-          class="border-default hover:bg-hover-dimmer w-1/2 border-b px-4 py-4"
+          class="border-default hover:bg-hover-dimmer w-1/3 border-b px-4 py-4"
           options={updateOptions}
           bind:value={editableWebsite.update_interval}>Automatic updates</Select.Simple
+        >
+
+        <Select.Simple
+          class="border-default hover:bg-hover-dimmer w-1/3 border-b px-4 py-4"
+          options={crawlerEngineOptions}
+          bind:value={editableWebsite.crawler_engine}>Crawler engine</Select.Simple
         >
       </div>
 

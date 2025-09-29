@@ -8,6 +8,7 @@ from intric.main.exceptions import (
 )
 from intric.main.models import NOT_PROVIDED, NotProvided, Status
 from intric.websites.domain.website import UpdateInterval, Website
+from intric.websites.domain.crawler_engine import CrawlerEngine
 
 if TYPE_CHECKING:
     from intric.actors.actor_manager import ActorManager
@@ -45,6 +46,7 @@ class WebsiteCRUDService:
         crawl_type: "CrawlType",
         update_interval: UpdateInterval,
         embedding_model_id: Optional["UUID"] = None,
+        crawler_engine: CrawlerEngine = CrawlerEngine.SCRAPY,
     ) -> Website:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -68,6 +70,7 @@ class WebsiteCRUDService:
             crawl_type=crawl_type,
             update_interval=update_interval,
             embedding_model=embedding_model,
+            crawler_engine=crawler_engine,
         )
 
         space.add_website(website)
@@ -96,6 +99,7 @@ class WebsiteCRUDService:
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union["CrawlType", NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
+        crawler_engine: Union[CrawlerEngine, NotProvided] = NOT_PROVIDED,
     ) -> Website:
         space = await self.space_service.get_space_by_website(id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -111,6 +115,7 @@ class WebsiteCRUDService:
             download_files=download_files,
             crawl_type=crawl_type,
             update_interval=update_interval,
+            crawler_engine=crawler_engine,
         )
 
         await self.space_repo.update(space=space)

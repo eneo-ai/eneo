@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select
+from sqlalchemy import BigInteger, ForeignKey, and_, select, Enum
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import EmbeddingModels
@@ -12,6 +12,7 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawler_engine import CrawlerEngine
 
 
 class CrawlRuns(BasePublic):
@@ -36,6 +37,9 @@ class Websites(BasePublic):
     crawl_type: Mapped[CrawlType] = mapped_column()
     update_interval: Mapped[str] = mapped_column()
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    crawler_engine: Mapped[CrawlerEngine] = mapped_column(
+        Enum(CrawlerEngine, name="crawlerengine", create_constraint=True)
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

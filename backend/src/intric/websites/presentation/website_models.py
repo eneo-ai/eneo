@@ -21,6 +21,7 @@ from intric.main.models import (
 from intric.websites.crawl_dependencies.crawl_models import CrawlRunSparse
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
 from intric.websites.domain.website import UpdateInterval, Website
+from intric.websites.domain.crawler_engine import CrawlerEngine
 
 
 class WebsiteBase(BaseModel):
@@ -30,6 +31,7 @@ class WebsiteBase(BaseModel):
     download_files: bool = False
     crawl_type: CrawlType = CrawlType.CRAWL
     update_interval: UpdateInterval = UpdateInterval.NEVER
+    crawler_engine: CrawlerEngine = CrawlerEngine.SCRAPY
 
 
 class WebsiteCreateRequestDeprecated(WebsiteBase):
@@ -60,6 +62,7 @@ class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
     user_id: UUID
     embedding_model: IdAndName
     metadata: WebsiteMetadata
+    crawler_engine: CrawlerEngine
 
 
 class CrawlRunPublic(BaseResponse):
@@ -94,6 +97,7 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     download_files: bool
     crawl_type: CrawlType
     update_interval: UpdateInterval
+    crawler_engine: CrawlerEngine
     latest_crawl: Optional[CrawlRunPublic]
     embedding_model: EmbeddingModelPublic
     metadata: WebsiteMetadata
@@ -114,6 +118,7 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             download_files=website.download_files,
             crawl_type=website.crawl_type,
             update_interval=website.update_interval,
+            crawler_engine=website.crawler_engine,
             latest_crawl=latest_crawl,
             embedding_model=EmbeddingModelPublic.from_domain(website.embedding_model),
             metadata=WebsiteMetadata(size=website.size),
@@ -128,6 +133,7 @@ class WebsiteCreate(BaseModel):
     crawl_type: CrawlType = CrawlType.CRAWL
     update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: Optional[ModelId] = None
+    crawler_engine: CrawlerEngine = CrawlerEngine.SCRAPY
 
 
 class WebsiteUpdate(BaseModel):
@@ -136,3 +142,4 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
+    crawler_engine: Union[CrawlerEngine, NotProvided] = NOT_PROVIDED

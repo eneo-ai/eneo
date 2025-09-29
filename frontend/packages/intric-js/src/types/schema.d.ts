@@ -2145,6 +2145,12 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlerEngine
+     * @description Represents available crawler engines for website crawling.
+     * @enum {string}
+     */
+    CrawlerEngine: "scrapy" | "crawl4ai";
     /** CreateGroupRequest */
     CreateGroupRequest: {
       /** Name */
@@ -5934,6 +5940,8 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model?: components["schemas"]["ModelId"] | null;
+      /** @default scrapy */
+      crawler_engine?: components["schemas"]["CrawlerEngine"];
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -5955,6 +5963,8 @@ export interface components {
       crawl_type?: components["schemas"]["CrawlType"];
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /** @default scrapy */
+      crawler_engine?: components["schemas"]["CrawlerEngine"];
       embedding_model: components["schemas"]["ModelId"];
     };
     /** WebsiteMetadata */
@@ -5991,6 +6001,7 @@ export interface components {
       download_files: boolean;
       crawl_type: components["schemas"]["CrawlType"];
       update_interval: components["schemas"]["UpdateInterval"];
+      crawler_engine: components["schemas"]["CrawlerEngine"];
       latest_crawl:
         | components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"]
         | null;
@@ -6024,6 +6035,11 @@ export interface components {
        * @default NOT_PROVIDED
        */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /**
+       * Crawler Engine
+       * @default NOT_PROVIDED
+       */
+      crawler_engine?: components["schemas"]["CrawlerEngine"];
     };
     /**
      * WizardType
