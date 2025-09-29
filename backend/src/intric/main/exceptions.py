@@ -102,6 +102,36 @@ class CrawlerException(Exception):
     pass
 
 
+class CrawlerEmptyResultException(CrawlerException):
+    """Raised when crawler completes but produces no content/pages"""
+    pass
+
+
+class CrawlerNetworkException(CrawlerException):
+    """Raised when crawler fails due to network/connection issues"""
+    pass
+
+
+class CrawlerParsingException(CrawlerException):
+    """Raised when crawler fails to parse content from responses"""
+    pass
+
+
+class CrawlerRobotsBlockedException(CrawlerException):
+    """Raised when crawler is blocked by robots.txt"""
+    pass
+
+
+class CrawlerTimeoutException(CrawlerException):
+    """Raised when crawler operation times out"""
+    pass
+
+
+class CrawlerConfigurationException(CrawlerException):
+    """Raised when crawler configuration is invalid"""
+    pass
+
+
 class NameCollisionException(Exception):
     pass
 

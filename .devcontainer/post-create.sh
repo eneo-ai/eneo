@@ -10,7 +10,7 @@ sudo apt-get update
 sudo apt-get install -y libmagic1 ffmpeg
 
 # Install Python dependencies
-python -m pip install --no-cache-dir poetry
+python -m pip install --no-cache-dir poetry==2.1.3
 
 cd /workspace/backend
 python -m poetry config virtualenvs.in-project true
