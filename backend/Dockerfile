@@ -11,6 +11,9 @@ RUN apt-get install libmagic1
 # Install poetry
 RUN pip install poetry==2.1.3
 
+# Configure Poetry to not create virtual environments
+ENV POETRY_VIRTUALENVS_CREATE=false
+
 WORKDIR /code
 
 COPY ./pyproject.toml ./poetry.lock ./
@@ -18,8 +21,7 @@ COPY ./pyproject.toml ./poetry.lock ./
 COPY . /code/
 
 # Install ALL dependencies and fix packaging
-RUN poetry config virtualenvs.create false \
-  && poetry install --no-interaction --no-ansi
+RUN poetry install --no-interaction --no-ansi
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
