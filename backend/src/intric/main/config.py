@@ -105,18 +105,31 @@ class Settings(BaseSettings):
     using_crawl: bool = True  # Enable/disable crawling feature globally
 
     # Crawl4AI-specific settings
-    # File download configuration
-    crawl4ai_download_timeout: int = 15  # Seconds to wait for file downloads to complete
-    crawl4ai_max_file_size_mb: int = 50  # Maximum file size in MB for downloaded files
-
-    # Content extraction configuration
-    crawl4ai_word_threshold: int = 10  # Minimum word count for valid page content
-    crawl4ai_table_score_threshold: int = 5  # Minimum score for table extraction (lower = more tables)
+    # Performance optimization
+    crawl4ai_text_only_mode: bool = True  # Enable text-only mode for faster crawls (disables images/GPU)
+    crawl4ai_light_mode: bool = True  # Enable light mode to reduce browser overhead
 
     # Memory and concurrency management
     crawl4ai_memory_threshold_percent: float = 75.0  # Auto-pause crawls when system memory exceeds this %
     crawl4ai_max_concurrent_sessions: int = 5  # Max concurrent pages in sitemap crawls (controls parallelism)
     crawl4ai_memory_check_interval: float = 1.0  # How often to check system memory (seconds)
+
+    # Rate limiting (prevents server blocking)
+    crawl4ai_rate_limit_delay_min: float = 1.0  # Minimum delay between requests to same domain (seconds)
+    crawl4ai_rate_limit_delay_max: float = 3.0  # Maximum delay between requests to same domain (seconds)
+    crawl4ai_max_retries: int = 3  # Maximum retry attempts on rate-limit errors (429, 503)
+
+    # Monitoring
+    crawl4ai_enable_monitor: bool = True  # Enable live crawl progress display in worker terminal
+    crawl4ai_show_progress_messages: bool = False  # Show [FETCH] [SCRAPE] [COMPLETE] messages
+
+    # Content extraction configuration
+    crawl4ai_word_threshold: int = 10  # Minimum word count for valid page content
+    crawl4ai_table_score_threshold: int = 5  # Minimum score for table extraction (lower = more tables)
+
+    # File download configuration
+    crawl4ai_download_timeout: int = 15  # Seconds to wait for file downloads to complete
+    crawl4ai_max_file_size_mb: int = 50  # Maximum file size in MB for downloaded files
 
     # Worker configuration
     worker_max_concurrent_jobs: int = 20  # Maximum number of concurrent jobs the worker can process

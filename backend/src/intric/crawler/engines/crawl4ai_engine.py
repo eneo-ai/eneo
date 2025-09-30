@@ -7,15 +7,16 @@ from typing import AsyncIterator
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_filter_strategy import PruningContentFilter
-from crawl4ai.async_dispatcher import MemoryAdaptiveDispatcher
+from crawl4ai.async_dispatcher import MemoryAdaptiveDispatcher, RateLimiter, CrawlerMonitor
 
 from intric.crawler.engines.base import CrawlerEngineAbstraction
 from intric.crawler.parse_html import CrawledPage
 from intric.main.config import SETTINGS
 from intric.main.exceptions import CrawlerException
+from intric.main.logging import get_logger
 from intric.websites.domain.crawl_run import CrawlType
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Crawl4aiEngine(CrawlerEngineAbstraction):
@@ -29,26 +30,38 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
         """Initialize the Crawl4ai engine."""
         self._download_dir = None  # Lazy initialization for file downloads
 
-        # Default browser config for regular crawling
+        # Suppress crawl4ai's verbose progress messages unless explicitly enabled
+        # Why: Those [FETCH] [SCRAPE] [COMPLETE] messages interfere with clean monitor display
+        if not SETTINGS.crawl4ai_show_progress_messages:
+            # Suppress crawl4ai library's internal loggers
+            for logger_name in ['crawl4ai', 'crawl4ai.async_webcrawler', 'crawl4ai.async_dispatcher']:
+                lib_logger = logging.getLogger(logger_name)
+                lib_logger.setLevel(logging.WARNING)  # Only show warnings and errors
+                lib_logger.propagate = False  # Don't propagate to root logger
+
+        # Default browser config - optimized based on settings
         self._browser_config = BrowserConfig(
             browser_type="chromium",
             headless=True,
             verbose=False,
-            # Optimize for server environments
-            text_mode=False,  # Keep images for better content understanding
+            text_mode=SETTINGS.crawl4ai_text_only_mode,
+            light_mode=SETTINGS.crawl4ai_light_mode,
             extra_args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-default-apps",
+                "--disable-sync",
             ]
         )
 
     def _get_download_browser_config(self) -> BrowserConfig:
         """Get or create browser config for file downloads with temp directory.
 
-        Why: Lazy initialization - only create temp directory when actually downloading files.
-        Ensures proper cleanup lifecycle management.
+        Why: File downloads need full browser with images enabled.
+        Lazy initialization - only create temp directory when actually downloading files.
 
         Returns:
             BrowserConfig configured for file downloads
@@ -64,12 +77,16 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
             verbose=False,
             accept_downloads=True,
             downloads_path=self._download_dir,
-            text_mode=False,
+            text_mode=False,  # Must disable text-only for file downloads
+            light_mode=SETTINGS.crawl4ai_light_mode,  # Can still use light mode
             extra_args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-default-apps",
+                "--disable-sync",
             ]
         )
 
@@ -108,7 +125,12 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
             # Configure crawl settings based on existing Scrapy patterns
             run_config = self._create_run_config(download_files, crawl_type)
 
-            async with AsyncWebCrawler(config=self._browser_config) as crawler:
+            # Select appropriate browser config based on whether we need downloads
+            # Use text-only mode for content crawling (faster + less memory)
+            # Use full browser for file downloads (needs images/full rendering)
+            browser_config = self._browser_config if not download_files else self._get_download_browser_config()
+
+            async with AsyncWebCrawler(config=browser_config) as crawler:
                 if crawl_type == CrawlType.SITEMAP:
                     # For sitemap crawling, we need to handle multiple URLs
                     async for page in self._crawl_sitemap(crawler, url, run_config):
@@ -293,14 +315,42 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
         Why: Prevents memory exhaustion on large sitemaps by limiting concurrent
         page processing and auto-pausing when system memory is high.
 
+        Features:
+        - Rate limiting with exponential backoff on 429/503 errors
+        - Real-time monitoring (debug mode only) for crawl progress visibility
+        - Memory-based concurrency management
+
         Returns:
             Configured MemoryAdaptiveDispatcher for sitemap crawls
         """
+        # Configure rate limiter to prevent server blocking
+        rate_limiter = RateLimiter(
+            base_delay=(SETTINGS.crawl4ai_rate_limit_delay_min, SETTINGS.crawl4ai_rate_limit_delay_max),
+            max_delay=60.0,  # Cap backoff at 1 minute
+            max_retries=SETTINGS.crawl4ai_max_retries,
+            rate_limit_codes=[429, 503]  # Standard rate-limit response codes
+        )
+
+        # Configure monitor for live crawl progress visibility
+        # Why: Provides real-time feedback on crawl progress in the terminal
+        monitor = None
+        if SETTINGS.crawl4ai_enable_monitor:
+            monitor = CrawlerMonitor(
+                urls_total=0,  # Will be updated by dispatcher
+                refresh_rate=2.0,  # Update every 2 seconds
+                enable_ui=True,  # Show detailed progress UI
+                max_width=120  # Terminal width for display
+            )
+            logger.info("Crawl monitor enabled - live progress UI will be displayed in terminal")
+            logger.info("Note: Monitor is experimental and works best in interactive terminals (may not display in logs)")
+
         return MemoryAdaptiveDispatcher(
             memory_threshold_percent=SETTINGS.crawl4ai_memory_threshold_percent,
             max_session_permit=SETTINGS.crawl4ai_max_concurrent_sessions,
             check_interval=SETTINGS.crawl4ai_memory_check_interval,
-            memory_wait_timeout=300.0  # Wait up to 5 minutes for memory to free up
+            memory_wait_timeout=300.0,  # Wait up to 5 minutes for memory to free up
+            rate_limiter=rate_limiter,
+            monitor=monitor
         )
 
     def validate_config(self) -> bool:
@@ -342,6 +392,7 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
         # Map Scrapy settings to crawl4ai configuration
         config = CrawlerRunConfig(
             cache_mode=CacheMode.BYPASS,  # Always bypass cache for fresh data
+            verbose=False,  # Disable [FETCH] [SCRAPE] [COMPLETE] messages
             markdown_generator=DefaultMarkdownGenerator(
                 content_source="cleaned_html",   # Pre-cleaning removes structural noise
                 content_filter=PruningContentFilter(
@@ -471,8 +522,32 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
             CrawledPage objects for each URL in the sitemap
         """
         try:
-            # First, fetch the sitemap
-            sitemap_result = await crawler.arun(url=sitemap_url, config=run_config)
+            # First, fetch the sitemap XML with a dedicated browser instance
+            # Why: Text-only mode cannot load XML files - we need a full browser for XML parsing
+            sitemap_browser_config = BrowserConfig(
+                browser_type="chromium",
+                headless=True,
+                verbose=False,
+                text_mode=False,  # MUST be False to load XML
+                light_mode=SETTINGS.crawl4ai_light_mode,  # Can still use light mode
+                extra_args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-extensions",
+                ]
+            )
+
+            sitemap_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                page_timeout=int(SETTINGS.crawl_max_length * 1000),
+                wait_for=None,  # XML files don't have body tags
+                check_robots_txt=SETTINGS.obey_robots,  # Respect robots.txt consistently
+            )
+
+            # Use separate crawler instance for XML sitemap
+            async with AsyncWebCrawler(config=sitemap_browser_config) as sitemap_crawler:
+                sitemap_result = await sitemap_crawler.arun(url=sitemap_url, config=sitemap_config)
 
             if not sitemap_result.success:
                 raise CrawlerException(f"Failed to fetch sitemap: {sitemap_result.error_message}")
@@ -496,19 +571,22 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                 max_urls = min(len(urls), SETTINGS.closespider_itemcount)
                 urls = urls[:max_urls]
 
-                logger.info(f"Found {len(urls)} URLs in sitemap, crawling {max_urls} with parallel processing")
+                logger.info(f"Found {len(urls)} URLs in sitemap, crawling {max_urls} with parallel streaming")
 
                 # Use arun_many with memory-adaptive dispatcher for efficient parallel crawling
                 dispatcher = self._create_dispatcher()
 
-                results = await crawler.arun_many(
+                # Enable streaming mode for immediate page-by-page processing
+                # Why: Pages are yielded as soon as they're crawled, allowing immediate embedding
+                # instead of waiting for entire sitemap to complete (faster time-to-first-result)
+                run_config.stream = True
+
+                # Stream results as they become available
+                async for result in await crawler.arun_many(
                     urls=urls,
                     config=run_config,
                     dispatcher=dispatcher
-                )
-
-                # Yield successful pages
-                for result in results:
+                ):
                     if result.success and result.markdown:
                         page = self._convert_result_to_crawled_page(result)
                         yield page
