@@ -69,8 +69,144 @@ class DebugLoggingMiddleware:
             del self.request_timestamps[request_id]
 
         logger.info(f"RESPONSE: {response.status} for {request.url}")
-        logger.info(f"Response headers: {dict(response.headers)}")
-        logger.info(f"Response body length: {len(response.body)} bytes")
+
+        # CRITICAL: Log ALL response details to diagnose 0 bytes
+        body_size = len(response.body)
+
+        # Analyze response headers in detail
+        headers_dict = {}
+        for name, values in response.headers.items():
+            header_name = name.decode('utf-8', errors='ignore')
+            header_values = [v.decode('utf-8', errors='ignore') for v in values]
+            headers_dict[header_name] = header_values[0] if len(header_values) == 1 else header_values
+
+        logger.info("Response headers analysis:")
+        logger.info(f"  Status: {response.status}")
+        logger.info(f"  Content-Type: {headers_dict.get('Content-Type', 'NOT SET')}")
+        logger.info(f"  Content-Length: {headers_dict.get('Content-Length', 'NOT SET')}")
+        logger.info(f"  Content-Encoding: {headers_dict.get('Content-Encoding', 'NOT SET')}")
+        logger.info(f"  Transfer-Encoding: {headers_dict.get('Transfer-Encoding', 'NOT SET')}")
+        logger.info(f"  Server: {headers_dict.get('Server', 'NOT SET')}")
+        logger.info(f"  Actual body size received: {body_size} bytes")
+
+        # CRITICAL: Diagnose WHY 0 bytes
+        if body_size == 0:
+            logger.error("=" * 80)
+            logger.error("DIAGNOSING ZERO-BYTE RESPONSE")
+            logger.error("=" * 80)
+            logger.error(f"URL: {request.url}")
+            logger.error(f"Status: {response.status}")
+            logger.error("")
+
+            # Check Content-Length header
+            content_length_header = headers_dict.get('Content-Length', 'NOT SET')
+            if content_length_header == '0':
+                logger.error("ROOT CAUSE: Server explicitly sent Content-Length: 0")
+                logger.error("  This means the server intentionally returned empty content")
+                logger.error("  Reasons:")
+                logger.error("    - Server detected automated request (User-Agent, headers)")
+                logger.error("    - Rate limiting or IP blocking (soft block)")
+                logger.error("    - Resource moved/deleted but returned 200 instead of 404")
+                logger.error("    - Authentication required but returned 200 instead of 401")
+                logger.error("    - WAF/security filter stripping content")
+            elif content_length_header == 'NOT SET':
+                logger.error("ROOT CAUSE: No Content-Length header AND empty body")
+                logger.error("  This is unusual - server should send Content-Length or use chunked encoding")
+                logger.error("  Possible reasons:")
+                logger.error("    - Connection closed prematurely")
+                logger.error("    - Transfer-Encoding issue")
+                logger.error("    - Proxy stripping content")
+                logger.error("    - Network filtering/firewall modifying response")
+            else:
+                logger.error(f"ROOT CAUSE: Content-Length header says {content_length_header} bytes, but received 0")
+                logger.error("  This means content was lost between server and Scrapy")
+                logger.error("  Possible reasons:")
+                logger.error("    - Transparent proxy intercepting and filtering")
+                logger.error("    - Chunked transfer encoding error")
+                logger.error("    - TLS/SSL layer dropping content")
+                logger.error("    - Twisted downloader bug")
+
+            # Check Transfer-Encoding
+            transfer_encoding = headers_dict.get('Transfer-Encoding', 'NOT SET')
+            if transfer_encoding != 'NOT SET':
+                logger.error(f"  Transfer-Encoding: {transfer_encoding}")
+                if 'chunked' in transfer_encoding.lower():
+                    logger.error("  ⚠️  Chunked encoding used - Twisted may have issue reading chunks")
+
+            # Check Content-Encoding (compression)
+            content_encoding = headers_dict.get('Content-Encoding', 'NOT SET')
+            if content_encoding != 'NOT SET':
+                logger.error(f"  Content-Encoding: {content_encoding}")
+                if content_encoding.lower() in ['gzip', 'deflate', 'br']:
+                    logger.error(f"  ⚠️  Content is {content_encoding} compressed - decompression may have failed")
+
+            # Check for blocking indicators in headers
+            logger.error("")
+            logger.error("Checking for blocking indicators in response headers:")
+
+            # Check for WAF/security headers
+            waf_headers = ['X-CDN', 'CF-RAY', 'X-Akamai', 'X-Cache', 'X-Served-By',
+                          'X-Cloudflare-Request-Id', 'Server']
+            found_waf = []
+            for waf_header in waf_headers:
+                if waf_header in headers_dict:
+                    found_waf.append(f"{waf_header}: {headers_dict[waf_header]}")
+
+            if found_waf:
+                logger.error("  Found CDN/WAF headers (may indicate filtering):")
+                for header in found_waf:
+                    logger.error(f"    {header}")
+
+            # Check for redirect loops or blocked content
+            if response.status == 200 and body_size == 0:
+                logger.error("")
+                logger.error("  Status 200 with 0 bytes is HIGHLY SUSPICIOUS")
+                logger.error("  This usually indicates:")
+                logger.error("    1. Bot detection - server detected automation")
+                logger.error("    2. Soft blocking - server responding but removing content")
+                logger.error("    3. Content filtering - proxy/firewall stripping body")
+
+            # Compare request headers vs typical browser
+            logger.error("")
+            logger.error("Request headers that may trigger filtering:")
+            request_headers = {}
+            for name, values in request.headers.items():
+                header_name = name.decode('utf-8', errors='ignore')
+                header_values = [v.decode('utf-8', errors='ignore') for v in values]
+                request_headers[header_name] = header_values[0] if len(header_values) == 1 else header_values
+
+            suspicious_headers = []
+            if 'User-Agent' in request_headers:
+                ua = request_headers['User-Agent']
+                if 'scrapy' in ua.lower() or 'bot' in ua.lower() or 'spider' in ua.lower():
+                    suspicious_headers.append(f"User-Agent contains bot indicator: {ua}")
+
+            if 'Accept-Language' not in request_headers:
+                suspicious_headers.append("Missing Accept-Language header (browsers always send this)")
+
+            if 'Accept-Encoding' not in request_headers:
+                suspicious_headers.append("Missing Accept-Encoding header")
+
+            if suspicious_headers:
+                logger.error("  Suspicious request headers:")
+                for issue in suspicious_headers:
+                    logger.error(f"    - {issue}")
+            else:
+                logger.error("  Request headers look reasonable")
+
+            logger.error("")
+            logger.error("=" * 80)
+
+        elif body_size < 100:
+            logger.warning(f"⚠️  Very small response: {body_size} bytes - may be error page")
+            # Log the actual content to see what it is
+            try:
+                small_content = response.body.decode('utf-8', errors='ignore')
+                logger.warning(f"Small content: {small_content}")
+            except Exception:
+                pass
+        else:
+            logger.info(f"✅ Received {body_size} bytes of content")
 
         # Check for redirects
         if response.status in [301, 302, 303, 307, 308]:
@@ -78,14 +214,23 @@ class DebugLoggingMiddleware:
             logger.info(f"REDIRECT: {response.status} from {request.url} to {location}")
 
         if response.status != 200:
-            logger.warning(f"Non-200 response: {response.status} {response.reason}")
+            logger.warning(f"Non-200 response: {response.status}")
 
-        if len(response.body) == 0:
-            logger.warning(f"Empty response body for {request.url}")
-        else:
-            # Log a snippet of the response body
+            # Specific status code explanations
+            if response.status == 403:
+                logger.error("403 Forbidden - Server explicitly rejecting the request")
+                logger.error("   Likely causes: IP blocking, User-Agent filtering, or WAF")
+            elif response.status == 401:
+                logger.error("401 Unauthorized - Authentication required")
+            elif response.status == 429:
+                logger.error("429 Too Many Requests - Rate limiting")
+            elif response.status >= 500:
+                logger.error(f"{response.status} Server Error - Target server problem")
+
+        # Log content preview if available
+        if body_size > 0:
             body_preview = response.body[:200].decode('utf-8', errors='ignore')
-            logger.info(f"Response body preview: {body_preview}...")
+            logger.info(f"Content preview: {body_preview}...")
 
         return response
 
@@ -133,23 +278,49 @@ class DebugLoggingMiddleware:
         exception_name = type(exception).__name__
         exception_str = str(exception).lower()
 
-        # Check for TLS/SSL-specific errors
+        # Check for TLS/SSL-specific errors (CRITICAL for municipality networks)
         if 'ssl' in exception_str or 'certificate' in exception_str or 'tls' in exception_str:
-            logger.error("🔒 TLS/CERTIFICATE ERROR DETECTED:")
+            logger.error("=" * 80)
+            logger.error("🔒 TLS/CERTIFICATE ERROR DETECTED")
+            logger.error("=" * 80)
+
             if 'certificate verify failed' in exception_str:
-                logger.error("   - TLS certificate verification failed")
+                logger.error("ROOT CAUSE: TLS certificate verification failed")
+                logger.error("")
+
                 if 'unknown ca' in exception_str or 'unable to get local issuer certificate' in exception_str:
-                    logger.error("   - Unknown Certificate Authority (okänt CA)")
-                    logger.error("   - Certificate is not trusted by the system")
+                    logger.error("SPECIFIC ISSUE: Unknown Certificate Authority (Okänt CA)")
+                    logger.error("")
+                    logger.error("EXPLANATION:")
+                    logger.error("  - Twisted's OpenSSL cannot find the certificate authority that signed this cert")
+                    logger.error("  - Python's ssl module (urllib) uses different CA bundle and DOES trust it")
+                    logger.error("  - This is why urllib works but Scrapy/Twisted doesn't")
+                    logger.error("")
+                    logger.error("SOLUTIONS:")
+                    logger.error("  1. Add CA certificate to system trust store in container")
+                    logger.error("  2. Configure Twisted to use same CA bundle as Python ssl")
+                    logger.error("  3. Disable certificate verification (NOT RECOMMENDED for production)")
+                    logger.error("")
+                    logger.error("FOR NETWORK TEAM:")
+                    logger.error("  - Check if site uses internal/self-signed certificate")
+                    logger.error("  - Verify certificate chain is complete")
+                    logger.error("  - Compare: openssl s_client -connect {host}:443 -showcerts")
+
                 elif 'hostname mismatch' in exception_str:
-                    logger.error("   - TLS certificate hostname mismatch")
+                    logger.error("SPECIFIC ISSUE: Certificate hostname mismatch")
+                    logger.error("  - Certificate doesn't match the domain being accessed")
+
                 elif 'certificate has expired' in exception_str:
-                    logger.error("   - TLS certificate has expired")
+                    logger.error("SPECIFIC ISSUE: Certificate has expired")
+                    logger.error("  - Server's TLS certificate is no longer valid")
+
             elif 'handshake' in exception_str:
-                logger.error("   - TLS handshake failed")
-            elif 'tls' in exception_str:
-                logger.error("   - TLS protocol error")
-            logger.error(f"   - Full TLS error: {exception}")
+                logger.error("ROOT CAUSE: TLS handshake failed")
+                logger.error("  - Connection established but TLS negotiation failed")
+                logger.error("  - May indicate protocol version mismatch or cipher incompatibility")
+
+            logger.error(f"Full exception: {exception}")
+            logger.error("=" * 80)
 
         # Connection-level analysis
         elif exception_name in ['ConnectionLost', 'ResponseNeverReceived']:

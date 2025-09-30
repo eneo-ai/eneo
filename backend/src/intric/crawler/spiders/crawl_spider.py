@@ -14,6 +14,23 @@ logger = get_logger(__name__)
 class CrawlSpider(scrapy.spiders.CrawlSpider):
     name = "crawlspider"
 
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        """Create spider and connect signals for execution phase tracking"""
+        spider = super().from_crawler(crawler, *args, **kwargs)
+
+        # Connect signals to track execution phases
+        from scrapy import signals
+
+        crawler.signals.connect(spider.engine_started, signal=signals.engine_started)
+        crawler.signals.connect(spider.engine_stopped, signal=signals.engine_stopped)
+        crawler.signals.connect(spider.spider_idle, signal=signals.spider_idle)
+        crawler.signals.connect(spider.request_scheduled, signal=signals.request_scheduled)
+        crawler.signals.connect(spider.response_received_handler, signal=signals.response_received)
+
+        logger.info("✅ Signal handlers connected for execution phase tracking")
+        return spider
+
     def __init__(
         self,
         url: str,
@@ -61,7 +78,7 @@ class CrawlSpider(scrapy.spiders.CrawlSpider):
         logger.info("Rule 2: LinkExtractor(deny_extensions=[]) for file downloads")
 
         super().__init__(*args, **kwargs)
-        logger.info("CrawlSpider initialization complete")
+        logger.info("✅ CrawlSpider initialization complete")
 
     def parse_start_url(self, response: Response):
         logger.info(f"Parsing start URL: {response.url}")
@@ -115,27 +132,69 @@ class CrawlSpider(scrapy.spiders.CrawlSpider):
                 logger.info(f"Check robots.txt at: {url}/robots.txt")
             yield scrapy.Request(url, self.parse_start_url)
 
+    # === SIGNAL HANDLERS FOR EXECUTION PHASE TRACKING ===
+
+    def engine_started(self):
+        """Critical checkpoint: Scrapy engine started successfully"""
+        logger.info("=" * 80)
+        logger.info("✅ SCRAPY ENGINE STARTED")
+        logger.info("=" * 80)
+        logger.info("Twisted reactor running, Scrapy engine initialized")
+
+    def engine_stopped(self, reason=None):
+        """Engine stopped"""
+        logger.info(f"Scrapy engine stopped: {reason}")
+
+    def spider_idle(self, spider):
+        """Spider has no more requests - could indicate problem"""
+        stats = spider.crawler.stats.get_stats()
+        requests = stats.get('downloader/request_count', 0)
+
+        if requests == 0:
+            logger.error("🚫 Spider idle with 0 requests - start_requests() failed or filtered")
+
+    def request_scheduled(self, request, spider):
+        """First request scheduled - critical checkpoint"""
+        if not hasattr(self, '_first_request_logged'):
+            logger.info("✅ First request scheduled: " + request.url)
+            self._first_request_logged = True
+
+    def response_received_handler(self, response, request, spider):
+        """First response received - network working"""
+        if not hasattr(self, '_first_response_logged'):
+            logger.info(f"✅ First response received: {response.status} from {response.url}")
+            self._first_response_logged = True
+
+    # === LIFECYCLE METHODS ===
+
     def spider_opened(self, spider):
         logger.info(f"Spider {spider.name} opened")
         logger.info(f"Spider stats: {spider.crawler.stats.get_stats()}")
 
     def spider_closed(self, spider, reason):
-        logger.info(f"Spider {spider.name} closed with reason: {reason}")
-        final_stats = spider.crawler.stats.get_stats()
-        logger.info(f"Final spider stats: {final_stats}")
+        logger.info("=" * 80)
+        logger.info("SPIDER CLOSED - FINAL DIAGNOSIS")
+        logger.info("=" * 80)
+        logger.info(f"Reason: {reason}")
 
-        # Log key metrics
+        final_stats = spider.crawler.stats.get_stats()
         requests_count = final_stats.get('downloader/request_count', 0)
         response_count = final_stats.get('downloader/response_count', 0)
         items_scraped = final_stats.get('item_scraped_count', 0)
 
-        logger.info(f"Requests made: {requests_count}")
-        logger.info(f"Responses received: {response_count}")
-        logger.info(f"Items scraped: {items_scraped}")
+        logger.info(f"Requests: {requests_count}, Responses: {response_count}, Items: {items_scraped}")
 
+        # Detailed diagnosis
         if requests_count == 0:
-            logger.error("NO REQUESTS WERE MADE - This indicates a fundamental issue")
+            logger.error("❌ NO REQUESTS MADE")
+            logger.error("   Cause: Engine never queued requests OR all filtered")
         elif response_count == 0:
-            logger.error("NO RESPONSES RECEIVED - Network/timeout/blocking issue")
+            logger.error(f"❌ NO RESPONSES ({requests_count} requests sent)")
+            logger.error("   Cause: Network/DNS/TLS issue OR firewall blocking")
         elif items_scraped == 0:
-            logger.error("NO ITEMS SCRAPED - Parsing issue or empty responses")
+            logger.error(f"❌ NO ITEMS ({response_count} responses)")
+            logger.error("   Cause: Parser failing OR empty responses")
+        else:
+            logger.info(f"✅ Success: {items_scraped} items from {response_count} responses")
+
+        logger.info("=" * 80)

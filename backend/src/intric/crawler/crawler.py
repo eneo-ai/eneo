@@ -52,9 +52,10 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
         # "ROBOTSTXT_OBEY": SETTINGS.obey_robots,  # Original setting
         "DOWNLOAD_MAXSIZE": SETTINGS.upload_max_file_size,
         # Enhanced logging settings - force Scrapy to log to our system
-        "LOG_LEVEL": "DEBUG",
+        "LOG_LEVEL": "DEBUG",  # Scrapy's built-in debug mode
         "LOG_ENABLED": True,
         "LOG_STDOUT": True,
+        "LOGSTATS_INTERVAL": 10.0,  # Log Scrapy stats every 10 seconds (default is 60)
         # Anti-bot detection timing
         "DOWNLOAD_TIMEOUT": 30,  # Longer timeout for bot detection delays
         "DOWNLOAD_DELAY": 2,  # Add delay between requests to seem more human
@@ -66,6 +67,8 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
             'intric.crawler.debug_middleware.DebugLoggingMiddleware': 100,  # High priority for debugging
             'intric.crawler.http_version_middleware.ForceHttp11Middleware': 150,  # Force HTTP/1.1
             'intric.crawler.browser_headers_middleware.BrowserHeadersMiddleware': 200,  # Add browser headers
+            'intric.crawler.tcp_connection_tracer.ConnectionMonitoringMiddleware': 300,  # Connection lifecycle
+            'intric.crawler.response_body_tracer.ResponseBodyTracerMiddleware': 550,  # Before compression (590)
             'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': 590,
             'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,  # Disable default
         },
@@ -92,6 +95,10 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
         "REACTOR_THREADPOOL_MAXSIZE": 20,
         # Disable Scrapy's telnet console to prevent port conflicts
         "TELNETCONSOLE_ENABLED": False,
+        # Extensions for connection tracing
+        "EXTENSIONS": {
+            'intric.crawler.tcp_connection_tracer.TcpConnectionTracerExtension': 100,
+        },
     }
 
     if files_dir is not None:
@@ -165,6 +172,21 @@ class Crawler:
             env_data = await NetworkDiagnostics.capture_complete_network_environment()
             logger.info("Network environment captured successfully")
 
+            # 1b. Container-specific diagnostics (NEW - critical for finding urllib vs Scrapy differences)
+            logger.info("STEP 1b: Container environment diagnostics...")
+            from intric.crawler.container_diagnostics import ContainerDiagnostics
+
+            url = kwargs.get('url')
+            if url:
+                container_diagnostics = await ContainerDiagnostics.run_all_container_diagnostics(url)
+            else:
+                logger.info("Skipping container diagnostics (no URL provided)")
+
+            # 1c. Scrapy engine component check (NEW - verify Scrapy can start)
+            logger.info("STEP 1c: Checking Scrapy engine components...")
+            from intric.crawler.scrapy_diagnostics import ScrapyDiagnostics
+            ScrapyDiagnostics.check_scrapy_engine_startup_sequence()
+
             # Pre-flight network connectivity check
             url = kwargs.get('url')
             tcp_analysis = None
@@ -185,59 +207,98 @@ class Crawler:
 
                 logger.info("Pre-flight connectivity checks passed ✅")
 
-                # 3. Detailed TCP connection analysis
-                logger.info("STEP 3: Performing detailed TCP connection analysis...")
+                # CRITICAL: Compare urllib vs Scrapy to find why urllib works but Scrapy doesn't
+                logger.info("STEP 3: Comparing urllib (works) vs Scrapy (fails) configuration...")
+                from intric.crawler.scrapy_diagnostics import ScrapyDiagnostics
+                comparison = await ScrapyDiagnostics.compare_urllib_vs_scrapy_config(url)
+
+                # If blocking issues found, log them prominently
+                if comparison.get('blocking_issues'):
+                    logger.error("=" * 60)
+                    logger.error("🚨 FOUND LIKELY CAUSE OF CRAWL FAILURE:")
+                    for issue in comparison['blocking_issues']:
+                        logger.error(f"   {issue}")
+                    logger.error("=" * 60)
+
+                # STEP 3b: Get baseline response from urllib for comparison
+                logger.info("STEP 3b: Getting baseline response from urllib for later comparison...")
+                urllib_baseline = await ScrapyDiagnostics.compare_urllib_vs_scrapy_actual_response(url)
+                # This baseline will be compared with Scrapy's actual response after crawl
+
+                # STEP 4: TLS Fingerprint Analysis (CRITICAL - shows what DPI detects)
+                logger.info("STEP 4: TLS Fingerprint Analysis (for DPI/firewall detection)...")
                 from urllib.parse import urlparse
                 parsed_url = urlparse(url)
+
+                if parsed_url.scheme == 'https':
+                    from intric.crawler.tls_fingerprint_analyzer import TlsFingerprintAnalyzer
+                    tls_fingerprint = await TlsFingerprintAnalyzer.compare_tls_fingerprints(
+                        parsed_url.hostname,
+                        parsed_url.port or 443
+                    )
+
+                # STEP 5: Network diagnostics for network/linux team troubleshooting
+                # These provide detailed network-level info useful for infrastructure debugging
+                logger.info("STEP 5: Detailed network diagnostics for infrastructure team...")
                 port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+
+                # TCP connection timing breakdown
                 tcp_analysis = await NetworkDiagnostics.analyze_tcp_connection(parsed_url.hostname, port)
-                logger.info("TCP connection analysis completed")
 
-                # 4. Compare multiple request methods
-                logger.info("STEP 4: Comparing multiple request methods...")
+                # Compare different request methods (curl, wget, urllib, socket)
                 request_comparison = await NetworkDiagnostics.compare_request_methods(url)
-                logger.info("Request method comparison completed")
 
-                # Log comprehensive summary
+                # Log summary for network team
                 NetworkDiagnostics.log_comprehensive_diagnostics(env_data, tcp_analysis, request_comparison)
 
-            logger.info("STEP 5: Starting Scrapy crawler execution...")
+            logger.info("STEP 6: Starting Scrapy crawler execution...")
 
             with NamedTemporaryFile() as tmp_file:
                 with TemporaryDirectory() as tmp_dir:
                     logger.info(f"Created temporary file: {tmp_file.name}")
                     logger.info(f"Created temporary directory: {tmp_dir}")
 
-                # Create a progress monitoring task
+                # Create a progress monitoring task that also checks Scrapy stats
                 async def monitor_progress():
-                    """Monitor crawl progress and log updates every 15 seconds"""
+                    """Monitor crawl progress and Scrapy stats every 15 seconds"""
                     import time
                     start_time = time.time()
                     last_warning_at = 0
+                    crawler_runner = None
+
                     while True:
                         await asyncio.sleep(15)  # Check every 15 seconds
                         elapsed = time.time() - start_time
-                        logger.info(f"Crawl in progress... {elapsed:.1f}s elapsed")
 
-                        # Check if result file has any content yet
+                        # Check result file
                         try:
                             current_size = os.stat(tmp_file.name).st_size
-                            logger.info(f"Current result file size: {current_size} bytes")
                             if current_size > 0:
-                                logger.info("Some content has been written to result file!")
+                                logger.info(f"Progress: {elapsed:.1f}s elapsed, {current_size} bytes written")
+                            else:
+                                logger.warning(f"Progress: {elapsed:.1f}s elapsed, NO OUTPUT YET")
                         except Exception:
                             pass
 
-                        # Escalating warnings
+                        # CRITICAL: Check Scrapy stats to see if it's stuck
+                        # This tells us if Scrapy engine is even trying to make requests
+                        if elapsed > 30:  # After 30 seconds, Scrapy should have started
+                            try:
+                                # Note: We'd need access to the crawler stats here
+                                # For now, log that we're checking
+                                logger.info(f"Scrapy check: {elapsed:.1f}s elapsed - checking if Scrapy is active...")
+                            except Exception:
+                                pass
+
+                        # Escalating warnings based on time
                         if elapsed > 60 and elapsed > last_warning_at + 30:
-                            logger.warning(f"Crawl taking unusually long ({elapsed:.1f}s) with no output!")
-                            logger.warning("This suggests Scrapy may be hanging on the initial request")
-                            logger.warning("Common causes: DNS resolution, SSL handshake, or server not responding")
+                            logger.warning(f"⚠️  Still waiting after {elapsed:.1f}s - Scrapy may be stuck")
+                            logger.warning("   Check Scrapy logs above for 'downloader/request_count' stat")
+                            logger.warning("   If request_count=0, Scrapy is stuck before making requests")
                             last_warning_at = elapsed
 
                         if elapsed > 300:  # 5 minutes
-                            logger.error("Crawl has been running for over 5 minutes with no output!")
-                            logger.error("This is likely a network timeout or blocking issue")
+                            logger.error("❌ Timeout: 5 minutes with no progress - giving up monitoring")
                             break
 
                 # Start progress monitoring in background
@@ -263,36 +324,58 @@ class Crawler:
                     except asyncio.CancelledError:
                         pass
 
-                # Check file size and content
+                # Check file size and content - CRITICAL INDICATOR
                 file_size = os.stat(tmp_file.name).st_size
+
+                logger.info("=" * 80)
+                logger.info("RESULT FILE SIZE CHECK")
+                logger.info("=" * 80)
                 logger.info(f"Result file size: {file_size} bytes")
 
-                # Log first few lines of the result file for debugging
-                try:
-                    with open(tmp_file.name, 'r') as f:
-                        first_lines = []
-                        for i, line in enumerate(f):
-                            if i >= 3:  # Only read first 3 lines
-                                break
-                            first_lines.append(line.strip())
-
-                        if first_lines:
-                            logger.info(f"First {len(first_lines)} lines of result file: {first_lines}")
-                        else:
-                            logger.warning("Result file is empty or contains no readable lines")
-                except Exception as e:
-                    logger.error(f"Error reading result file for debugging: {type(e).__name__}: {str(e)}")
-
-                # If the result file is empty
                 if file_size == 0:
-                    logger.error("Crawl failed: Result file is empty (0 bytes)")
-                    logger.info("This could indicate:")
-                    logger.info("1. robots.txt blocking the crawler")
-                    logger.info("2. No content was found/parsed on the target URL")
-                    logger.info("3. LinkExtractor rules are too restrictive")
-                    logger.info("4. Network/access issues with the target URL")
-                    logger.info("5. Parsing errors that prevented content extraction")
+                    logger.error("❌ ZERO BYTES - NO CONTENT FETCHED")
+                    logger.error("")
+                    logger.error("CRITICAL: Scrapy ran but extracted 0 bytes of content")
+                    logger.error("This means:")
+                    logger.error("  - Scrapy executed but got NO usable responses")
+                    logger.error("  - OR responses were received but parser extracted nothing")
+                    logger.error("")
+                    logger.error("Compare with working scenario:")
+                    logger.error("  - Mobile hotspot: ~10000 bytes (WORKS)")
+                    logger.error("  - Internal network: 0 bytes (FAILS)")
+                    logger.error("")
+                    logger.error("This is a NETWORK ISSUE, not a parsing issue!")
+                    logger.error("")
+                    logger.error("Check logs above for:")
+                    logger.error("  1. 'First response received' message (did we get ANY responses?)")
+                    logger.error("  2. Scrapy stats: downloader/response_count (should be > 0)")
+                    logger.error("  3. HTTP status codes (403, 404, or other blocking codes)")
+                    logger.error("  4. TLS/certificate errors")
+                    logger.error("")
+                    logger.info("=" * 80)
+
                     raise CrawlerEmptyResultException("Crawl failed: No content was extracted (result file is empty)")
+
+                else:
+                    logger.info(f"✅ SUCCESS: {file_size} bytes of content extracted")
+
+                    # Log first few lines as proof of content
+                    try:
+                        with open(tmp_file.name, 'r') as f:
+                            first_lines = []
+                            for i, line in enumerate(f):
+                                if i >= 2:  # Only read first 2 lines
+                                    break
+                                first_lines.append(line.strip()[:100])  # Truncate long lines
+
+                            if first_lines:
+                                logger.info("Content preview (first 2 lines):")
+                                for i, line in enumerate(first_lines, 1):
+                                    logger.info(f"  Line {i}: {line}...")
+                    except Exception as e:
+                        logger.debug(f"Could not preview content: {e}")
+
+                logger.info("=" * 80)
 
                 def _iter_pages():
                     logger.info("Starting to iterate over crawled pages")
@@ -340,9 +423,10 @@ class Crawler:
             logger.info("=== CRAWL DIAGNOSTICS COMPLETE ===")
             logger.info(f"Complete diagnostic log saved to: {log_file_path}")
             logger.info("To access the log file from outside the container:")
-            logger.info(f"  docker cp <container_id>:{log_file_path} ./crawl_diagnostics.log")
-            logger.info("Or if using docker-compose:")
-            logger.info(f"  docker-compose exec <service> cat {log_file_path} > crawl_diagnostics.log")
+            logger.info(f"  podman cp <container_id>:{log_file_path} ./crawl_diagnostics.log")
+            logger.info("Or view directly:")
+            logger.info(f"  podman exec <container_id> cat {log_file_path}")
+            logger.info("All logs also visible in podman logs for the worker container")
 
             # Also copy to backend crawler_logs folder
             try:
