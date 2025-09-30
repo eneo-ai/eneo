@@ -1,0 +1,491 @@
+# Document Processing
+
+Eneo's document processing capabilities allow you to create AI-powered knowledge bases from your documents and websites. This guide covers uploading documents, web crawling, and optimizing retrieval.
+
+## Overview
+
+Eneo can process and extract knowledge from:
+- **Documents**: PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .csv)
+- **Websites**: Automated crawling and content extraction
+- **Text files**: Plain text, Markdown
+
+All content is:
+1. **Extracted** from source format
+2. **Chunked** into optimal segments
+3. **Embedded** as vectors for semantic search
+4. **Stored** in PostgreSQL with pgvector
+5. **Retrieved** when relevant to queries
+
+---
+
+## Uploading Documents
+
+### Step 1: Create a Space
+
+Documents belong to collaborative spaces in Eneo:
+
+1. Log in to your Eneo instance
+2. Click **Spaces** in the sidebar
+3. Click **Create Space**
+4. Fill in:
+   - **Name**: Your space name
+   - **Description**: What the space is for
+   - **Visibility**: Private or Team
+5. Click **Create**
+
+### Step 2: Navigate to Knowledge Base
+
+1. Open your space
+2. Click the **Knowledge** tab
+3. Click **Add Documents**
+
+### Step 3: Upload Files
+
+1. Click **Upload Files** or drag and drop
+2. Select one or multiple files
+3. Click **Upload**
+
+The worker service will process files in the background. You'll see:
+- ✓ **Uploaded**: File received
+- ⏳ **Processing**: Content extraction in progress
+- ✓ **Completed**: Ready for queries
+
+### Supported Formats
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| PDF | `.pdf` | Text-based PDFs work best; OCR not yet supported |
+| Word | `.docx` | Modern Word documents |
+| PowerPoint | `.pptx` | Extracts text from slides |
+| Excel | `.xlsx`, `.csv` | Extracts data as text |
+| Text | `.txt`, `.md` | Plain text and Markdown |
+
+### File Size Limits
+
+Default maximum file size: **50MB per file**
+
+To increase limits, add to `env_backend.env`:
+
+```bash
+MAX_UPLOAD_SIZE_MB=100
+```
+
+Then restart:
+```bash
+docker compose restart backend
+```
+
+---
+
+## Web Crawling
+
+Automatically extract content from websites.
+
+### Step 1: Add a Web Source
+
+1. In your space, go to **Knowledge** tab
+2. Click **Add Web Source**
+3. Enter the URL to crawl
+4. Configure crawling options:
+   - **Max Depth**: How many levels to crawl (default: 2)
+   - **Max Pages**: Maximum pages to process (default: 50)
+   - **Follow Links**: Crawl linked pages
+5. Click **Start Crawling**
+
+### Step 2: Monitor Progress
+
+The crawler will:
+1. Fetch the initial page
+2. Extract links (if configured)
+3. Process each page in the background
+4. Update progress in real-time
+
+### Crawling Configuration
+
+**Shallow crawl** (single page):
+```
+URL: https://example.com/documentation
+Max Depth: 0
+Max Pages: 1
+```
+
+**Deep crawl** (entire section):
+```
+URL: https://example.com/docs
+Max Depth: 3
+Max Pages: 100
+Follow Links: Yes
+```
+
+### Web Crawling Best Practices
+
+1. **Start small**: Test with single pages first
+2. **Respect limits**: Don't crawl too many pages at once
+3. **Check robots.txt**: Ensure crawling is allowed
+4. **Use specific URLs**: Target documentation sections, not entire websites
+
+### Handling Authentication
+
+For authenticated websites, use the API:
+
+```python
+import requests
+
+response = requests.post(
+    "https://your-eneo-instance.com/api/spaces/123/knowledge/web",
+    json={
+        "url": "https://example.com/docs",
+        "max_depth": 2,
+        "headers": {
+            "Authorization": "Bearer your-token"
+        }
+    },
+    headers={"Authorization": "Bearer your-eneo-api-key"}
+)
+```
+
+---
+
+## How Document Processing Works
+
+### 1. Extraction
+
+Content is extracted from source formats:
+- **PDF**: Text extraction using pdfplumber
+- **Word**: XML parsing of .docx structure
+- **PowerPoint**: Slide text extraction
+- **Excel**: Cell data extraction
+- **Web**: HTML parsing with Scrapy
+
+### 2. Chunking
+
+Text is split into chunks for optimal retrieval:
+
+**Default chunk size**: 1000 characters with 200 character overlap
+
+Overlap ensures context isn't lost at boundaries:
+
+```
+Chunk 1: [..................] (chars 0-1000)
+Chunk 2:           [..................] (chars 800-1800)
+Chunk 3:                      [..................] (chars 1600-2600)
+```
+
+### 3. Embedding
+
+Each chunk is converted to a vector embedding:
+- **Model**: Configurable embedding model (default: OpenAI text-embedding-3-small)
+- **Dimensions**: 1536 dimensions (OpenAI) or model-specific
+- **Storage**: Stored in PostgreSQL with pgvector extension
+
+### 4. Retrieval
+
+When users query:
+1. Query is converted to an embedding
+2. Vector similarity search finds relevant chunks
+3. Top-k most relevant chunks are retrieved (default: k=5)
+4. Chunks are provided as context to the AI model
+
+---
+
+## Optimizing Retrieval
+
+### Chunk Size Configuration
+
+Adjust chunk size based on your content:
+
+**Large chunks** (1500-2000 chars):
+- ✓ Better for long-form content
+- ✓ More context per chunk
+- ✗ Less precise retrieval
+
+**Small chunks** (500-800 chars):
+- ✓ More precise retrieval
+- ✓ Better for factual Q&A
+- ✗ May lose context
+
+To configure, add to `env_backend.env`:
+
+```bash
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
+```
+
+### Embedding Models
+
+Choose the right embedding model:
+
+**OpenAI text-embedding-3-small** (default):
+- Fast and cost-effective
+- 1536 dimensions
+- Good for general purpose
+
+**OpenAI text-embedding-3-large**:
+- Higher quality
+- 3072 dimensions
+- Better for complex queries
+
+Configure in `env_backend.env`:
+```bash
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+### Retrieval Parameters
+
+Adjust how many chunks are retrieved:
+
+```bash
+# Number of chunks to retrieve
+RETRIEVAL_K=5
+
+# Minimum similarity threshold (0-1)
+RETRIEVAL_THRESHOLD=0.7
+```
+
+Higher `k` = more context but potentially less relevant
+Higher threshold = more precise but may miss relevant content
+
+---
+
+## Managing Your Knowledge Base
+
+### View Documents
+
+1. Go to your space
+2. Click **Knowledge** tab
+3. See all documents and their status
+
+### Search Documents
+
+Use the search bar to find specific documents:
+```
+Search: "quarterly report"
+```
+
+### Update Documents
+
+To update a document:
+1. Delete the old version
+2. Upload the new version
+
+Or use versioning:
+1. Keep both versions
+2. Mark old version as archived
+
+### Delete Documents
+
+1. Click the document
+2. Click **Delete**
+3. Confirm deletion
+
+Deletion removes:
+- Original document
+- All chunks
+- All embeddings
+
+---
+
+## Performance Optimization
+
+### Processing Speed
+
+**Worker configuration** in `docker-compose.yml`:
+
+```yaml
+worker:
+  deploy:
+    replicas: 2  # Run 2 worker instances
+    resources:
+      limits:
+        cpus: '2'
+        memory: 2G
+```
+
+### Database Performance
+
+**Create indexes** for faster queries:
+
+```sql
+-- Already included in migrations, but if needed:
+CREATE INDEX idx_document_chunks_embedding
+ON document_chunks
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+**Optimize PostgreSQL** in `env_db.env`:
+
+```bash
+# Increase shared buffers
+POSTGRES_SHARED_BUFFERS=256MB
+
+# Increase work memory
+POSTGRES_WORK_MEM=16MB
+```
+
+### Caching
+
+Enable Redis caching for embeddings:
+
+```bash
+# In env_backend.env
+CACHE_EMBEDDINGS=true
+CACHE_TTL_SECONDS=3600
+```
+
+---
+
+## Troubleshooting
+
+### Files Not Processing
+
+**Check worker status:**
+```bash
+docker compose ps worker
+docker compose logs worker
+```
+
+**Common issues:**
+- Worker not running
+- Insufficient memory
+- Unsupported file format
+- Corrupted file
+
+**Solution:**
+```bash
+docker compose restart worker
+```
+
+### Web Crawling Fails
+
+**Check error messages:**
+```bash
+docker compose logs worker | grep crawl
+```
+
+**Common issues:**
+- Website blocks crawlers (check robots.txt)
+- Authentication required
+- Rate limiting
+- Network issues
+
+**Solution:**
+- Use specific URLs instead of root domains
+- Reduce max_pages and max_depth
+- Add delays between requests
+
+### Poor Retrieval Quality
+
+**Symptoms:**
+- AI doesn't use uploaded documents
+- Irrelevant chunks retrieved
+- Missing important information
+
+**Solutions:**
+
+1. **Check chunk size:**
+   - Too large = less precise
+   - Too small = loses context
+
+2. **Adjust retrieval parameters:**
+   ```bash
+   RETRIEVAL_K=10  # Retrieve more chunks
+   RETRIEVAL_THRESHOLD=0.6  # Lower threshold
+   ```
+
+3. **Use better embeddings:**
+   ```bash
+   EMBEDDING_MODEL=text-embedding-3-large
+   ```
+
+4. **Improve document quality:**
+   - Use text-based PDFs (not scanned images)
+   - Remove headers/footers
+   - Clean up formatting
+
+### Out of Memory Errors
+
+**Reduce worker memory usage:**
+
+```yaml
+# docker-compose.yml
+worker:
+  deploy:
+    resources:
+      limits:
+        memory: 1G  # Reduce from 2G
+```
+
+**Process fewer documents simultaneously:**
+```bash
+# env_backend.env
+MAX_CONCURRENT_TASKS=2  # Reduce from default
+```
+
+---
+
+## Advanced Use Cases
+
+### Batch Upload via API
+
+Upload multiple files programmatically:
+
+```python
+import requests
+
+files = [
+    ('files', open('doc1.pdf', 'rb')),
+    ('files', open('doc2.pdf', 'rb')),
+    ('files', open('doc3.pdf', 'rb')),
+]
+
+response = requests.post(
+    'https://your-eneo-instance.com/api/spaces/123/knowledge/upload',
+    files=files,
+    headers={'Authorization': 'Bearer your-api-key'}
+)
+```
+
+### Custom Chunking Strategies
+
+For specialized content, implement custom chunking:
+
+```python
+# In your fork of Eneo backend
+from app.services.chunking import ChunkingStrategy
+
+class CustomChunker(ChunkingStrategy):
+    def chunk(self, text: str) -> list[str]:
+        # Your custom logic
+        return chunks
+```
+
+### Multi-language Support
+
+Process documents in multiple languages:
+
+```bash
+# env_backend.env
+EMBEDDING_MODEL=multilingual-e5-large  # Multi-language model
+```
+
+---
+
+## Best Practices
+
+1. **Organize by topic**: Create separate spaces for different topics
+2. **Use descriptive names**: Name documents clearly
+3. **Keep documents updated**: Regularly refresh content
+4. **Monitor storage**: Check disk usage periodically
+5. **Test retrieval**: Verify documents are being used in responses
+6. **Start small**: Test with a few documents before bulk upload
+7. **Clean data**: Remove unnecessary content before upload
+
+---
+
+## Need Help?
+
+- **Processing issues**: Check [troubleshooting docs](https://github.com/eneo-ai/eneo/blob/main/docs/TROUBLESHOOTING.md)
+- **API reference**: [API documentation](https://your-eneo-instance.com/api/docs)
+- **GitHub issues**: [Report bugs](https://github.com/eneo-ai/eneo/issues)
+- **Email support**: digitalisering@sundsvall.se (public sector organizations)
