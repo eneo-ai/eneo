@@ -92,6 +92,7 @@ jobs:
 
       # Backend build and push
       - name: Extract backend metadata
+        if: github.ref != 'refs/heads/docs-site'
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
@@ -113,6 +114,7 @@ jobs:
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Inject backend version
+        if: github.ref != 'refs/heads/docs-site'
         run: |
           # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
           if [[ "${{ github.ref_type }}" == "branch" ]]; then
@@ -123,6 +125,7 @@ jobs:
           ./scripts/inject-backend-version.sh "$VERSION"
 
       - name: Build and push backend Docker image
+        if: github.ref != 'refs/heads/docs-site'
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -135,6 +138,7 @@ jobs:
 
       # Frontend build and push
       - name: Extract frontend metadata
+        if: github.ref != 'refs/heads/docs-site'
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
@@ -156,6 +160,7 @@ jobs:
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Synchronize frontend with backend
+        if: github.ref != 'refs/heads/docs-site'
         run: |
           # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
           if [[ "${{ github.ref_type }}" == "branch" ]]; then
@@ -166,6 +171,7 @@ jobs:
           ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
 
       - name: Build and push frontend Docker image
+        if: github.ref != 'refs/heads/docs-site'
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
