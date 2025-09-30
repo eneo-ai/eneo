@@ -20,7 +20,6 @@ on:
     branches:
       - main
       - develop
-      - docs-site
       - 'feature/*'
     tags:
       - 'v*'  # Triggered when version tags are pushed
@@ -85,7 +84,6 @@ jobs:
 
       # Backend build and push
       - name: Extract backend metadata
-        if: github.ref != 'refs/heads/docs-site'
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
@@ -106,7 +104,6 @@ jobs:
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Inject backend version
-        if: github.ref != 'refs/heads/docs-site'
         run: |
           # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
           if [[ "${{ github.ref_type }}" == "branch" ]]; then
@@ -117,7 +114,6 @@ jobs:
           ./scripts/inject-backend-version.sh "$VERSION"
 
       - name: Build and push backend Docker image
-        if: github.ref != 'refs/heads/docs-site'
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -130,7 +126,6 @@ jobs:
 
       # Frontend build and push
       - name: Extract frontend metadata
-        if: github.ref != 'refs/heads/docs-site'
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
@@ -151,7 +146,6 @@ jobs:
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Synchronize frontend with backend
-        if: github.ref != 'refs/heads/docs-site'
         run: |
           # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
           if [[ "${{ github.ref_type }}" == "branch" ]]; then
@@ -162,7 +156,6 @@ jobs:
           ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
 
       - name: Build and push frontend Docker image
-        if: github.ref != 'refs/heads/docs-site'
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
@@ -173,22 +166,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Docs site build and push (only for docs-site branch)
+      # Docs site build and push (for develop and main branches)
       - name: Extract docs metadata
-        if: github.ref == 'refs/heads/docs-site'
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
         id: meta-docs
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}
           tags: |
             # Branch-based tags
-            type=ref,event=branch
-
-            # Git SHA for traceability
-            type=sha,prefix={{branch}}-,format=short
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push docs Docker image
-        if: github.ref == 'refs/heads/docs-site'
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
@@ -205,13 +196,7 @@ jobs:
           echo "## 🐳 Docker Images Built and Pushed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ github.ref }}" == "refs/heads/docs-site" ]]; then
-            echo "### Docs Site Build" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:docs-site\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "📚 Docs site image built for testing" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
+          if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             echo "### Production Release: $VERSION" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -229,6 +214,7 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🧪 Images will be deployed to testing environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
@@ -236,6 +222,7 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.ref }}" == "refs/heads/feature/"* ]]; then
