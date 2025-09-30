@@ -166,3 +166,51 @@ class WebsiteCRUDService:
             raise UnauthorizedException()
 
         return await self.crawl_run_repo.get_crawl_runs(website_id=website_id)
+
+    async def bulk_crawl_websites(
+        self, website_ids: list[UUID]
+    ) -> tuple[list["CrawlRun"], list[dict[str, str]]]:
+        """Trigger crawls for multiple websites in bulk.
+
+        Why: Enables efficient batch operations for users managing many websites.
+        Each website is processed independently - failures don't stop the batch.
+
+        Args:
+            website_ids: List of website IDs to crawl
+
+        Returns:
+            Tuple of (successful_crawl_runs, errors)
+            - successful_crawl_runs: List of CrawlRun objects that were queued
+            - errors: List of dicts with website_id and error message for failures
+
+        Raises:
+            BadRequestException: If more than 50 websites requested (safety limit)
+        """
+        if len(website_ids) > 50:
+            raise BadRequestException("Cannot crawl more than 50 websites at once")
+
+        successful_runs = []
+        errors = []
+
+        for website_id in website_ids:
+            try:
+                # Reuse existing crawl_website method for consistent behavior
+                crawl_run = await self.crawl_website(website_id)
+                successful_runs.append(crawl_run)
+            except CrawlAlreadyRunningException:
+                errors.append({
+                    "website_id": str(website_id),
+                    "error": "Crawl already in progress for this website"
+                })
+            except UnauthorizedException:
+                errors.append({
+                    "website_id": str(website_id),
+                    "error": "Not authorized to crawl this website"
+                })
+            except Exception as e:
+                errors.append({
+                    "website_id": str(website_id),
+                    "error": str(e)
+                })
+
+        return successful_runs, errors

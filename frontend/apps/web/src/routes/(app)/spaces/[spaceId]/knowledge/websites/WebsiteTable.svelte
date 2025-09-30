@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table, Input } from "@intric/ui";
   import WebsiteActions from "./WebsiteActions.svelte";
   import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
   import WebsiteSync from "./WebsiteSync.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived } from "svelte/store";
+  import { derived, writable } from "svelte/store";
   import type { WebsiteSparse } from "@intric/intric-js";
   import { IconWeb } from "@intric/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
@@ -15,6 +15,33 @@
   } = getSpacesManager();
 
   const websites = derived(currentSpace, ($currentSpace) => $currentSpace.knowledge.websites);
+
+  // Selection state for bulk operations
+  export let selectedWebsiteIds = writable<Set<string>>(new Set());
+
+  // Toggle individual website selection
+  function toggleSelection(websiteId: string) {
+    const current = $selectedWebsiteIds;
+    if (current.has(websiteId)) {
+      current.delete(websiteId);
+    } else {
+      current.add(websiteId);
+    }
+    $selectedWebsiteIds = new Set(current);
+  }
+
+  // Toggle all websites selection
+  function toggleSelectAll() {
+    if ($selectedWebsiteIds.size === $websites.length && $websites.length > 0) {
+      $selectedWebsiteIds = new Set();
+    } else {
+      $selectedWebsiteIds = new Set($websites.map(w => w.id));
+    }
+  }
+
+  // Selection state helpers
+  $: isAllSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size === $websites.length;
+  $: isSomeSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size < $websites.length;
   const embeddingModels = derived(currentSpace, ($currentSpace) => {
     const modelsInSpace = $currentSpace.embedding_models.map((model) => model.id);
     const modelsInWebsites = $currentSpace.knowledge.websites.map((website) => {
@@ -37,6 +64,32 @@
   const table = Table.createWithStore(websites);
 
   const viewModel = table.createViewModel([
+    // Checkbox column (compact, left side)
+    table.column({
+      accessor: (item) => item,
+      id: "select",
+      header: () => {
+        return createRender(Input.Checkbox, {
+          checked: isAllSelected,
+          indeterminate: isSomeSelected,
+          onCheckedChange: toggleSelectAll,
+          ariaLabel: "Select all websites"
+        });
+      },
+      cell: (item) => {
+        return createRender(Input.Checkbox, {
+          checked: $selectedWebsiteIds.has(item.value.id),
+          onCheckedChange: () => toggleSelection(item.value.id),
+          ariaLabel: `Select ${formatWebsiteName(item.value)}`
+        });
+      },
+      plugins: {
+        sort: {
+          disable: true
+        }
+      }
+    }),
+
     table.column({
       accessor: (item) => item,
       header: "Website",
@@ -104,32 +157,6 @@
         return createRender(WebsiteSync, {
           updateInterval: item.value
         });
-      }
-    }),
-
-    table.column({
-      accessor: "crawler_engine",
-      header: "Engine",
-      cell: (item) => {
-        const engine = item.value;
-        const isExperimental = engine === "crawl4ai";
-        return createRender(Table.BasicCell, {
-          label: isExperimental ? "Crawl4AI" : "Scrapy",
-          tooltip: isExperimental ? "Experimental AI-optimized crawler" : "Traditional web crawler",
-          customClass: isExperimental ? "text-blue-600 font-medium" : "text-gray-600"
-        });
-      },
-      plugins: {
-        sort: {
-          getSortValue(value) {
-            return value;
-          }
-        },
-        tableFilter: {
-          getFilterValue(value) {
-            return value;
-          }
-        }
       }
     }),
 

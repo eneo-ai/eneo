@@ -1,6 +1,8 @@
+from datetime import datetime
 from uuid import UUID
 
 from dependency_injector import providers
+import sqlalchemy as sa
 
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
@@ -9,30 +11,51 @@ from intric.websites.crawl_dependencies.crawl_models import (
 )
 from intric.crawler.engines import get_engine
 from intric.websites.domain.crawler_engine import CrawlerEngine
+from intric.database.tables.websites_table import Websites as WebsitesTable
 
 logger = get_logger(__name__)
 
 
 async def queue_website_crawls(container: Container):
+    """Queue websites for crawling based on their update intervals.
+
+    Why: Engine-agnostic scheduling that works for both Scrapy and Crawl4AI.
+    Uses centralized scheduler service for maintainable interval logic.
+    """
     user_repo = container.user_repo()
-    website_sparse_repo = container.website_sparse_repo()
+    crawl_scheduler_service = container.crawl_scheduler_service()
 
     async with container.session().begin():
-        websites = await website_sparse_repo.get_weekly_websites()
+        # Why: Use scheduler service instead of direct repo call for better abstraction
+        websites = await crawl_scheduler_service.get_websites_due_for_crawl()
+
+        logger.info(f"Processing {len(websites)} websites due for crawling")
+
+        successful_crawls = 0
+        failed_crawls = 0
 
         for website in websites:
             try:
-                # Get user
+                # Get user for this website
                 user = await user_repo.get_user_by_id(website.user_id)
                 container.user.override(providers.Object(user))
                 container.tenant.override(providers.Object(user.tenant))
 
                 crawl_service = container.crawl_service()
 
+                # Why: Engine selection happens in crawl_service based on website.crawler_engine
                 await crawl_service.crawl(website)
+                successful_crawls += 1
+
+                logger.debug(f"Successfully queued crawl for {website.url}")
+
             except Exception as e:
-                # If a website fails to queue, try the next one
-                logger.error(f"Error when queueing up website {website.url}: {e}")
+                # Why: Individual website failures shouldn't stop the entire batch
+                failed_crawls += 1
+                logger.error(f"Failed to queue crawl for {website.url}: {str(e)}")
+                continue
+
+        logger.info(f"Crawl queueing completed: {successful_crawls} successful, {failed_crawls} failed")
 
     return True
 
@@ -168,6 +191,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
         await update_website_size_service.update_website_size(website_id=website.id)
+
+        # Update last_crawled_at timestamp for accurate interval scheduling
+        # Why: Must happen in same transaction as size update
+        stmt = (
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == params.website_id)
+            .values(last_crawled_at=datetime.now())
+        )
+        await session.execute(stmt)
 
         logger.info(
             f"Crawler finished. {num_pages} pages, {num_failed_pages} failed. "

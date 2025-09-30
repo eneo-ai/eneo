@@ -7,6 +7,7 @@ from typing import AsyncIterator
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_filter_strategy import PruningContentFilter
+from crawl4ai.async_dispatcher import MemoryAdaptiveDispatcher
 
 from intric.crawler.engines.base import CrawlerEngineAbstraction
 from intric.crawler.parse_html import CrawledPage
@@ -26,6 +27,8 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
 
     def __init__(self):
         """Initialize the Crawl4ai engine."""
+        self._download_dir = None  # Lazy initialization for file downloads
+
         # Default browser config for regular crawling
         self._browser_config = BrowserConfig(
             browser_type="chromium",
@@ -41,16 +44,26 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
             ]
         )
 
-        # Browser config for file downloads
-        import tempfile
-        self._download_dir = tempfile.mkdtemp(prefix="crawl4ai_downloads_")
+    def _get_download_browser_config(self) -> BrowserConfig:
+        """Get or create browser config for file downloads with temp directory.
 
-        self._download_browser_config = BrowserConfig(
+        Why: Lazy initialization - only create temp directory when actually downloading files.
+        Ensures proper cleanup lifecycle management.
+
+        Returns:
+            BrowserConfig configured for file downloads
+        """
+        if self._download_dir is None:
+            import tempfile
+            self._download_dir = tempfile.mkdtemp(prefix="crawl4ai_downloads_")
+            logger.debug(f"Created temporary download directory: {self._download_dir}")
+
+        return BrowserConfig(
             browser_type="chromium",
             headless=True,
             verbose=False,
-            accept_downloads=True,      # Enable actual file downloads
-            downloads_path=self._download_dir,  # Use temp directory for downloads
+            accept_downloads=True,
+            downloads_path=self._download_dir,
             text_mode=False,
             extra_args=[
                 "--no-sandbox",
@@ -59,6 +72,19 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                 "--disable-extensions",
             ]
         )
+
+    def __del__(self):
+        """Cleanup temporary download directory on engine destruction.
+
+        Why: Prevent disk space leaks from accumulating temp directories.
+        """
+        if self._download_dir is not None:
+            try:
+                import shutil
+                shutil.rmtree(self._download_dir, ignore_errors=True)
+                logger.debug(f"Cleaned up temporary download directory: {self._download_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup download directory: {str(e)}")
 
     async def crawl(
         self,
@@ -155,7 +181,7 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                 """,
 
                 # Wait longer for downloads
-                delay_before_return_html=15.0,  # Wait 15 seconds for downloads
+                delay_before_return_html=float(SETTINGS.crawl4ai_download_timeout),
 
                 # Use timeout equivalent to Scrapy settings
                 page_timeout=int(SETTINGS.crawl_max_length * 1000),
@@ -167,7 +193,8 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
             )
 
             # Execute file download crawl
-            async with AsyncWebCrawler(config=self._download_browser_config) as crawler:
+            download_config = self._get_download_browser_config()
+            async with AsyncWebCrawler(config=download_config) as crawler:
                 result = await crawler.arun(url=url, config=run_config)
 
                 # Check download results
@@ -209,9 +236,13 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
 
                                 file_size = file_path.stat().st_size
 
-                                # Skip extremely large files
-                                if file_size > 50 * 1024 * 1024:  # 50MB limit
-                                    logger.warning(f"Skipping oversized file: {file_size / 1024 / 1024:.1f}MB")
+                                # Skip extremely large files (configurable limit)
+                                max_size_bytes = SETTINGS.crawl4ai_max_file_size_mb * 1024 * 1024
+                                if file_size > max_size_bytes:
+                                    logger.warning(
+                                        f"Skipping oversized file: {file_size / 1024 / 1024:.1f}MB "
+                                        f"(limit: {SETTINGS.crawl4ai_max_file_size_mb}MB)"
+                                    )
                                     continue
 
                                 # Handle binary document files (PDFs, Word, Excel) that TextExtractor can process
@@ -255,6 +286,22 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
         except Exception as e:
             logger.error(f"File download engine error: {str(e)}")
             # Graceful degradation - continue with content crawling even if file downloads fail
+
+    def _create_dispatcher(self) -> MemoryAdaptiveDispatcher:
+        """Create memory-adaptive dispatcher for efficient multi-URL crawling.
+
+        Why: Prevents memory exhaustion on large sitemaps by limiting concurrent
+        page processing and auto-pausing when system memory is high.
+
+        Returns:
+            Configured MemoryAdaptiveDispatcher for sitemap crawls
+        """
+        return MemoryAdaptiveDispatcher(
+            memory_threshold_percent=SETTINGS.crawl4ai_memory_threshold_percent,
+            max_session_permit=SETTINGS.crawl4ai_max_concurrent_sessions,
+            check_interval=SETTINGS.crawl4ai_memory_check_interval,
+            memory_wait_timeout=300.0  # Wait up to 5 minutes for memory to free up
+        )
 
     def validate_config(self) -> bool:
         """Validate crawl4ai engine configuration.
@@ -310,7 +357,7 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                     "citations": True           # Generate citations for references
                 }
             ),
-            word_count_threshold=10,  # Minimum word count for content
+            word_count_threshold=SETTINGS.crawl4ai_word_threshold,
 
             # Performance settings based on Scrapy configuration
             page_timeout=int(SETTINGS.crawl_max_length * 1000),  # Convert to milliseconds
@@ -335,7 +382,7 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
             wait_for="body",
 
             # Enable table extraction for structured data
-            table_score_threshold=5,  # Lower threshold to capture more tables
+            table_score_threshold=SETTINGS.crawl4ai_table_score_threshold,
 
             # Only generate useful captures when downloading files
             screenshot=False,           # Never capture screenshots (binary image data)
@@ -410,7 +457,10 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
         )
 
     async def _crawl_sitemap(self, crawler, sitemap_url: str, run_config: CrawlerRunConfig) -> AsyncIterator[CrawledPage]:
-        """Handle sitemap crawling by processing sitemap URLs.
+        """Handle sitemap crawling by processing sitemap URLs with parallel execution.
+
+        Why: Uses arun_many() with MemoryAdaptiveDispatcher for efficient parallel processing.
+        Large sitemaps (1000+ pages) process multiple pages concurrently instead of sequentially.
 
         Args:
             crawler: AsyncWebCrawler instance
@@ -428,12 +478,10 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                 raise CrawlerException(f"Failed to fetch sitemap: {sitemap_result.error_message}")
 
             # Parse URLs from sitemap
-            # This is a simplified implementation - in production, you'd want a proper sitemap parser
             import xml.etree.ElementTree as ET
 
             try:
                 root = ET.fromstring(sitemap_result.html)
-                # Handle XML namespaces
                 namespaces = {
                     'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'
                 }
@@ -444,24 +492,28 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                     if loc_elem is not None and loc_elem.text:
                         urls.append(loc_elem.text)
 
-                # Limit URLs based on settings (equivalent to CLOSESPIDER_ITEMCOUNT)
+                # Limit URLs based on settings
                 max_urls = min(len(urls), SETTINGS.closespider_itemcount)
                 urls = urls[:max_urls]
 
-                logger.info(f"Found {len(urls)} URLs in sitemap, crawling {max_urls}")
+                logger.info(f"Found {len(urls)} URLs in sitemap, crawling {max_urls} with parallel processing")
 
-                # Crawl each URL
-                for url in urls:
-                    try:
-                        result = await crawler.arun(url=url, config=run_config)
-                        if result.success and result.markdown:
-                            page = self._convert_result_to_crawled_page(result)
-                            yield page
-                        else:
-                            logger.warning(f"Failed to crawl URL from sitemap: {url}")
-                    except Exception as e:
-                        logger.warning(f"Error crawling URL {url}: {str(e)}")
-                        continue
+                # Use arun_many with memory-adaptive dispatcher for efficient parallel crawling
+                dispatcher = self._create_dispatcher()
+
+                results = await crawler.arun_many(
+                    urls=urls,
+                    config=run_config,
+                    dispatcher=dispatcher
+                )
+
+                # Yield successful pages
+                for result in results:
+                    if result.success and result.markdown:
+                        page = self._convert_result_to_crawled_page(result)
+                        yield page
+                    else:
+                        logger.warning(f"Failed to crawl URL from sitemap: {result.url}")
 
             except ET.ParseError as e:
                 logger.error(f"Failed to parse sitemap XML: {str(e)}")

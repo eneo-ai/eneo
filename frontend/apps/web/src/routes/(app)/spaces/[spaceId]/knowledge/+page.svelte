@@ -6,18 +6,57 @@
   import WebsiteTable from "./websites/WebsiteTable.svelte";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getIntric } from "$lib/core/Intric";
   import { Button } from "@intric/ui";
   import { IconLinkExternal } from "@intric/icons/link-external";
+  import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   export let data;
 
+  const intric = getIntric();
   const {
-    state: { currentSpace }
+    state: { currentSpace },
+    refreshCurrentSpace
   } = getSpacesManager();
 
   let selectedTab = writable<string>();
   let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+
+  // Website selection state (shared with WebsiteTable)
+  let selectedWebsiteIds = writable<Set<string>>(new Set());
+  let isBulkRecrawling = false;
+
+  // Bulk recrawl handler
+  async function bulkRecrawl() {
+    if ($selectedWebsiteIds.size === 0) return;
+
+    isBulkRecrawling = true;
+    try {
+      const websiteIds = Array.from($selectedWebsiteIds);
+
+      const response = await intric.websites.bulkRun({
+        website_ids: websiteIds
+      });
+
+      // Only show alert if there were errors
+      if (response.failed > 0) {
+        alert(
+          `${response.queued} website${response.queued > 1 ? 's' : ''} queued, ${response.failed} failed.\n` +
+          `Check console for error details.`
+        );
+        console.error("Bulk recrawl errors:", response.errors);
+      }
+
+      // Clear selection and refresh
+      $selectedWebsiteIds = new Set();
+      refreshCurrentSpace();
+    } catch (e) {
+      alert("Failed to trigger bulk recrawl: " + e);
+      console.error(e);
+    }
+    isBulkRecrawling = false;
+  }
 
   $: userCanSeeCollections = $currentSpace.hasPermission("read", "collection");
   $: userCanSeeWebsites = $currentSpace.hasPermission("read", "website");
@@ -51,7 +90,18 @@
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
-        <WebsiteEditor mode="create"></WebsiteEditor>
+        {#if $selectedWebsiteIds.size > 0}
+          <Button
+            variant="primary"
+            on:click={bulkRecrawl}
+            disabled={isBulkRecrawling}
+          >
+            <IconRefresh size="sm" />
+            {isBulkRecrawling ? 'Syncing...' : `Sync selected (${$selectedWebsiteIds.size})`}
+          </Button>
+        {:else}
+          <WebsiteEditor mode="create"></WebsiteEditor>
+        {/if}
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge") && data.availableIntegrations.length > 0}
         <ImportKnowledgeDialog></ImportKnowledgeDialog>
       {/if}
@@ -65,7 +115,7 @@
     {/if}
     {#if userCanSeeWebsites}
       <Page.Tab id="websites">
-        <WebsiteTable></WebsiteTable>
+        <WebsiteTable bind:selectedWebsiteIds></WebsiteTable>
       </Page.Tab>
     {/if}
     {#if userCanSeeIntegrations}

@@ -97,12 +97,29 @@ class Settings(BaseSettings):
     testing: bool = False
     dev: bool = False
 
-    # Crawl
-    crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max
-    closespider_itemcount: int = 20000
-    obey_robots: bool = True
-    autothrottle_enabled: bool = True
-    using_crawl: bool = True
+    # Crawl - General settings (applies to all crawler engines)
+    crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
+    closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    obey_robots: bool = True  # Respect robots.txt rules
+    autothrottle_enabled: bool = True  # Enable automatic request throttling
+    using_crawl: bool = True  # Enable/disable crawling feature globally
+
+    # Crawl4AI-specific settings
+    # File download configuration
+    crawl4ai_download_timeout: int = 15  # Seconds to wait for file downloads to complete
+    crawl4ai_max_file_size_mb: int = 50  # Maximum file size in MB for downloaded files
+
+    # Content extraction configuration
+    crawl4ai_word_threshold: int = 10  # Minimum word count for valid page content
+    crawl4ai_table_score_threshold: int = 5  # Minimum score for table extraction (lower = more tables)
+
+    # Memory and concurrency management
+    crawl4ai_memory_threshold_percent: float = 75.0  # Auto-pause crawls when system memory exceeds this %
+    crawl4ai_max_concurrent_sessions: int = 5  # Max concurrent pages in sitemap crawls (controls parallelism)
+    crawl4ai_memory_check_interval: float = 1.0  # How often to check system memory (seconds)
+
+    # Worker configuration
+    worker_max_concurrent_jobs: int = 20  # Maximum number of concurrent jobs the worker can process
 
     # integration callback
     oauth_callback_url: Optional[str] = None

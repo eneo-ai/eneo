@@ -228,6 +228,7 @@ from intric.websites.application.website_crud_service import WebsiteCRUDService
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.crawl_service import CrawlService
 from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
+from intric.websites.application.crawl_scheduler_service import CrawlSchedulerService
 from intric.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
@@ -345,6 +346,10 @@ class Container(containers.DeclarativeContainer):
     )
     embedding_model_repo = providers.Factory(AdminEmbeddingModelsService, session=session)
     website_sparse_repo = providers.Factory(WebsiteSparseRepository, session=session)
+    crawl_scheduler_service = providers.Factory(
+        CrawlSchedulerService,
+        website_sparse_repo=website_sparse_repo
+    )
     integration_knowledge_repo = providers.Factory(
         IntegrationKnowledgeRepoImpl,
         session=session,

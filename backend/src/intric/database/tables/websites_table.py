@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select, Enum
+from sqlalchemy import BigInteger, ForeignKey, and_, select, Enum, TIMESTAMP
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import EmbeddingModels
@@ -39,6 +40,9 @@ class Websites(BasePublic):
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     crawler_engine: Mapped[CrawlerEngine] = mapped_column(
         Enum(CrawlerEngine, name="crawlerengine", create_constraint=True)
+    )
+    last_crawled_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
     )
 
     # Foreign keys

@@ -16,8 +16,15 @@ if TYPE_CHECKING:
 
 
 class UpdateInterval(str, Enum):
+    """Defines how frequently a website should be crawled.
+
+    Why: Provides flexible scheduling options while maintaining engine abstraction.
+    Engine choice (Scrapy/Crawl4AI) is independent of crawl frequency.
+    """
     NEVER = "never"
-    WEEKLY = "weekly"
+    DAILY = "daily"                    # Crawl every day at 3 AM Swedish time
+    EVERY_OTHER_DAY = "every_other_day"  # Crawl every 2 days at 3 AM Swedish time
+    WEEKLY = "weekly"                  # Crawl every Friday at 3 AM Swedish time
 
 
 class Website(Entity):
@@ -154,6 +161,7 @@ class WebsiteSparse(Entity):
         update_interval: UpdateInterval,
         size: int,
         crawler_engine: CrawlerEngine,
+        last_crawled_at: Optional["datetime"],
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
@@ -167,6 +175,7 @@ class WebsiteSparse(Entity):
         self.update_interval = update_interval
         self.size = size
         self.crawler_engine = crawler_engine
+        self.last_crawled_at = last_crawled_at
 
     @classmethod
     def to_domain(cls, record: "WebsitesTable") -> "WebsiteSparse":
@@ -185,4 +194,5 @@ class WebsiteSparse(Entity):
             update_interval=record.update_interval,
             size=record.size,
             crawler_engine=record.crawler_engine,
+            last_crawled_at=record.last_crawled_at,
         )

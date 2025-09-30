@@ -8,7 +8,7 @@
   dayjs.extend(utc);
 
   export let website: WebsiteSparse;
-  /* TODO colours */
+
   function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
     switch (website.latest_crawl?.status) {
       case "complete": {
@@ -20,33 +20,44 @@
           tooltip: `Synced on ${completed.format("YYYY-MM-DD HH:mm")}`
         };
       }
-      case "in progress":
+      case "in progress": {
+        const started = dayjs(website.latest_crawl?.created_at);
+        const elapsed = dayjs().diff(started, 'minutes');
         return {
           color: "yellow",
           label: "Sync in progress",
-          tooltip: `Started on ${dayjs(website.latest_crawl?.created_at).format("YYYY-MM-DD HH:mm")}`
+          tooltip: `Started ${started.format("YYYY-MM-DD HH:mm")} (${elapsed} min ago)`
         };
+      }
       case "failed":
         return {
           color: "orange",
-          label: "Sync failed"
+          label: "Sync failed",
+          tooltip: website.latest_crawl?.finished_at
+            ? `Failed at ${dayjs(website.latest_crawl.finished_at).format("YYYY-MM-DD HH:mm")}`
+            : undefined
         };
       case "not found":
         return {
           color: "orange",
           label: "Sync failed"
         };
-      case "queued":
+      case "queued": {
+        const queued = dayjs(website.latest_crawl?.created_at);
         return {
           color: "blue",
-          label: "Queued"
+          label: "Queued",
+          tooltip: `Queued at ${queued.format("YYYY-MM-DD HH:mm")}`
         };
+      }
     }
     return {
       color: "orange",
       label: "error"
     };
   }
+
+  $: status = statusInfo();
 </script>
 
-<Label.Single item={statusInfo()}></Label.Single>
+<Label.Single item={status}></Label.Single>
