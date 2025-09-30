@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - develop
+      - docs-site
       - 'feature/*'
     tags:
       - 'v*'  # Triggered when version tags are pushed
@@ -28,6 +29,7 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
+  DOCS_IMAGE_NAME: eneo-ai/eneo-docs
 
 jobs:
   build-and-push:
@@ -165,13 +167,45 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Docs site build and push (only for docs-site branch)
+      - name: Extract docs metadata
+        if: github.ref == 'refs/heads/docs-site'
+        id: meta-docs
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}
+          tags: |
+            # Branch-based tags
+            type=ref,event=branch
+
+            # Git SHA for traceability
+            type=sha,prefix={{branch}}-,format=short
+
+      - name: Build and push docs Docker image
+        if: github.ref == 'refs/heads/docs-site'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/apps/docs-site/Dockerfile
+          push: true
+          tags: ${{ steps.meta-docs.outputs.tags }}
+          labels: ${{ steps.meta-docs.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       # Summary of what was built
       - name: Build Summary
         run: |
           echo "## 🐳 Docker Images Built and Pushed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/docs-site" ]]; then
+            echo "### Docs Site Build" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:docs-site\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📚 Docs site image built for testing" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             echo "### Production Release: $VERSION" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
