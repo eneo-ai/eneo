@@ -7,8 +7,20 @@ import './globals.css'
 import EneoLogo from '@/components/EneoLogo'
 
 export const metadata = {
-  // Define your metadata here
-  // For more information on metadata API, see: https://nextjs.org/docs/app/building-your-application/optimizing/metadata
+  title: {
+    default: 'Eneo - Democratic AI Platform',
+    template: '%s | Eneo Docs'
+  },
+  description: 'Open-source AI platform for public sector organizations. Deploy and manage AI assistants with complete data sovereignty, GDPR compliance, and EU AI Act readiness.',
+  keywords: ['AI platform', 'open source', 'public sector', 'GDPR', 'EU AI Act', 'data sovereignty', 'self-hosted AI'],
+  authors: [{ name: 'Sundsvall Municipality & Ånge Municipality' }],
+  openGraph: {
+    title: 'Eneo - Democratic AI Platform',
+    description: 'Open-source AI platform for public sector organizations',
+    url: 'https://eneo.ai',
+    siteName: 'Eneo Documentation',
+    type: 'website',
+  },
 }
 
 // const banner = <Banner storageKey="some-key">Nextra 4.0 is released 🎉</Banner>
@@ -18,7 +30,18 @@ const navbar = (
     // ... Your additional navbar options
   />
 )
-const footer = <Footer>MIT {new Date().getFullYear()} © Eneo.</Footer>
+const footer = (
+  <Footer>
+    <div className="flex flex-col items-center gap-2">
+      <div>
+        AGPL-3.0 {new Date().getFullYear()} © Sundsvall Municipality & Ånge Municipality
+      </div>
+      <div className="text-sm opacity-70">
+        Made with ❤️ by the Swedish Public Sector for the Global Community
+      </div>
+    </div>
+  </Footer>
+)
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -39,7 +62,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Layout
           navbar={navbar}
           pageMap={await getPageMap()}
-          docsRepositoryBase="https://github.com/shuding/nextra/tree/main/docs"
+          docsRepositoryBase="https://github.com/eneo-ai/eneo/tree/main/frontend/apps/docs-site"
           footer={footer}
           // ... Your additional layout options
         >

@@ -1,0 +1,453 @@
+# AI Provider Configuration
+
+Eneo is model-agnostic and supports multiple AI providers. This guide covers configuration for each supported provider.
+
+## Overview
+
+Eneo supports the following AI providers:
+- **OpenAI** (GPT-4, GPT-3.5, etc.)
+- **Anthropic** (Claude)
+- **Azure OpenAI Service**
+- **Google Gemini**
+- **Local Models** (Ollama, LM Studio)
+
+You can configure multiple providers simultaneously and switch between them based on your needs.
+
+---
+
+## OpenAI
+
+OpenAI provides access to GPT models including GPT-4, GPT-4 Turbo, and GPT-3.5 Turbo.
+
+### Step 1: Get an API Key
+
+1. Go to [OpenAI Platform](https://platform.openai.com/)
+2. Sign in or create an account
+3. Navigate to **API keys** in your account settings
+4. Click **Create new secret key**
+5. Copy the key (you won't be able to see it again)
+
+### Step 2: Configure Eneo
+
+Add this to your `env_backend.env`:
+
+```bash
+OPENAI_API_KEY=sk-...your-api-key
+```
+
+### Step 3: Restart the Backend
+
+```bash
+docker compose restart backend
+```
+
+### Available Models
+
+Once configured, these models will be available in Eneo:
+- `gpt-4o` (GPT-4 Omni - latest and most capable)
+- `gpt-4-turbo` (GPT-4 Turbo)
+- `gpt-4` (GPT-4)
+- `gpt-3.5-turbo` (GPT-3.5 Turbo - faster and more economical)
+
+### Cost Considerations
+
+OpenAI charges based on token usage:
+- **GPT-4**: Higher quality, higher cost
+- **GPT-3.5 Turbo**: Good quality, lower cost
+- **GPT-4 Turbo**: Balance of quality and cost
+
+Monitor your usage at [OpenAI Usage Dashboard](https://platform.openai.com/usage).
+
+---
+
+## Anthropic (Claude)
+
+Anthropic's Claude models offer strong performance with large context windows.
+
+### Step 1: Get an API Key
+
+1. Go to [Anthropic Console](https://console.anthropic.com/)
+2. Sign in or create an account
+3. Navigate to **API Keys**
+4. Click **Create Key**
+5. Copy the key
+
+### Step 2: Configure Eneo
+
+Add this to your `env_backend.env`:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...your-api-key
+```
+
+### Step 3: Restart the Backend
+
+```bash
+docker compose restart backend
+```
+
+### Available Models
+
+- `claude-3-opus` (Most capable, largest context)
+- `claude-3-sonnet` (Balanced performance)
+- `claude-3-haiku` (Fast and economical)
+- `claude-3.5-sonnet` (Latest Sonnet version)
+
+### Key Features
+
+- **Large Context**: Up to 200K tokens
+- **Strong Reasoning**: Excellent for complex tasks
+- **Safety**: Built-in safety features
+
+---
+
+## Azure OpenAI Service
+
+Azure OpenAI provides OpenAI models through Microsoft Azure with enterprise features.
+
+### Step 1: Create an Azure OpenAI Resource
+
+1. Go to [Azure Portal](https://portal.azure.com)
+2. Search for **Azure OpenAI**
+3. Click **Create** and fill in:
+   - **Subscription**: Your Azure subscription
+   - **Resource group**: Create new or select existing
+   - **Region**: Choose a region
+   - **Name**: Your resource name
+   - **Pricing tier**: Select based on your needs
+4. Click **Review + Create** → **Create**
+
+### Step 2: Deploy a Model
+
+1. Go to your Azure OpenAI resource
+2. Navigate to **Model deployments** → **Create**
+3. Select a model (e.g., `gpt-4`, `gpt-35-turbo`)
+4. Give it a deployment name (you'll use this in configuration)
+5. Click **Create**
+
+### Step 3: Get Your Credentials
+
+1. In your Azure OpenAI resource, go to **Keys and Endpoint**
+2. Note:
+   - **Endpoint** (e.g., `https://your-resource.openai.azure.com/`)
+   - **Key 1** or **Key 2**
+
+### Step 4: Configure Eneo
+
+Add these to your `env_backend.env`:
+
+```bash
+AZURE_OPENAI_API_KEY=your-azure-key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-02-15-preview
+AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+```
+
+### Step 5: Restart the Backend
+
+```bash
+docker compose restart backend
+```
+
+### Benefits of Azure OpenAI
+
+- **Enterprise SLA**: Microsoft's service level agreement
+- **Data Residency**: Keep data in specific Azure regions
+- **Private Network**: Use Azure Virtual Networks
+- **Microsoft Support**: Enterprise support options
+- **Compliance**: Additional compliance certifications
+
+---
+
+## Google Gemini
+
+Google's Gemini models offer multimodal capabilities and competitive performance.
+
+### Step 1: Get an API Key
+
+1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. Sign in with your Google account
+3. Click **Create API Key**
+4. Select or create a Google Cloud project
+5. Copy the API key
+
+### Step 2: Configure Eneo
+
+Add this to your `env_backend.env`:
+
+```bash
+GOOGLE_API_KEY=AIza...your-api-key
+```
+
+### Step 3: Restart the Backend
+
+```bash
+docker compose restart backend
+```
+
+### Available Models
+
+- `gemini-pro` (Text-only model)
+- `gemini-pro-vision` (Multimodal model with image support)
+- `gemini-1.5-pro` (Latest version with extended capabilities)
+
+### Key Features
+
+- **Multimodal**: Process text and images
+- **Long Context**: Up to 1M tokens (Gemini 1.5 Pro)
+- **Fast**: Quick response times
+
+---
+
+## Local Models (Ollama)
+
+Run AI models locally on your own hardware for complete data privacy.
+
+### Step 1: Install Ollama
+
+1. Download Ollama from [ollama.ai](https://ollama.ai)
+2. Install on your server or local machine
+3. Pull a model:
+   ```bash
+   ollama pull llama2
+   ollama pull mistral
+   ollama pull codellama
+   ```
+
+### Step 2: Configure Eneo
+
+Add this to your `env_backend.env`:
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+If Ollama is on a different server:
+```bash
+OLLAMA_BASE_URL=http://ollama-server:11434
+```
+
+### Step 3: Restart the Backend
+
+```bash
+docker compose restart backend
+```
+
+### Popular Models
+
+- `llama2` (Meta's Llama 2, various sizes)
+- `mistral` (Mistral AI's open model)
+- `codellama` (Code-specialized model)
+- `neural-chat` (Intel's conversational model)
+- `starling-lm` (High-performing open model)
+
+### Hardware Requirements
+
+Model performance depends on your hardware:
+- **7B models**: 8GB RAM minimum
+- **13B models**: 16GB RAM minimum
+- **70B models**: 64GB RAM, GPU recommended
+
+### Benefits of Local Models
+
+- **Complete Privacy**: Data never leaves your infrastructure
+- **No API Costs**: Only hardware costs
+- **Offline Capable**: No internet required
+- **Customizable**: Fine-tune models for your needs
+
+---
+
+## LM Studio
+
+Alternative to Ollama for running local models with a GUI.
+
+### Step 1: Install LM Studio
+
+1. Download from [lmstudio.ai](https://lmstudio.ai)
+2. Install on your server
+3. Download models through the LM Studio interface
+
+### Step 2: Start the Server
+
+1. In LM Studio, go to the **Local Server** tab
+2. Click **Start Server**
+3. Note the server URL (usually `http://localhost:1234`)
+
+### Step 3: Configure Eneo
+
+Add this to your `env_backend.env`:
+
+```bash
+LM_STUDIO_BASE_URL=http://localhost:1234
+```
+
+### Step 4: Restart the Backend
+
+```bash
+docker compose restart backend
+```
+
+---
+
+## Using Multiple Providers
+
+You can configure multiple providers simultaneously:
+
+```bash
+# OpenAI
+OPENAI_API_KEY=sk-...
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Azure OpenAI
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=...
+AZURE_OPENAI_DEPLOYMENT_NAME=...
+
+# Google Gemini
+GOOGLE_API_KEY=AIza...
+
+# Local Ollama
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Users can then select their preferred model when creating assistants or chatting.
+
+---
+
+## Model Selection Guidelines
+
+### Choose OpenAI if:
+- You need the most capable models
+- You want fast response times
+- You're okay with cloud-based processing
+
+### Choose Anthropic Claude if:
+- You need very large context windows
+- You want strong reasoning capabilities
+- You prefer Anthropic's approach to AI safety
+
+### Choose Azure OpenAI if:
+- You need enterprise SLA and support
+- You require specific data residency
+- You're already using Azure services
+
+### Choose Google Gemini if:
+- You need multimodal capabilities
+- You want long context support
+- You prefer Google's ecosystem
+
+### Choose Local Models if:
+- Data privacy is paramount
+- You want to avoid API costs
+- You have sufficient hardware
+- You need offline capabilities
+
+---
+
+## Cost Management
+
+### Set Budget Alerts
+
+For cloud providers, set up budget alerts:
+- **OpenAI**: Usage limits in account settings
+- **Azure**: Budget alerts in Azure Cost Management
+- **Google**: Budget alerts in Google Cloud Console
+
+### Monitor Usage
+
+Check your usage regularly:
+- View API call metrics in Eneo's admin panel
+- Review provider dashboards
+- Set up automated alerts
+
+### Optimize Costs
+
+- Use smaller models (e.g., GPT-3.5) for simple tasks
+- Implement caching for repeated queries
+- Use local models for development/testing
+- Set context length limits
+
+---
+
+## Troubleshooting
+
+### Invalid API Key
+
+**Symptoms**: Authentication errors, 401 responses
+
+**Solutions**:
+- Verify the API key is copied correctly
+- Check for extra spaces or line breaks
+- Ensure the key hasn't expired
+- Verify the key has necessary permissions
+
+### Rate Limit Errors
+
+**Symptoms**: 429 status codes, "rate limit exceeded"
+
+**Solutions**:
+- Check your API tier limits
+- Implement request queuing
+- Upgrade your API tier
+- Spread load across multiple keys/providers
+
+### Model Not Available
+
+**Symptoms**: Model name not recognized
+
+**Solutions**:
+- Verify model name spelling
+- Check model availability in your region
+- Ensure you have access to the model
+- Review provider's model list
+
+### Connection Errors
+
+**For cloud providers:**
+- Check internet connectivity
+- Verify firewall rules allow outbound HTTPS
+- Check provider status page
+
+**For local models:**
+- Ensure Ollama/LM Studio is running
+- Verify the URL and port
+- Check Docker network settings (if using containers)
+
+---
+
+## Security Best Practices
+
+1. **Protect API Keys**
+   - Never commit keys to version control
+   - Use environment variables
+   - Rotate keys regularly
+
+2. **Network Security**
+   - Use HTTPS for all API connections
+   - Consider VPN for local model access
+   - Implement firewall rules
+
+3. **Access Control**
+   - Limit who can configure API keys
+   - Use separate keys for different environments
+   - Monitor API usage for anomalies
+
+4. **Data Handling**
+   - Review provider data policies
+   - Use local models for sensitive data
+   - Implement data retention policies
+
+---
+
+## Need Help?
+
+- Check the [security guide](/guides/security-compliance)
+- Visit [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+- Review provider documentation:
+  - [OpenAI Docs](https://platform.openai.com/docs)
+  - [Anthropic Docs](https://docs.anthropic.com)
+  - [Azure OpenAI Docs](https://learn.microsoft.com/azure/ai-services/openai/)
+  - [Google AI Docs](https://ai.google.dev/docs)
+  - [Ollama Docs](https://ollama.ai/docs)

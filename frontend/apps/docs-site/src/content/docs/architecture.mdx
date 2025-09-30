@@ -1,0 +1,555 @@
+# Architecture
+
+Eneo follows a modern microservices architecture with clean separation of concerns, designed for scalability, maintainability, and deployment flexibility.
+
+## High-Level Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Client Layer                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │  Web Browser │  │  Mobile App  │  │  API Client  │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└────────────────┬────────────────────────────────────────────┘
+                 │ HTTPS
+                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Reverse Proxy (Traefik)                  │
+│              SSL Termination, Load Balancing                 │
+└────────────────┬────────────────────────────────────────────┘
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+┌──────────────┐  ┌──────────────────────────────────┐
+│   Frontend   │  │          Backend API             │
+│  (SvelteKit) │  │         (FastAPI)                │
+│              │  │                                   │
+│  - UI/UX     │  │  - Business Logic                │
+│  - Routing   │  │  - Authentication                │
+│  - State     │  │  - API Endpoints                 │
+└──────────────┘  └───────┬──────────────────────────┘
+                          │
+            ┌─────────────┼─────────────┐
+            ▼             ▼             ▼
+      ┌──────────┐  ┌──────────┐  ┌──────────┐
+      │ Database │  │  Redis   │  │  Worker  │
+      │(Postgres)│  │  Cache   │  │  (ARQ)   │
+      │          │  │  Queue   │  │          │
+      │- Data    │  │- Session │  │- Files   │
+      │- Vectors │  │- Tasks   │  │- Crawl   │
+      └──────────┘  └──────────┘  └──────────┘
+                                        │
+                                        ▼
+                              ┌──────────────────┐
+                              │   AI Providers   │
+                              │  - OpenAI        │
+                              │  - Anthropic     │
+                              │  - Azure/Local   │
+                              └──────────────────┘
+```
+
+---
+
+## Core Components
+
+### Frontend (SvelteKit)
+
+**Technology Stack:**
+- **Framework**: SvelteKit with TypeScript
+- **Styling**: Tailwind CSS
+- **State Management**: Svelte stores
+- **HTTP Client**: Fetch API with type-safe wrappers
+
+**Responsibilities:**
+- User interface and user experience
+- Client-side routing and navigation
+- Form handling and validation
+- Real-time updates via SSE and WebSockets
+- State management and caching
+
+**Key Features:**
+- Server-side rendering (SSR) for SEO
+- Hot module replacement for development
+- Type-safe API client generation
+- Responsive design
+- Dark mode support
+
+**Directory Structure:**
+```
+frontend/apps/client/
+├── src/
+│   ├── routes/          # SvelteKit routes
+│   ├── lib/             # Shared utilities
+│   │   ├── api/         # API client
+│   │   ├── stores/      # State stores
+│   │   └── components/  # Reusable components
+│   └── app.html         # HTML template
+└── package.json
+```
+
+---
+
+### Backend (FastAPI)
+
+**Technology Stack:**
+- **Framework**: FastAPI (Python 3.11+)
+- **ORM**: SQLAlchemy 2.0
+- **Validation**: Pydantic v2
+- **Authentication**: JWT tokens, OIDC
+- **API Documentation**: OpenAPI/Swagger
+
+**Responsibilities:**
+- RESTful API endpoints
+- Business logic and validation
+- Authentication and authorization
+- Database operations
+- AI provider integration
+- WebSocket connections
+
+**Architecture Pattern:**
+- **Domain-Driven Design** (DDD)
+- **Repository Pattern** for data access
+- **Service Layer** for business logic
+- **Dependency Injection** for modularity
+
+**Directory Structure:**
+```
+backend/
+├── app/
+│   ├── main.py              # Application entry point
+│   ├── api/                 # API endpoints
+│   │   ├── routes/          # Route handlers
+│   │   └── dependencies.py  # DI dependencies
+│   ├── core/                # Core functionality
+│   │   ├── config.py        # Configuration
+│   │   ├── security.py      # Auth & security
+│   │   └── database.py      # DB connection
+│   ├── models/              # SQLAlchemy models
+│   ├── schemas/             # Pydantic schemas
+│   ├── services/            # Business logic
+│   │   ├── ai/              # AI integrations
+│   │   ├── embeddings/      # Vector embeddings
+│   │   └── documents/       # Document processing
+│   └── worker.py            # Background worker
+└── tests/
+```
+
+**Key Design Patterns:**
+
+**Repository Pattern:**
+```python
+class UserRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get(self, user_id: int) -> User:
+        return self.db.query(User).filter(User.id == user_id).first()
+
+    def create(self, user_data: UserCreate) -> User:
+        user = User(**user_data.dict())
+        self.db.add(user)
+        self.db.commit()
+        return user
+```
+
+**Service Layer:**
+```python
+class AIService:
+    def __init__(self, user_repo: UserRepository, ai_provider: AIProvider):
+        self.user_repo = user_repo
+        self.ai_provider = ai_provider
+
+    async def generate_response(self, prompt: str, user_id: int) -> str:
+        user = self.user_repo.get(user_id)
+        # Business logic here
+        return await self.ai_provider.generate(prompt)
+```
+
+---
+
+### Database (PostgreSQL + pgvector)
+
+**Technology:**
+- **Database**: PostgreSQL 13+
+- **Extension**: pgvector for vector similarity search
+- **Migrations**: Alembic
+
+**Schema Design:**
+
+**Core Tables:**
+- `users` - User accounts and profiles
+- `organizations` - Organization/tenant data
+- `spaces` - Collaborative workspaces
+- `assistants` - AI assistant configurations
+- `conversations` - Chat conversations
+- `messages` - Individual messages
+- `documents` - Uploaded documents
+- `document_chunks` - Chunked document text with embeddings
+
+**Key Relationships:**
+```
+organizations (1) ─── (N) users
+organizations (1) ─── (N) spaces
+spaces (1) ─── (N) assistants
+spaces (1) ─── (N) documents
+users (1) ─── (N) conversations
+conversations (1) ─── (N) messages
+documents (1) ─── (N) document_chunks
+```
+
+**Vector Search:**
+```sql
+-- Example vector similarity search
+SELECT id, content,
+       1 - (embedding <=> query_embedding) as similarity
+FROM document_chunks
+WHERE 1 - (embedding <=> query_embedding) > 0.7
+ORDER BY embedding <=> query_embedding
+LIMIT 5;
+```
+
+**Indexes:**
+- B-tree indexes on foreign keys
+- IVFFlat index on vector embeddings
+- GiST indexes for full-text search
+
+---
+
+### Worker Service (ARQ)
+
+**Technology:**
+- **Queue**: Redis-based ARQ (Async Redis Queue)
+- **Language**: Python with async/await
+- **Concurrency**: Configurable worker pool
+
+**Responsibilities:**
+- Document processing (PDF, Word, etc.)
+- Web crawling and content extraction
+- Embedding generation
+- Background tasks and scheduled jobs
+
+**Task Types:**
+
+**Document Processing:**
+```python
+@worker.task
+async def process_document(ctx, document_id: int):
+    # Extract text from document
+    text = await extract_text(document_id)
+
+    # Chunk the text
+    chunks = chunk_text(text)
+
+    # Generate embeddings
+    embeddings = await generate_embeddings(chunks)
+
+    # Store in database
+    await store_chunks(document_id, chunks, embeddings)
+```
+
+**Web Crawling:**
+```python
+@worker.task
+async def crawl_website(ctx, url: str, max_depth: int):
+    async with Crawler() as crawler:
+        pages = await crawler.crawl(url, max_depth=max_depth)
+        for page in pages:
+            await process_page_content(page)
+```
+
+---
+
+### Redis (Cache & Queue)
+
+**Responsibilities:**
+- Session storage
+- Task queue for ARQ
+- Caching frequently accessed data
+- Rate limiting counters
+- WebSocket pub/sub
+
+**Cache Strategy:**
+- **Session data**: 24-hour TTL
+- **API responses**: 5-minute TTL
+- **Embeddings**: 1-hour TTL
+- **User preferences**: No expiration
+
+---
+
+### Reverse Proxy (Traefik)
+
+**Responsibilities:**
+- SSL/TLS termination
+- Load balancing
+- Request routing
+- Automatic certificate management (Let's Encrypt)
+- Health checks
+
+**Configuration:**
+```yaml
+# Route HTTP to HTTPS
+- "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+- "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+
+# Backend routing
+- "traefik.http.routers.backend.rule=Host(`eneo.example.com`) && PathPrefix(`/api`)"
+- "traefik.http.routers.backend.tls.certresolver=myresolver"
+
+# Frontend routing
+- "traefik.http.routers.frontend.rule=Host(`eneo.example.com`)"
+- "traefik.http.routers.frontend.tls.certresolver=myresolver"
+```
+
+---
+
+## Data Flow
+
+### User Authentication Flow
+
+```
+User → Frontend → Backend → Database
+                     ↓
+                  Generate JWT
+                     ↓
+                  Response ← Frontend ← User
+```
+
+### AI Chat Flow
+
+```
+User types message
+    ↓
+Frontend sends POST /api/chat
+    ↓
+Backend validates & authenticates
+    ↓
+Retrieve relevant documents (RAG)
+    ↓
+Generate prompt with context
+    ↓
+Stream to AI Provider (OpenAI/Claude)
+    ↓
+Stream response back via SSE
+    ↓
+Frontend displays streaming text
+    ↓
+Save conversation to database
+```
+
+### Document Upload Flow
+
+```
+User uploads file
+    ↓
+Frontend uploads to /api/documents
+    ↓
+Backend saves metadata to database
+    ↓
+Enqueue processing task in Redis
+    ↓
+Worker picks up task
+    ↓
+Extract text → Chunk → Generate embeddings
+    ↓
+Store chunks & embeddings in PostgreSQL
+    ↓
+Update document status
+    ↓
+Frontend polls or receives WebSocket update
+```
+
+---
+
+## Security Architecture
+
+### Authentication Layers
+
+1. **Session-based** (default)
+   - JWT tokens stored in httpOnly cookies
+   - CSRF protection
+   - Token refresh mechanism
+
+2. **OIDC** (optional)
+   - Integration with enterprise IdP
+   - Automatic user provisioning
+   - Single sign-on (SSO)
+
+### Authorization Model
+
+**Role-Based Access Control (RBAC):**
+- **Global Roles**: Admin, User
+- **Space Roles**: Owner, Editor, Viewer
+- **Resource-level**: Per-assistant, per-document permissions
+
+**Permission Checks:**
+```python
+def check_permission(user: User, resource: Space, action: str) -> bool:
+    membership = get_membership(user.id, resource.id)
+    return membership.role.has_permission(action)
+```
+
+### Data Security
+
+- **At Rest**: Database encryption (optional)
+- **In Transit**: TLS 1.3 everywhere
+- **Secrets**: Environment variables, never in code
+- **API Keys**: Hashed storage, regular rotation
+
+---
+
+## Scalability Considerations
+
+### Horizontal Scaling
+
+**Stateless Services:**
+- Frontend and Backend are stateless
+- Can run multiple instances behind load balancer
+- Session state in Redis (shared)
+
+**Scaling Strategy:**
+```yaml
+# Docker Compose scaling
+docker compose up -d --scale backend=3 --scale worker=2
+```
+
+### Database Scaling
+
+**Read Replicas:**
+- Primary for writes
+- Replicas for reads
+- Connection pooling (PgBouncer)
+
+**Partitioning:**
+- Partition large tables by date
+- Separate hot and cold data
+
+### Caching Strategy
+
+**Multi-Level Cache:**
+1. Browser cache (static assets)
+2. CDN cache (public content)
+3. Redis cache (dynamic data)
+4. Application cache (in-memory)
+
+---
+
+## Deployment Architectures
+
+### Single Server (Small Organizations)
+
+All services on one server with Docker Compose:
+- Frontend, Backend, Worker
+- PostgreSQL, Redis
+- Traefik
+
+**Suitable for:** < 100 users
+
+### Multi-Server (Medium Organizations)
+
+Separate servers for different roles:
+- **Web Server**: Frontend + Backend
+- **Database Server**: PostgreSQL
+- **Worker Server**: Background processing
+- **Cache Server**: Redis
+
+**Suitable for:** 100-1000 users
+
+### Kubernetes (Large Organizations)
+
+Fully orchestrated with K8s:
+- Auto-scaling pods
+- Service discovery
+- Rolling updates
+- Health checks and self-healing
+
+**Suitable for:** 1000+ users
+
+---
+
+## Monitoring & Observability
+
+### Logging
+
+**Structured Logging:**
+```json
+{
+  "timestamp": "2025-09-30T10:30:45Z",
+  "level": "INFO",
+  "service": "backend",
+  "user_id": "user-123",
+  "request_id": "req-456",
+  "message": "AI request completed",
+  "duration_ms": 1250
+}
+```
+
+### Metrics
+
+**Key Metrics:**
+- Request rate and latency
+- Error rates (4xx, 5xx)
+- Database query performance
+- AI provider response times
+- Worker queue depth
+
+### Health Checks
+
+**Endpoints:**
+- `GET /api/health` - Basic health
+- `GET /api/health/db` - Database connectivity
+- `GET /api/health/redis` - Redis connectivity
+- `GET /api/health/ready` - Readiness probe
+
+---
+
+## Technology Decisions
+
+### Why SvelteKit?
+
+- Lightweight and fast
+- Excellent developer experience
+- Built-in SSR and routing
+- Smaller bundle sizes than React
+
+### Why FastAPI?
+
+- Modern Python async framework
+- Automatic OpenAPI documentation
+- Type safety with Pydantic
+- High performance (comparable to Node.js)
+
+### Why PostgreSQL + pgvector?
+
+- Reliable and mature RDBMS
+- Native vector support (pgvector)
+- Excellent performance
+- ACID compliance for data integrity
+
+### Why ARQ?
+
+- Python-native async task queue
+- Simple and reliable
+- Redis-backed for speed
+- Cron-like scheduling support
+
+---
+
+## Future Architecture Plans
+
+### Planned Enhancements
+
+- **Kubernetes Native**: Helm charts for K8s deployment
+- **Multi-Region**: Geographic distribution
+- **Plugin System**: Extensibility via plugins
+- **GraphQL API**: Alternative to REST
+- **Event Sourcing**: Audit trail improvements
+- **Microservices**: Further service decomposition
+
+---
+
+## Additional Resources
+
+- **Technical Diagrams**: [Architecture diagrams on GitHub](https://github.com/eneo-ai/eneo/tree/main/docs/architecture)
+- **API Documentation**: [OpenAPI Specification](https://your-eneo-instance.com/api/docs)
+- **Database Schema**: [Schema documentation](https://github.com/eneo-ai/eneo/tree/main/backend/migrations)
+- **Contributing Guide**: [Development guidelines](https://github.com/eneo-ai/eneo/blob/main/docs/CONTRIBUTING.md)

@@ -6,11 +6,15 @@ const meta: MetaRecord = {
     type: 'page',
   },
   docs: {
-    title: 'Docs',
+    title: 'Documentation',
+    type: 'page',
+  },
+  guides: {
+    title: 'Guides',
     type: 'page',
   },
   about: {
-    title: 'About Eneo',
+    title: 'About',
     type: 'page',
   },
 }
