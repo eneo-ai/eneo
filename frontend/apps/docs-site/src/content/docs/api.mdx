@@ -1,0 +1,620 @@
+# API Reference
+
+Eneo provides a comprehensive RESTful API for programmatic access to all platform features. This guide covers authentication, common endpoints, and usage examples.
+
+## Interactive API Documentation
+
+The best way to explore the API is through the interactive documentation:
+
+**Local Development:**
+- http://localhost:8123/docs (Swagger UI)
+- http://localhost:8123/redoc (ReDoc)
+
+**Production:**
+- https://your-domain.com/api/docs (Swagger UI)
+- https://your-domain.com/api/redoc (ReDoc)
+
+The interactive docs allow you to:
+- Browse all available endpoints
+- View request/response schemas
+- Test API calls directly in the browser
+- Download OpenAPI specification
+
+---
+
+## Authentication
+
+### API Keys
+
+Generate an API key for programmatic access:
+
+**Via Web Interface:**
+1. Log in to Eneo
+2. Go to **Settings** → **API Keys**
+3. Click **Generate New Key**
+4. Copy and save the key securely
+
+**Via API:**
+```bash
+curl -X POST "https://your-domain.com/api/api-keys" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Integration Key",
+    "expires_in_days": 90
+  }'
+```
+
+### Using API Keys
+
+Include the API key in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  https://your-domain.com/api/spaces
+```
+
+### JWT Tokens (Session Authentication)
+
+For user-facing applications, use JWT tokens:
+
+**Login:**
+```bash
+curl -X POST "https://your-domain.com/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password"
+  }'
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGc...",
+  "token_type": "bearer",
+  "user": {
+    "id": "user-123",
+    "email": "user@example.com",
+    "name": "John Doe"
+  }
+}
+```
+
+**Use the token:**
+```bash
+curl -H "Authorization: Bearer eyJhbGc..." \
+  https://your-domain.com/api/user/me
+```
+
+---
+
+## Common Endpoints
+
+### Users
+
+#### Get Current User
+```http
+GET /api/user/me
+```
+
+**Response:**
+```json
+{
+  "id": "user-123",
+  "email": "user@example.com",
+  "name": "John Doe",
+  "created_at": "2025-01-15T10:30:00Z"
+}
+```
+
+#### Update User Profile
+```http
+PATCH /api/user/me
+Content-Type: application/json
+
+{
+  "name": "Jane Doe",
+  "preferences": {
+    "theme": "dark",
+    "language": "en"
+  }
+}
+```
+
+---
+
+### Spaces
+
+#### List Spaces
+```http
+GET /api/spaces
+```
+
+**Query Parameters:**
+- `limit` (optional): Number of results (default: 20)
+- `offset` (optional): Pagination offset (default: 0)
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "space-123",
+      "name": "Marketing Team",
+      "description": "Marketing AI assistants",
+      "created_at": "2025-01-10T09:00:00Z",
+      "role": "owner"
+    }
+  ],
+  "total": 1,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+#### Create Space
+```http
+POST /api/spaces
+Content-Type: application/json
+
+{
+  "name": "Marketing Team",
+  "description": "Marketing AI assistants",
+  "visibility": "private"
+}
+```
+
+#### Get Space Details
+```http
+GET /api/spaces/{space_id}
+```
+
+#### Update Space
+```http
+PATCH /api/spaces/{space_id}
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "description": "Updated description"
+}
+```
+
+#### Delete Space
+```http
+DELETE /api/spaces/{space_id}
+```
+
+---
+
+### Assistants
+
+#### List Assistants in Space
+```http
+GET /api/spaces/{space_id}/assistants
+```
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "assistant-456",
+      "name": "Content Writer",
+      "model": "gpt-4",
+      "system_prompt": "You are a helpful content writer...",
+      "created_at": "2025-01-12T14:20:00Z"
+    }
+  ]
+}
+```
+
+#### Create Assistant
+```http
+POST /api/spaces/{space_id}/assistants
+Content-Type: application/json
+
+{
+  "name": "Content Writer",
+  "model": "gpt-4",
+  "system_prompt": "You are a helpful content writer...",
+  "temperature": 0.7,
+  "max_tokens": 2000
+}
+```
+
+#### Update Assistant
+```http
+PATCH /api/spaces/{space_id}/assistants/{assistant_id}
+Content-Type: application/json
+
+{
+  "system_prompt": "Updated prompt..."
+}
+```
+
+---
+
+### Conversations
+
+#### Create Conversation
+```http
+POST /api/conversations
+Content-Type: application/json
+
+{
+  "assistant_id": "assistant-456",
+  "title": "Content Ideas"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "conv-789",
+  "assistant_id": "assistant-456",
+  "title": "Content Ideas",
+  "created_at": "2025-09-30T10:30:00Z"
+}
+```
+
+#### List Conversations
+```http
+GET /api/conversations?assistant_id=assistant-456
+```
+
+#### Send Message
+```http
+POST /api/conversations/{conversation_id}/messages
+Content-Type: application/json
+
+{
+  "content": "Write a blog post about AI in public sector",
+  "stream": false
+}
+```
+
+**Response (non-streaming):**
+```json
+{
+  "id": "msg-123",
+  "role": "assistant",
+  "content": "Here's a blog post about AI in public sector...",
+  "created_at": "2025-09-30T10:31:00Z"
+}
+```
+
+#### Stream Message (SSE)
+```http
+POST /api/conversations/{conversation_id}/messages
+Content-Type: application/json
+
+{
+  "content": "Write a blog post",
+  "stream": true
+}
+```
+
+**Response** (Server-Sent Events):
+```
+event: message
+data: {"type": "start", "id": "msg-123"}
+
+event: message
+data: {"type": "content", "delta": "Here's"}
+
+event: message
+data: {"type": "content", "delta": " a blog"}
+
+event: message
+data: {"type": "done"}
+```
+
+**Example client:**
+```javascript
+const eventSource = new EventSource(
+  '/api/conversations/conv-789/messages/stream'
+);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'content') {
+    console.log(data.delta);
+  }
+};
+```
+
+---
+
+### Documents
+
+#### Upload Document
+```http
+POST /api/spaces/{space_id}/knowledge/documents
+Content-Type: multipart/form-data
+
+file: <binary file data>
+```
+
+**Example with curl:**
+```bash
+curl -X POST "https://your-domain.com/api/spaces/space-123/knowledge/documents" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "file=@document.pdf"
+```
+
+**Response:**
+```json
+{
+  "id": "doc-456",
+  "filename": "document.pdf",
+  "size": 1048576,
+  "status": "processing",
+  "created_at": "2025-09-30T10:32:00Z"
+}
+```
+
+#### List Documents
+```http
+GET /api/spaces/{space_id}/knowledge/documents
+```
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "doc-456",
+      "filename": "document.pdf",
+      "size": 1048576,
+      "status": "completed",
+      "chunks_count": 45,
+      "created_at": "2025-09-30T10:32:00Z"
+    }
+  ]
+}
+```
+
+#### Get Document Details
+```http
+GET /api/spaces/{space_id}/knowledge/documents/{document_id}
+```
+
+#### Delete Document
+```http
+DELETE /api/spaces/{space_id}/knowledge/documents/{document_id}
+```
+
+---
+
+### Web Crawling
+
+#### Start Web Crawl
+```http
+POST /api/spaces/{space_id}/knowledge/web
+Content-Type: application/json
+
+{
+  "url": "https://example.com/docs",
+  "max_depth": 2,
+  "max_pages": 50,
+  "follow_links": true
+}
+```
+
+**Response:**
+```json
+{
+  "id": "crawl-789",
+  "url": "https://example.com/docs",
+  "status": "started",
+  "pages_crawled": 0,
+  "created_at": "2025-09-30T10:35:00Z"
+}
+```
+
+#### Get Crawl Status
+```http
+GET /api/spaces/{space_id}/knowledge/web/{crawl_id}
+```
+
+**Response:**
+```json
+{
+  "id": "crawl-789",
+  "url": "https://example.com/docs",
+  "status": "processing",
+  "pages_crawled": 23,
+  "pages_total": 50,
+  "progress": 46
+}
+```
+
+---
+
+## SDK Examples
+
+### Python
+
+```python
+import requests
+
+class EneoClient:
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+    def list_spaces(self):
+        response = requests.get(
+            f"{self.base_url}/api/spaces",
+            headers=self.headers
+        )
+        return response.json()
+
+    def send_message(self, conversation_id: str, content: str):
+        response = requests.post(
+            f"{self.base_url}/api/conversations/{conversation_id}/messages",
+            headers=self.headers,
+            json={"content": content, "stream": False}
+        )
+        return response.json()
+
+# Usage
+client = EneoClient("https://your-domain.com", "your-api-key")
+spaces = client.list_spaces()
+print(spaces)
+```
+
+### JavaScript/TypeScript
+
+```typescript
+class EneoClient {
+  constructor(
+    private baseUrl: string,
+    private apiKey: string
+  ) {}
+
+  async listSpaces() {
+    const response = await fetch(`${this.baseUrl}/api/spaces`, {
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`
+      }
+    });
+    return response.json();
+  }
+
+  async sendMessage(conversationId: string, content: string) {
+    const response = await fetch(
+      `${this.baseUrl}/api/conversations/${conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content, stream: false })
+      }
+    );
+    return response.json();
+  }
+
+  // Streaming example
+  async *streamMessage(conversationId: string, content: string) {
+    const response = await fetch(
+      `${this.baseUrl}/api/conversations/${conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content, stream: true })
+      }
+    );
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'content') {
+            yield data.delta;
+          }
+        }
+      }
+    }
+  }
+}
+
+// Usage
+const client = new EneoClient('https://your-domain.com', 'your-api-key');
+
+// Non-streaming
+const message = await client.sendMessage('conv-123', 'Hello!');
+console.log(message);
+
+// Streaming
+for await (const chunk of client.streamMessage('conv-123', 'Hello!')) {
+  process.stdout.write(chunk);
+}
+```
+
+---
+
+## Rate Limits
+
+Default rate limits:
+- **Authenticated requests**: 60 requests per minute
+- **Document uploads**: 10 per minute
+- **AI requests**: 20 per minute
+
+Rate limit headers:
+```http
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 45
+X-RateLimit-Reset: 1727695200
+```
+
+---
+
+## Error Handling
+
+### Error Response Format
+
+```json
+{
+  "detail": "Error message",
+  "error_code": "VALIDATION_ERROR",
+  "errors": [
+    {
+      "field": "email",
+      "message": "Invalid email format"
+    }
+  ]
+}
+```
+
+### HTTP Status Codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 201 | Created |
+| 204 | No Content |
+| 400 | Bad Request |
+| 401 | Unauthorized |
+| 403 | Forbidden |
+| 404 | Not Found |
+| 422 | Validation Error |
+| 429 | Rate Limit Exceeded |
+| 500 | Internal Server Error |
+
+---
+
+## Additional Resources
+
+- **OpenAPI Spec**: Download from [/api/openapi.json](https://your-domain.com/api/openapi.json)
+- **Interactive Docs**: [https://your-domain.com/api/docs](https://your-domain.com/api/docs)
+- **Code Examples**: [GitHub examples folder](https://github.com/eneo-ai/eneo/tree/main/examples)
+- **Report API Issues**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+
+---
+
+## Need Help?
+
+- Browse the [interactive API documentation](https://your-domain.com/api/docs)
+- Check [GitHub examples](https://github.com/eneo-ai/eneo/tree/main/examples)
+- Ask on [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
+- Email: digitalisering@sundsvall.se (public sector organizations)

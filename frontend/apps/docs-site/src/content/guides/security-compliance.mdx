@@ -1,0 +1,611 @@
+# Security & Compliance
+
+Eneo is designed with security and regulatory compliance at its core. This guide covers GDPR compliance, EU AI Act readiness, security best practices, and audit capabilities.
+
+## Overview
+
+Eneo provides:
+- **Data Sovereignty**: Complete control over your data
+- **GDPR Compliance**: Built-in privacy features
+- **EU AI Act Readiness**: Transparency and accountability
+- **Audit Trails**: Comprehensive logging
+- **Access Control**: Role-based permissions
+- **Security Hardening**: Industry best practices
+
+---
+
+## GDPR Compliance
+
+The General Data Protection Regulation (GDPR) sets strict requirements for handling personal data in the EU.
+
+### Data Sovereignty
+
+**Complete control over data location:**
+- Self-hosted deployment keeps all data in your infrastructure
+- No data transmitted to third parties (except configured AI providers)
+- Full control over data retention and deletion
+
+**Configuration:**
+```bash
+# env_backend.env
+DATA_RESIDENCY=EU  # or your region
+```
+
+### Right to Access (Article 15)
+
+Users can request their personal data:
+
+1. Log in to Eneo
+2. Go to **Settings** → **Privacy**
+3. Click **Download My Data**
+4. Receive JSON export of all personal data
+
+**Admin export via API:**
+```bash
+curl -X GET "https://your-eneo-instance.com/api/users/123/export" \
+  -H "Authorization: Bearer admin-token" \
+  -o user-data.json
+```
+
+### Right to Erasure (Article 17)
+
+Users can request data deletion:
+
+1. Go to **Settings** → **Privacy**
+2. Click **Delete My Account**
+3. Confirm deletion
+
+This removes:
+- User profile and credentials
+- All messages and conversations
+- User-specific settings
+- Shared content is anonymized
+
+**Admin deletion:**
+```bash
+curl -X DELETE "https://your-eneo-instance.com/api/users/123" \
+  -H "Authorization: Bearer admin-token"
+```
+
+### Data Minimization (Article 5)
+
+Eneo collects only necessary data:
+- Email address (for authentication)
+- Display name (optional)
+- Usage data (optional, can be disabled)
+
+**Disable telemetry:**
+```bash
+# env_backend.env
+TELEMETRY_ENABLED=false
+USAGE_ANALYTICS=false
+```
+
+### Data Processing Records (Article 30)
+
+Maintain records of processing activities:
+
+1. **Purpose**: AI assistance for organizational tasks
+2. **Categories of data**: User inputs, documents, conversations
+3. **Recipients**: AI providers (if external APIs used)
+4. **Retention period**: Configurable per organization
+5. **Security measures**: Encryption, access control, audit logs
+
+**Configure retention:**
+```bash
+# env_backend.env
+DATA_RETENTION_DAYS=365  # Keep data for 1 year
+AUTO_DELETE_OLD_DATA=true
+```
+
+### Privacy by Design (Article 25)
+
+Eneo implements privacy by default:
+- ✓ End-to-end encryption for data in transit (HTTPS)
+- ✓ Encrypted data at rest (database encryption)
+- ✓ Minimal data collection
+- ✓ User consent for optional features
+- ✓ Granular privacy controls
+
+---
+
+## EU AI Act Compliance
+
+The EU AI Act establishes requirements for AI systems based on risk levels. Eneo is classified as a **Limited Risk** AI system.
+
+### Transparency Requirements (Article 52)
+
+Users must know they're interacting with AI:
+
+**Eneo provides:**
+- Clear indication in UI when AI is responding
+- Model information displayed (e.g., "GPT-4", "Claude 3")
+- Ability to see which knowledge sources were used
+
+### Human Oversight (Article 14)
+
+Humans must be able to oversee AI systems:
+
+**Eneo enables:**
+- Human-in-the-loop workflows
+- Ability to review and modify AI responses
+- Admin controls to disable AI features
+- Manual override capabilities
+
+### Accuracy & Robustness (Article 15)
+
+AI systems must be accurate and robust:
+
+**Eneo implements:**
+- Configurable temperature settings for consistency
+- Citation of sources for factual claims
+- Ability to use multiple models for verification
+- Monitoring of model performance
+
+### Record Keeping (Article 12)
+
+Maintain logs of AI system operations:
+
+**Eneo logs:**
+- All AI interactions (timestamp, user, model, prompt, response)
+- Model selection and parameters
+- Knowledge sources used
+- Errors and failures
+
+**Access logs:**
+```bash
+docker compose logs backend | grep "ai_interaction"
+```
+
+### Risk Management (Article 9)
+
+Identify and mitigate risks:
+
+**Risk mitigation strategies:**
+1. **Hallucinations**: Use RAG (Retrieval-Augmented Generation) with source documents
+2. **Bias**: Support multiple AI providers, allow model comparison
+3. **Security**: Role-based access, encryption, audit trails
+4. **Privacy**: Self-hosted option, data sovereignty
+
+---
+
+## Security Best Practices
+
+### Authentication & Access Control
+
+**Use strong authentication:**
+```bash
+# env_backend.env
+
+# OIDC recommended for organizations
+OIDC_ENABLED=true
+
+# Password requirements
+PASSWORD_MIN_LENGTH=12
+REQUIRE_SPECIAL_CHARACTERS=true
+REQUIRE_NUMBERS=true
+
+# Session security
+SESSION_TIMEOUT_MINUTES=60
+REQUIRE_REAUTHENTICATION=true
+```
+
+**Implement role-based access:**
+- **Admin**: Full system access
+- **Editor**: Create and edit content
+- **Viewer**: Read-only access
+- **Guest**: Limited access
+
+### Network Security
+
+**Use HTTPS everywhere:**
+```bash
+# Enforce HTTPS
+FORCE_HTTPS=true
+HSTS_ENABLED=true
+HSTS_MAX_AGE=31536000
+```
+
+**Firewall configuration:**
+```bash
+# Allow only necessary ports
+sudo ufw allow 22/tcp   # SSH
+sudo ufw allow 80/tcp   # HTTP (redirect to HTTPS)
+sudo ufw allow 443/tcp  # HTTPS
+sudo ufw deny 8123/tcp  # Block direct backend access
+sudo ufw enable
+```
+
+**Private network deployment:**
+```bash
+# Restrict to internal network
+# In docker-compose.yml, bind to internal IP:
+ports:
+  - "192.168.1.10:443:443"
+```
+
+### Data Encryption
+
+**Data in transit:**
+- All connections use TLS 1.3
+- Certificate management via Let's Encrypt
+- HSTS headers enabled
+
+**Data at rest:**
+```bash
+# Enable PostgreSQL encryption
+# In env_db.env or postgresql.conf:
+ssl = on
+ssl_cert_file = '/path/to/server.crt'
+ssl_key_file = '/path/to/server.key'
+```
+
+**Encrypt backups:**
+```bash
+# Backup with encryption
+docker compose exec -T db pg_dump -U eneo eneo | \
+  gpg --encrypt --recipient admin@your-company.com | \
+  gzip > backup.sql.gpg.gz
+```
+
+### Secrets Management
+
+**Never commit secrets:**
+```bash
+# .gitignore
+*.env
+*_secret*
+credentials.*
+```
+
+**Use environment variables:**
+```bash
+# Good
+OPENAI_API_KEY=sk-...
+
+# Bad - don't hardcode
+# config.py: OPENAI_API_KEY = "sk-..."
+```
+
+**Rotate secrets regularly:**
+```bash
+# Rotate JWT secret
+echo "JWT_SECRET=$(openssl rand -hex 32)" > new_jwt_secret.env
+# Update and restart
+docker compose restart backend
+```
+
+### API Security
+
+**Rate limiting:**
+```bash
+# env_backend.env
+RATE_LIMIT_PER_MINUTE=60
+RATE_LIMIT_PER_HOUR=1000
+ENABLE_RATE_LIMITING=true
+```
+
+**API authentication:**
+```bash
+# Require API keys for all endpoints
+REQUIRE_API_KEY=true
+
+# Generate API keys
+curl -X POST "https://your-eneo-instance.com/api/api-keys" \
+  -H "Authorization: Bearer admin-token" \
+  -d '{"name": "Integration Key", "expires_in_days": 90}'
+```
+
+### Input Validation
+
+Eneo validates all inputs:
+- File uploads: Type checking, size limits, malware scanning
+- User inputs: SQL injection prevention, XSS protection
+- API requests: Schema validation, type checking
+
+**Configure validation:**
+```bash
+# env_backend.env
+MAX_UPLOAD_SIZE_MB=50
+ALLOWED_UPLOAD_TYPES=pdf,docx,txt,csv
+ENABLE_MALWARE_SCANNING=true
+```
+
+---
+
+## Audit & Logging
+
+### Comprehensive Audit Trails
+
+Eneo logs all critical actions:
+- User authentication (login, logout, failed attempts)
+- AI interactions (prompts, responses, models used)
+- Document operations (upload, download, delete)
+- Configuration changes (settings, permissions)
+- API calls (endpoint, user, timestamp)
+
+### Log Configuration
+
+**Set log level:**
+```bash
+# env_backend.env
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+**Structured logging:**
+```json
+{
+  "timestamp": "2025-09-30T10:30:45Z",
+  "level": "INFO",
+  "user_id": "user-123",
+  "action": "ai_interaction",
+  "model": "gpt-4",
+  "space_id": "space-456",
+  "duration_ms": 1250
+}
+```
+
+### Access Logs
+
+**View recent activity:**
+```bash
+# All logs
+docker compose logs backend --tail=1000
+
+# Authentication logs
+docker compose logs backend | grep "auth"
+
+# AI interaction logs
+docker compose logs backend | grep "ai_interaction"
+
+# Error logs
+docker compose logs backend | grep "ERROR"
+```
+
+### Log Retention
+
+**Configure retention policy:**
+```bash
+# env_backend.env
+LOG_RETENTION_DAYS=90
+ARCHIVE_OLD_LOGS=true
+LOG_ARCHIVE_PATH=/backups/logs
+```
+
+**Export logs for compliance:**
+```bash
+# Export logs for date range
+docker compose logs backend --since "2025-09-01" --until "2025-09-30" > september_logs.txt
+```
+
+### Security Monitoring
+
+**Monitor for suspicious activity:**
+- Multiple failed login attempts
+- Unusual API usage patterns
+- Large data exports
+- Unauthorized access attempts
+
+**Set up alerts:**
+```bash
+# Monitor failed logins
+docker compose logs backend -f | grep "authentication_failed" | \
+while read line; do
+  echo "ALERT: Failed login detected: $line"
+  # Send notification
+done
+```
+
+---
+
+## Data Classification
+
+Classify data based on sensitivity:
+
+### Classification Levels
+
+1. **Public**: Non-sensitive, public information
+2. **Internal**: Internal use, not confidential
+3. **Confidential**: Sensitive business information
+4. **Restricted**: Highly sensitive, regulated data
+
+### Implementation
+
+**Label spaces and assistants:**
+```python
+# Create space with classification
+POST /api/spaces
+{
+  "name": "HR Documents",
+  "classification": "CONFIDENTIAL",
+  "allowed_models": ["gpt-4", "claude-3"],
+  "data_residency": "EU"
+}
+```
+
+**Enforce classification:**
+```bash
+# env_backend.env
+
+# Prevent confidential data from leaving EU
+ENFORCE_DATA_RESIDENCY=true
+
+# Restrict high-classification data to specific models
+CONFIDENTIAL_MODELS=claude-3-opus,gpt-4
+
+# Disable external models for restricted data
+RESTRICTED_LOCAL_ONLY=true
+```
+
+---
+
+## Incident Response
+
+### Security Incident Procedure
+
+1. **Detect**: Monitor logs and alerts
+2. **Assess**: Determine scope and severity
+3. **Contain**: Isolate affected systems
+4. **Investigate**: Analyze root cause
+5. **Remediate**: Fix vulnerabilities
+6. **Document**: Record incident details
+7. **Review**: Update security procedures
+
+### Incident Response Steps
+
+**1. Immediate Actions:**
+```bash
+# Stop affected services
+docker compose stop backend
+
+# Backup logs for investigation
+docker compose logs backend > incident_logs.txt
+
+# Preserve database state
+docker compose exec db pg_dump -U eneo eneo > incident_backup.sql
+```
+
+**2. Investigation:**
+```bash
+# Review recent access
+docker compose logs backend | grep "user_id"
+
+# Check for unusual API calls
+docker compose logs backend | grep "api_call" | grep "404\|403"
+
+# Analyze authentication failures
+docker compose logs backend | grep "auth" | grep "failed"
+```
+
+**3. Remediation:**
+```bash
+# Reset compromised credentials
+# Rotate JWT secret
+echo "JWT_SECRET=$(openssl rand -hex 32)" >> env_backend.env
+
+# Revoke API keys
+curl -X DELETE "https://your-eneo-instance.com/api/api-keys/{key_id}"
+
+# Update and restart
+docker compose up -d
+```
+
+### Contact Information
+
+For security incidents:
+- **Email**: digitalisering@sundsvall.se
+- **GitHub Security**: [Report vulnerability](https://github.com/eneo-ai/eneo/security)
+
+---
+
+## Compliance Checklist
+
+### GDPR Compliance
+- [ ] Data residency configured
+- [ ] User data export available
+- [ ] Account deletion implemented
+- [ ] Privacy policy published
+- [ ] Data retention policy set
+- [ ] User consent mechanisms in place
+- [ ] DPA (Data Processing Agreement) signed with AI providers
+
+### EU AI Act Compliance
+- [ ] AI transparency indicators visible
+- [ ] Human oversight capabilities enabled
+- [ ] Risk assessment documented
+- [ ] Audit logs configured
+- [ ] Model information disclosed
+- [ ] Accuracy monitoring active
+
+### Security Hardening
+- [ ] HTTPS enforced
+- [ ] Strong authentication configured
+- [ ] Firewall rules applied
+- [ ] Secrets properly managed
+- [ ] Rate limiting enabled
+- [ ] Backups scheduled
+- [ ] Logs monitored
+- [ ] Incident response plan documented
+
+### Operational Security
+- [ ] Regular security updates scheduled
+- [ ] Access control policies defined
+- [ ] API keys rotated regularly
+- [ ] Monitoring alerts configured
+- [ ] Staff security training completed
+
+---
+
+## Security Scanning
+
+### Vulnerability Scanning
+
+**Scan Docker images:**
+```bash
+# Install Trivy
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+
+# Scan Eneo images
+trivy image ghcr.io/eneo-ai/eneo-backend:latest
+trivy image ghcr.io/eneo-ai/eneo-frontend:latest
+```
+
+**Scan dependencies:**
+```bash
+# Backend (Python)
+cd backend
+pip install safety
+safety check
+
+# Frontend (Node.js)
+cd frontend
+pnpm audit
+```
+
+### Penetration Testing
+
+Before production deployment:
+1. Run automated security scans
+2. Perform manual penetration testing
+3. Review OWASP Top 10 vulnerabilities
+4. Test authentication and authorization
+5. Validate input sanitization
+
+---
+
+## Regular Security Maintenance
+
+### Weekly
+- [ ] Review authentication logs
+- [ ] Check for failed login attempts
+- [ ] Monitor resource usage
+- [ ] Verify backups completed
+
+### Monthly
+- [ ] Update Docker images
+- [ ] Rotate API keys
+- [ ] Review access permissions
+- [ ] Analyze security logs
+- [ ] Test backup restoration
+
+### Quarterly
+- [ ] Security vulnerability scan
+- [ ] Update security policies
+- [ ] Staff security training
+- [ ] Third-party security audit (recommended)
+
+### Annually
+- [ ] Full security assessment
+- [ ] Penetration testing
+- [ ] Compliance audit (GDPR, EU AI Act)
+- [ ] Disaster recovery drill
+- [ ] Update incident response plan
+
+---
+
+## Need Help?
+
+- **Security Guide**: [GitHub security docs](https://github.com/eneo-ai/eneo/blob/main/docs/SECURITY.md)
+- **Report Vulnerability**: [Security advisories](https://github.com/eneo-ai/eneo/security/advisories)
+- **Email**: digitalisering@sundsvall.se (public sector organizations)
+- **Forum**: [forum.eneo.ai](https://forum.eneo.ai) (requires government/municipality email)

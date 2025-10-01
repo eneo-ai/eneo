@@ -1,0 +1,22 @@
+/* Nextra Theme Overrides - Direct CSS Variable Approach */
+
+/* Light mode overrides */
+:root, .dark {
+  /* Direct override of Nextra's generated primary colors with hex values */
+  --x-color-primary-50: #fffdea;
+  --x-color-primary-100: #fff6c5;
+  --x-color-primary-200: #ffee85;
+  --x-color-primary-300: #ffde46;
+  --x-color-primary-400: #ffcc1b;
+  --x-color-primary-500: #ffaa00;
+  --x-color-primary-600: #e28100;
+  --x-color-primary-700: #bb5902;
+  --x-color-primary-800: #984508;
+  --x-color-primary-900: #7c380b;
+  --x-color-primary-950: #481c00;
+
+  /* Override Nextra's base HSL variables that generate the primary colors */
+  --nextra-primary-hue: hsl(from var(--x-color-primary-500) h); /* Cyan hue */
+  --nextra-primary-saturation: 100%; /* Full saturation */
+  --nextra-primary-lightness: 45%; /* Base lightness */
+}
