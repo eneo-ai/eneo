@@ -34,6 +34,14 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
         "DOWNLOAD_MAXSIZE": SETTINGS.upload_max_file_size,
     }
 
+    custom_header_name = os.getenv("CRAWLER_CUSTOM_HEADER_NAME")
+    custom_header_value = os.getenv("CRAWLER_CUSTOM_HEADER_VALUE")
+
+    if custom_header_name and custom_header_value:
+        settings["DEFAULT_REQUEST_HEADERS"] = {
+            custom_header_name: custom_header_value,
+        }
+
     if files_dir is not None:
         settings["ITEM_PIPELINES"] = {FileNamePipeline: 300}
         settings["FILES_STORE"] = files_dir
