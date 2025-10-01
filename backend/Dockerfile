@@ -24,9 +24,9 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 RUN poetry run crawl4ai-setup
 # Verify crawl4ai installation
 RUN poetry run crawl4ai-doctor
-# Create crawl4ai directory and set permissions
-RUN mkdir -p /.crawl4ai \
- && chown -R 1000:1000 /.crawl4ai
+# Create directories and set permissions for unprivileged user
+RUN mkdir -p /.crawl4ai /.cache \
+ && chown -R 1000:1000 /.crawl4ai /.cache
 # Run as unprivileged user
 USER 1000
 CMD ["sh", "-c", "./run.sh"]
