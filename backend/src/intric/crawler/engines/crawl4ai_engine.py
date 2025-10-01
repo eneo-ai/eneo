@@ -170,39 +170,72 @@ class Crawl4aiEngine(CrawlerEngineAbstraction):
                 word_count_threshold=10,
 
                 # JavaScript to trigger document downloads (production version)
+                # Why: Create synthetic <a download> elements to force downloads instead of navigation
+                # Prevents navigation from killing JS context after first click
                 js_code="""
-                    const selectors = [
-                        'a[href$=".pdf"]', 'a[href*=".pdf"]',     // PDF files
-                        'a[href$=".doc"]', 'a[href*=".doc"]',     // Word documents
-                        'a[href$=".docx"]', 'a[href*=".docx"]',   // Modern Word documents
-                        'a[href$=".xls"]', 'a[href*=".xls"]',     // Excel files
-                        'a[href$=".xlsx"]', 'a[href*=".xlsx"]',   // Modern Excel files
-                        'a[href$=".csv"]', 'a[href*=".csv"]',     // CSV files
-                        'a[href$=".txt"]', 'a[href*=".txt"]',     // Text files
-                        'a[download]'                             // Explicit download links
-                    ];
+                    (async () => {
+                        // Helper: convert to absolute URL
+                        const toAbs = (u) => {
+                            try { return new URL(u, location.href).href; } catch { return null; }
+                        };
 
-                    let downloadLinks = [];
-                    selectors.forEach(sel => {
-                        downloadLinks.push(...document.querySelectorAll(sel));
-                    });
-
-                    // Remove duplicates by href
-                    const uniqueLinks = [...new Map(downloadLinks.map(link => [link.href, link])).values()];
-
-                    if (uniqueLinks.length > 0) {
-                        for (const link of uniqueLinks) {
+                        // Helper: check pathname extension (case-insensitive, handles URL encoding)
+                        const hasExt = (u, exts) => {
                             try {
-                                link.click();
-                                await new Promise(r => setTimeout(r, 2000));
+                                const url = new URL(u);
+                                const pathname = decodeURIComponent(url.pathname).toLowerCase();
+                                return exts.some(ext => pathname.endsWith(ext));
+                            } catch {
+                                return false;
+                            }
+                        };
+
+                        // File extensions to download
+                        const exts = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt'];
+
+                        // Gather all anchors and filter by extension
+                        const anchors = Array.from(document.querySelectorAll('a[href]'));
+                        const candidates = anchors
+                            .map(a => a.getAttribute('href'))
+                            .map(toAbs)
+                            .filter(Boolean)
+                            .filter(href => hasExt(href, exts));
+
+                        // Deduplicate by href
+                        const uniqueHrefs = Array.from(new Set(candidates));
+
+                        // Trigger downloads using synthetic <a download> elements
+                        for (const href of uniqueHrefs) {
+                            try {
+                                const url = new URL(href);
+                                const filename = decodeURIComponent(url.pathname.split('/').pop() || 'download');
+
+                                // Create synthetic anchor with download attribute
+                                const a = document.createElement('a');
+                                a.href = href;
+                                a.setAttribute('download', filename);
+                                a.rel = 'noopener noreferrer';
+                                a.target = '_self';
+                                a.style.display = 'none';
+                                document.body.appendChild(a);
+
+                                // Click to trigger download (not navigation)
+                                a.click();
+                                a.remove();
+
+                                // Small delay between downloads
+                                await new Promise(r => setTimeout(r, 750));
                             } catch (e) {
-                                // Silent failure - don't clutter logs
+                                // Silent failure - continue with other files
                             }
                         }
-                    }
+                    })();
                 """,
 
-                # Wait longer for downloads
+                # Wait for downloads to complete after JavaScript execution
+                # Why: delay_before_return_html waits AFTER js_code finishes, giving browser
+                # time to initiate and complete downloads before returning result
+                # Note: wait_for only accepts CSS/JS selectors (strings), not time delays
                 delay_before_return_html=float(SETTINGS.crawl4ai_download_timeout),
 
                 # Use timeout equivalent to Scrapy settings
