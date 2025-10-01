@@ -20,6 +20,10 @@ ENV PYTHONUNBUFFERED=1
 ENV TIKTOKEN_CACHE_DIR=/tiktoken
 RUN mkdir /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
+# Install crawl4ai browser dependencies
+RUN poetry run crawl4ai-setup
+# Verify crawl4ai installation
+RUN poetry run crawl4ai-doctor
 # Create crawl4ai directory and set permissions
 RUN mkdir -p /.crawl4ai \
  && chown -R 1000:1000 /.crawl4ai
