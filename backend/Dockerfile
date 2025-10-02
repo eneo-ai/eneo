@@ -31,7 +31,7 @@ RUN mkdir -p /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
 
 # Production stage
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
