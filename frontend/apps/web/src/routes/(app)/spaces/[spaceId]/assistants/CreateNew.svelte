@@ -10,6 +10,7 @@
   import { IntricError } from "@intric/intric-js";
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
 
@@ -49,7 +50,7 @@
 <div class="flex gap-[1px]">
   <TemplateCreateAssistant let:trigger={createAssistantTrigger}>
     <Button variant="primary" is={createAssistantTrigger} class="!rounded-r-none"
-      >Create assistant</Button
+      >{m.create_assistant()}</Button
     ></TemplateCreateAssistant
   >
   <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
@@ -61,11 +62,11 @@
     <Dropdown.Menu let:item>
       <Button is={item} onclick={() => ($showCreateAssistantDialog = true)}>
         <IconAssistant size="sm"></IconAssistant>
-        Create new assistant</Button
+        {m.create_new_assistant()}</Button
       >
       <Button is={item} onclick={() => ($showCreateGroupChatDialog = true)}>
         <IconPeople size="sm"></IconPeople>
-        Create new group chat</Button
+        {m.create_new_group_chat()}</Button
       >
     </Dropdown.Menu>
   </Dropdown.Root>
@@ -75,20 +76,20 @@
   <Dialog.Content width="dynamic">
     <Dialog.Section class="relative mt-2 -mb-0.5">
       <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
-        <h3 class="px-4 pb-1 text-2xl font-extrabold">Create a new group chat</h3>
+        <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.create_a_new_group_chat()}</h3>
         <p class="text-secondary max-w-[60ch] pr-36 pl-4">
-          Group chats are an easy way to communicate with multiple assistants in a single session.
+          {m.group_chats_intro_text()}
         </p>
         <!-- <div class="h-8"></div> -->
         <div class=" border-dimmer mt-14 mb-4 border-t"></div>
         <div class="flex flex-col gap-1 pt-6 pb-4">
-          <span class="px-4 pb-1 text-lg font-medium">Group chat name</span>
+          <span class="px-4 pb-1 text-lg font-medium">{m.group_chat_name()}</span>
           <Input.Text
             bind:value={newGroupChatName}
             hiddenLabel
             inputClass="!text-lg !py-6 !px-4"
-            placeholder="Name..."
-            required>Group chat name</Input.Text
+            placeholder="{m.name()}..."
+            required>{m.group_chat_name()}</Input.Text
           >
         </div>
       </div>
@@ -96,11 +97,11 @@
 
     <Dialog.Controls let:close>
       <Input.Switch bind:value={openGroupChatAfterCreation} class="flex-row-reverse p-2"
-        >Open group chat editor after creation</Input.Switch
+        >{m.open_group_chat_editor_after_creation()}</Input.Switch
       >
       <div class="flex-grow"></div>
-      <Button is={close}>Cancel</Button>
-      <Button is={close} onclick={createNewGroupChat} variant="primary">Create group chat</Button>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button is={close} onclick={createNewGroupChat} variant="primary">{m.create_group_chat()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

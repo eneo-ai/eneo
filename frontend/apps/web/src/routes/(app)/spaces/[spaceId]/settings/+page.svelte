@@ -16,6 +16,7 @@
   import { writable } from "svelte/store";
   import { getIntric } from "$lib/core/Intric.js";
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
 
@@ -39,7 +40,7 @@
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
     if (deleteConfirmation !== $currentSpace.name) {
-      alert("You entered a wrong name.");
+      alert(m.wrong_space_name());
       return;
     }
     isDeleting = true;
@@ -49,7 +50,7 @@
     try {
       await spaces.deleteSpace($currentSpace);
     } catch (e) {
-      alert(`Error while deleting space`);
+      alert(m.error_deleting_space());
       console.error(e);
     }
     clearTimeout(deletionMessageTimeout);
@@ -59,22 +60,22 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.name} – Settings</title>
+  <title>{m.app_name()} – {$currentSpace.name} – {m.settings()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Settings"></Page.Title>
+    <Page.Title title={m.settings()}></Page.Title>
   </Page.Header>
 
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="General">
+      <Settings.Group title={m.general()}>
         <EditNameAndDescription></EditNameAndDescription>
         <SpaceStorageOverview></SpaceStorageOverview>
       </Settings.Group>
 
-      <Settings.Group title="Advanced settings">
+      <Settings.Group title={m.advanced_settings()}>
         {#if data.isSecurityEnabled}
           <ChangeSecurityClassification
             classifications={data.classifications}
@@ -94,27 +95,24 @@
       </Settings.Group>
 
       {#if $currentSpace.permissions?.includes("delete")}
-        <Settings.Group title="Danger zone">
-          <Settings.Row title="Delete space" description="Delete this space and all its resources.">
+        <Settings.Group title={m.danger_zone()}>
+          <Settings.Row title={m.delete_space()} description={m.delete_space_description()}>
             <Dialog.Root alert openController={showDeleteDialog}>
               <Dialog.Trigger asFragment let:trigger>
                 <Button is={trigger} variant="destructive" class="flex-grow"
-                  >Delete this space</Button
+                  >{m.delete_this_space()}</Button
                 >
               </Dialog.Trigger>
               <Dialog.Content width="medium" form>
-                <Dialog.Title>Delete space</Dialog.Title>
+                <Dialog.Title>{m.delete_space()}</Dialog.Title>
 
                 <Dialog.Section>
                   <p class="border-default hover:bg-hover-dimmer border-b px-7 py-4">
-                    Do you really want to delete the space "<span class="italic"
-                      >{$currentSpace.name}</span
-                    >"? You will lose access to all applications and data in it. This cannot be
-                    undone.
+                    {m.confirm_delete_space_message({ space: $currentSpace.name })}
                   </p>
                   <Input.Text
                     bind:value={deleteConfirmation}
-                    label="Enter the name of this space to confirm your deletion"
+                    label={m.enter_space_name_to_confirm()}
                     required
                     placeholder={$currentSpace.name}
                     class=" border-default hover:bg-hover-dimmer px-4 py-4"
@@ -125,16 +123,15 @@
                   <p
                     class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2 rounded-md border p-2"
                   >
-                    <span class="font-bold">Hint:</span>
-                    Deleting a space and all its resources can take up to 30 seconds. Please do not leave
-                    this page.
+                    <span class="font-bold">{m.hint()}:</span>
+                    {m.delete_space_hint()}
                   </p>
                 {/if}
 
                 <Dialog.Controls let:close>
-                  <Button is={close} disabled={isDeleting}>Cancel</Button>
+                  <Button is={close} disabled={isDeleting}>{m.cancel()}</Button>
                   <Button variant="destructive" on:click={deleteSpace} disabled={isDeleting}
-                    >{isDeleting ? "Deleting..." : "Confirm deletion"}</Button
+                    >{isDeleting ? m.deleting() : m.confirm_deletion()}</Button
                   >
                 </Dialog.Controls>
               </Dialog.Content>

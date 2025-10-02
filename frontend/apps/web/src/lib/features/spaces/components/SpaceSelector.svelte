@@ -14,6 +14,7 @@
   import { fade, fly } from "svelte/transition";
   import SpaceChip from "./SpaceChip.svelte";
   import CreateSpaceDialog from "./CreateSpaceDialog.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let showSelectPrompt = false;
 
@@ -45,13 +46,13 @@
     class="group border-default relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b-[0.5px] pt-0.5 pr-5 pl-[1.4rem] font-medium"
   >
     <SpaceChip space={$currentSpace}></SpaceChip>
-    <span class="text-primary flex-grow truncate pl-0.5 text-left"> Personal space </span>
+    <span class="text-primary flex-grow truncate pl-0.5 text-left">{m.personal_space()}</span>
   </div>
 {:else}
   <Button
     is={[$trigger]}
     unstyled
-    label="Change space or create a new one"
+    label={m.change_space_or_create()}
     class="group border-default hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b-[0.5px] pt-0.5 pr-5 pl-[1.4rem] font-medium"
   >
     {#if showSelectPrompt}
@@ -60,7 +61,7 @@
       >
         <IconSquare />
       </div>
-      <span class="text-primary flex-grow truncate pl-0.5 text-left"> Select a space </span>
+      <span class="text-primary flex-grow truncate pl-0.5 text-left">{m.select_a_space()}</span>
     {:else}
       <SpaceChip space={$currentSpace}></SpaceChip>
       <span class="text-primary flex-grow truncate pl-0.5 text-left">
@@ -89,7 +90,7 @@
     <div
       class="border-default text-secondary flex items-baseline justify-between gap-4 border-b pt-1 pr-3 pb-2.5 pl-6 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
-      <a href="/spaces/list" class="hover:underline"> Your spaces </a>
+      <a href="/spaces/list" class="hover:underline">{m.your_spaces()}</a>
     </div>
 
     <div class="relative max-h-[50vh] overflow-y-auto">
@@ -122,7 +123,7 @@
       }}
       is={[$item]}
       class="border-default bg-accent-default text-on-fill hover:bg-accent-stronger mt-1 !justify-center rounded-lg border !py-2 shadow-md focus:ring-offset-4 focus:outline-offset-4"
-      >Create a new space</Button
+      >{m.create_new_space()}</Button
     >
     <div {...$arrow} use:arrow class="border-stronger !z-10"></div>
   </div>

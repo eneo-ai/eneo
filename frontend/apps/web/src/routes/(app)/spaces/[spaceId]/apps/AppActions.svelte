@@ -10,6 +10,7 @@
   import { writable } from "svelte/store";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
+  import { m } from "$lib/paraglide/messages";
 
   export let app: AppSparse;
 
@@ -27,7 +28,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete app.");
+      alert(m.could_not_delete_app());
       console.error(e);
     }
     isProcessing = false;
@@ -57,7 +58,7 @@
           padding="icon-leading"
         >
           <IconEdit size="sm" />
-          Edit</Button
+          {m.edit()}</Button
         >
       {/if}
       {#if app.permissions?.includes("publish")}
@@ -70,10 +71,10 @@
         >
           {#if app.published}
             <IconArrowDownToLine size="sm"></IconArrowDownToLine>
-            Unpublish
+            {m.unpublish()}
           {:else}
             <IconArrowUpToLine size="sm"></IconArrowUpToLine>
-            Publish
+            {m.publish()}
           {/if}
         </Button>
       {/if}
@@ -86,7 +87,7 @@
           }}
           padding="icon-leading"
         >
-          <IconTrash size="sm" />Delete</Button
+          <IconTrash size="sm" />{m.delete()}</Button
         >
       {/if}
     </Dropdown.Menu>
@@ -95,15 +96,15 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete app</Dialog.Title>
+    <Dialog.Title>{m.delete_app()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{app.name}</span>?</Dialog.Description
+      >{m.confirm_delete_app()}</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteService}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

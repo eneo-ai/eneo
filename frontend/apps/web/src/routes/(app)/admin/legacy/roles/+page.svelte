@@ -8,20 +8,21 @@
   import { Page } from "$lib/components/layout/index.js";
   import RoleEditor from "./RoleEditor.svelte";
   import RolesTable from "./RolesTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Roles</title>
+  <title>Eneo.ai – {m.admin()} – {m.roles()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Roles"></Page.Title>
+    <Page.Title title={m.roles()}></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="custom_roles">Custom roles</Page.TabTrigger>
-      <Page.TabTrigger tab="default_roles">Default roles</Page.TabTrigger>
+      <Page.TabTrigger tab="custom_roles">{m.custom_roles()}</Page.TabTrigger>
+      <Page.TabTrigger tab="default_roles">{m.default_roles()}</Page.TabTrigger>
     </Page.Tabbar>
     <RoleEditor mode="create" permissions={data.permissions}></RoleEditor>
   </Page.Header>

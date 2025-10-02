@@ -3,6 +3,7 @@
   import { IconFileText } from "@intric/icons/file-text";
   import type { AppRun } from "@intric/intric-js";
   export let run: Pick<AppRun, "input">;
+  import { m } from "$lib/paraglide/messages";
 </script>
 
 {#if run.input.text || run.input.files.length > 0}
@@ -12,7 +13,7 @@
         class="group-hover:bg-primary flex max-w-[40ch] gap-2 rounded-lg p-1 pr-2 backdrop-blur-sm group-hover:shadow"
       >
         <IconFileText class="min-w-6" /><span class="truncate">
-          Input: {run.input.text}
+          {m.input()}: {run.input.text}
         </span>
       </div>
     {/if}
@@ -28,5 +29,5 @@
     {/each}
   </div>
 {:else}
-  <div>This run did not receive any inputs.</div>
+  <div>{m.this_run_did_not_receive_any_inputs()}</div>
 {/if}

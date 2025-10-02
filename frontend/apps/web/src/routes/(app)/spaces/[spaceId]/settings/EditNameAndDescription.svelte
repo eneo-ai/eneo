@@ -8,6 +8,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Button, Input } from "@intric/ui";
   import { Settings } from "$lib/components/layout";
+  import { m } from "$lib/paraglide/messages";
 
   const spaces = getSpacesManager();
   const currentSpace = spaces.state.currentSpace;
@@ -24,8 +25,8 @@
 </script>
 
 <Settings.Row
-  title="Name"
-  description="A name to identify this space across your organisation."
+  title={m.name()}
+  description={m.space_name_description()}
   let:labelId
   let:descriptionId
 >
@@ -44,20 +45,20 @@
       variant="primary"
       on:click={() => {
         spaces.updateSpace({ name: currentName });
-      }}>Save changes</Button
+      }}>{m.save_changes()}</Button
     >
     <Button
       variant="outlined"
       on:click={() => {
         currentName = $currentSpace.name;
-      }}>Revert changes</Button
+      }}>{m.revert_changes()}</Button
     >
   </div>
 </Settings.Row>
 
 <Settings.Row
-  title="Description"
-  description="A brief description of this space that will be displayed to its users."
+  title={m.description()}
+  description={m.space_description_description()}
   let:labelId
   let:descriptionId
 >
@@ -74,13 +75,13 @@
       variant="outlined"
       on:click={() => {
         currentDescription = $currentSpace.description ?? "";
-      }}>Revert changes</Button
+      }}>{m.revert_changes()}</Button
     >
     <Button
       variant="primary"
       on:click={() => {
         spaces.updateSpace({ description: currentDescription });
-      }}>Save changes</Button
+      }}>{m.save_changes()}</Button
     >
   </div>
 </Settings.Row>

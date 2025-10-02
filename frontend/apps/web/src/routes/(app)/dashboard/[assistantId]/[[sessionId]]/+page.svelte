@@ -5,6 +5,7 @@
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
   import { initChatService } from "$lib/features/chat/ChatService.svelte.js";
+  import { m } from "$lib/paraglide/messages";
 
   let { data } = $props();
 
@@ -52,7 +53,7 @@
         });
       }}
       class="!rounded-lg !border-b-2 !border-[var(--color-ui-blue-700)] !px-5 !py-1"
-      >New chat
+      >{m.new_chat()}
     </Button>
   </div>
 

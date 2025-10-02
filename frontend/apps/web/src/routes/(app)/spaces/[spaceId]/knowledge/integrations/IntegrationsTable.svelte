@@ -7,6 +7,7 @@
   import IntegrationNameCell from "./IntegrationNameCell.svelte";
   import IntegrationActions from "./IntegrationActions.svelte";
   import { integrationData } from "$lib/features/integrations/IntegrationData";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -42,7 +43,7 @@
 
   const viewModel = table.createViewModel([
     table.column({
-      header: "Name",
+      header: m.name(),
       accessor: (item) => item,
       cell: (item) => {
         return createRender(IntegrationNameCell, {
@@ -53,7 +54,7 @@
 
     table.column({
       accessor: (item) => item,
-      header: "Link",
+      header: m.link(),
       cell: (item) => {
         return createRender(Table.ButtonCell, {
           link: item.value.url ?? "",
@@ -83,7 +84,7 @@
   {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
     {#each $embeddingModels as embeddingModel (embeddingModel.id)}
       <Table.Group
-        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + " (disabled)"}
+        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + ` (${m.disabled()})`}
         filterFn={createModelFilter(embeddingModel)}
       ></Table.Group>
     {/each}

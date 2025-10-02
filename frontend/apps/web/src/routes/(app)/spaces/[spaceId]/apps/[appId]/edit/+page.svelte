@@ -15,7 +15,7 @@
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { page } from "$app/state";
-  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
   const {
@@ -40,7 +40,7 @@
   beforeNavigate((navigate) => {
     if (
       $currentChanges.hasUnsavedChanges &&
-      !confirm("You have unsaved changes. Do you want to discard all changes?")
+      !confirm(m.confirm_discard())
     ) {
       navigate.cancel();
       return;
@@ -61,7 +61,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – {$resource.name}</title
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {$resource.name}</title
   >
 </svelte:head>
 
@@ -72,7 +72,7 @@
         title: $resource.name,
         href: `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`
       }}
-      title="Edit"
+      title={m.edit()}
     ></Page.Title>
     <Page.Flex>
       {#if $currentChanges.hasUnsavedChanges}
@@ -82,7 +82,7 @@
           on:click={() => {
             cancelUploadsAndClearQueue();
             discardChanges();
-          }}>Discard all changes</Button
+          }}>{m.discard_all_changes()}</Button
         >
         <Button
           variant="positive"
@@ -94,23 +94,23 @@
             setTimeout(() => {
               showSavesChangedNotice = false;
             }, 5000);
-          }}>{$isSaving ? "Saving..." : "Save changes"}</Button
+          }}>{$isSaving ? m.saving() : m.save_changes()}</Button
         >
       {:else}
         {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>All changes saved!</p>
+          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>Done</Button>
+        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
 
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="General">
+      <Settings.Group title={m.general()}>
         <Settings.Row
-          title="Name"
-          description="A brief name of this app that will be displayed to its users."
+          title={m.name()}
+          description={m.app_name_description()}
           hasChanges={$currentChanges.diff.name !== undefined}
           revertFn={() => {
             discardChanges("name");
@@ -126,8 +126,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Description"
-          description="A brief description of this app that will be displayed to its users."
+          title={m.description()}
+          description={m.app_description_description()}
           hasChanges={$currentChanges.diff.description !== undefined}
           revertFn={() => {
             discardChanges("description");
@@ -143,8 +143,8 @@
 
         {#if data.app.permissions?.includes("publish")}
           <Settings.Row
-            title="Status"
-            description="Publishing your app will make it available to all users of this space, including viewers."
+            title={m.status()}
+            description={m.publishing_description()}
           >
             <PublishingSetting
               endpoints={data.intric.apps}
@@ -155,14 +155,14 @@
         {/if}
       </Settings.Group>
 
-      <Settings.Group title="Input">
+      <Settings.Group title={m.input()}>
         <AppSettingsInput></AppSettingsInput>
       </Settings.Group>
 
-      <Settings.Group title="Instructions">
+      <Settings.Group title={m.instructions()}>
         <Settings.Row
-          title="Prompt"
-          description="Describe what this app should do with the input data."
+          title={m.prompt()}
+          description={m.app_prompt_description()}
           hasChanges={$currentChanges.diff.prompt !== undefined}
           revertFn={() => {
             discardChanges("prompt");
@@ -172,7 +172,7 @@
         >
           <div slot="toolbar" class="text-secondary">
             <PromptVersionDialog
-              title="Prompt history for {$resource.name}"
+              title={m.prompt_history_for({ name: $resource.name })}
               loadPromptVersionHistory={() => {
                 return data.intric.apps.listPrompts({ id: data.app.id });
               }}
@@ -195,8 +195,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Attachments"
-          description="Attach files to your instructions, for example guidelines, background information or formatting templates."
+          title={m.attachments()}
+          description={m.app_attachments_description()}
           hasChanges={$currentChanges.diff.attachments !== undefined}
           revertFn={() => {
             cancelUploadsAndClearQueue();
@@ -207,11 +207,11 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title="AI Settings">
+      <Settings.Group title={m.ai_settings()}>
         {#if $update.input_fields.some( (field) => ["audio-recorder", "audio-upload"].includes(field.type) )}
           <Settings.Row
-            title="Transcription model"
-            description="This model will be used to transcribe audio input to text before processing it further."
+            title={m.transcription_model()}
+            description={m.transcription_model_description()}
             hasChanges={$currentChanges.diff.transcription_model !== undefined}
             revertFn={() => {
               discardChanges("transcription_model");
@@ -227,8 +227,8 @@
         {/if}
 
         <Settings.Row
-          title="Completion model"
-          description="This model will be used to process the app's input and generate a response."
+          title={m.completion_model()}
+          description={m.completion_model_description()}
           hasChanges={$currentChanges.diff.completion_model !== undefined}
           revertFn={() => {
             discardChanges("completion_model");
@@ -243,8 +243,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Model behaviour"
-          description="Select a preset for how the completion model should behave, or configure its parameters manually."
+          title={m.model_behaviour()}
+          description={m.model_behaviour_description()}
           hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
           revertFn={() => {
             discardChanges("completion_model_kwargs");
@@ -253,7 +253,7 @@
         >
           <SelectBehaviourV2
             bind:kwArgs={$update.completion_model_kwargs}
-            isDisabled={!supportsTemperature($update.completion_model.name)}
+            isDisabled={false}
             {aria}
           ></SelectBehaviourV2>
         </Settings.Row>

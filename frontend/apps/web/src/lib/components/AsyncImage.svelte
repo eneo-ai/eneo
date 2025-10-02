@@ -2,6 +2,7 @@
   import placeholderImageUrl from "$lib/assets/GeneratedImagePlaceholder.svg";
   import { IconDownload } from "@intric/icons/download";
   import { Button } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     url: string | null;
@@ -18,7 +19,7 @@
   <img
     src={placeholderImageUrl}
     class=" bg-secondary absolute m-0 animate-pulse p-0"
-    alt="placeholder"
+    alt={m.placeholder()}
   />
   {#if url}
     <img
@@ -31,14 +32,14 @@
           target.style.opacity = "1";
         }
       }}
-      alt="The generated file"
+      alt={m.generated_file()}
     />
     <Button
       href={url}
       unstyled
       variant="outlined"
       class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 hidden gap-1 rounded-md border px-2 py-1 no-underline shadow group-hover:flex"
-      ><IconDownload></IconDownload>Download</Button
+      ><IconDownload></IconDownload>{m.download_file()}</Button
     >
   {/if}
 </div>

@@ -9,6 +9,7 @@
   import { IconEdit } from "@intric/icons/edit";
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { Button, Dropdown } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let space: SpaceSparse;
 </script>
@@ -23,7 +24,7 @@
     <Dropdown.Menu let:item>
       <Button is={item} href="/spaces/{space.id}/settings" padding="icon-leading">
         <IconEdit size="sm" />
-        Edit</Button
+        {m.edit()}</Button
       >
     </Dropdown.Menu>
   </Dropdown.Root>

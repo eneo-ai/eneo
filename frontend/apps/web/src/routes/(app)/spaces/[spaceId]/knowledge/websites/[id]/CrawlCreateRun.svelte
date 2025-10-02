@@ -4,6 +4,7 @@
   import { IconRefresh } from "@intric/icons/refresh";
   import type { Website } from "@intric/intric-js";
   import { Button, Dialog, Tooltip } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let website: Website;
   export let isDisabled = false;
@@ -23,32 +24,29 @@
       $showDialog = false;
     } catch (error) {
       console.error(error);
-      alert("Error when trying to create a new crawl run.");
+      alert(m.error_creating_crawl_run());
     }
   }
 </script>
 
 <Dialog.Root bind:isOpen={showDialog}>
   <Dialog.Trigger let:trigger asFragment>
-    <Tooltip text={isDisabled ? "Can't sync while a crawl is already running" : undefined}>
+    <Tooltip text={isDisabled ? m.cant_sync_while_crawl_running() : undefined}>
       <Button is={trigger} variant="primary" disabled={isDisabled}>
         <IconRefresh></IconRefresh>
-        Sync now</Button
+        {m.sync_now()}</Button
       >
     </Tooltip>
   </Dialog.Trigger>
   <Dialog.Content width="small">
-    <Dialog.Title>Sync website</Dialog.Title>
+    <Dialog.Title>{m.sync_website()}</Dialog.Title>
     <Dialog.Description>
-      Do you want to synchronise
-      <span class="italic">
-        {website.name ? `${website.name} (${website.url})` : website.url}
-      </span> now by starting a new crawl run?
+      {m.confirm_sync_website({ websiteName: website.name ? `${website.name} (${website.url})` : website.url })}
     </Dialog.Description>
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" on:click={createRun} disabled={isProcessing}
-        >{isProcessing ? "Starting..." : "Start crawl"}</Button
+        >{isProcessing ? m.starting() : m.start_crawl()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

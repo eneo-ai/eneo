@@ -6,6 +6,7 @@
   import relativeTime from "dayjs/plugin/relativeTime";
   import utc from "dayjs/plugin/utc";
   import { getResultTitle } from "$lib/features/apps/getResultTitle";
+  import { m } from "$lib/paraglide/messages";
   import ResultPrimaryCell from "./ResultPrimaryCell.svelte";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import ResultAction from "./ResultAction.svelte";
@@ -24,7 +25,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => getResultTitle(item),
       cell: (item) => {
         return createRender(ResultPrimaryCell, {
@@ -34,7 +35,7 @@
       }
     }),
     table.column({
-      header: "Status",
+      header: m.status(),
       accessor: (item) => item,
       cell: (item) => {
         return createRender(AppResultStatus, {
@@ -43,7 +44,7 @@
       }
     }),
     table.column({
-      header: "Created",
+      header: m.created(),
       accessor: "created_at",
       cell: (item) => {
         return createRender(Table.FormattedCell, {
@@ -66,4 +67,4 @@
   $: table.update(results);
 </script>
 
-<Table.Root {viewModel} resourceName="result" emptyMessage="No previous results found"></Table.Root>
+<Table.Root {viewModel} resourceName="result" emptyMessage={m.no_previous_results_found()}></Table.Root>

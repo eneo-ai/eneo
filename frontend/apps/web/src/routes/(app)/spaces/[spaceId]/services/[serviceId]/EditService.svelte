@@ -13,6 +13,7 @@
     type ModelBehaviour
   } from "$lib/features/ai-models/ModelBehaviours";
   import SelectBehaviourCustom from "$lib/features/ai-models/components/SelectBehaviourCustom.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let service: Service;
 
@@ -77,14 +78,14 @@
 <div class="flex min-h-full flex-grow flex-col justify-start">
   <Input.Text
     bind:value={editableService.name}
-    label="Name"
+    label={m.name()}
     required
     class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
   ></Input.Text>
 
   <Input.TextArea
     bind:value={editableService.prompt}
-    label="Prompt"
+    label={m.prompt()}
     required
     rows={6}
     class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
@@ -107,11 +108,11 @@
     class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
     options={[
       { value: "json", label: "JSON" },
-      { value: "list", label: "List" },
-      { value: "boolean", label: "Boolean" },
-      { value: null, label: "None" }
+      { value: "list", label: m.list() },
+      { value: "boolean", label: m.boolean() },
+      { value: null, label: m.none() }
     ]}
-    bind:value={editableService.output_format}>Output format</Select.Simple
+    bind:value={editableService.output_format}>{m.output_format()}</Select.Simple
   >
 
   {#if editableService.output_format === "json"}
@@ -121,7 +122,7 @@
       rows={15}
       required
     >
-      JSON Schema</Input.TextArea
+      {m.json_schema()}</Input.TextArea
     >
   {/if}
 
@@ -131,9 +132,9 @@
   >
     <Button variant="primary" on:click={updateService} class="w-[140px]">
       {#if updatingService}
-        Saving...
+        {m.saving()}
       {:else}
-        Save
+        {m.save()}
       {/if}
     </Button>
   </div>

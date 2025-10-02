@@ -11,6 +11,7 @@
   import { getChatService } from "../../ChatService.svelte";
   import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
   import { getChatQueryParams } from "../../getChatQueryParams";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -59,7 +60,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
   >
-    Select an assistant
+    {m.select_an_assistant()}
   </div>
   {#each $currentSpace.applications.chat as partner (partner.id)}
     <div

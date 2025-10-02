@@ -1,37 +1,38 @@
 <script lang="ts">
   import { Button } from "@intric/ui";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Login failed</title>
+  <title>Eneo.ai – {m.login_failed()}</title>
 </svelte:head>
 
 <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
   <div class="box w-[400px] justify-center">
     <h1 class="flex justify-center">
       <EneoWordMark class="text-brand-intric h-16 w-20"></EneoWordMark>
-      <span class="hidden">Eneo</span>
+      <span class="hidden">{m.intric()}</span>
     </h1>
 
     <div aria-live="polite">
       <div class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg">
-        <strong>Failed to login to Eneo</strong>
+        <strong>{m.failed_to_login()}</strong>
         <div class="mt-2">
-          {data.message || "An unexpected error occurred during authentication."}
+          {data.message || m.authentication_error_occurred()}
         </div>
         {#if data.details}
           <div class="text-sm mt-2 opacity-80">
-            Details: {data.details}
+            {m.details()}: {data.details}
           </div>
         {/if}
       </div>
     </div>
 
     <div class="shadowed border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href="/login" variant="primary">Try logging in again</Button>
+      <Button href="/login" variant="primary">{m.try_logging_in_again()}</Button>
     </div>
   </div>
 </div>

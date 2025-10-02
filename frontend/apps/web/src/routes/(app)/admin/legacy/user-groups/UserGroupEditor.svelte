@@ -10,6 +10,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { UserGroup } from "@intric/intric-js";
   import { Dialog, Button, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const emptyUserGroup: UserGroup = {
     id: "",
@@ -71,27 +72,27 @@
 <Dialog.Root bind:isOpen={showDialog}>
   {#if mode === "create"}
     <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>Create user group</Button>
+      <Button variant="primary" is={trigger}>{m.create_user_group()}</Button>
     </Dialog.Trigger>
   {:else}
     <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger}>Edit</Button>
+      <Button is={trigger}>{m.edit()}</Button>
     </Dialog.Trigger>
   {/if}
 
   <Dialog.Content width="medium" form>
     {#if mode === "create"}
-      <Dialog.Title>Create a new user group</Dialog.Title>
+      <Dialog.Title>{m.create_new_user_group()}</Dialog.Title>
     {:else}
-      <Dialog.Title>Edit user group</Dialog.Title>
+      <Dialog.Title>{m.edit_user_group()}</Dialog.Title>
     {/if}
 
     <Dialog.Section>
       <div class="hover:bg-hover-dimmer">
         <Input.Text
           bind:value={editableUserGroup.name}
-          label="Group name"
-          descripton="A descriptive name for this group"
+          label={m.group_name()}
+          descripton={m.descriptive_name_for_group()}
           required
           class="border-default px-4 py-4  {mode === 'create' ? 'border-b' : ''}"
         ></Input.Text>
@@ -99,14 +100,14 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       {#if mode === "create"}
         <Button variant="primary" on:click={create} type="submit" disabled={isProcessing}
-          >{isProcessing ? "Creating..." : "Create user group"}</Button
+          >{isProcessing ? m.creating() : m.create_user_group()}</Button
         >
       {:else}
         <Button variant="primary" on:click={edit} disabled={isProcessing}
-          >{isProcessing ? "Saving..." : "Save changes"}</Button
+          >{isProcessing ? m.saving() : m.save_changes()}</Button
         >
       {/if}
     </Dialog.Controls>

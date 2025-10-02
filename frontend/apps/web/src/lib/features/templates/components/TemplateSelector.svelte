@@ -9,6 +9,7 @@
   import { IconCopy } from "@intric/icons/copy";
   import { IconFile } from "@intric/icons/file";
   import { getAppContext } from "$lib/core/AppContext";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { name, creationMode, selectedTemplate, showTemplateGallery, hasWizard },
@@ -20,22 +21,20 @@
 
 <div class="outer relative flex flex-grow flex-col items-start justify-start text-left">
   <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
-    <h3 class="px-4 pb-1 text-2xl font-extrabold">Create a new {resourceName.singular}</h3>
+    <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.create_a_new_resource({ resourceName: resourceName.singular })}</h3>
     <p class="text-secondary max-w-[60ch] pr-36 pl-4">
       {#if featureFlags.showTemplates}
-        Create a new {resourceName.singular} from scratch or get started with a premade {resourceName.singular}
-        from our template gallery.
+        {m.create_from_scratch_or_template({ resourceName: resourceName.singular })}
       {:else}
-        Get started creating a new {resourceName.singular} by entering a name below. You will be able
-        to edit your {resourceName.singular} after creation.
+        {m.get_started_creating_new_assistant()}
       {/if}
     </p>
     <!-- <div class="h-8"></div> -->
     <div class="border-dimmer mt-14 mb-2 border-t"></div>
     <div class="flex flex-col gap-1 pt-6 pb-4">
-      <span class="px-4 pb-1 text-lg font-medium">{resourceName.singularCapitalised} name</span>
+      <span class="px-4 pb-1 text-lg font-medium">{m.assistant_name()}</span>
       <Input.Text bind:value={$name} hiddenLabel inputClass="!text-lg !py-6 !px-4" required
-        >{resourceName.singularCapitalised} name</Input.Text
+        >{m.assistant_name()}</Input.Text
       >
     </div>
     {#if featureFlags.showTemplates}
@@ -48,7 +47,7 @@
           <div class="flex w-full items-center justify-start gap-2 text-left">
             <IconFile></IconFile>
             <span class="text-dynamic-stronger line-clamp-2">
-              Create a blank {resourceName.singular}</span
+              {m.create_blank_assistant()}</span
             >
           </div>
         </button>
@@ -71,7 +70,7 @@
                 >
               {:else}
                 <IconCopy></IconCopy>
-                Start with a template...
+                {m.start_with_template()}
               {/if}
               <div class="flex-grow"></div>
             </div>
@@ -90,7 +89,7 @@
       {#if $hasWizard}
         <p class="text-secondary translate-y-5 p-2 text-center">
           <IconInfo class="inline"></IconInfo>
-          This template offers additional options. You can configure them in the next step.
+          {m.template_offers_additional_options()}
         </p>
       {/if}
 

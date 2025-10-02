@@ -3,6 +3,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Button, Dialog, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace },
@@ -31,7 +32,7 @@
         goto(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`);
       }
     } catch (e) {
-      alert("Error creating new service");
+      alert(m.error_creating_new_service());
       console.error(e);
     }
     isProcessing = false;
@@ -42,25 +43,24 @@
 
 <Dialog.Root alert bind:isOpen={showCreateDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant="primary">Create service</Button>
+    <Button is={trigger} variant="primary">{m.create_service()}</Button>
   </Dialog.Trigger>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Create a new service</Dialog.Title>
+    <Dialog.Title>{m.create_a_new_service()}</Dialog.Title>
 
     <Dialog.Section>
       {#if $currentSpace.completion_models.length < 1}
         <p
           class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
         >
-          <span class="font-bold">Warning:</span>
-          This space does currently not have any completion models enabled. Enable at least one completion
-          model to be able to create a service.
+          <span class="font-bold">{m.warning()}:</span>
+          {m.completion_models_warning_service()}
         </p>
         <div class="border-default border-b"></div>
       {/if}
       <Input.Text
         bind:value={newServiceName}
-        label="Name!"
+        label={m.name()}
         required
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
@@ -68,15 +68,15 @@
 
     <Dialog.Controls let:close>
       <Input.Switch bind:value={openServiceAfterCreation} class="flex-row-reverse p-2"
-        >Open service editor after creation</Input.Switch
+        >{m.open_service_editor_after_creation()}</Input.Switch
       >
       <div class="flex-grow"></div>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button
         variant="primary"
         on:click={createService}
         disabled={isProcessing || $currentSpace.completion_models.length === 0}
-        >{isProcessing ? "Creating..." : "Create service"}</Button
+        >{isProcessing ? m.creating() : m.create_service()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

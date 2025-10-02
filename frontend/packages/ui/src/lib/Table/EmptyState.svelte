@@ -6,6 +6,7 @@
 
 <script lang="ts">
   import type { ComponentType, SvelteComponent } from "svelte";
+  import { getUIMessage } from "$lib/utils/messages.js";
 
   export let filterValue = "";
   export let resourceName = "item";
@@ -35,8 +36,8 @@
     </svg>
   {/if}
   {#if filterValue === ""}
-    {emptyMessage ?? `There are currently no ${resourceName}s configured`}
+    {emptyMessage ?? getUIMessage('ui_no_items_configured', { count: 0, resourceNamePlural: resourceName })}
   {:else}
-    Found no {resourceName}s matching your criteria
+    {getUIMessage('ui_no_items_matching', { count: 0, resourceNamePlural: resourceName })}
   {/if}
 </div>

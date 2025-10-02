@@ -1,6 +1,7 @@
 <script lang="ts">
   import { cva } from "class-variance-authority";
   import { uid } from "uid";
+  import { m } from "$lib/paraglide/messages";
 
   export let title: string;
   export let description: string;
@@ -44,7 +45,7 @@
           <button
             class="border-default hover:bg-hover-dimmer ml-2 -translate-y-[1px] self-end rounded-lg border px-2 py-0.5 text-sm font-normal transition-all hover:shadow disabled:opacity-0"
             disabled={!hasChanges}
-            on:click={revertFn}>Discard changes</button
+            on:click={revertFn}>{m.discard_changes()}</button
           >
         {/if}
       </h3>

@@ -9,6 +9,7 @@
   import GroupChatActions from "./GroupChatActions.svelte";
   import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams";
+  import { m } from "$lib/paraglide/messages";
 
   export let items: (GroupChatSparse | AssistantSparse)[];
   const table = Table.createWithResource(items);
@@ -19,7 +20,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
         return createRender(Table.PrimaryCell, {
@@ -37,7 +38,7 @@
     ...(!$currentSpace.personal
       ? [
           table.column({
-            header: "Status",
+            header: m.status(),
             accessor: (item) => item,
             cell: (item) => {
               return createRender(PublishingStatusChip, {
@@ -85,15 +86,16 @@
 
 <Table.Root
   {viewModel}
-  resourceName="assistant"
+  resourceName={m.resource_assistants()}
   displayAs="cards"
   gapX={1.5}
   gapY={1.5}
   layout="grid"
+  emptyMessage={m.there_are_currently_no_assistants_configured()}
 >
   {#if $currentSpace.hasPermission("publish", "assistant")}
-    <Table.Group title="Published" filterFn={isPublished(true)}></Table.Group>
-    <Table.Group title="Drafts" filterFn={isPublished(false)}></Table.Group>
+    <Table.Group title={m.published()} filterFn={isPublished(true)}></Table.Group>
+    <Table.Group title={m.drafts()} filterFn={isPublished(false)}></Table.Group>
   {:else}
     <Table.Group></Table.Group>
   {/if}

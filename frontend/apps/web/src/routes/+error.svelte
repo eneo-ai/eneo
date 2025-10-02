@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import type { IntricErrorCode } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   type Error = {
     message: string;
@@ -37,7 +38,7 @@
     } else {
       appError = {
         code: 0,
-        message: "An unexpected error has occured. (Empty object)",
+        message: m.unexpected_error(),
         status: 500
       };
     }
@@ -50,14 +51,14 @@
   <div class="bg-secondary absolute inset-0 flex flex-col items-center justify-center">
     <div class="flex flex-col justify-center pb-12 text-center">
       <div class="pb-4 text-2xl">Error {appError.status}: {appError.message}</div>
-      <p class="text-lg">We're experiencing some difficulties, please try again later.</p>
+      <p class="text-lg">{m.were_experiencing_difficulties()}</p>
       <div class="flex items-center justify-center gap-2 text-lg">
-        <p>If this error persists, you can try to</p>
+        <p>{m.if_error_persists()}</p>
         <Button
           href="/login?clear_cookies=true"
           unstyled
           class="hover:text-hover-on-fill hover:bg-accent-stronger underline"
-          >delete your cookies.</Button
+          >{m.delete_cookies()}</Button
         >
       </div>
       <p class="pt-4">(Code: {appError.code})</p>

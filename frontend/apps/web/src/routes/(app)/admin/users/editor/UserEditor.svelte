@@ -6,6 +6,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { getAdminUserCtx } from "../ctx";
   import { getAppContext } from "$lib/core/AppContext";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   const { defaultRoles } = getAdminUserCtx();
@@ -22,7 +23,7 @@
     if (user.id === currentUser.id && !userRole.permissions.includes("admin")) {
       if (
         !confirm(
-          `This will change your role to ${userRole.name} and remove your admin priviledges. You will no longer be able to access this page.\n\nAre you sure you want to continue?`
+          m.role_change_admin_warning({ role: userRole.name })
         )
       ) {
         return;
@@ -44,13 +45,13 @@
 
 <Dialog.Root bind:isOpen>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Edit user</Dialog.Title>
-    <Dialog.Description hidden>Edit the selected user</Dialog.Description>
+    <Dialog.Title>{m.edit_user()}</Dialog.Title>
+    <Dialog.Description hidden>{m.edit_the_selected_user()}</Dialog.Description>
 
     <Dialog.Section>
       <Input.Text
         bind:value={user.email}
-        label="Email"
+        label={m.email()}
         disabled
         type="email"
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
@@ -60,9 +61,9 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
 
-      <Button variant="primary" on:click={updateUser}>Save changes</Button>
+      <Button variant="primary" on:click={updateUser}>{m.save_changes()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

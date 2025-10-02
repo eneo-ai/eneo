@@ -10,6 +10,7 @@
   import { Button, Dialog } from "@intric/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
+  import { m } from "$lib/paraglide/messages";
 
   type PreviewOption = {
     label: string;
@@ -38,7 +39,7 @@
     const { id } = integration;
 
     if (!id) {
-      alert("You need to configure this integration before using it");
+      alert(m.you_need_to_configure_this_integration_before_using_it());
       goBack();
       return;
     }
@@ -107,28 +108,27 @@
 
 <Dialog.Root {openController}>
   <Dialog.Content width="medium">
-    <Dialog.Title>Import knowledge from Sharepoint</Dialog.Title>
+    <Dialog.Title>{m.import_knowledge_from_sharepoint()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
       {#if $currentSpace.embedding_models.length < 1}
         <p
           class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
         >
-          <span class="font-bold">Warning:</span>
-          This space does currently not have any embedding models enabled. Enable at least one embedding
-          model to be able to connect to a website.
+          <span class="font-bold">{m.warning()}:</span>
+          {m.warning_no_embedding_models()}
         </p>
         <div class="border-default border-t"></div>
       {/if}
 
       <div class="flex flex-grow flex-col gap-1 rounded-md p-4">
         <div>
-          <span class="pl-3 font-medium">Import knowledge from...</span>
+          <span class="pl-3 font-medium">{m.import_knowledge_from()}</span>
         </div>
         <div class="relative flex flex-grow">
           <input
             bind:this={inputElement}
-            placeholder="Find Sharepoint site"
+            placeholder={m.find_sharepoint_site()}
             {...$input}
             required
             use:input
@@ -154,7 +154,7 @@
             {#if loadPreview.isLoading}
               <div class="flex gap-2 px-2 py-1">
                 <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
-                Loading available sites...
+                {m.loading_available_sites()}
               </div>
             {:else if filteredResources.length > 0}
               {#each filteredResources as previewItem (previewItem.value.key)}
@@ -170,7 +170,7 @@
                 </li>
               {/each}
             {:else}
-              <span class="text-secondary px-2 py-1">No matching sites found.</span>
+              <span class="text-secondary px-2 py-1">{m.no_matching_sites_found()}</span>
             {/if}
           </div>
         </ul>
@@ -188,13 +188,13 @@
     </Dialog.Section>
 
     <Dialog.Controls>
-      <Button onclick={goBack}>Back</Button>
+      <Button onclick={goBack}>{m.back()}</Button>
       <Button
         variant="primary"
         disabled={importKnowledge.isLoading || $currentSpace.embedding_models.length === 0}
         onclick={importKnowledge}
       >
-        {importKnowledge.isLoading ? "Importing..." : "Import site"}
+        {importKnowledge.isLoading ? m.importing() : m.import_site()}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

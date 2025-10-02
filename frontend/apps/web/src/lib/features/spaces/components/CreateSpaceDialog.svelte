@@ -8,6 +8,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import { getSpacesManager } from "../SpacesManager";
   import { goto } from "$app/navigation";
+  import { m } from "$lib/paraglide/messages";
 
   const spaces = getSpacesManager();
 
@@ -22,23 +23,23 @@
 <Dialog.Root bind:isOpen>
   {#if includeTrigger}
     <Dialog.Trigger let:trigger asFragment>
-      <Button variant="primary" is={trigger}>Create space</Button>
+      <Button variant="primary" is={trigger}>{m.create_space()}</Button>
     </Dialog.Trigger>
   {/if}
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Create a new space</Dialog.Title>
+    <Dialog.Title>{m.create_new_space()}</Dialog.Title>
 
     <Dialog.Section>
       <Input.Text
         bind:value={newSpaceName}
-        label="Name"
+        label={m.name()}
         required
         class="hover:bg-hover-dimmer px-4 py-4"
       ></Input.Text>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button
         variant="primary"
         on:click={async () => {
@@ -53,7 +54,7 @@
             }
           }
           isCreatingSpace = false;
-        }}>{isCreatingSpace ? "Creating..." : "Create space"}</Button
+        }}>{isCreatingSpace ? m.creating() : m.create_space()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

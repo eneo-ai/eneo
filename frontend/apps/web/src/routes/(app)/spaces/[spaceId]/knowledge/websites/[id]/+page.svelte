@@ -8,6 +8,7 @@
   import CrawlLimitations from "./CrawlLimitations.svelte";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
   import CrawlCreateRun from "./CrawlCreateRun.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -26,7 +27,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – Crawls for {formatWebsiteName(
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {m.crawls()} for {formatWebsiteName(
       data.website
     )}</title
   >
@@ -36,15 +37,15 @@
   <Page.Header>
     <Page.Title
       parent={{
-        title: "Knowledge",
+        title: m.knowledge(),
         href: `/spaces/${$currentSpace.routeId}/knowledge?tab=websites`
       }}
       truncate
       title={formatWebsiteName(data.website)}
     ></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="crawls">Crawls</Page.TabTrigger>
-      <Page.TabTrigger tab="blobs">Indexed content</Page.TabTrigger>
+      <Page.TabTrigger tab="crawls">{m.crawls()}</Page.TabTrigger>
+      <Page.TabTrigger tab="blobs">{m.indexed_content()}</Page.TabTrigger>
     </Page.Tabbar>
     <CrawlCreateRun
       website={data.website}

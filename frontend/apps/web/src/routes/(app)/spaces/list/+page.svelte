@@ -9,6 +9,7 @@
   import CreateSpaceDialog from "$lib/features/spaces/components/CreateSpaceDialog.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import SpacesTable from "./SpacesTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { accessibleSpaces }
@@ -17,7 +18,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Your spaces"></Page.Title>
+    <Page.Title title={m.your_spaces()}></Page.Title>
     <CreateSpaceDialog includeTrigger={true} forwardToNewSpace={false}></CreateSpaceDialog>
   </Page.Header>
 

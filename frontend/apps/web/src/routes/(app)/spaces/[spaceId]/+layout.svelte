@@ -10,6 +10,7 @@
   import SpaceSelector from "$lib/features/spaces/components/SpaceSelector.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
   import SpaceMenu from "./SpaceMenu.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -25,7 +26,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name}</title>
+  <title>Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name}</title>
 </svelte:head>
 
 <div

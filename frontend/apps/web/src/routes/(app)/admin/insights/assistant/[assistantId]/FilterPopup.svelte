@@ -8,6 +8,7 @@
   import { IconFilter } from "@intric/icons/filter";
   import { Button, Dialog, Input } from "@intric/ui";
   import type { CalendarDate } from "@internationalized/date";
+  import { m } from "$lib/paraglide/messages";
 
   export let includeFollowups: boolean;
   export let dateRange: { start: CalendarDate; end: CalendarDate };
@@ -34,30 +35,30 @@
   <Dialog.Trigger asFragment let:trigger>
     <Button variant="primary" is={trigger}>
       <IconFilter />
-      Settings</Button
+      {m.settings()}</Button
     >
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Change filter settings</Dialog.Title>
+    <Dialog.Title>{m.change_filter_settings()}</Dialog.Title>
 
     <Dialog.Section>
       <Input.DateRange
         bind:value={dateRange}
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-        >Included timeframe</Input.DateRange
+        >{m.included_timeframe()}</Input.DateRange
       >
       <Input.Switch
         bind:value={includeFollowups}
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-        >Include follow-up questions</Input.Switch
+        >{m.include_follow_up_questions()}</Input.Switch
       >
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
 
-      <Button variant="primary" on:click={update}>Update</Button>
+      <Button variant="primary" on:click={update}>{m.update()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

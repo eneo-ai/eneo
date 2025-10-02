@@ -12,14 +12,15 @@
   import SecurityClassificationActions from "./SecurityClassificationActions.svelte";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { IconLockOpen } from "@intric/icons/lock-open";
+  import { m } from "$lib/paraglide/messages";
 
   const security = getSecurityClassificationService();
 </script>
 
 <Settings.Row
   fullWidth
-  title="Classifications"
-  description="Manage your organisation's security classifications and their descriptions."
+  title={m.classifications()}
+  description={m.classifications_description()}
 >
   <div slot="toolbar">
     <SecurityClassificationCreateDialog></SecurityClassificationCreateDialog>
@@ -30,7 +31,7 @@
     <div
       class="border-strongest bg-primary relative z-0 mb-4 flex w-fit items-center gap-2 rounded-full border px-4 py-2 font-mono text-sm shadow-sm"
     >
-      <IconLockClosed></IconLockClosed> Highest security
+      <IconLockClosed></IconLockClosed> {m.highest_security()}
     </div>
     {#if security.classifications.length > 0}
       <table class=" w-full">
@@ -61,13 +62,13 @@
       </table>
     {:else}
       <div class="text-muted flex h-20 items-center justify-center">
-        Your organisation does currently not have any security classifications configured.
+        {m.no_security_classifications()}
       </div>
     {/if}
     <div
       class="border-strongest bg-primary relative z-0 mt-4 flex w-fit items-center gap-2 rounded-full border px-4 py-2 font-mono text-sm shadow-sm"
     >
-      <IconLockOpen></IconLockOpen> Lowest security
+      <IconLockOpen></IconLockOpen> {m.lowest_security()}
     </div>
   </div>
 </Settings.Row>

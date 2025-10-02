@@ -4,6 +4,7 @@
   import PublishingDialog from "./PublishingDialog.svelte";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import PublishingStatusChip from "./PublishingStatusChip.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let resource: PublishableResource;
   export let endpoints: PublishableResourceEndpoints;
@@ -17,7 +18,7 @@
       try {
         resource = await endpoints.publish(resource);
       } catch (e) {
-        alert(`Could not publish ${resource.name}.`);
+        alert(m.could_not_publish({ name: resource.name }));
       }
       isLoading = false;
       return resource;
@@ -27,7 +28,7 @@
       try {
         resource = await endpoints.unpublish(resource);
       } catch (e) {
-        alert(`Could not unpublish ${resource.name}.`);
+        alert(m.could_not_unpublish({ name: resource.name }));
       }
       isLoading = false;
       return resource;
@@ -39,14 +40,14 @@
   <div class="text-muted flex flex-grow items-center justify-center gap-2">
     {#if isLoading}
       <IconLoadingSpinner class="ml-2 animate-spin"></IconLoadingSpinner>
-      <span>Updating...</span>
+      <span>{m.updating()}</span>
     {:else}
       <PublishingStatusChip {resource}></PublishingStatusChip>
     {/if}
   </div>
   <Tooltip
     text={hasUnsavedChanges
-      ? "Save or discard your changes before updating the status."
+      ? m.save_or_discard_changes_before_updating()
       : undefined}
   >
     <PublishingDialog

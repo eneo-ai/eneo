@@ -9,6 +9,7 @@
   import { dynamicColour } from "$lib/core/colours";
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
   import AdminMenu from "./AdminMenu.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const { tenant } = getAppContext();
 </script>
@@ -21,12 +22,12 @@
       <SpaceChip
         space={{
           id: "1",
-          name: tenant.display_name ?? "Your organisation",
+          name: tenant.display_name ?? m.your_organisation(),
           personal: false
         }}
       ></SpaceChip>
       <span class="text-primary flex-grow truncate pl-0.5 text-left">
-        {tenant.display_name ?? "Your organisation"}
+        {tenant.display_name ?? m.your_organisation()}
       </span>
     </div>
     <AdminMenu></AdminMenu>

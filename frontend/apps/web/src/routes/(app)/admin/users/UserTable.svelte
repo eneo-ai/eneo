@@ -3,15 +3,16 @@
   import { Table, Label } from "@intric/ui";
   import UserActions from "./UserActions.svelte";
   import { createRender } from "svelte-headless-table";
+  import { m } from "$lib/paraglide/messages";
 
   export let users: User[];
   const table = Table.createWithResource(users);
 
   const viewModel = table.createViewModel([
-    table.column({ accessor: "email", header: "Email" }),
+    table.column({ accessor: "email", header: m.email() }),
     table.column({
       accessor: (user) => user,
-      header: "Role",
+      header: m.role(),
       cell: (item) => {
         const content: { label: string; color: Label.LabelColor }[] =
           item.value.predefined_roles.map((group) => {
@@ -32,14 +33,14 @@
     }),
     table.column({
       accessor: (user) => user,
-      header: "Active",
+      header: m.active(),
       cell: (item) => {
         const label: { label: string; color: Label.LabelColor } = item.value.is_active
           ? {
-              label: "Active",
+              label: m.active(),
               color: "green"
             }
-          : { label: "Invited", color: "gray" };
+          : { label: m.invited(), color: "gray" };
         return createRender(Label.Single, { item: label });
       },
       plugins: {
@@ -50,7 +51,7 @@
         },
         tableFilter: {
           getFilterValue(value) {
-            return value.is_active ? "Active" : "Invited";
+            return value.is_active ? m.active() : m.invited();
           }
         }
       }
@@ -65,4 +66,4 @@
   $: table.update(users);
 </script>
 
-<Table.Root {viewModel} resourceName="user"></Table.Root>
+<Table.Root {viewModel} resourceName={m.user()}></Table.Root>
