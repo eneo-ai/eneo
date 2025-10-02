@@ -13,8 +13,7 @@
 	],
 	"features": {
 		"ghcr.io/devcontainers/features/node:1": {
-			"version": "20",
-			"packageManager": "pnpm"
+			"version": "20"
 		}
 	},
 	"postCreateCommand": "bash .devcontainer/post-create.sh",

@@ -21,10 +21,12 @@ cd /workspace
 python -m pip install pre-commit
 pre-commit install
 
-# Install Node.js dependencies
-cd /workspace/frontend
+# Install Bun
+curl -fsSL https://bun.com/install | bash -s "bun-v1.2.23"
 
-npm install -g pnpm@9.12.3
-# Set pnpm store directory
-pnpm config set store-dir $HOME/.pnpm-store
-pnpm run setup
+# Add Bun to PATH for this session
+export PATH="$HOME/.bun/bin:$PATH"
+
+# Install frontend dependencies
+cd /workspace/frontend
+bun run setup

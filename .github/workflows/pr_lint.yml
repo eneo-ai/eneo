@@ -49,22 +49,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: latest
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          cache-dependency-path: frontend/pnpm-lock.yaml
-          node-version: 20
-          cache: pnpm
+          bun-version: 1.2.23
       - name: Install dependencies
-        run: pnpm run setup:github
+        run: bun run setup:github
       - name: Run svelte-check
-        run: pnpm run check || echo "Svelte check failed but continuing..."
+        run: bun run check || echo "Svelte check failed but continuing..."
       - name: Run eslint (non-blocking)
-        run: pnpm run lint || echo "ESLint failed but continuing..."
+        run: bun run lint || echo "ESLint failed but continuing..."
 
   backend-checks:
     runs-on: ubuntu-latest
