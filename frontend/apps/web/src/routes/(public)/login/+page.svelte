@@ -129,25 +129,25 @@
 
         {#if showUsernameAndPassword || !data.mobilityguardLink}
           <Input.Text
-            label="Email"
+            label={m.email()}
             value=""
             name="email"
             autocomplete="username"
             type="email"
             required
             hiddenLabel={true}
-            placeholder="Email"
+            placeholder={m.email()}
           ></Input.Text>
 
           <Input.Text
-            label="Password"
+            label={m.password()}
             value=""
             name="password"
             autocomplete="current-password"
             type="password"
             required
             hiddenLabel={true}
-            placeholder="Password"
+            placeholder={m.password()}
           ></Input.Text>
 
           <Button type="submit" disabled={isAwaitingLoginResponse} variant="primary">
@@ -164,14 +164,14 @@
     </div>
     <div class="absolute bottom-10 mt-12 flex justify-center">
       {#if showUsernameAndPassword && data.mobilityguardLink}
-        <Button variant="outlined" class="text-secondary" href="/login?">Hide Login Fields</Button>
+        <Button variant="outlined" class="text-secondary" href="/login?">{m.hide_login_fields()}</Button>
       {:else if data.mobilityguardLink}
         <Button
           variant="outlined"
           class="text-secondary"
           href="/login?showUsernameAndPassword=true"
         >
-          Show Login Fields
+          {m.show_login_fields()}
         </Button>
       {/if}
     </div>
