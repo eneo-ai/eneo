@@ -1,35 +1,52 @@
-FROM python:3.11
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
-# Install ffmpeg
-RUN apt-get -y update
-RUN apt-get -y upgrade
-RUN apt-get install -y ffmpeg
+# Install system dependencies
+RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
 
-# Install libmagic, for mimetypes
-RUN apt-get install libmagic1
+# Set uv optimizations
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never
 
-# Install poetry
-RUN pip install poetry==2.1.3
+WORKDIR /app
 
-# Configure Poetry to not create virtual environments
-ENV POETRY_VIRTUALENVS_CREATE=false
+# Copy dependency files for optimal layer caching
+COPY pyproject.toml uv.lock ./
 
-WORKDIR /code
+# Create venv and install dependencies only (optimal caching)
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv venv /app/.venv && \
+    uv sync --frozen --no-dev --no-editable --no-install-project
 
-COPY ./pyproject.toml ./poetry.lock ./
+# Copy application code
+COPY . .
 
-COPY . /code/
+# Install the project itself
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-editable
 
-# Install ALL dependencies and fix packaging
-RUN poetry install --no-interaction --no-ansi
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-
-# Handle tiktoken
+# Handle tiktoken cache
 ENV TIKTOKEN_CACHE_DIR=/tiktoken
-RUN mkdir /tiktoken
+RUN mkdir -p /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
+
+# Production stage
+FROM python:3.11-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+
+# Copy venv and tiktoken from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /tiktoken /tiktoken
+COPY --from=builder /app /app
+
+# Set PATH to use venv and environment variables
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    TIKTOKEN_CACHE_DIR=/tiktoken
+
+WORKDIR /app
 
 # Run as unprivileged user
 USER 1000

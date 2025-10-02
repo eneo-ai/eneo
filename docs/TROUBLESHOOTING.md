@@ -271,7 +271,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 4. **Manual database initialization**:
    ```bash
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 5. **Verify environment variables**:
@@ -299,7 +299,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    docker compose down -v
    docker compose up -d db
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 2. **Check password in environment**:
@@ -402,7 +402,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 1. **Verify default user creation**:
    ```bash
    cd backend
-   poetry run python init_db.py  # This creates default user
+   uv run python init_db.py  # This creates default user
    ```
 
 2. **Check default credentials**:
@@ -413,7 +413,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```bash
    docker compose exec db psql -U postgres -d eneo -c "DELETE FROM users WHERE email = 'user@example.com';"
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 4. **Create user manually**:
@@ -749,7 +749,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```python
    # In backend container
    cd backend
-   poetry run python -c "
+   uv run python -c "
    from src.intric.embedding_models.infrastructure.create_embeddings_service import create_embeddings
    print('Testing embeddings...')
    "
@@ -904,7 +904,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 1. **Verify development mode**:
    ```bash
    cd backend
-   poetry run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
+   uv run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 2. **Check file watching**:
