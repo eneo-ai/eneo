@@ -76,6 +76,15 @@ jobs:
         with:
           fetch-depth: 0  # Needed for changed files detection
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
       - name: Get changed Python files
         id: changed-files
         run: |
@@ -92,31 +101,18 @@ jobs:
 
       - name: 🚨 Critical Issues Check (BLOCKING)
         if: steps.changed-files.outputs.skip == 'false'
-        uses: astral-sh/ruff-action@v3
-        with:
-          src: ${{ steps.changed-files.outputs.files }}
-          args: --config backend/pyproject.toml check --output-format github
+        run: |
+          cd backend
+          uv run ruff check ${{ steps.changed-files.outputs.files }} --config pyproject.toml --output-format github
         # This step will FAIL the workflow for critical issues
 
       - name: 💅 Style & Format Check (NON-BLOCKING)
         if: steps.changed-files.outputs.skip == 'false'
         run: |
-          echo "Installing ruff for style checks..."
-          pip install ruff
           echo "Checking style issues in: ${{ steps.changed-files.outputs.files }}"
-          ruff check --config backend/pyproject.toml --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
+          cd backend
+          uv run ruff check --config pyproject.toml --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
         continue-on-error: true
-
-      # Disabled for now as the project has not used ruff formatting previously
-      # TODO: Re-enable this when the project is ready to use ruff formatting
-      # - name: 🎨 Auto-format Check (NON-BLOCKING)
-      #   if: steps.changed-files.outputs.skip == 'false'
-      #   run: |
-      #     echo "Installing ruff for formatting check..."
-      #     pip install ruff
-      #     echo "Checking format of: ${{ steps.changed-files.outputs.files }}"
-      #     ruff format --config backend/pyproject.toml --check ${{ steps.changed-files.outputs.files }} || echo "⚠️ Files need formatting (run 'ruff format' locally)"
-      #   continue-on-error: true
 
       - name: Skip message
         if: steps.changed-files.outputs.skip == 'true'

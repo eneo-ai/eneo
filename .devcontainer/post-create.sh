@@ -9,16 +9,17 @@ set -euf -o pipefail
 sudo apt-get update
 sudo apt-get install -y libmagic1 ffmpeg
 
-# Install Python dependencies
-python -m pip install --no-cache-dir poetry==2.1.3
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 
+# Install Python dependencies
 cd /workspace/backend
-python -m poetry config virtualenvs.in-project true
-python -m poetry install
+uv sync
 
 # Install pre-commit globally and setup hooks
 cd /workspace
-python -m pip install pre-commit
+uv tool install pre-commit
 pre-commit install
 
 # Install Node.js dependencies
