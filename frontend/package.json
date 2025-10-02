@@ -2,7 +2,7 @@
   "version": "1.23.1",
   "private": true,
   "scripts": {
-    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter './packages/*' --filter './apps/*' build",
+    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @intric/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @intric/web build",
     "dev": "NODE_ENV=development FORCE_COLOR=1 bun run --filter @intric/web --filter @intric/ui dev",
     "lint": "FORCE_COLOR=1 bun run --filter '*' lint",
     "check": "NODE_ENV=production FORCE_COLOR=1 bun run --filter '*' check",
