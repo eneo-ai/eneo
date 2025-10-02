@@ -21,7 +21,6 @@ on:
       - main
       - develop
       - 'feature/*'
-      - rebased-swedish-translations-with-develop
     tags:
       - 'v*'  # Triggered when version tags are pushed
 
@@ -76,9 +75,6 @@ jobs:
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "Building develop branch for dev environment"
             echo "is-release=false" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/rebased-swedish-translations-with-develop" ]]; then
-            echo "Building swedish translation branch"
-            echo "is-release=false" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/feature/"* ]]; then
             BRANCH_NAME="${GITHUB_REF#refs/heads/}"
             echo "Building feature branch: $BRANCH_NAME"
@@ -95,7 +91,6 @@ jobs:
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=swedish-translation,enable=${{ github.ref == 'refs/heads/rebased-swedish-translations-with-develop' }}
             type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/feature/') }}
 
             # Version tags (only for releases)
@@ -138,7 +133,6 @@ jobs:
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=swedish-translation,enable=${{ github.ref == 'refs/heads/rebased-swedish-translations-with-develop' }}
             type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/feature/') }}
 
             # Version tags (only for releases)
@@ -204,13 +198,6 @@ jobs:
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ github.ref }}" == "refs/heads/rebased-swedish-translations-with-develop" ]]; then
-            echo "### Swedish Translation Build" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:swedish-translation\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:swedish-translation\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🇸🇪 Swedish translation branch images built successfully" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.ref }}" == "refs/heads/feature/"* ]]; then
             BRANCH_NAME="${GITHUB_REF#refs/heads/}"
             BRANCH_TAG="${BRANCH_NAME//\//-}"
