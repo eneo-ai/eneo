@@ -17,11 +17,13 @@
     "test:integration": "playwright test",
     "test:unit": "vitest"
   },
+  "dependencies": {
+    "@intric/ui": "workspace:*"
+  },
   "devDependencies": {
     "@internationalized/date": "^3.7.0",
     "@intric/eslint-plugin": "workspace:*",
     "@intric/intric-js": "workspace:*",
-    "@intric/ui": "workspace:*",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "^1.51.1",
     "@sveltejs/adapter-auto": "^6.0.0",
