@@ -6,7 +6,7 @@
 # OpenAI Configuration
 OPENAI_API_KEY=
 
-# Anthropic Claude Configuration  
+# Anthropic Claude Configuration
 ANTHROPIC_API_KEY=
 
 # Google Gemini Configuration
@@ -19,7 +19,7 @@ AZURE_API_VERSION=2024-02-15-preview
 AZURE_MODEL_DEPLOYMENT=gpt-4o
 
 ###############
-# REQUIRED: Security Settings - MUST BE CHANGED! 
+# REQUIRED: Security Settings - MUST BE CHANGED!
 # Ensure to have it the same in the frontend
 ###############
 # Generate with: openssl rand -hex 32
@@ -101,9 +101,6 @@ NODE_ENV=production
 # VLLM_API_KEY=
 # VLLM_MODEL_URL=
 
-# Web Search
-# TAVILY_API_KEY=
-
 # Worker Configuration
 # NUM_WORKERS=3
 API_KEY_HEADER_NAME=
@@ -181,9 +178,6 @@ SHAREPOINT_CLIENT_ID=
 
 # [OPTIONAL] SharePoint client secret for integration
 SHAREPOINT_CLIENT_SECRET=
-
-# [OPTIONAL] Tavily API key for web search
-TAVILY_API_KEY=
 
 # [OPTIONAL] Enable testing mode (default: False)
 TESTING=
