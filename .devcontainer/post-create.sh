@@ -16,9 +16,10 @@ cd /workspace/backend
 python -m poetry config virtualenvs.in-project true
 python -m poetry install
 
-# Install pre-commit globally (hooks will be installed in post-start)
+# Install pre-commit globally and setup hooks
 cd /workspace
 python -m pip install pre-commit
+pre-commit install
 
 # Install Node.js dependencies
 cd /workspace/frontend
