@@ -18,6 +18,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { Button } from "@intric/ui";
   import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { m } from "$lib/paraglide/messages";
 
   type Props =
     | {
@@ -69,9 +70,9 @@
   }
 
   const label: Record<typeof type, string> = {
-    completionModel: "Configure completion models",
-    embeddingModel: "Configure embedding models",
-    transcriptionModel: "Configure transcription models"
+    completionModel: m.configure_completion_models(),
+    embeddingModel: m.configure_embedding_models(),
+    transcriptionModel: m.configure_transcription_models()
   };
 
   const countClassifiedModels = () => {
@@ -79,7 +80,7 @@
     const classified = models.filter(
       ({ security_classification }) => security_classification !== null
     ).length;
-    return `${classified} of ${total} classified`;
+    return m.classified_of_total({ classified, total });
   };
 
   let classifiedCount = $state(countClassifiedModels());

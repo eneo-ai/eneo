@@ -14,6 +14,7 @@
   import { Input } from "@intric/ui";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
+  import { m } from "$lib/paraglide/messages";
 
   let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
@@ -100,15 +101,15 @@
 </script>
 
 <Settings.Page>
-  <Settings.Group title="Overview">
+  <Settings.Group title={m.overview()}>
     {#if userStats}
       <UserOverviewBar {userStats}></UserOverviewBar>
     {/if}
   </Settings.Group>
-  <Settings.Group title="Details">
+  <Settings.Group title={m.details()}>
     <Settings.Row
-      title="Usage by user"
-      description="See token usage broken down by individual users within your organization."
+      title={m.usage_by_user()}
+      description={m.usage_by_user_description()}
       fullWidth
     >
       <div slot="toolbar" class="mb-4">
@@ -117,7 +118,7 @@
 
       {#if isLoading}
         <div class="flex justify-center p-8">
-          <div class="text-gray-500">Loading user token usage...</div>
+          <div class="text-gray-500">{m.loading_user_token_usage()}</div>
         </div>
       {:else if error}
         <div class="flex justify-center p-8">
@@ -139,7 +140,7 @@
         </div>
       {:else}
         <div class="flex justify-center p-8">
-          <div class="text-gray-500">No user token usage data available for this period.</div>
+          <div class="text-gray-500">{m.no_user_token_usage_data()}</div>
         </div>
       {/if}
     </Settings.Row>

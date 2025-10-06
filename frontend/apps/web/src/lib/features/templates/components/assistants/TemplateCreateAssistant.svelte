@@ -6,6 +6,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import CreateAssistantBackdrop from "./CreateAssistantBackdrop.svelte";
   import { goto } from "$app/navigation";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace },
@@ -34,7 +35,7 @@
     {#if $$slots.default}
       <slot {trigger}></slot>
     {:else}
-      <Button is={trigger} variant="primary">Create assistant</Button>
+      <Button is={trigger} variant="primary">{m.create_assistant()}</Button>
     {/if}
   </Dialog.Trigger>
 
@@ -43,9 +44,8 @@
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Warning:</span>
-        This space does currently not have any completion models enabled. Enable at least one completion
-        model to be able to create an assistant.
+        <span class="font-bold">{m.warning()}:</span>
+        {m.completion_models_warning()}
       </p>
       <div class="border-dimmer border-b"></div>
     {/if}
@@ -67,7 +67,7 @@
         sideEffect={() => {
           userTouchedToggle = true;
         }}
-        class="flex-row-reverse p-2">Open assistant editor after creation</Input.Switch
+        class="flex-row-reverse p-2">{m.open_assistant_editor_after_creation()}</Input.Switch
       >
       <div class="flex-grow"></div>
 
@@ -75,10 +75,10 @@
         <Button
           on:click={() => {
             $currentStep = "start";
-          }}>Back</Button
+          }}>{m.back()}</Button
         >
       {:else}
-        <Button is={close}>Cancel</Button>
+        <Button is={close}>{m.cancel()}</Button>
       {/if}
       <Button
         variant="primary"

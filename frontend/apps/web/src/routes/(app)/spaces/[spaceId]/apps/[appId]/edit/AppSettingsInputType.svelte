@@ -6,6 +6,7 @@
   import { IconFileImage } from "@intric/icons/file-image";
   import { IconFileText } from "@intric/icons/file-text";
   import { IconMicrophone } from "@intric/icons/microphone";
+  import { m } from "$lib/paraglide/messages";
   import type { App } from "@intric/intric-js";
   import { createSelect } from "@melt-ui/svelte";
   import type { ComponentType } from "svelte";
@@ -16,11 +17,11 @@
   export let aria: AriaProps;
 
   const inputTypes: Record<InputType, { icon: ComponentType; label: string }> = {
-    "text-upload": { icon: IconFileText, label: "Upload text document" },
-    "text-field": { icon: IconEdit, label: "Enter text directly" },
-    "audio-upload": { icon: IconFileAudio, label: "Upload audio file" },
-    "audio-recorder": { icon: IconMicrophone, label: "Record microphone audio" },
-    "image-upload": { icon: IconFileImage, label: "Upload image file" }
+    "text-upload": { icon: IconFileText, label: m.upload_text_document() },
+    "text-field": { icon: IconEdit, label: m.enter_text_directly() },
+    "audio-upload": { icon: IconFileAudio, label: m.upload_audio_file() },
+    "audio-recorder": { icon: IconMicrophone, label: m.record_microphone_audio() },
+    "image-upload": { icon: IconFileImage, label: m.upload_image_file() }
   };
 
   const groupedTypes: Record<string, Array<InputType>> = {
@@ -68,7 +69,7 @@
       <span>{inputTypes[$selected.value].label}</span>
     </div>
   {:else}
-    Nothing selected
+    {m.nothing_selected()}
   {/if}
   <IconChevronDown />
 </button>

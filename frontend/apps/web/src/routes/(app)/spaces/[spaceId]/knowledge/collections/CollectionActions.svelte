@@ -9,6 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { derived } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     refreshCurrentSpace,
@@ -25,7 +26,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete collection.");
+      alert(m.could_not_delete_collection());
       console.error(e);
     }
     isProcessing = false;
@@ -79,7 +80,7 @@
       padding="icon-leading"
     >
       <IconEdit size="sm" />
-      Edit</Button
+      {m.edit()}</Button
     >
     {#if collection.permissions?.includes("delete")}
       <Button
@@ -89,7 +90,7 @@
         }}
         padding="icon-leading"
       >
-        <IconMove size="sm" />Move</Button
+        <IconMove size="sm" />{m.move()}</Button
       >
       <Button
         is={item}
@@ -99,7 +100,7 @@
         }}
         padding="icon-leading"
       >
-        <IconTrash size="sm" />Delete</Button
+        <IconTrash size="sm" />{m.delete()}</Button
       >
     {/if}
   </Dropdown.Menu>
@@ -109,16 +110,15 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete collection</Dialog.Title>
+    <Dialog.Title>{m.delete_collection()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{collection.name}</span
-      >?</Dialog.Description
+      >{m.confirm_delete_collection({ name: collection.name })}</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteResource}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>
@@ -126,7 +126,7 @@
 
 <Dialog.Root bind:isOpen={showMoveDialog}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Move collection</Dialog.Title>
+    <Dialog.Title>{m.move_collection()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
       <Select.Simple
@@ -135,20 +135,20 @@
         bind:value={moveDestination}
         fitViewport={true}
         class="border-default hover:bg-hover-dimmer rounded-t-md px-4 pt-4"
-        >Destination</Select.Simple
+        >{m.destination()}</Select.Simple
       >
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mx-4 mt-1.5 mb-4 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Hint:</span>
-        The assistants in this space will no longer have access to this collection.
+        <span class="font-bold">{m.hint()}:</span>
+        {m.move_collection_hint()}
       </p>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={moveCollection}
-        >{isProcessing ? "Moving..." : "Move collection"}</Button
+        >{isProcessing ? m.moving() : m.move_collection()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

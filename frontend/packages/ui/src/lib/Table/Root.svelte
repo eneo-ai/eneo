@@ -16,6 +16,7 @@
   import Group from "./Group.svelte";
   import EmptyState from "./EmptyState.svelte";
   import { cva } from "class-variance-authority";
+  import { getUIMessage } from "$lib/utils/messages.js";
 
   export let displayAs: "cards" | "list" = "list";
   const displayType = writable<"cards" | "list">(displayAs);
@@ -87,9 +88,9 @@
     {#if filter}
       <Input.Text
         bind:value={$filterValue}
-        label="Filter"
+        label={getUIMessage('ui_filter')}
         class="flex-grow"
-        placeholder={`Filter ${resourceName}s...`}
+        placeholder={getUIMessage('ui_filter_items', { resourceName })}
         hiddenLabel={true}
         inputClass="!px-4"
       ></Input.Text>
@@ -105,7 +106,7 @@
         padding="icon-leading"
       >
         <IconList />
-        List
+        {getUIMessage("list")}
       </Button>
       {#if showCardSwitch}
         <Button
@@ -117,7 +118,7 @@
           data-state={$displayType === "cards" ? "active" : ""}
         >
           <IconSquares />
-          Cards
+          {getUIMessage("cards")}
         </Button>
       {/if}
     </div>

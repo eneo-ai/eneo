@@ -15,6 +15,7 @@
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     classification: SecurityClassification;
@@ -81,7 +82,7 @@
       padding="icon-leading"
     >
       <IconArrowUpToLine size="sm" />
-      Move up
+      {m.move_up()}
     </Button>
     <Button
       is={item}
@@ -92,7 +93,7 @@
       padding="icon-leading"
     >
       <IconArrowDownToLine size="sm" />
-      Move down
+      {m.move_down()}
     </Button>
     <Button
       is={item}
@@ -102,7 +103,7 @@
       padding="icon-leading"
     >
       <IconEdit size="sm" />
-      Edit
+      {m.edit()}
     </Button>
     <Button
       is={item}
@@ -112,25 +113,23 @@
       }}
       padding="icon-leading"
     >
-      <IconTrash size="sm"></IconTrash>Delete</Button
+      <IconTrash size="sm"></IconTrash>{m.delete()}</Button
     >
   </Dropdown.Menu>
 </Dropdown.Root>
 
 <Dialog.Root openController={showDeleteDialog}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Create a new security classification</Dialog.Title>
+    <Dialog.Title>{m.delete_security_classification()}</Dialog.Title>
 
     <Dialog.Description>
-      Do you really want to delete the classification <span class="italic"
-        >{classification.name}</span
-      >? You will lose all associated information. This cannot be undone.
+      {m.confirm_delete_classification({ name: classification.name })}
     </Dialog.Description>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" onclick={remove} type="submit" disabled={remove.isLoading}
-        >{remove.isLoading ? "Deleting..." : "Delete classification"}</Button
+        >{remove.isLoading ? m.deleting() : m.delete_classification()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>
@@ -138,33 +137,33 @@
 
 <Dialog.Root openController={showEditDialog}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Edit security classification</Dialog.Title>
+    <Dialog.Title>{m.edit_security_classification()}</Dialog.Title>
 
     <Dialog.Section>
       <Input.Text
         bind:value={name}
-        label="Name"
-        description="A recognisable display name."
+        label={m.name()}
+        description={m.recognisable_display_name()}
         required
         class="border-default hover:bg-hover-dimmer border-b p-4"
       ></Input.Text>
 
       <Input.TextArea
-        label="Description"
+        label={m.description()}
         class="border-default hover:bg-hover-dimmer border-b p-4"
-        description="Describe when this classification should be chosen."
+        description={m.describe_when_classification_chosen()}
         bind:value={description}
       ></Input.TextArea>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button
         variant="primary"
         onclick={update}
         type="submit"
         disabled={update.isLoading || !hasChanges}
-        >{update.isLoading ? "Updating..." : "Update classification"}</Button
+        >{update.isLoading ? m.updating() : m.update_classification()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

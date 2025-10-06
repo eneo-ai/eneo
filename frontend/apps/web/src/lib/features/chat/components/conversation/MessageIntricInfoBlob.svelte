@@ -4,6 +4,7 @@
   import type { IntricInrefCustomComponentProps } from "@intric/ui/components/markdown";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   let { token }: IntricInrefCustomComponentProps = $props();
 
@@ -70,7 +71,7 @@
     >
       <img
         src={faviconService.getFavicon(webReference.url)}
-        alt="Favicon for {webReference.url}"
+        alt="{m.favicon_for()} {webReference.url}"
         class="!m-0 h-7 w-7 p-0.5"
       />
     </a>

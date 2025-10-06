@@ -19,6 +19,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import ModelClassificationDialog from "$lib/features/security-classifications/components/ModelClassificationDialog.svelte";
   import { IconLockClosed } from "@intric/icons/lock-closed";
+  import { m } from "$lib/paraglide/messages";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
@@ -39,7 +40,7 @@
       );
       invalidate("admin:models:load");
     } catch (e) {
-      alert(`Error changing status of ${model.name}`);
+      alert(`${m.error_changing_model_status()} ${model.name}`);
     }
   }
 
@@ -56,7 +57,7 @@
       );
       invalidate("admin:models:load");
     } catch (e) {
-      alert(`Error changing status of ${model.name}`);
+      alert(`${m.error_changing_model_status()} ${model.name}`);
     }
   }
 
@@ -78,7 +79,7 @@
         $showCardDialog = true;
       }}
     >
-      <IconInfo></IconInfo>Show model info
+      <IconInfo></IconInfo>{m.show_model_info()}
     </Button>
     <Button
       is={item}
@@ -87,14 +88,14 @@
         $showSecurityDialog = true;
       }}
     >
-      <IconLockClosed></IconLockClosed>Edit security classification
+      <IconLockClosed></IconLockClosed>{m.edit_security_classification()}
     </Button>
     {#if "is_org_default" in model}
       <Button is={item} on:click={togglePreferred} padding="icon-leading">
         {#if model.is_org_default}
-          <IconArrowDownToLine></IconArrowDownToLine>Unset default status
+          <IconArrowDownToLine></IconArrowDownToLine>{m.unset_default_status()}
         {:else}
-          <IconArrowUpToLine></IconArrowUpToLine>Set as default model
+          <IconArrowUpToLine></IconArrowUpToLine>{m.set_as_default_model()}
         {/if}
       </Button>
     {/if}
@@ -106,10 +107,10 @@
     >
       {#if model.is_org_enabled}
         <IconCancel></IconCancel>
-        <span> Disable model </span>
+        <span>{m.disable_model()}</span>
       {:else}
         <IconCheck></IconCheck>
-        Enable model
+        {m.enable_model()}
       {/if}
     </Button>
   </Dropdown.Menu>

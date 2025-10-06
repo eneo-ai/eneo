@@ -9,6 +9,7 @@
   import { Button, Dialog, Input, Tooltip } from "@intric/ui";
   import { getPromptManager } from "../PromptManager";
   import type { Prompt } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   export let prompt: Prompt;
   let description = prompt.description ?? "";
@@ -23,17 +24,17 @@
   <Dialog.Trigger asFragment let:trigger>
     <Tooltip
       text={!isPromptCreatedByUser
-        ? "Only the author of a prompt can change the description"
+        ? m.only_author_can_change_description()
         : undefined}
     >
       <Button variant="outlined" disabled={!isPromptCreatedByUser} is={trigger}
-        >{prompt.description ? "Edit" : "Add"} description</Button
+        >{prompt.description ? m.edit_description() : m.add_description()}</Button
       >
     </Tooltip>
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Edit prompt description</Dialog.Title>
+    <Dialog.Title>{m.edit_prompt_description()}</Dialog.Title>
 
     <Dialog.Section>
       <Input.TextArea
@@ -41,12 +42,12 @@
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         rows={3}
       >
-        Description</Input.TextArea
+        {m.description()}</Input.TextArea
       >
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button
         variant="primary"
         is={close}
@@ -55,7 +56,7 @@
             id: prompt.id,
             description
           });
-        }}>Save changes</Button
+        }}>{m.save_changes()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

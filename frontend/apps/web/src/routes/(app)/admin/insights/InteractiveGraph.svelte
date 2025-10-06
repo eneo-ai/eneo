@@ -10,6 +10,7 @@
   import { Chart, Button } from "@intric/ui";
   import type { AnalyticsData } from "@intric/intric-js";
   import { getConfig, prepareData } from "./prepareData";
+  import { m } from "$lib/paraglide/messages";
 
   export let data: AnalyticsData;
   export let timeframe: { start: string; end: string };
@@ -33,7 +34,7 @@
       }}
     >
       <IconSession />
-      New Conversations</Button
+      {m.new_conversations()}</Button
     >
     <Button
       displayActiveState
@@ -43,7 +44,7 @@
       }}
     >
       <IconQuestionMark />
-      New Questions</Button
+      {m.new_questions()}</Button
     >
     <div class="flex-grow"></div>
     <Button
@@ -51,21 +52,21 @@
       data-state={dataset === datasets.byDate ? "active" : "incative"}
       on:click={() => {
         dataset = datasets.byDate;
-      }}>By Date</Button
+      }}>{m.by_date()}</Button
     >
     <Button
       displayActiveState
       data-state={dataset === datasets.byWeekday ? "active" : "incative"}
       on:click={() => {
         dataset = datasets.byWeekday;
-      }}>By Weekday</Button
+      }}>{m.by_weekday()}</Button
     >
     <Button
       displayActiveState
       data-state={dataset === datasets.byHour ? "active" : "incative"}
       on:click={() => {
         dataset = datasets.byHour;
-      }}>By Hour</Button
+      }}>{m.by_hour()}</Button
     >
   </div>
   <div class="h-full w-full px-6 pt-2 pb-4">

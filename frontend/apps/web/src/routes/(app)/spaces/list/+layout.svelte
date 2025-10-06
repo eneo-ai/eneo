@@ -9,12 +9,13 @@
   import { Navigation } from "$lib/components/layout";
   import SpaceSelector from "$lib/features/spaces/components/SpaceSelector.svelte";
   import { IconSquares } from "@intric/icons/squares";
+  import { m } from "$lib/paraglide/messages";
 
   $: section = $page.url.pathname.split("/")[3] ?? "list";
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Spaces</title>
+  <title>Eneo.ai – {m.spaces()}</title>
 </svelte:head>
 
 <div data-dynamic-colour="blue" class="absolute inset-0 flex flex-grow justify-stretch">
@@ -25,7 +26,7 @@
         href="/spaces/list"
         isActive={section === "list"}
         icon={IconSquares}
-        label="Your spaces"
+        label={m.your_spaces()}
       />
     </Navigation.Menu>
   </div>

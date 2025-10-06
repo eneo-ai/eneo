@@ -7,6 +7,7 @@
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
   import { Dialog, Button, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const { updateUserInfo } = getAppContext();
 
@@ -31,7 +32,7 @@
       await updateUserInfo({ firstName, lastName, displayName });
       $isOpen = false;
     } catch (e) {
-      alert("Error updating user info.");
+      alert(m.error_updating_user_info());
     }
   }
 
@@ -40,17 +41,17 @@
 
 <Dialog.Root bind:isOpen>
   <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant="outlined">Change your name</Button>
+    <Button is={trigger} variant="outlined">{m.change_your_name()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content form width="medium">
-    <Dialog.Title>Change your name</Dialog.Title>
+    <Dialog.Title>{m.change_your_name()}</Dialog.Title>
 
     <Dialog.Section>
       <Input.Text
         bind:value={firstName}
-        label="First name"
-        description="The name you'd like to be addressed with"
+        label={m.first_name()}
+        description={m.first_name_description()}
         maxlength="200"
         type="text"
         required
@@ -59,7 +60,7 @@
 
       <Input.Text
         bind:value={lastName}
-        label="Last name"
+        label={m.last_name()}
         required
         maxlength="200"
         type="text"
@@ -68,8 +69,8 @@
 
       <Input.Text
         bind:value={displayName}
-        label="Full name"
-        description="Optional, will default to your first and last name if not specified"
+        label={m.full_name()}
+        description={m.full_name_description()}
         placeholder={displayNamePlaceholder}
         maxlength="200"
         type="text"
@@ -78,9 +79,9 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
 
-      <Button variant="primary" on:click={updateUser}>Save changes</Button>
+      <Button variant="primary" on:click={updateUser}>{m.save_changes()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

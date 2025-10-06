@@ -8,6 +8,7 @@
     state: { attachmentRules },
     queueValidUploads
   } = getAttachmentManager();
+  import { m } from "$lib/paraglide/messages";
 
   let fileInput: HTMLInputElement;
 
@@ -29,11 +30,11 @@
   class="border-default hover:bg-hover-stronger flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border"
 >
   <IconUpload />
-  <span>Upload attachment</span>
+  <span>{m.upload_attachment()}</span>
   <input
     type="file"
     bind:this={fileInput}
-    aria-label="Select a file to send to the service"
+    aria-label={m.select_file_to_send()}
     id="fileInput"
     {multiple}
     accept={$attachmentRules.acceptString}

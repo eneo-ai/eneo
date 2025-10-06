@@ -104,8 +104,12 @@ jobs:
 
       - name: Inject backend version
         run: |
-          # Extract version from metadata action output
-          VERSION=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
+          # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
+          if [[ "${{ github.ref_type }}" == "branch" ]]; then
+            VERSION=$(echo "${{ steps.meta-backend.outputs.tags }}" | sed -n '2p' | cut -d':' -f2)
+          else
+            VERSION=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
+          fi
           ./scripts/inject-backend-version.sh "$VERSION"
 
       - name: Build and push backend Docker image
@@ -142,8 +146,12 @@ jobs:
 
       - name: Synchronize frontend with backend
         run: |
-          # Use the first backend tag (main version) for synchronization
-          BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
+          # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
+          if [[ "${{ github.ref_type }}" == "branch" ]]; then
+            BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | sed -n '2p' | cut -d':' -f2)
+          else
+            BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
+          fi
           ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
 
       - name: Build and push frontend Docker image

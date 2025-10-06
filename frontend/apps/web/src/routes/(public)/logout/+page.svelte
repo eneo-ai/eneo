@@ -1,12 +1,13 @@
 <script lang="ts">
   import { Button } from "@intric/ui";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
   const messages: Record<string, { label: string; colour: string }> = {
-    logout: { label: "Successfully logged out", colour: "green" },
-    expired: { label: "Your session has expired", colour: "amber" }
+    logout: { label: m.successfully_logged_out(), colour: "green" },
+    expired: { label: m.session_expired(), colour: "amber" }
   };
 
   let message = messages.logout;
@@ -16,14 +17,14 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Logout</title>
+  <title>Eneo.ai – {m.logout()}</title>
 </svelte:head>
 
 <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
   <div class="box w-[400px] justify-center">
     <h1 class="flex justify-center">
       <EneoWordMark class="text-brand-intric h-16 w-20"></EneoWordMark>
-      <span class="hidden">Intric</span>
+      <span class="hidden">{m.intric()}</span>
     </h1>
 
     <div aria-live="polite">
@@ -31,7 +32,7 @@
     </div>
 
     <div class="shadowed border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href="/login" variant="primary">Login again</Button>
+      <Button href="/login" variant="primary">{m.login_again()}</Button>
     </div>
   </div>
 </div>

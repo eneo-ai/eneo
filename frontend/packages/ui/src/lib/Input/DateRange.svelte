@@ -5,6 +5,7 @@
   import { Tooltip } from "$lib/Tooltip/index.js";
   import { IconCalendar } from "@intric/icons/calendar";
   import { cva } from "class-variance-authority";
+  import { getUIMessage } from "$lib/utils/messages.js";
 
   const now = new Date();
   const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
@@ -47,7 +48,7 @@
     defaultValue: value,
     weekdayFormat: "short",
     locale: "en-GB",
-    onValueChange: ({ next }) => {
+    onValueChange: ({ next }: { next: any }) => {
       value = next;
       return next;
     },
@@ -100,7 +101,7 @@
 
 <div class="flex items-center justify-between gap-4 {cls}">
   <span {...$label} use:label class=""
-    >{#if $$slots.default}<slot />{:else}Select timeframe{/if}</span
+    >{#if $$slots.default}<slot />{:else}{getUIMessage('ui_select_timeframe')}{/if}</span
   >
   <div
     {...$field}
@@ -122,7 +123,7 @@
         </div>
       {/each}
     </div>
-    <Tooltip text="Open calendar" asFragment let:trigger={tooltipTrigger} placement="top">
+    <Tooltip text={getUIMessage('ui_open_calendar')} asFragment let:trigger={tooltipTrigger} placement="top">
       <Button is={[$trigger, ...tooltipTrigger]} variant="primary" padding="icon">
         <IconCalendar />
       </Button>

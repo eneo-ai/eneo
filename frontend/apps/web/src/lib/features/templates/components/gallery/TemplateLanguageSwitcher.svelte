@@ -2,11 +2,12 @@
   import { Button, Dropdown } from "@intric/ui";
   import SwedishFlag from "./SwedishFlag.svelte";
   import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
+  import { m } from "$lib/paraglide/messages";
 
   const availableLanguages = {
     sv: {
       flag: SwedishFlag,
-      label: "Swedish"
+      label: m.swedish()
     }
   } as const;
 

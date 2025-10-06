@@ -8,6 +8,7 @@
   import type { Role } from "@intric/intric-js";
   import { Select } from "@intric/ui";
   import { writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   // Array of all currently selected roles
   export let value: Role[];
@@ -44,10 +45,10 @@
     customStore={roleSelectStore}
     class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
   >
-    <Select.Label>Roles & Permissions</Select.Label>
-    <Select.Trigger placeholder="Select..."></Select.Trigger>
+    <Select.Label>{m.roles_permissions()}</Select.Label>
+    <Select.Trigger placeholder={m.select_ellipsis()}></Select.Trigger>
     <Select.Options>
-      <Select.OptionGroup label="Default Roles">
+      <Select.OptionGroup label={m.default_roles()}>
         {#each defaultRoles as role (role.id)}
           <Select.Item value={role} label={role.name}>
             <div class="flex w-full items-center justify-between py-1">
@@ -59,7 +60,7 @@
         {/each}
       </Select.OptionGroup>
       {#if customRoles.length > 0}
-        <Select.OptionGroup label="Custom roles">
+        <Select.OptionGroup label={m.custom_roles()}>
           {#each customRoles as role (role.id)}
             <Select.Item value={role} label={role.name}></Select.Item>
           {/each}

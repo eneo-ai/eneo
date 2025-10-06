@@ -27,21 +27,21 @@
   
   function updateKwArgs() {
     const args = { ...kwArgs };
-    
+
     // Update reasoning effort
     if (customReasoningEffort) {
       args.reasoning_effort = customReasoningEffort;
     } else {
-      delete args.reasoning_effort;
+      args.reasoning_effort = null;
     }
-    
+
     // Update verbosity
     if (customVerbosity) {
       args.verbosity = customVerbosity;
     } else {
-      delete args.verbosity;
+      args.verbosity = null;
     }
-    
+
     kwArgs = args;
   }
   

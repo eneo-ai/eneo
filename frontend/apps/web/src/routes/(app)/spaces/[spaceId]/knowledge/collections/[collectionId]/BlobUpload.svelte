@@ -3,6 +3,7 @@
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { type Group, type InfoBlob } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     limits,
@@ -33,7 +34,7 @@
     if (duplicateFiles.length > 0) {
       if (
         !confirm(
-          `The following files already exist on the server:\n- ${duplicateFiles.join("\n- ")}\nProceeding will replace them with the newly uploaded file(s).`
+          m.duplicate_files_warning({ fileList: duplicateFiles.join("\\n- ") })
         )
       ) {
         return;
@@ -64,14 +65,17 @@
   }}
 >
   <Dialog.Trigger asFragment let:trigger>
-    <Button {disabled} variant="primary" is={trigger}>Upload files</Button>
+    <Button {disabled} variant="primary" is={trigger}>{m.upload_files()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content width="medium">
-    <Dialog.Title>Upload files</Dialog.Title>
+    <Dialog.Title>{m.upload_files()}</Dialog.Title>
     <Dialog.Description hidden></Dialog.Description>
 
-    <Input.Files bind:files {acceptedMimeTypes}></Input.Files>
+    <Input.Files 
+      bind:files 
+      {acceptedMimeTypes}
+    ></Input.Files>
 
     <Dialog.Controls let:close>
       {#if files.length > 0}
@@ -79,14 +83,13 @@
           on:click={() => {
             files = [];
           }}
-          variant="destructive">Clear list</Button
+          variant="destructive">{m.clear_list()}</Button
         >
         <div class="flex-grow"></div>
       {/if}
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" on:click={uploadBlobs} disabled={isUploading || files.length < 1}>
-        {#if isUploading}Uploading...{:else}
-          Upload files{/if}</Button
+        {#if isUploading}{m.uploading()}{:else}{m.upload_files()}{/if}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

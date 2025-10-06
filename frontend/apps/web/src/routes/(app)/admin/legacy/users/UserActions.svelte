@@ -12,6 +12,7 @@
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { getIntric } from "$lib/core/Intric";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   export let user: User;
@@ -36,7 +37,7 @@
   <Dialog.Trigger asFragment let:trigger>
     <Button
       is={trigger}
-      label="Delete user"
+      label={m.delete_user()}
       variant="destructive"
       padding="icon"
       disabled={user.username === currentUser.username}
@@ -46,14 +47,14 @@
   </Dialog.Trigger>
 
   <Dialog.Content width="small">
-    <Dialog.Title>Delete user</Dialog.Title>
+    <Dialog.Title>{m.delete_user()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{user.username}</span>?</Dialog.Description
+      >{m.do_you_really_want_to_delete()} <span class="italic">{user.username}</span>?</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
-      <Button is={close} variant="destructive" on:click={deleteUser}>Delete</Button>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button is={close} variant="destructive" on:click={deleteUser}>{m.delete()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

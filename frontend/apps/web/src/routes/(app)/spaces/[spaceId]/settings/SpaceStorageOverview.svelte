@@ -9,6 +9,7 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -35,17 +36,17 @@
   // For the colours we're currently using names of css variables
   const [items, total] = prepareData([
     {
-      label: "Collections",
+      label: m.collections(),
       items: $currentSpace.knowledge.groups,
       colour: "chart-green"
     },
     {
-      label: "Websites",
+      label: m.websites(),
       items: $currentSpace.knowledge.websites,
       colour: "accent-default"
     },
     {
-      label: "Integrations",
+      label: m.integrations(),
       items: $currentSpace.knowledge.integrationKnowledge,
       colour: "chart-intric"
     }
@@ -53,8 +54,8 @@
 </script>
 
 <Settings.Row
-  title="Storage"
-  description="See how much storage this space's knowledge is taking up."
+  title={m.storage()}
+  description={m.storage_description()}
 >
   <div class="flex flex-col gap-4">
     <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full lg:mt-2">
@@ -69,7 +70,7 @@
     </div>
     <div class="flex flex-wrap gap-x-6">
       <div>
-        <span class="font-medium">Total</span>: {formatBytes(total)}
+        <span class="font-medium">{m.total()}</span>: {formatBytes(total)}
       </div>
       {#each items as item (item)}
         <div class="flex items-center gap-2">

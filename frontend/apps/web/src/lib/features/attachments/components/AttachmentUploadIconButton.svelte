@@ -8,7 +8,8 @@
   import { IconAttachment } from "@intric/icons/attachment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
 
-  export let label = "Select documents to attach";
+  export let label = m.select_documents_to_attach();
+  import { m } from "$lib/paraglide/messages";
   let selectedFiles: FileList;
 
   const {
@@ -41,6 +42,6 @@
   <label
     for="fileInput"
     class="bg-secondary text-primary hover:bg-hover-stronger flex h-9 cursor-pointer items-center justify-center gap-1 rounded-lg pr-2 pl-1"
-    ><IconAttachment class="text-primary" />Attach files</label
+    ><IconAttachment class="text-primary" />{m.attach_files()}</label
   >
 </div>

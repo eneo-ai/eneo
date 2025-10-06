@@ -11,6 +11,7 @@
   import UserGroupEditor from "./UserGroupEditor.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
+  import { m } from "$lib/paraglide/messages";
 
   export let userGroup: UserGroup;
 
@@ -25,7 +26,7 @@
       invalidate("admin:user-groups:load");
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete user group.");
+      alert(m.could_not_delete_user_group());
       console.error(e);
     }
     isDeleting = false;
@@ -38,22 +39,22 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} label="Delete user group" variant="destructive" padding="icon">
+    <Button is={trigger} label={m.delete_user_group()} variant="destructive" padding="icon">
       <IconTrash />
     </Button>
   </Dialog.Trigger>
 
   <Dialog.Content width="small">
-    <Dialog.Title>Delete user group</Dialog.Title>
+    <Dialog.Title>{m.delete_user_group()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{userGroup.name}</span
+      >{m.do_you_really_want_to_delete()} <span class="italic">{userGroup.name}</span
       >?</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button disabled={isDeleting} variant="destructive" on:click={deleteResource}
-        >{isDeleting ? "Deleting..." : "Delete"}</Button
+        >{isDeleting ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

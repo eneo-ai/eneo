@@ -12,6 +12,7 @@
   import { Tooltip } from "@intric/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { Snippet } from "svelte";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     children?: Snippet;
@@ -105,7 +106,7 @@
   >
     {#if showScrollToBottom}
       <div transition:fade={{ duration: 150 }} class="absolute -top-12">
-        <Tooltip text="Scroll to bottom">
+        <Tooltip text={m.scroll_to_bottom()}>
           <button
             class="border-stronger bg-primary ring-default hover:bg-secondary flex gap-1 rounded-full border px-1.5 py-1.5 shadow-lg ring-offset-0 hover:ring-2"
             onclick={scrollToBottom}><IconArrowDownToLine></IconArrowDownToLine></button
@@ -118,7 +119,7 @@
   </div>
 </div>
 {#if isDragging}
-  <AttachmentDropArea bind:isDragging label="Drop files here to attach them to your conversation" />
+  <AttachmentDropArea bind:isDragging label={m.drop_files_here_conversation()} />
 {/if}
 
 <style></style>

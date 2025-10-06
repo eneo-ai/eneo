@@ -7,6 +7,7 @@
 <script context="module" lang="ts">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { Label } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
   export function getLabels(model: CompletionModel | EmbeddingModel | TranscriptionModel) {
     const labels: {
       label: string | number;
@@ -16,31 +17,31 @@
 
     if ("reasoning" in model && model.reasoning) {
       labels.push({
-        tooltip: "This model can use reasoning to refine its answers",
-        label: "Reasoning",
+        tooltip: m.model_tooltip_reasoning(),
+        label: m.model_label_reasoning(),
         color: "amethyst"
       });
     }
 
     if ("vision" in model && model.vision) {
       labels.push({
-        tooltip: "This model can process image files",
-        label: "Vision",
+        tooltip: m.model_tooltip_vision(),
+        label: m.model_label_vision(),
         color: "moss"
       });
     }
 
     if (model.open_source) {
       labels.push({
-        tooltip: "This model is open source",
-        label: "Open Source",
+        tooltip: m.model_tooltip_open_source(),
+        label: m.model_label_open_source(),
         color: "green"
       });
     }
 
     if (model.hosting !== null) {
       labels.push({
-        tooltip: "Region this model is hosted in",
+        tooltip: m.model_tooltip_hosting(),
         label: model.hosting.toUpperCase(),
         color: model.hosting === "usa" ? "orange" : "green"
       });

@@ -6,8 +6,9 @@
   import dayjs from "dayjs";
   import AudioRecorder from "./AudioRecorder.svelte";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
+  import { m } from "$lib/paraglide/messages";
 
-  export let description = "Record audio on this device";
+  export let description = m.record_audio_device();
 
   const {
     queueValidUploads,
@@ -19,7 +20,7 @@
 
   async function saveAudioFile() {
     if (!audioFile) {
-      alert("Recording not found");
+      alert(m.recording_not_found());
       return;
     }
     const suggestedName = audioFile.name + (audioFile.type.includes("webm") ? ".webm" : ".mp4");
@@ -60,28 +61,28 @@
         variant="destructive"
         padding="icon-leading"
         on:click={() => {
-          if (confirm("Do you really want to discard this recording?")) {
+          if (confirm(m.confirm_discard_recording())) {
             audioFile = undefined;
             audioURL = undefined;
           }
         }}
       >
         <IconTrash />
-        Discard</Button
+        {m.discard()}</Button
       >
-      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />Save as file</Button>
+      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button>
       <Button
         variant="primary"
         on:click={() => {
           if (!audioFile) {
-            alert("Recording not found");
+            alert(m.recording_not_found());
             return;
           }
           const errors = queueValidUploads([audioFile]);
           if (errors) {
             alert(errors);
           }
-        }}>Use this recording</Button
+        }}>{m.use_this_recording()}</Button
       >
     </div>
   {/if}
@@ -89,7 +90,7 @@
   <AudioRecorder
     onRecordingDone={({ blob, mimeType }) => {
       const extension = mimeType.replaceAll("audio/", "").split(";")[0] ?? "";
-      const fileName = `Recording ${dayjs().format("YYYY-MM-DD HH:mm:ss")}.${extension}`;
+      const fileName = `${m.recording_filename_template({ datetime: dayjs().format("YYYY-MM-DD HH:mm:ss") })}.${extension}`;
       audioFile = new File([blob], fileName, { type: mimeType });
       audioURL = URL.createObjectURL(blob);
     }}

@@ -15,6 +15,7 @@
   import { IconSparkles } from "@intric/icons/sparkles";
   import { Button, Input, Markdown } from "@intric/ui";
   import { fly } from "svelte/transition";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   const chat = getChatService();
@@ -31,14 +32,14 @@
     class="bg-primary border-default sticky top-0 z-[11] mx-auto mb-4 w-full max-w-[74rem] rounded-xl rounded-t-none border border-t-0 py-2 pr-2.5 pl-4 shadow-lg"
   >
     <Input.DateRange bind:value={insights.dateRange}
-      >Choose a timeframe to generate insights for</Input.DateRange
+      >{m.choose_timeframe_for_insights()}</Input.DateRange
     >
   </div>
   <Settings.Page>
-    <Settings.Group title="Statistics">
+    <Settings.Group title={m.statistics()}>
       <Settings.Row
-        title="Total conversations"
-        description="Number of times a new conversation has been started with this assistant in the selected timeframe."
+        title={m.total_conversations()}
+        description={m.number_of_times_new_conversation_started()}
       >
         <div class="border-default flex h-14 items-center justify-end border-b px-4 py-2">
           {#await insights.statistics}
@@ -52,8 +53,8 @@
       </Settings.Row>
 
       <Settings.Row
-        title="Total questions"
-        description="Amount of questions this assistant has received in the selected timeframe."
+        title={m.total_questions()}
+        description={m.amount_of_questions_assistant_received()}
       >
         <div class="border-default flex h-14 items-center justify-end border-b px-4 py-2">
           {#await insights?.statistics}
@@ -66,16 +67,16 @@
         </div>
       </Settings.Row>
     </Settings.Group>
-    <Settings.Group title="Explore">
+    <Settings.Group title={m.explore()}>
       <Settings.Row
-        title="Explore conversations"
-        description="View all conversations users had with this assistant in the selected timeframe."
+        title={m.explore_conversations()}
+        description={m.view_all_conversations_users_had()}
       >
         <InsightsExploreConversationsDialog></InsightsExploreConversationsDialog>
       </Settings.Row>
       <Settings.Row
-        title="Generate insights"
-        description="Ask a question about how your users have used this assistant in the selected timeframe."
+        title={m.generate_insights()}
+        description={m.ask_question_about_how_users_used_assistant()}
       >
         <IconSparkles
           data-dynamic-colour="moss"
@@ -115,9 +116,9 @@
             type="text"
             bind:value={question}
             class="flex-grow appearance-none p-2 text-lg focus:outline-none"
-            placeholder="Ask a question..."
+            placeholder={m.ask_a_question()}
           />
-          <Button padding="icon" aria-label="Send the question"
+          <Button padding="icon" aria-label={m.send_the_question()}
             ><IconSendArrow></IconSendArrow></Button
           >
         </form>

@@ -9,6 +9,7 @@
   import type { UserIntegration } from "@intric/intric-js";
   import UserConnectedSplitButton from "$lib/features/integrations/components/UserConnectedSplitButton.svelte";
   import { getAppContext } from "$lib/core/AppContext";
+  import { m } from "$lib/paraglide/messages";
 
   const { data }: PageProps = $props();
 
@@ -47,20 +48,20 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Account – My integrations</title>
+  <title>Eneo.ai – Account – {m.my_integrations()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="My integrations"></Page.Title>
+    <Page.Title title={m.my_integrations()}></Page.Title>
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="Configure your integrations">
+      <Settings.Group title={m.configure_your_integrations()}>
         <Settings.Row
-          title="Available integrations"
+          title={m.available_integrations()}
           fullWidth
-          description="Connect your intric account to one of these providers to import external knowledge into intric."
+          description={m.connect_account_description()}
         >
           {#if integrations.length > 0}
             <IntegrationGrid>
@@ -76,7 +77,7 @@
                           auth.connect(integration);
                         }}
                         variant="primary"
-                        >{auth.isConnecting(integration) ? "Connecting..." : "Connect"}</Button
+                        >{auth.isConnecting(integration) ? m.connecting() : m.connect()}</Button
                       >
                     {/if}
                   {/snippet}
@@ -88,10 +89,10 @@
               class="border-default text-muted flex h-48 w-full items-center justify-center rounded-lg border"
             >
               <div class="text-center">
-                Your organisation does currently not have any integrations enabled.
+                {m.no_integrations_enabled()}
                 {#if user.hasPermission("admin")}
-                  <br />You can enable integrations in the
-                  <a href="/admin/integrations" class="underline">integrations admin menu</a>.
+                  <br />{m.enable_integrations_admin()}
+                  <a href="/admin/integrations" class="underline">{m.integrations_admin_menu()}</a>.
                 {/if}
               </div>
             </div>

@@ -7,6 +7,7 @@
   import { derived } from "svelte/store";
   import type { GroupSparse } from "@intric/intric-js";
   import { IconCollections } from "@intric/icons/collections";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -36,7 +37,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
         return createRender(Table.PrimaryCell, {
@@ -48,7 +49,7 @@
     }),
 
     table.column({
-      header: "Files",
+      header: m.files_header(),
       accessor: (item) => item,
       cell: (item) =>
         createRender(CollectionFileLabels, {
@@ -75,11 +76,15 @@
   }
 </script>
 
-<Table.Root {viewModel} resourceName="collection">
+<Table.Root 
+  {viewModel} 
+  resourceName="collection"
+  emptyMessage={m.there_are_currently_no_collections_configured()}
+>
   {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
     {#each $embeddingModels as embeddingModel (embeddingModel.id)}
       <Table.Group
-        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + " (disabled)"}
+        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + ` (${m.disabled()})`}
         filterFn={createModelFilter(embeddingModel)}
       ></Table.Group>
     {/each}

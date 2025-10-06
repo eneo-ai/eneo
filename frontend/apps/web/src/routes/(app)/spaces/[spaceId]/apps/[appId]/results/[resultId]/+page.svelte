@@ -20,6 +20,7 @@
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { getIntric } from "$lib/core/Intric.js";
   import { browser } from "$app/environment";
+  import { m } from "$lib/paraglide/messages";
   dayjs.extend(utc);
 
   const { data } = $props();
@@ -38,7 +39,7 @@
 
   async function downloadAsText(text?: string | null) {
     if (!text) {
-      alert("Not output to save!");
+      alert(m.not_output_to_save());
       return;
     }
     const file = new Blob([text], { type: "application/octet-stream;charset=utf-8" });
@@ -78,7 +79,7 @@
       navigator.clipboard.writeText(text);
       setTimeout(() => {}, 2000);
     } else {
-      alert("This run did not generate any copyable output.");
+      alert(m.no_copyable_output());
     }
   }
 
@@ -117,7 +118,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – {data.app
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {data.app
       .name}</title
   >
 </svelte:head>
@@ -128,7 +129,7 @@
     <Markdown source={result.output}></Markdown>
   {:else}
     <div class="flex items-center justify-center gap-2">
-      <span class="text-secondary"> This run did not generate any output.</span>
+      <span class="text-secondary">{m.no_output_generated()}</span>
     </div>
   {/if}
 {/snippet}
@@ -137,17 +138,17 @@
   <div
     class="hidden-in-print border-default bg-primary absolute -right-[5.5rem] z-10 flex flex-col gap-1 rounded-lg border p-1 shadow"
   >
-    <Tooltip text="Print / Save {type} as PDF" placement="left">
+    <Tooltip text={m.print_save_type_pdf({ type })} placement="left">
       <Button on:click={print} padding="icon">
         <IconPrint size="md" />
       </Button>
     </Tooltip>
 
-    <Tooltip text="Download {type} as raw text" placement="left">
+    <Tooltip text={m.download_type_raw_text({ type })} placement="left">
       <Button on:click={() => downloadAsText(text)} padding="icon"><IconDownload /></Button>
     </Tooltip>
 
-    <Tooltip text="Copy {type}" placement="left">
+    <Tooltip text={m.copy_type({ type })} placement="left">
       <Button on:click={() => copyText(text)} padding="icon"><IconCopy /></Button>
     </Tooltip>
   </div>
@@ -157,7 +158,7 @@
   <Page.Header>
     <Page.Title
       parent={{
-        title: "Back",
+        title: m.back(),
         href: `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`
       }}
       title={resultTitle}
@@ -165,12 +166,12 @@
 
     <Page.Flex>
       <Button href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}/edit" class="!line-clamp-1"
-        >Edit</Button
+        >{m.edit()}</Button
       >
       <Button
         variant="primary"
         class="!line-clamp-1"
-        href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}">New run</Button
+        href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}">{m.new_run()}</Button
       >
     </Page.Flex>
   </Page.Header>
@@ -185,8 +186,8 @@
             {#if transcribedFiles.length > 0}
               <div class="hidden-in-print -mt-2 h-20">
                 <Tabbar>
-                  <TabTrigger tab="results">Results</TabTrigger>
-                  <TabTrigger tab="transcription">Transcription</TabTrigger>
+                  <TabTrigger tab="results">{m.results()}</TabTrigger>
+                  <TabTrigger tab="transcription">{m.transcription()}</TabTrigger>
                 </Tabbar>
               </div>
               <Tab id="results">
@@ -210,7 +211,7 @@
                             </div>
                             <Button href={url}>
                               <IconDownload></IconDownload>
-                              Download</Button
+                              {m.download()}</Button
                             >
                           </div>
                           <audio
@@ -233,26 +234,26 @@
             {:else if browser && result.status === "failed" && result.input.files.length > 0}
               <div class="flex flex-grow flex-col items-center justify-center gap-2">
                 <span class="py-2">
-                  This app run failed. Here is a list of the files you uploaded:
+                  {m.app_run_failed_files_list()}
                 </span>
 
                 {#each result.input.files as file (file.id)}
                   {#await intric.files.url({ id: file.id, download: true }) then fileUrl}
                     <Button href={fileUrl} class="outlined no-underline"
-                      ><IconDownload></IconDownload>Download "{file.name}"</Button
+                      ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
                     >
                   {/await}
                 {/each}
               </div>
             {:else}
               <div class="flex flex-grow flex-col items-center justify-center gap-2">
-                <span class="py-2"> This app run did not generate any outputs. </span>
+                <span class="py-2">{m.no_outputs_generated()}</span>
               </div>
             {/if}
           {:else}
             <div class="flex h-[50vh] flex-col items-center justify-center gap-2">
               <IconLoadingSpinner class="animate-spin" />
-              <span class="text-secondary">Your result is being generated.</span>
+              <span class="text-secondary">{m.result_being_generated()}</span>
             </div>
           {/if}
         </div>
@@ -260,13 +261,13 @@
       <div class="sticky top-8 flex min-w-[26ch] flex-col gap-4">
         <div class="flex flex-col gap-3 pt-2">
           <div class="border-dimmer flex items-center justify-between border-b">
-            <span>Started:</span><span class="font-mono text-sm"
+            <span>{m.started()}</span><span class="font-mono text-sm"
               >{dayjs(result.created_at).format("YYYY-MM-DD HH:mm")}</span
             >
           </div>
           {#if isRunComplete}
             <div class="border-dimmer flex items-center justify-between border-b">
-              <span>Finished:</span><span class="font-mono text-sm"
+              <span>{m.finished()}</span><span class="font-mono text-sm"
                 >{dayjs(result.finished_at).format("YYYY-MM-DD HH:mm")}</span
               >
             </div>

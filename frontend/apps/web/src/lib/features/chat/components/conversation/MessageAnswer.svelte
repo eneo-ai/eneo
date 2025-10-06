@@ -8,6 +8,7 @@
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
@@ -26,7 +27,7 @@
 </script>
 
 <div class="relative pt-4 text-lg">
-  <span class="sr-only">Answer:</span>
+  <span class="sr-only">{m.answer()}</span>
   {#if showAnswerLabel}
     {#each message.tools?.assistants ?? [] as mention (mention.id)}
       <div
@@ -35,7 +36,7 @@
       >
         <IconSpeechBubble class="stroke-2"></IconSpeechBubble>
         <span>
-          {formatEmojiTitle(mention.handle ?? "Unknown assistant")}
+          {formatEmojiTitle(mention.handle ?? m.unknown_assistant())}
         </span>
       </div>
     {/each}

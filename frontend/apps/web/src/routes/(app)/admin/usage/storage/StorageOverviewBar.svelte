@@ -9,6 +9,7 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import type { StorageUsageSummary } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     storageStats: StorageUsageSummary;
@@ -21,17 +22,17 @@
   // For the colours we're currently just using names of css variables.
   const items = [
     {
-      label: "Public spaces",
+      label: m.public_spaces(),
       size: storageStats.shared_used,
       colour: "chart-green"
     },
     {
-      label: "Personal spaces",
+      label: m.personal_spaces(),
       size: storageStats.personal_used,
       colour: "accent-default"
     },
     {
-      label: "Free",
+      label: m.free(),
       // There is an edge case where more space is used up than available,
       // in which case we want to show 0 instead of a negative number
       size: Math.max(totalAvailable - storageStats.total_used, 0),
@@ -41,8 +42,8 @@
 </script>
 
 <Settings.Row
-  title="Storage summary"
-  description="See how much storage this organisation's spaces are taking up."
+  title={m.storage_summary()}
+  description={m.storage_summary_description()}
 >
   <div class="flex flex-col gap-4">
     <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full lg:mt-2">
@@ -57,7 +58,7 @@
     </div>
     <div class="flex flex-wrap gap-x-6">
       <div>
-        <span class="font-medium">Available</span>: {formatBytes(totalAvailable)}
+        <span class="font-medium">{m.available()}</span>: {formatBytes(totalAvailable)}
       </div>
       {#each items as item (item)}
         <div class="flex items-center gap-2">

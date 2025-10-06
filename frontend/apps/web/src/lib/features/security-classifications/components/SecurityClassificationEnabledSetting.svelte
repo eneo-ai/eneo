@@ -11,6 +11,7 @@
   import { IntricError } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const security = getSecurityClassificationService();
 
@@ -45,21 +46,20 @@
 </script>
 
 <Settings.Row
-  title="Security classification"
-  description="Enable security classifications across your organisation's spaces."
+  title={m.security_classification()}
+  description={m.enable_security_description()}
 >
   <div class="border-default flex h-14 border-b py-2">
-    <Input.RadioSwitch bind:value={isEnabled} sideEffect={onValueChange}></Input.RadioSwitch>
+    <Input.RadioSwitch bind:value={isEnabled} sideEffect={onValueChange} labelTrue={m.enabled()} labelFalse={m.disabled()}></Input.RadioSwitch>
   </div>
 </Settings.Row>
 
 <Dialog.Root openController={showEnableDialog}>
   <Dialog.Content>
-    <Dialog.Title>Enable security classifications</Dialog.Title>
+    <Dialog.Title>{m.enable_security_classifications()}</Dialog.Title>
 
     <Dialog.Description>
-      Do you want to enable security classifications for your organisation? This will limit the
-      availablity of AI models based on their respective security setting.
+      {m.enable_security_classifications_dialog_description()}
     </Dialog.Description>
 
     <Dialog.Controls>
@@ -67,20 +67,19 @@
         onclick={() => {
           isEnabled = security.isSecurityEnabled;
           $showEnableDialog = false;
-        }}>Cancel</Button
+        }}>{m.cancel()}</Button
       >
-      <Button variant="primary" onclick={enable} disabled={enable.isLoading}>Enable</Button>
+      <Button variant="primary" onclick={enable} disabled={enable.isLoading}>{m.enable()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
 
 <Dialog.Root openController={showDisableDialog}>
   <Dialog.Content>
-    <Dialog.Title>Disable security classifications</Dialog.Title>
+    <Dialog.Title>{m.disable_security_classifications()}</Dialog.Title>
 
     <Dialog.Description>
-      Do you want to disable security classifications for your organisation? This will remove model
-      restrictions from your spaces.
+      {m.disable_security_classifications_dialog_description()}
     </Dialog.Description>
 
     <Dialog.Controls>
@@ -88,9 +87,9 @@
         onclick={() => {
           isEnabled = security.isSecurityEnabled;
           $showDisableDialog = false;
-        }}>Cancel</Button
+        }}>{m.cancel()}</Button
       >
-      <Button variant="destructive" onclick={disable} disabled={disable.isLoading}>Disable</Button>
+      <Button variant="destructive" onclick={disable} disabled={disable.isLoading}>{m.disable()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

@@ -3,6 +3,7 @@
   import { setAdminUserCtx } from "./ctx";
   import InviteUser from "./editor/InviteUser.svelte";
   import UserTable from "./UserTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -14,12 +15,12 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Users</title>
+  <title>Eneo.ai – {m.admin()} – {m.users()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Users"></Page.Title>
+    <Page.Title title={m.users()}></Page.Title>
     <InviteUser></InviteUser>
   </Page.Header>
   <Page.Main>

@@ -10,32 +10,32 @@
   import SecurityClassificationEnabledSetting from "$lib/features/security-classifications/components/SecurityClassificationEnabledSetting.svelte";
   import SecurityClassificationListSetting from "$lib/features/security-classifications/components/SecurityClassificationListSetting.svelte";
   import { initSecurityClassificationService } from "$lib/features/security-classifications/SecurityClassificationsService.svelte.js";
+  import { m } from "$lib/paraglide/messages";
 
   const { data } = $props();
 
   initSecurityClassificationService(data.intric, data.securityClassifications);
   // Using a JS string so we can have a newline in this
-  const description =
-    "Select a security classification for all of you organisation's models.\nModels will be available in spaces with the same or lower classification.";
+  const description = m.classify_models_description();
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Security classifications</title>
+  <title>Eneo.ai – {m.admin()} – {m.security_classifications()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Security"></Page.Title>
+    <Page.Title title={m.security()}></Page.Title>
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="General">
+      <Settings.Group title={m.general()}>
         <SecurityClassificationEnabledSetting></SecurityClassificationEnabledSetting>
       </Settings.Group>
-      <Settings.Group title="Configuration">
+      <Settings.Group title={m.configuration()}>
         <SecurityClassificationListSetting></SecurityClassificationListSetting>
 
-        <Settings.Row title="Classify models" {description} fullWidth>
+        <Settings.Row title={m.classify_models()} {description} fullWidth>
           <div class="grid gap-4">
             <MultipleModelsClassificationDialog
               models={data.models.completionModels}

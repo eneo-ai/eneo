@@ -8,6 +8,7 @@
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { getChatService } from "../../ChatService.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace },
@@ -49,7 +50,7 @@
     {#if $currentSpace.default_assistant.completion_model}
       {$currentSpace.default_assistant.completion_model.nickname}
     {:else}
-      Select a model...
+      {m.select_a_model()}
     {/if}
   </span>
   <IconChevronUpDown class="text-secondary group-hover:text-primary min-w-6" />
@@ -63,7 +64,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
   >
-    Choose a completion model
+    {m.choose_a_completion_model()}
   </div>
   {#each sortModels($currentSpace.completion_models) as model (model.id)}
     <div

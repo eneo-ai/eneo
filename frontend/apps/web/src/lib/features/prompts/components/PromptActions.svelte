@@ -11,6 +11,7 @@
   import { getPromptManager } from "../PromptManager";
   import type { PromptSparse } from "@intric/intric-js";
   import { IconInfo } from "@intric/icons/info";
+  import { m } from "$lib/paraglide/messages";
 
   export let prompt: PromptSparse;
   let showDeleteDialog: Dialog.OpenState;
@@ -34,7 +35,7 @@
   on:click={() => loadPreview({ id: prompt.id })}
   class="absolute inset-0"
   data-prompt-previewed={isPromptPreviewed}
-  aria-label="Open this prompt in the preview panel."
+  aria-label={m.open_this_prompt_in_preview_panel()}
 ></button>
 
 <div class="flex w-full items-center justify-end gap-2">
@@ -58,27 +59,27 @@
           $showDeleteDialog = true;
         }}
         padding="icon-leading"
-        label="Delete prompt"
+        label={m.delete_prompt()}
         class="relative"
       >
-        <IconTrash size="sm" />Delete
+        <IconTrash size="sm" />{m.delete()}
       </Button>
     </Dropdown.Menu>
   </Dropdown.Root>
 
   <Dialog.Root alert bind:isOpen={showDeleteDialog}>
     <Dialog.Content>
-      <Dialog.Title>Delete prompt</Dialog.Title>
-      <Dialog.Description>Do you really want to delete this version?</Dialog.Description>
+      <Dialog.Title>{m.delete_prompt()}</Dialog.Title>
+      <Dialog.Description>{m.do_you_really_want_to_delete_this_version()}</Dialog.Description>
 
       <Dialog.Controls let:close>
-        <Button is={close}>Cancel</Button>
+        <Button is={close}>{m.cancel()}</Button>
         <Button
           is={close}
           variant="destructive"
           on:click={() => {
             deletePrompt(prompt);
-          }}>{isProcessing ? "Deleting..." : "Delete"}</Button
+          }}>{isProcessing ? m.deleting() : m.delete()}</Button
         >
       </Dialog.Controls>
     </Dialog.Content>

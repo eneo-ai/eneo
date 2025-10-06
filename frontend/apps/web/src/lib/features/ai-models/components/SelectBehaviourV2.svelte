@@ -11,11 +11,20 @@
   import { IconCheck } from "@intric/icons/check";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { Input, Tooltip } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
+
   export let selectedModel: any = null; // CompletionModel from the parent
-  export let aria: AriaProps = { "aria-label": "Select model behaviour" };
+  export let aria: AriaProps = { "aria-label": m.select_model_behaviour() };
+
+  const behaviourLabels: Record<ModelBehaviour, string> = {
+    creative: m.creative(),
+    default: m.default_behavior(),
+    deterministic: m.deterministic(),
+    custom: m.custom()
+  };
 
   // Check if model has custom parameters that should override behavior presets
   // For reasoning models, disable behavior controls as they have model-specific parameters
@@ -36,13 +45,23 @@
     },
     portal: null,
     onSelectedChange: ({ next }) => {
-      const args = next?.value ? getKwargs(next.value) : getKwargs("default");
-      // If the user selects "custom", we want to keep the current kwargs settings if they already are custom
-      // However, if they are not, then we initialise with a default custom setting
-      const customArgs =
-        getBehaviour(kwArgs) === "custom" ? kwArgs : { temperature: 1, top_p: null };
-      // keep in mind: setting the kwargs will trigger the `watchKwArgs` function
-      kwArgs = args ? args : customArgs;
+      const behaviorKwargs = next?.value ? getKwargs(next.value) : getKwargs("default");
+
+      if (behaviorKwargs) {
+        // Preserve all existing fields while only updating the behavior-relevant ones
+        kwArgs = {
+          ...kwArgs,
+          ...behaviorKwargs
+        };
+      } else {
+        // For custom behavior, preserve current kwargs if already custom, otherwise set defaults
+        const customArgs = getBehaviour(kwArgs) === "custom" ? kwArgs : {
+          ...kwArgs,
+          temperature: 1,
+          top_p: null
+        };
+        kwArgs = customArgs;
+      }
       return next;
     }
   });
@@ -54,7 +73,11 @@
   function maybeSetKwArgsCustom() {
     const args = { temperature: customTemp, top_p: null };
     if (getBehaviour(args) === "custom") {
-      kwArgs = args;
+      // Preserve all existing fields while only updating temperature and top_p
+      kwArgs = {
+        ...kwArgs,
+        ...args
+      };
     }
   }
 
@@ -82,7 +105,12 @@
     // Only reset when transitioning from enabled to disabled
     if (finalIsDisabled && !previousDisabledState) {
       $selected = { value: "default" };
-      kwArgs = getKwargs("default") || { temperature: null, top_p: null };
+      const defaultKwargs = getKwargs("default") || { temperature: null, top_p: null };
+      // Preserve all existing fields while only updating the behavior-relevant ones
+      kwArgs = {
+        ...kwArgs,
+        ...defaultKwargs
+      };
     }
     previousDisabledState = finalIsDisabled;
   }
@@ -97,7 +125,7 @@
   class:text-secondary={finalIsDisabled}
   class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
 >
-  <span class="capitalize">{$selected?.value ?? "No behaviour found"}</span>
+  <span class="capitalize">{$selected?.value ? behaviourLabels[$selected?.value] : m.no_behaviour_found()}</span>
   <IconChevronDown />
 </button>
 
@@ -109,7 +137,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 font-mono text-sm"
   >
-    Select a model behaviour
+    {m.select_model_behaviour()}
   </div>
   {#each behaviourList as behavior (behavior)}
     <div
@@ -118,7 +146,7 @@
       use:option
     >
       <span class="capitalize">
-        {behavior}
+        {behaviourLabels[behavior]}
       </span>
       <div class="check {$isSelected(behavior) ? 'block' : 'hidden'}">
         <IconCheck class="text-positive-default" />
@@ -132,9 +160,9 @@
     class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
   >
     <div class="flex items-center gap-2">
-      <p class="w-24" aria-label="Temperature setting" id="temperature_label">Temperature</p>
+      <p class="w-24" aria-label="Temperature setting" id="temperature_label">{m.temperature()}</p>
       <Tooltip
-        text="Randomness: A value between 0 and 2 (Default: 1)\nHigher values will create more creative responses.\nLower values will be more deterministic."
+        text={m.temperature_tooltip()}
       >
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
@@ -167,7 +195,7 @@
   <p
     class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
   >
-    <span class="font-bold">Warning:&nbsp;</span>Temperature settings not available for this model.
+    <span class="font-bold">{m.warning()}:&nbsp;</span>{m.temperature_not_available()}
   </p>
 {/if}
 

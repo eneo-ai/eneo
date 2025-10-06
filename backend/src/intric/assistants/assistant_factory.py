@@ -104,7 +104,7 @@ class AssistantFactory:
 
         user = UserSparse.model_validate(assistant_in_db.user)
         completion_model_kwargs = ModelKwargs.model_validate(
-            assistant_in_db.completion_model_kwargs
+            assistant_in_db.completion_model_kwargs or {}
         )
 
         source_template = (
@@ -177,7 +177,7 @@ class AssistantFactory:
         ]
 
         completion_model_kwargs = ModelKwargs.model_validate(
-            assistant_in_db.completion_model_kwargs
+            assistant_in_db.completion_model_kwargs or {}
         )
         completion_model = next(
             (cm for cm in completion_models if cm.id == assistant_in_db.completion_model_id),

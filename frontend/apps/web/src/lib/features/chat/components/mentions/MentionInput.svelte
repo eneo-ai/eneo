@@ -13,6 +13,7 @@
   }: {
     onpaste?: (event: ClipboardEvent) => void | null | undefined;
   } = $props();
+  import { m } from "$lib/paraglide/messages";
 </script>
 
 <div class="relative flex-grow">
@@ -24,7 +25,7 @@
       {...rest}
     ></div>
     {#if $question.length === 0}
-      <div class="text-muted pointer-events-none absolute top-2">Ask a question...</div>
+      <div class="text-muted pointer-events-none absolute top-2">{m.ask_a_question()}</div>
     {/if}
   </div>
   <div

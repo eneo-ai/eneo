@@ -10,6 +10,7 @@
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { IntricError } from "@intric/intric-js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   let name = $state("");
   let description = $state("");
@@ -31,33 +32,33 @@
 
 <Dialog.Root openController={showDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button variant="primary" is={trigger}>Create new</Button>
+    <Button variant="primary" is={trigger}>{m.create_new()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Create a new security classification</Dialog.Title>
+    <Dialog.Title>{m.create_new_security_classification()}</Dialog.Title>
 
     <Dialog.Section>
       <Input.Text
         bind:value={name}
-        label="Name"
-        description="A recognisable display name."
+        label={m.name()}
+        description={m.recognisable_display_name()}
         required
         class="border-default hover:bg-hover-dimmer border-b p-4"
       ></Input.Text>
 
       <Input.TextArea
-        label="Description"
+        label={m.description()}
         class="border-default hover:bg-hover-dimmer border-b p-4"
-        description="Describe when this classification should be chosen."
+        description={m.describe_when_classification_chosen()}
         bind:value={description}
       ></Input.TextArea>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" onclick={create} type="submit" disabled={create.isLoading}
-        >{create.isLoading ? "Creating..." : "Create classification"}</Button
+        >{create.isLoading ? m.creating() : m.create_classification()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>
