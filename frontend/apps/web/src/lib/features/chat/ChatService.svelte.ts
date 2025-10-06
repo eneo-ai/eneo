@@ -34,6 +34,19 @@ export class ChatService {
   // Track tokens for the message being composed
   newPromptTokens = $state<number>(0);
 
+  // Separate tracking for text and file tokens to prevent race conditions
+  #textTokensApprox = $state<number>(0);
+  #fileTokensCache = $state<number>(0);
+  #lastCalculatedText = "";
+  #lastCalculatedAttachmentIds = new Set<string>();
+
+  // Track current state to avoid closure issues
+  #currentText = "";
+  #currentAttachmentIdString = "";
+
+  // Learn token density from API responses for better approximations
+  #learnedCharsPerToken = 4.0; // Default approximation, will be refined by API responses
+
   // Debounce timer for token calculations
   #tokenCalculationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -367,27 +380,42 @@ export class ChatService {
   async calculateNewPromptTokens(text: string, attachments: { id: string; size?: number }[]) {
     if (!this.#chatPartner?.id) {
       this.newPromptTokens = 0;
+      this.#textTokensApprox = 0;
+      this.#fileTokensCache = 0;
       return;
     }
 
+    // Store current text to avoid closure issues
+    this.#currentText = text;
+
     // --- IMMEDIATE UPDATE FOR RESPONSIVE UI ---
-    // Provide instant approximation for typed text (1 token ≈ 4 characters)
-    const textTokensApproximation = Math.ceil(text.length / 4);
+    // Use learned token density for better approximations
+    this.#textTokensApprox = Math.ceil(text.length / this.#learnedCharsPerToken);
 
-    // Store the last known file token count to preserve it while typing
-    const currentFileTokens = this.newPromptTokens > textTokensApproximation
-      ? this.newPromptTokens - Math.ceil(text.length / 4)
-      : 0;
+    // Create a stable string representation of attachment IDs for comparison
+    const attachmentIds = attachments.map(a => a.id).filter(Boolean);
+    const attachmentIdString = attachmentIds.sort().join(',');
 
-    // Immediately update with text approximation
-    if (text.length > 0 || attachments.length === 0) {
-      // If we have text or no attachments, update immediately
-      this.newPromptTokens = textTokensApproximation + (attachments.length > 0 ? currentFileTokens : 0);
+    // Check if attachments have actually changed based on ID string
+    const attachmentsChanged = attachmentIdString !== this.#currentAttachmentIdString;
+
+    // If attachments changed, reset file token cache with rough estimate
+    if (attachmentsChanged) {
+      this.#fileTokensCache = attachments.length * 1000; // Rough estimate until API returns
+      this.#currentAttachmentIdString = attachmentIdString;
+      this.#lastCalculatedAttachmentIds = new Set(attachmentIds);
     }
 
-    // If no input at all, reset immediately
+    // Immediately update with text approximation + cached file tokens
+    this.newPromptTokens = this.#textTokensApprox + this.#fileTokensCache;
+
+    // If no input at all, reset everything
     if (text.trim().length === 0 && attachments.length === 0) {
       this.newPromptTokens = 0;
+      this.#textTokensApprox = 0;
+      this.#fileTokensCache = 0;
+      this.#lastCalculatedText = "";
+      this.#lastCalculatedAttachmentIds.clear();
       return;
     }
 
@@ -396,50 +424,104 @@ export class ChatService {
       clearTimeout(this.#newPromptTokenTimer);
     }
 
+    // Store the request identifiers to check for staleness later
+    const requestText = text;
+    const requestAttachmentIdString = attachmentIdString;
+
     this.#newPromptTokenTimer = setTimeout(async () => {
       try {
-        const fileIds = attachments.filter(att => att.id).map(att => att.id);
+        // Check if this request is stale by comparing with CURRENT state (not closure)
+        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
+          return; // Silently skip stale requests
+        }
 
-        console.log('[ChatService] Making token-estimate API call:', {
-          partnerId: this.#chatPartner.id,
-          fileIds,
-          textLength: text.length
-        });
+        // Use the request attachment IDs that were captured at the time of the request
+        const fileIds = requestAttachmentIdString.split(',').filter(Boolean);
 
         // Use the token-estimate endpoint
+        // Truncate text to avoid URL length limits (keep under 6000 chars for safety)
+        const MAX_TEXT_LENGTH = 6000;
+        const truncatedText = text.length > MAX_TEXT_LENGTH
+          ? text.substring(0, MAX_TEXT_LENGTH)
+          : text;
+
         const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
           method: "get",
           params: {
             path: { id: this.#chatPartner.id },
             query: {
               file_ids: fileIds.join(','),
-              text: text
+              text: truncatedText
             }
           }
         });
 
+        // Learn token density from API response and scale if needed
+        let adjustedBreakdown = response?.breakdown;
         if (response?.breakdown) {
-          const breakdown = response.breakdown;
+          const apiTextTokens = response.breakdown.text || 0;
+          const apiTextLength = text.length > MAX_TEXT_LENGTH ? MAX_TEXT_LENGTH : text.length;
+
+          // Update learned ratio from API response (with smoothing)
+          if (apiTextTokens > 0 && apiTextLength > 0) {
+            const newCharsPerToken = apiTextLength / apiTextTokens;
+            // Smooth the learning: 80% old value, 20% new observation
+            this.#learnedCharsPerToken = this.#learnedCharsPerToken * 0.8 + newCharsPerToken * 0.2;
+          }
+
+          // If text was truncated, scale up the token estimate proportionally
+          if (text.length > MAX_TEXT_LENGTH) {
+            const scaleFactor = text.length / MAX_TEXT_LENGTH;
+            adjustedBreakdown = {
+              ...response.breakdown,
+              text: Math.ceil(apiTextTokens * scaleFactor)
+            };
+          }
+        }
+
+        // Double-check staleness after API returns using CURRENT state
+        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
+          return; // Silently skip stale responses
+        }
+
+        if (adjustedBreakdown) {
+          const breakdown = adjustedBreakdown;
+
+          // Update cached file tokens ONLY if we're still working with the same attachments
+          this.#fileTokensCache = breakdown.files || 0;
+
           // Calculate total tokens from breakdown - this is the accurate count
           const totalNewTokens = (breakdown.prompt || 0) + (breakdown.text || 0) + (breakdown.files || 0);
+
+          // Update the total with accurate API result
           this.newPromptTokens = totalNewTokens;
 
-          console.log(
-            `[ChatService] ✅ Accurate token count: ${totalNewTokens.toLocaleString()} ` +
-            `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${breakdown.prompt || 0})`
-          );
-        } else {
-          // Fallback if API response is malformed
-          const fileTokens = attachments.length * 1000;
-          this.newPromptTokens = textTokensApproximation + fileTokens;
+          // Store the text that was calculated
+          this.#lastCalculatedText = requestText;
         }
       } catch (error) {
         console.error('[ChatService] Token calculation failed, keeping approximation:', error);
-        // Keep the immediate approximation on error
-        const fileTokens = attachments.length * 1000;
-        this.newPromptTokens = textTokensApproximation + fileTokens;
+        // Keep the current approximation on error
       }
     }, 300); // 300ms debounce for API accuracy
+  }
+
+  // Method to cleanly reset all token tracking
+  resetNewPromptTokens() {
+    this.newPromptTokens = 0;
+    this.#textTokensApprox = 0;
+    this.#fileTokensCache = 0;
+    this.#lastCalculatedText = "";
+    this.#lastCalculatedAttachmentIds.clear();
+    this.#currentText = "";
+    this.#currentAttachmentIdString = "";
+    // Keep learned ratio - it's useful across messages
+
+    // Cancel any pending API calls
+    if (this.#newPromptTokenTimer) {
+      clearTimeout(this.#newPromptTokenTimer);
+      this.#newPromptTokenTimer = null;
+    }
   }
 }
 
