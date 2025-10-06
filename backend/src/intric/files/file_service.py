@@ -3,11 +3,10 @@ from uuid import UUID
 
 from fastapi import UploadFile
 
-from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType, FilePublic
+from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
 from intric.main.exceptions import NotFoundException, UnauthorizedException
-from intric.tokens.token_utils import count_tokens
 from intric.users.user import UserInDB
 
 
