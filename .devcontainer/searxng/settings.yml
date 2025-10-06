@@ -22,7 +22,7 @@ server:
   #port: 8080
   #bind_address: "0.0.0.0"
   # Secret key for sessions (replace with random key in production)
-  secret_key: "c6ff3c7fadbd12ec96c76cb873a4ed3238b6af3af57857f7c85308a660f4b8c3"
+  secret_key: "searxng-secret-key"
   # Base URL
   #base_url: http://localhost:8080/
   limiter: false
