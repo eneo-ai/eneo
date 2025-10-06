@@ -55,8 +55,14 @@
 
 		try {
 			const storedPreference = window.localStorage.getItem(TOKEN_USAGE_STORAGE_KEY);
-			if (storedPreference !== null) {
-				tokenUsageEnabled = storedPreference === 'true';
+			// Always default to false (OFF) - user must explicitly enable it
+			// Only restore if it was explicitly set to true by user
+			if (storedPreference === 'true') {
+				tokenUsageEnabled = true;
+			} else {
+				// Ensure it's false and clear any stale values
+				tokenUsageEnabled = false;
+				window.localStorage.setItem(TOKEN_USAGE_STORAGE_KEY, 'false');
 			}
 		} catch (error) {
 			console.warn('Unable to read token usage preference', error);
@@ -100,7 +106,8 @@
 		scrollToBottom();
 		resetMentionInput();
 		clearUploads();
-		chat.newPromptTokens = 0;
+		// Reset all token tracking when message is sent
+		chat.resetNewPromptTokens();
 	}
 
 	$effect(() => {
