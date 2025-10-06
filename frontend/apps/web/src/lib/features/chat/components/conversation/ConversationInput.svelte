@@ -17,7 +17,7 @@
 	import { getAppContext } from '$lib/core/AppContext';
 	import { m } from '$lib/paraglide/messages';
 	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
-	import { IconUsage } from '@intric/icons/usage';
+	import { ChartPie } from 'lucide-svelte';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
@@ -153,12 +153,11 @@
 		// If no tokens at all, keep it grey
 		if (totalTokens === 0) return 'text-tertiary';
 
-		// Match the exact bg colors from TokenUsageBar but as text colors
-		// Using fill-current to inherit the exact background color values
-		if (percentage >= 95) return 'text-[#d2272a]'; // Exact negative-default color
-		if (percentage >= 85) return 'text-[var(--change-indicator)]';
-		if (percentage >= 70) return 'text-[#906405]'; // Exact warning-default color
-		return 'text-[#15601b]'; // Exact positive-default color
+		// Match the semantic colors from TokenUsageBar
+		if (percentage >= 95) return 'text-negative-stronger';
+		if (percentage >= 85) return 'text-warning-stronger';
+		if (percentage >= 70) return 'text-warning-stronger';
+		return 'text-positive-stronger';
 	});
 </script>
 
@@ -167,7 +166,7 @@
 >
 	<!-- Icon always absolutely positioned to prevent jumping -->
 	{#if modelInfo && tokenLimit > 0}
-		<div class="absolute top-2 right-3 z-10">
+		<div class="absolute top-2 right-2.5 z-10">
 			<Tooltip text={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()} placement="top">
 				<button
 					type="button"
@@ -179,7 +178,7 @@
 					aria-label={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()}
 					aria-pressed={tokenUsageEnabled ? "true" : "false"}
 				>
-					<IconUsage class="h-4 w-4 transition-colors duration-200" />
+					<ChartPie class="h-4.5 w-4.5 transition-colors duration-200" />
 				</button>
 			</Tooltip>
 		</div>
@@ -190,7 +189,7 @@
 		<div
 			transition:slide={{ duration: 350, easing: quintOut, axis: 'y' }}
 		>
-			<div class="px-2 pt-1 pr-12 pb-2">
+			<div class="px-2 pt-1 pr-11 pb-2">
 				<TokenUsageBar tokens={newTokens} limit={tokenLimit} {historyTokens} {isApproximate} />
 			</div>
 		</div>
