@@ -526,6 +526,37 @@ class AssistantService:
                     f"Embedding Model {item.embedding_model.name} is not in space."
                 )
 
+    async def _rephrase_for_web_search(
+        self,
+        question: str,
+        completion_model: "CompletionModel",
+    ) -> str:
+        """Rephrase the user's question to make it better suited for web search."""
+        system_prompt = (
+            "Your job is to summarize the user's request into a query that will be sent to a search engine. "
+            "Ensure to get the whole content in a concise manner."
+        )
+
+        response = await self.completion_service.get_response(
+            model=completion_model,
+            text_input=question,
+            files=[],
+            prompt=system_prompt,
+            prompt_files=[],
+            info_blob_chunks=[],
+            session=None,
+            stream=False,
+            extended_logging=False,
+            model_kwargs=None,
+        )
+
+        # Extract the rephrased query from the response
+        if isinstance(response, str):
+            return response.strip()
+        else:
+            # If response is a CompletionModelResponse object
+            return response.completion.text.strip()
+
     async def ask(
         self,
         question: str,
@@ -593,7 +624,12 @@ class AssistantService:
             _question.question = clean_intric_tag(_question.question)
 
         if use_web_search and version == 2:
-            web_search_results = await self.web_search.search(search_query=question)
+            # Rephrase the question to make it better suited for web search
+            search_query = await self._rephrase_for_web_search(
+                question=question,
+                completion_model=assistant_to_ask.completion_model,
+            )
+            web_search_results = await self.web_search.search(search_query=search_query)
         else:
             web_search_results = []
 
