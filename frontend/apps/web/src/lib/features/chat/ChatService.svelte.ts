@@ -47,6 +47,9 @@ export class ChatService {
   // Learn token density from API responses for better approximations
   #learnedCharsPerToken = 4.0; // Default approximation, will be refined by API responses
 
+  // Cache token counts per file ID to avoid resets when adding/removing files
+  #fileTokenMap = new Map<string, number>();
+
   // Debounce timer for token calculations
   #tokenCalculationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -399,9 +402,31 @@ export class ChatService {
     // Check if attachments have actually changed based on ID string
     const attachmentsChanged = attachmentIdString !== this.#currentAttachmentIdString;
 
-    // If attachments changed, reset file token cache with rough estimate
+    // If attachments changed, recalculate file tokens from cached values
     if (attachmentsChanged) {
-      this.#fileTokensCache = attachments.length * 1000; // Rough estimate until API returns
+      // Calculate total file tokens from cached per-file values
+      let totalFileTokens = 0;
+      for (const fileId of attachmentIds) {
+        if (this.#fileTokenMap.has(fileId)) {
+          // Use cached value for files we've seen before
+          totalFileTokens += this.#fileTokenMap.get(fileId)!;
+        } else {
+          // Rough estimate for new files (will be updated by API)
+          const roughEstimate = 1000;
+          this.#fileTokenMap.set(fileId, roughEstimate);
+          totalFileTokens += roughEstimate;
+        }
+      }
+
+      // Remove cached tokens for files that are no longer present
+      const currentFileIdSet = new Set(attachmentIds);
+      for (const cachedFileId of this.#fileTokenMap.keys()) {
+        if (!currentFileIdSet.has(cachedFileId)) {
+          this.#fileTokenMap.delete(cachedFileId);
+        }
+      }
+
+      this.#fileTokensCache = totalFileTokens;
       this.#currentAttachmentIdString = attachmentIdString;
       this.#lastCalculatedAttachmentIds = new Set(attachmentIds);
     }
@@ -414,6 +439,7 @@ export class ChatService {
       this.newPromptTokens = 0;
       this.#textTokensApprox = 0;
       this.#fileTokensCache = 0;
+      this.#fileTokenMap.clear();
       this.#lastCalculatedText = "";
       this.#lastCalculatedAttachmentIds.clear();
       return;
@@ -487,7 +513,14 @@ export class ChatService {
         if (adjustedBreakdown) {
           const breakdown = adjustedBreakdown;
 
-          // Update cached file tokens ONLY if we're still working with the same attachments
+          // Update per-file token cache with accurate values from API
+          if (response?.breakdown?.file_details) {
+            for (const [fileId, tokenCount] of Object.entries(response.breakdown.file_details)) {
+              this.#fileTokenMap.set(fileId, tokenCount as number);
+            }
+          }
+
+          // Update cached file tokens total
           this.#fileTokensCache = breakdown.files || 0;
 
           // Calculate total tokens from breakdown - this is the accurate count
@@ -511,6 +544,7 @@ export class ChatService {
     this.newPromptTokens = 0;
     this.#textTokensApprox = 0;
     this.#fileTokensCache = 0;
+    this.#fileTokenMap.clear();
     this.#lastCalculatedText = "";
     this.#lastCalculatedAttachmentIds.clear();
     this.#currentText = "";
