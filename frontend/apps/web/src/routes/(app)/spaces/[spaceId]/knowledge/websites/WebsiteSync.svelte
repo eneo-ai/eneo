@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { WebsiteSparse } from "@intric/intric-js";
   import { Label } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let updateInterval: WebsiteSparse["update_interval"];
   /* TODO colours */
@@ -8,15 +9,15 @@
     {
       weekly: {
         color: "green",
-        label: "Weekly"
+        label: m.weekly()
       },
       never: {
         color: "gray",
-        label: "Never"
+        label: m.never()
       },
       error: {
         color: "orange",
-        label: "Not found"
+        label: m.not_found()
       }
     };
 </script>
