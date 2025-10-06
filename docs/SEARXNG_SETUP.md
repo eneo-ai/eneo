@@ -24,36 +24,96 @@ This guide covers setting up SearxNG as a web search engine for Eneo. SearxNG pr
 - Basic understanding of Docker networking
 - Access to modify your Eneo configuration
 
-### Step 1: Create SearxNG Configuration
+### Step 1: Add SearxNG to Docker Compose
 
-Create a directory structure for SearxNG configuration:
+Add SearxNG service to your existing Docker Compose configuration using inline config (recommended for environments without file access like Komodo):
 
-```bash
-# Create SearxNG configuration directory
-mkdir -p /opt/eneo/searxng
-cd /opt/eneo/searxng
+```yaml
+configs:
+  searxng_settings:
+    content: |
+      use_default_settings: true
+
+      general:
+        debug: false
+        instance_name: "Eneo SearXNG"
+        safe_search: 1
+
+      search:
+        formats:
+          - html
+          - json
+        max_results: 20
+        default_lang: "en"
+        auto_lang: true
+
+      server:
+        secret_key: "REPLACE_WITH_RANDOM_SECRET"  # Generate with: openssl rand -hex 32
+        limiter: false
+
+      ui:
+        static_use_hash: false
+        default_theme: simple
+        simple_style: auto
+        center_alignment: false
+        results_on_new_tab: false
+        hotkeys: default
+
+      redis:
+        url: redis://redis:6379/0
+
+      outgoing:
+        request_timeout: 3.0
+        max_request_timeout: 10.0
+        pool_connections: 100
+        pool_maxsize: 20
+        enable_http2: true
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8085:8080"
+    networks:
+      - eneo
+    configs:
+      - source: searxng_settings
+        target: /etc/searxng/settings.yml
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8085/  # Update for production
+    depends_on:
+      - redis
 ```
 
-### Step 2: Create Settings Configuration
-
-Create the main SearxNG settings file (see [.devcontainer/searxng/settings.yml](.devcontainer/searxng/settings.yml) for a reference example).
-
-### Step 3: Generate Secure Secret Key
-
-Generate a secure secret key for production:
+**Important:** Replace `REPLACE_WITH_RANDOM_SECRET` with a secure random key:
 
 ```bash
-# Generate and replace the secret key
-SECRET_KEY=$(openssl rand -hex 32)
-sed -i "s/REPLACE_WITH_RANDOM_SECRET/$SECRET_KEY/g" /opt/eneo/searxng/settings.yml
-echo "Generated secret key: $SECRET_KEY"
+openssl rand -hex 32
 ```
 
-### Step 4: Add SearxNG to Docker Compose
+### Step 2: Alternative - Local Volume Mount (Development)
 
-Add SearxNG service to your existing Docker Compose configuration (see [.devcontainer/docker-compose.yml](.devcontainer/docker-compose.yml) for a reference example).
+For local development with file access, you can mount a local configuration file instead:
 
-### Step 5: Configure Eneo Backend
+```yaml
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8085:8080"
+    networks:
+      - eneo
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8085/
+    depends_on:
+      - redis
+```
+
+See [.devcontainer/docker-compose.yml](.devcontainer/docker-compose.yml) for a working development example.
+
+### Step 3: Configure Eneo Backend
 
 Update your Eneo backend configuration to use SearxNG by setting the internal searxng address:
 
