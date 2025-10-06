@@ -31,14 +31,14 @@
   // Color logic for the NEW prompt segment based on total usage
   const newSegmentColorClass = $derived(
     isOverflow
-      ? 'bg-negative-default'
+      ? 'bg-negative-stronger'
       : totalPercentage < 70
-        ? 'bg-positive-default'
+        ? 'bg-positive-stronger'
         : totalPercentage < 85
-          ? 'bg-warning-default'
+          ? 'bg-warning-stronger'
         : totalPercentage < 95
-            ? 'bg-[var(--change-indicator)]'
-            : 'bg-negative-default'
+            ? 'bg-warning-stronger'
+            : 'bg-negative-stronger'
   );
 
   // History segment always has a neutral color
