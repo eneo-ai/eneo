@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Tooltip, Button } from "@intric/ui";
   import { AlertTriangle } from "lucide-svelte";
+  import { m } from "$lib/paraglide/messages";
 
   interface Props {
     tokens: number; // Tokens for the NEW prompt (text + files)
@@ -57,7 +58,7 @@
     <!-- History segment (left) -->
     {#if historyTokens > 0}
       <Tooltip
-        text={`${formattedHistoryTokens} tokens from conversation history`}
+        text={m.tokens_from_conversation_history({ tokens: formattedHistoryTokens })}
         placement="top"
         let:trigger
         asFragment
@@ -74,7 +75,7 @@
     <!-- New prompt segment (right) -->
     {#if tokens > 0}
       <Tooltip
-        text={`${formattedNewTokens} tokens from new message & files`}
+        text={m.tokens_from_new_message({ tokens: formattedNewTokens })}
         placement="top"
         let:trigger
         asFragment
@@ -108,7 +109,7 @@
       {#if isApproximate && !isOverflow}
         <span class="text-tertiary">≈</span>
       {/if}
-      <span>{formattedGrandTotal} / {formattedLimit} tokens</span>
+      <span>{formattedGrandTotal} / {formattedLimit} {m.tokens().toLowerCase()}</span>
 
       <!-- Legend indicators for segments -->
       {#if historyTokens > 0 || tokens > 0}
@@ -116,13 +117,13 @@
           {#if historyTokens > 0}
             <div class="flex items-center gap-1">
               <div class="w-2 h-2 rounded-full {historySegmentColorClass}"></div>
-              <span class="text-[10px] text-tertiary">history</span>
+              <span class="text-[10px] text-tertiary">{m.history_label()}</span>
             </div>
           {/if}
           {#if tokens > 0}
             <div class="flex items-center gap-1">
               <div class="w-2 h-2 rounded-full {newSegmentColorClass}"></div>
-              <span class="text-[10px] text-tertiary">new</span>
+              <span class="text-[10px] text-tertiary">{m.new_label()}</span>
             </div>
           {/if}
         </div>
@@ -132,7 +133,7 @@
     <div class="flex items-center gap-3">
       {#if isOverflow}
         <Tooltip
-          text="You've exceeded the context limit. The AI may not see the oldest messages or file content."
+          text={m.context_limit_exceeded()}
           placement="top"
           let:trigger
           asFragment
@@ -143,7 +144,7 @@
             class="flex cursor-help items-center gap-1 rounded-md p-1 transition-colors duration-200 hover:bg-negative-dimmer/60 -m-1"
           >
             <AlertTriangle class="h-4 w-4 flex-shrink-0 text-negative-stronger" />
-            <span class="font-medium text-negative-stronger">({formattedOverflow} over)</span>
+            <span class="font-medium text-negative-stronger">({formattedOverflow} {m.over()})</span>
           </Button>
         </Tooltip>
       {/if}
