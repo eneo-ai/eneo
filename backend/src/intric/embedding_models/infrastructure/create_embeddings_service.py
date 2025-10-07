@@ -16,6 +16,7 @@ from intric.settings.credential_resolver import CredentialResolver
 
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
 
 
@@ -24,6 +25,7 @@ class CreateEmbeddingsService:
         self,
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
+        encryption_service: Optional["EncryptionService"] = None,
     ):
         self._adapters = {
             ModelFamily.OPEN_AI: OpenAIEmbeddingAdapter,
@@ -31,6 +33,7 @@ class CreateEmbeddingsService:
         }
         self.tenant = tenant
         self.config = config or SETTINGS
+        self.encryption_service = encryption_service
 
     def _get_adapter(self, model: "EmbeddingModel") -> EmbeddingModelAdapter:
         # Create credential resolver with tenant context if tenant is available
@@ -38,12 +41,15 @@ class CreateEmbeddingsService:
         if self.tenant:
             credential_resolver = CredentialResolver(
                 tenant=self.tenant,
-                settings=self.config
+                settings=self.config,
+                encryption_service=self.encryption_service,
             )
 
         # Check for LiteLLM model first
         if model.litellm_model_name:
-            return LiteLLMEmbeddingAdapter(model, credential_resolver=credential_resolver)
+            return LiteLLMEmbeddingAdapter(
+                model, credential_resolver=credential_resolver
+            )
 
         # Fall back to existing family-based selection
         adapter_class = self._adapters.get(model.family.value)

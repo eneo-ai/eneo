@@ -1,10 +1,11 @@
 import json
 import logging
 import os
+import sys
 from typing import Optional
 
 from intric.definitions import ROOT_DIR
-from pydantic import computed_field
+from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MANIFEST_LOCATION = f"{ROOT_DIR}/.release-please-manifest.json"
@@ -114,6 +115,28 @@ class Settings(BaseSettings):
     # Sharepoint
     sharepoint_client_id: Optional[str] = None
     sharepoint_client_secret: Optional[str] = None
+
+    # Tenant credential management
+    tenant_credentials_enabled: bool = False
+    encryption_key: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_encryption_config(self):
+        """Fail-fast if tenant credentials enabled without encryption key."""
+        if self.tenant_credentials_enabled and not self.encryption_key:
+            logging.error(
+                "Configuration error: TENANT_CREDENTIALS_ENABLED=true requires ENCRYPTION_KEY\n"
+                "Generate key: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+            sys.exit(1)
+
+        if self.encryption_key and not self.tenant_credentials_enabled:
+            logging.warning(
+                "ENCRYPTION_KEY set but TENANT_CREDENTIALS_ENABLED=false. "
+                "Key will be ignored. Set TENANT_CREDENTIALS_ENABLED=true to use tenant credentials."
+            )
+
+        return self
 
     @computed_field
     @property

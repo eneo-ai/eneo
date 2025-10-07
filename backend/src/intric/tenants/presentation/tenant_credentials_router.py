@@ -13,13 +13,37 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from intric.authentication import auth
+from intric.main.config import Settings, get_settings
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+
+
+def check_feature_enabled(
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Verify tenant credentials feature is enabled.
+
+    Raises:
+        HTTPException: 404 if feature disabled
+    """
+    if not settings.tenant_credentials_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "feature_disabled",
+                "message": "Tenant-specific credentials are not enabled on this installation",
+                "hint": "Contact system administrator to enable TENANT_CREDENTIALS_ENABLED",
+            },
+        )
+
 
 router = APIRouter(
     prefix="/tenants",
     tags=["tenant-credentials"],
-    dependencies=[Depends(auth.authenticate_super_api_key)],
+    dependencies=[
+        Depends(auth.authenticate_super_api_key),
+        Depends(check_feature_enabled),
+    ],
 )
 
 # Provider enum - supported LLM providers
@@ -110,6 +134,7 @@ class CredentialInfo(BaseModel):
             "provider": "openai",
             "masked_key": "...xyz9",
             "configured_at": "2025-10-07T12:34:56.789Z",
+            "encryption_status": "encrypted",
             "config": {
                 "endpoint": "https://my-resource.openai.azure.com",
                 "api_version": "2024-02-15-preview"
@@ -117,12 +142,34 @@ class CredentialInfo(BaseModel):
         }
     """
 
-    provider: str
-    masked_key: str
-    configured_at: datetime | None
+    provider: str = Field(
+        ..., description="LLM provider name", examples=["openai", "azure"]
+    )
+    masked_key: str = Field(
+        ...,
+        description="Last 4 characters of API key for identification",
+        examples=["...xyz9", "...abc1"],
+    )
+    configured_at: datetime | None = Field(
+        None, description="Timestamp when credential was last updated"
+    )
+    encryption_status: Literal["encrypted", "plaintext"] = Field(
+        ...,
+        description="Encryption status of stored credential. "
+        "'encrypted' = secure at rest (Fernet encryption), "
+        "'plaintext' = needs migration for security compliance",
+        examples=["encrypted"],
+    )
     config: dict[str, Any] = Field(
         default_factory=dict,
         description="Provider-specific configuration (e.g., Azure endpoint, api_version)",
+        examples=[
+            {
+                "endpoint": "https://sweden.openai.azure.com/",
+                "api_version": "2024-02-15-preview",
+                "deployment_name": "gpt-4-sweden",
+            }
+        ],
     )
 
 
@@ -137,12 +184,14 @@ class ListCredentialsResponse(BaseModel):
                     "provider": "openai",
                     "masked_key": "...xyz9",
                     "configured_at": "2025-10-07T12:34:56.789Z",
+                    "encryption_status": "encrypted",
                     "config": {}
                 },
                 {
                     "provider": "azure",
                     "masked_key": "...abc3",
                     "configured_at": "2025-10-07T12:45:00.123Z",
+                    "encryption_status": "plaintext",
                     "config": {
                         "endpoint": "https://my-resource.openai.azure.com",
                         "api_version": "2024-02-15-preview",
@@ -199,9 +248,7 @@ async def set_tenant_credential(
 
     # Azure-specific validation
     if provider == "azure":
-        if not all(
-            [request.endpoint, request.api_version, request.deployment_name]
-        ):
+        if not all([request.endpoint, request.api_version, request.deployment_name]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Azure provider requires: api_key, endpoint, api_version, deployment_name",
@@ -224,9 +271,7 @@ async def set_tenant_credential(
     )
 
     # Mask key (show last 4 characters)
-    masked_key = (
-        f"...{request.api_key[-4:]}" if len(request.api_key) > 4 else "***"
-    )
+    masked_key = f"...{request.api_key[-4:]}" if len(request.api_key) > 4 else "***"
 
     return SetCredentialResponse(
         tenant_id=tenant_id,
@@ -288,7 +333,8 @@ async def delete_tenant_credential(
     response_model=ListCredentialsResponse,
     status_code=status.HTTP_200_OK,
     summary="List tenant API credentials",
-    description="List all configured API credentials for a tenant (with masked keys). "
+    description="List all configured API credentials for a tenant with masked keys and encryption status. "
+    "Shows last 4 characters of API key for verification and encryption state for security auditing. "
     "System admin only.",
 )
 async def list_tenant_credentials(
@@ -298,14 +344,15 @@ async def list_tenant_credentials(
     """
     List all configured API credentials for a tenant.
 
-    Returns masked keys and provider-specific configuration (without sensitive data).
+    Returns masked keys, encryption status, and provider-specific configuration
+    (without sensitive data).
 
     Args:
         tenant_id: UUID of the tenant
         container: Dependency injection container
 
     Returns:
-        ListCredentialsResponse with list of configured credentials
+        ListCredentialsResponse with list of configured credentials including encryption status
 
     Raises:
         HTTPException 404: Tenant not found
@@ -320,12 +367,14 @@ async def list_tenant_credentials(
             detail=f"Tenant {tenant_id} not found",
         )
 
-    # Get masked credentials
-    masked_credentials = await tenant_repo.get_api_credentials_masked(tenant_id)
+    # Get credentials with metadata (masked keys + encryption status)
+    credentials_metadata = await tenant_repo.get_api_credentials_with_metadata(
+        tenant_id
+    )
 
     # Build credential info list
     credentials: list[CredentialInfo] = []
-    for provider, masked_key in masked_credentials.items():
+    for provider, metadata in credentials_metadata.items():
         # Use tenant's updated_at as configured_at timestamp
         configured_at: datetime = tenant.updated_at
         config: dict[str, Any] = {}
@@ -337,17 +386,14 @@ async def list_tenant_credentials(
                 # Build non-sensitive config (exclude api_key)
                 # For Azure: includes endpoint, api_version, deployment_name
                 # For other providers: empty dict
-                config = {
-                    k: v
-                    for k, v in credential_data.items()
-                    if k != "api_key"
-                }
+                config = {k: v for k, v in credential_data.items() if k != "api_key"}
 
         credentials.append(
             CredentialInfo(
                 provider=provider,
-                masked_key=masked_key,
+                masked_key=metadata["masked_key"],
                 configured_at=configured_at,
+                encryption_status=metadata["encryption_status"],
                 config=config,
             )
         )
