@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
@@ -132,6 +133,7 @@ class TenantRepository:
         ):
             original_key = credential_to_store["api_key"]
             credential_to_store["api_key"] = self.encryption.encrypt(original_key)
+            credential_to_store["encrypted_at"] = datetime.now(timezone.utc).isoformat()
             logger.info(
                 f"Encrypted credential for provider {provider}",
                 extra={"tenant_id": str(tenant_id), "provider": provider},
@@ -218,10 +220,17 @@ class TenantRepository:
             if self.encryption and api_key:
                 try:
                     api_key = self.encryption.decrypt(api_key)
-                except ValueError:
-                    # If decryption fails, mask the encrypted value
+                except ValueError as e:
+                    logger.warning(
+                        f"Failed to decrypt credential for provider {provider} during masking",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "provider": provider,
+                            "error": str(e),
+                        },
+                    )
+                    # Continue with masking the encrypted value
                     # This handles legacy plaintext credentials gracefully
-                    pass
 
             # Mask the key - show last 4 chars or "***" for short keys
             if len(api_key) > 4:

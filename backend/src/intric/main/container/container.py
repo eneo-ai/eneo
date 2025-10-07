@@ -275,7 +275,7 @@ class Container(containers.DeclarativeContainer):
     _logger.info(
         f"Container: Initializing EncryptionService with encryption_key={'present' if _settings.encryption_key else 'MISSING'}"
     )
-    encryption_service = providers.Singleton(
+    encryption_service: providers.Singleton[EncryptionService] = providers.Singleton(
         EncryptionService,
         encryption_key=_settings.encryption_key,
     )
@@ -359,7 +359,7 @@ class Container(containers.DeclarativeContainer):
 
     # Repositories
     user_repo = providers.Factory(UsersRepository, session=session)
-    tenant_repo = providers.Factory(
+    tenant_repo: providers.Factory[TenantRepository] = providers.Factory(
         TenantRepository, session=session, encryption_service=encryption_service
     )
     settings_repo = providers.Factory(SettingsRepository, session=session)
