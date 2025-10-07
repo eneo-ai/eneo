@@ -1,7 +1,10 @@
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from intric.main.config import Settings, get_settings
 from intric.tenants.tenant import TenantInDB
 from intric.main.logging import get_logger
+
+if TYPE_CHECKING:
+    from intric.settings.encryption_service import EncryptionService
 
 logger = get_logger(__name__)
 
@@ -15,24 +18,44 @@ class CredentialResolver:
     """
 
     def __init__(
-        self, tenant: Optional[TenantInDB] = None, settings: Optional[Settings] = None
+        self,
+        tenant: Optional[TenantInDB] = None,
+        settings: Optional[Settings] = None,
+        encryption_service: Optional["EncryptionService"] = None,
     ):
         self.tenant = tenant
         self.settings = settings or get_settings()
+        self.encryption = encryption_service
 
     def get_api_key(self, provider: str) -> str:
-        """Get API key with strict resolution (no fallback if tenant key exists)"""
+        """Get API key with decryption support and strict resolution."""
         provider_lower = provider.lower()
 
         # Check tenant-specific credential first
         if self.tenant and self.tenant.api_credentials:
             tenant_cred = self.tenant.api_credentials.get(provider_lower)
             if tenant_cred:
+                # Extract api_key
                 api_key = (
                     tenant_cred
                     if isinstance(tenant_cred, str)
                     else tenant_cred.get("api_key")
                 )
+
+                # Decrypt if needed
+                if self.encryption and api_key:
+                    try:
+                        api_key = self.encryption.decrypt(api_key)
+                    except ValueError as e:
+                        logger.error(
+                            f"Failed to decrypt credential for provider {provider}: {e}",
+                            extra={"tenant_id": str(self.tenant.id), "provider": provider},
+                        )
+                        raise ValueError(
+                            f"Failed to decrypt credential for provider '{provider}'. "
+                            f"Encryption key may be incorrect or data corrupted."
+                        )
+
                 logger.info(
                     "Credential resolved successfully",
                     extra={

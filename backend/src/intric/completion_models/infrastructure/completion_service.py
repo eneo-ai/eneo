@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     )
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
 
 logger = get_logger(__name__)
@@ -53,6 +54,7 @@ class CompletionService:
         context_builder: ContextBuilder,
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
+        encryption_service: Optional["EncryptionService"] = None,
     ):
         self._adapters = {
             ModelFamily.OPEN_AI: OpenAIModelAdapter,
@@ -65,13 +67,16 @@ class CompletionService:
         self.context_builder = context_builder
         self.tenant = tenant
         self.config = config or SETTINGS
+        self.encryption_service = encryption_service
 
     def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         # Create credential resolver with tenant context if tenant is available
         credential_resolver = None
         if self.tenant:
             credential_resolver = CredentialResolver(
-                tenant=self.tenant, settings=self.config
+                tenant=self.tenant,
+                settings=self.config,
+                encryption_service=self.encryption_service,
             )
 
         try:
