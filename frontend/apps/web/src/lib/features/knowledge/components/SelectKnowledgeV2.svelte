@@ -115,7 +115,13 @@
   }
   function isOrgItem(item: any) {
     const sid = ownerSpaceId(item);
-    return $organizationSpaceId && sid === $organizationSpaceId;
+    if ($organizationSpaceId) {
+      return sid === $organizationSpaceId;
+    }
+    if (!$currentSpace?.id) {
+      return false;
+    }
+    return Boolean(sid) && sid !== $currentSpace.id;
   }
 
   function addItem(
@@ -185,9 +191,12 @@
       const org: any[] = [];
       for (const item of arr) {
         const sid = ownerSpaceId(item);
-        if (sid === $currentSpace?.id) personal.push(item);
-        else if ($organizationSpaceId && sid === $organizationSpaceId) org.push(item);
+        if (!sid || sid === $currentSpace?.id) personal.push(item);
+        else {
+          org.push(item);
+        }
       }
+      console.log("3",{ personal, org })
       return { personal, org };
     };
 
@@ -213,7 +222,7 @@
     const out: Array<[string, any]> = [];
     if (g.personal.length || w.personal.length || k.personal.length)
       out.push([`${modelId}::personal`, mk("Personal", g.personal, w.personal, k.personal)]);
-    if ($organizationSpaceId && (g.org.length || w.org.length || k.org.length))
+    if (g.org.length || w.org.length || k.org.length)
       out.push([`${modelId}::org`, mk("Organization", g.org, w.org, k.org)]);
 
     return out;
@@ -230,6 +239,14 @@
   
   $: selectedIntegrationKnowledgePersonal = (selectedIntegrationKnowledge ?? []).filter(isPersonalItem);
   $: selectedIntegrationKnowledgeOrg = (selectedIntegrationKnowledge ?? []).filter(isOrgItem);
+
+  $: hasOrgSelections =
+    selectedCollectionsOrg.length > 0 ||
+    selectedWebsitesOrg.length > 0 ||
+    selectedIntegrationKnowledgeOrg.length > 0;
+
+  $: shouldRenderOrgSelectedSection =
+    Boolean($organizationSpaceId) || hasOrgSelections || partitionedSectionsOrg.length > 0;
 
 </script>
 {#if originMode !== "organization"}
@@ -300,7 +317,7 @@
 {/if}
 
 {#if originMode !== "personal"}
-  {#if $organizationSpaceId}
+  {#if shouldRenderOrgSelectedSection}
   <section class="knowledge-selected">
     {#each selectedCollectionsOrg as collection (`group:${collection.id}`)}
       {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}

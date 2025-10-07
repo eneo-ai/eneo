@@ -37,14 +37,13 @@ function SpacesManager(data: SpacesManagerParams) {
 
   const userSpaces = writable(data.spaces);
   const currentSpace = writable(data.currentSpace);
-  const organizationSpaceIdManual = writable<string | null>(null);
   const organizationSpaceIdFromList = derived(userSpaces, ($spaces) => {
     return $spaces.find((s) => isOrganizationSpace(s))?.id ?? null;
   });
 
   const organizationSpaceId = derived(
-    [organizationSpaceIdFromList, organizationSpaceIdManual],
-    ([$listId, $manualId]) => $listId ?? $manualId
+    [organizationSpaceIdFromList],
+    ([$listId]) => $listId
   );
 
   const nonOrgSpaces = derived(userSpaces, ($spaces) =>

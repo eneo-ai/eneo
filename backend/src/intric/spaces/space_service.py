@@ -21,7 +21,6 @@ from intric.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.spaces.space_repo import SpaceRepository
-from intric.spaces.utils.space_utils import effective_space_ids
 from intric.transcription_models.application.transcription_model_crud_service import (
     TranscriptionModelCRUDService,
 )
@@ -392,8 +391,7 @@ class SpaceService:
 
         return space_in_db
 
-    async def get_personal_space(self):
-        await self._get_or_create_tenant_space() 
+    async def get_personal_space(self): 
         return await self.repo.get_personal_space(self.user.id)
 
     async def _get_space_by_resource(self, space: Space) -> Space:
@@ -460,13 +458,11 @@ class SpaceService:
 
     async def get_knowledge_for_space(self, space_id: UUID):
         space = await self.get_space(space_id)
-
-        space_ids = effective_space_ids(space)
-
-        groups = await self.collection_repo.list_by_space_ids(space_ids)
-        websites = await self.website_repo.list_by_space_ids(space_ids)
-        integrations = await self.integration_repo.list_by_space_ids(space_ids)
-        return groups, websites, integrations
+        return (
+            space.collections,
+            space.websites,
+            space.integration_knowledge_list,
+        )
     
     async def ensure_org_admin_members(self, hub: "Space") -> "Space":
         admins = await self.user_repo.list_tenant_admins(self.user.tenant_id)

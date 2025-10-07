@@ -394,9 +394,13 @@ class SpaceActor:
         if (
             self.space.is_personal()
             and resource_type in PERMISSION_RESOURCES
-            and self._to_permisson(resource_type=resource_type) not in self.user.permissions
         ):
-            return False
+            permission = self._to_permisson(resource_type=resource_type)
+            has_permission = permission in self.user.permissions if permission else False
+            if not has_permission and not (
+                resource_type == SpaceResourceType.WEBSITE and action == SpaceAction.READ
+            ):
+                return False
 
         if (
             resource_type == SpaceResourceType.SERVICE
