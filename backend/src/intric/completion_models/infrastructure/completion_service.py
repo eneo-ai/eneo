@@ -11,6 +11,7 @@ from intric.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from intric.ai_models.model_enums import ModelFamily
+from intric.main.exceptions import APIKeyNotConfiguredException
 from intric.completion_models.infrastructure.adapters import (
     AzureOpenAIModelAdapter,
     ClaudeModelAdapter,
@@ -70,21 +71,62 @@ class CompletionService:
         credential_resolver = None
         if self.tenant:
             credential_resolver = CredentialResolver(
-                tenant=self.tenant,
-                settings=self.config
+                tenant=self.tenant, settings=self.config
             )
 
-        # Check for LiteLLM model first
-        if model.litellm_model_name:
-            return LiteLLMModelAdapter(model, credential_resolver=credential_resolver)
+        try:
+            # Check for LiteLLM model first
+            if model.litellm_model_name:
+                return LiteLLMModelAdapter(
+                    model, credential_resolver=credential_resolver
+                )
 
-        # Fall back to existing family-based selection
-        adapter_class = self._adapters.get(model.family.value)
-        if not adapter_class:
-            raise ValueError(f"No adapter found for modelfamily {model.family.value}")
+            # Fall back to existing family-based selection
+            adapter_class = self._adapters.get(model.family.value)
+            if not adapter_class:
+                raise ValueError(
+                    f"No adapter found for modelfamily {model.family.value}"
+                )
 
-        # Inject credential_resolver into family-based adapters
-        return adapter_class(model, credential_resolver=credential_resolver)
+            # Inject credential_resolver into family-based adapters
+            return adapter_class(model, credential_resolver=credential_resolver)
+
+        except ValueError as e:
+            error_message = str(e)
+
+            # Check if this is a credential resolution error
+            if "No API key configured" in error_message:
+                # Extract provider from error message if possible
+                # Error format: "No API key configured for provider 'openai'. ..."
+                provider = "unknown"
+                if "provider '" in error_message:
+                    start = error_message.find("provider '") + len("provider '")
+                    end = error_message.find("'", start)
+                    if end > start:
+                        provider = error_message[start:end]
+
+                tenant_name = self.tenant.name if self.tenant else "N/A"
+
+                logger.error(
+                    f"API key not configured for provider {provider}",
+                    extra={
+                        "tenant_id": str(self.tenant.id) if self.tenant else None,
+                        "tenant_name": tenant_name,
+                        "provider": provider,
+                        "model_name": model.name,
+                        "model_family": model.family.value,
+                    },
+                )
+
+                # Raise custom exception with user-friendly message
+                # The exception handler will format this as GeneralError with error code
+                raise APIKeyNotConfiguredException(
+                    f"No API key configured for provider '{provider}'. "
+                    f"Please contact your administrator to configure credentials for this provider."
+                )
+
+            # Re-raise if it's a different ValueError (e.g., unsupported model family)
+            raise
 
     @staticmethod
     def is_valid_arguments(arguments: str):
@@ -157,7 +199,9 @@ class CompletionService:
 
         # Image generation only works on streaming for now
         # And only if feature flag is turned on
-        use_image_generation = use_image_generation and stream and SETTINGS.using_image_generation
+        use_image_generation = (
+            use_image_generation and stream and SETTINGS.using_image_generation
+        )
 
         context = self.context_builder.build_context(
             input_str=text_input,

@@ -28,7 +28,7 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdatePublic
+from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdatePublic, TenantWithMaskedCredentials
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.authentication import auth
 
@@ -106,13 +106,28 @@ async def get_access_token(user_id: UUID, container: Container = Depends(get_con
     return auth_service.create_access_token_for_user(user)
 
 
-@router.get("/tenants/", response_model=PaginatedResponse[TenantInDB])
+@router.get("/tenants/", response_model=PaginatedResponse[TenantWithMaskedCredentials])
 async def get_tenants(domain: str | None = None, container: Container = Depends(get_container())):
+    """Get all tenants with masked API credentials.
+
+    Returns tenant information with API keys masked to show only last 4 characters.
+    This prevents exposing full API keys through the API endpoint.
+
+    Args:
+        domain: Optional domain filter
+        container: Dependency injection container
+
+    Returns:
+        Paginated list of tenants with masked credentials
+    """
     tenant_service = container.tenant_service()
 
     tenants = await tenant_service.get_all_tenants(domain)
 
-    return protocol.to_paginated_response(tenants)
+    # Mask API credentials before returning
+    masked_tenants = [TenantWithMaskedCredentials.from_tenant(t) for t in tenants]
+
+    return protocol.to_paginated_response(masked_tenants)
 
 
 @router.post(
