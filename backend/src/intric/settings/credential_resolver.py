@@ -35,12 +35,25 @@ class CredentialResolver:
         if self.tenant and self.tenant.api_credentials:
             tenant_cred = self.tenant.api_credentials.get(provider_lower)
             if tenant_cred:
-                # Extract api_key
-                api_key = (
-                    tenant_cred
-                    if isinstance(tenant_cred, str)
-                    else tenant_cred.get("api_key")
-                )
+                # Extract api_key with type validation
+                if isinstance(tenant_cred, str):
+                    api_key = tenant_cred
+                elif isinstance(tenant_cred, dict):
+                    api_key = tenant_cred.get("api_key")
+                else:
+                    logger.error(
+                        f"Invalid credential format for provider {provider}",
+                        extra={
+                            "tenant_id": str(self.tenant.id),
+                            "tenant_name": self.tenant.name,
+                            "provider": provider,
+                            "credential_type": type(tenant_cred).__name__,
+                        },
+                    )
+                    raise ValueError(
+                        f"Invalid credential format for provider '{provider}'. "
+                        f"Expected string or dict, got {type(tenant_cred).__name__}."
+                    )
 
                 # Decrypt if needed
                 if self.encryption and api_key:
@@ -49,7 +62,10 @@ class CredentialResolver:
                     except ValueError as e:
                         logger.error(
                             f"Failed to decrypt credential for provider {provider}: {e}",
-                            extra={"tenant_id": str(self.tenant.id), "provider": provider},
+                            extra={
+                                "tenant_id": str(self.tenant.id),
+                                "provider": provider,
+                            },
                         )
                         raise ValueError(
                             f"Failed to decrypt credential for provider '{provider}'. "
@@ -63,6 +79,8 @@ class CredentialResolver:
                         "tenant_name": self.tenant.name,
                         "provider": provider,
                         "credential_source": "tenant",
+                        "metric_name": "credential.tenant.resolved",
+                        "metric_value": 1,
                     },
                 )
                 return api_key
@@ -86,6 +104,8 @@ class CredentialResolver:
                     "tenant_name": self.tenant.name if self.tenant else "N/A",
                     "provider": provider,
                     "credential_source": "global",
+                    "metric_name": "credential.global.resolved",
+                    "metric_value": 1,
                 },
             )
             return global_key

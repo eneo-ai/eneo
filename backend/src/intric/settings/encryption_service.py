@@ -20,6 +20,7 @@ class EncryptionService:
     """
 
     VERSION_PREFIX = "enc:fernet:v1:"
+    MAX_CREDENTIAL_LENGTH = 10240  # 10KB - reasonable limit for API keys
 
     def __init__(self, encryption_key: Optional[str] = None):
         """Initialize with optional encryption key.
@@ -40,6 +41,10 @@ class EncryptionService:
         """Check if encryption is enabled."""
         return self._fernet is not None
 
+    def __repr__(self) -> str:
+        """Safe representation for debugging (doesn't expose key material)."""
+        return f"<EncryptionService active={self.is_active()}>"
+
     def encrypt(self, plaintext: str) -> str:
         """Encrypt plaintext and return versioned token.
 
@@ -50,13 +55,19 @@ class EncryptionService:
             Versioned encrypted string: enc:fernet:v1:<ciphertext>
 
         Raises:
-            ValueError: If encryption not configured
+            ValueError: If encryption not configured or plaintext too long
         """
         if not self._fernet:
             raise ValueError("Encryption not configured")
 
         if not plaintext:
             raise ValueError("Cannot encrypt empty string")
+
+        if len(plaintext) > self.MAX_CREDENTIAL_LENGTH:
+            raise ValueError(
+                f"Credential too long ({len(plaintext)} bytes). "
+                f"Maximum allowed: {self.MAX_CREDENTIAL_LENGTH} bytes"
+            )
 
         encrypted_bytes = self._fernet.encrypt(plaintext.encode())
         ciphertext = encrypted_bytes.decode()
