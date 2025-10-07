@@ -76,6 +76,13 @@
 
   let useWebSearch = $state(false);
 
+  // Disable web search when there are attachments
+  $effect(() => {
+    if ($attachments.length > 0 && useWebSearch) {
+      useWebSearch = false;
+    }
+  });
+
   const shouldShowMentionButton = $derived.by(() => {
     const hasTools = chat.partner.tools.assistants.length > 0;
     const isEnabled =
@@ -98,15 +105,15 @@
 
   <div class="flex justify-between">
     <div class="flex items-center gap-2">
-      <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
+      <AttachmentUploadIconButton disabled={useWebSearch} label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
         <MentionButton></MentionButton>
       {/if}
       {#if chat.partner.type === "default-assistant" && featureFlags.showWebSearch}
         <div
-          class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
+          class="border-default flex items-center justify-center rounded-full border p-1.5 {$attachments.length > 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent-dimmer hover:text-accent-stronger hover:border-accent-default'}"
         >
-          <Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
+          <Input.Switch bind:value={useWebSearch} disabled={$attachments.length > 0} class="{$attachments.length > 0 ? '*:!cursor-not-allowed' : '*:!cursor-pointer'}">
             <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
           >
         </div>
