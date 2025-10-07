@@ -1,10 +1,11 @@
 import json
 import logging
 import os
+import sys
 from typing import Optional
 
 from intric.definitions import ROOT_DIR
-from pydantic import computed_field
+from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MANIFEST_LOCATION = f"{ROOT_DIR}/.release-please-manifest.json"
@@ -131,9 +132,13 @@ class Settings(BaseSettings):
     sharepoint_client_id: Optional[str] = None
     sharepoint_client_secret: Optional[str] = None
 
-    # Generic encryption key for sensitive data (HTTP auth, API keys, etc.)
-    # Required for encrypting HTTP auth credentials, API keys, etc.
+    # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
+    # Required for encrypting HTTP auth credentials, tenant API credentials, etc.
+    # Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
     encryption_key: str
+
+    # Tenant credential management
+    tenant_credentials_enabled: bool = False
 
     @computed_field
     @property

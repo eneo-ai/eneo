@@ -179,6 +179,7 @@ from intric.security_classifications.domain.repositories.security_classification
     SecurityClassificationRepoImpl,
 )
 from intric.services.service_repo import ServiceRepository
+from intric.settings.encryption_service import EncryptionService
 from intric.services.service_runner import ServiceRunner
 from intric.services.service_service import ServiceService
 from intric.sessions.session_service import SessionService
@@ -249,6 +250,10 @@ from intric.websites.infrastructure.update_website_size_service import (
 from intric.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from intric.worker.task_manager import TaskManager
 from intric.workflows.step_repo import StepRepository
+from intric.main.config import get_settings
+from intric.main.logging import get_logger
+
+_logger = get_logger(__name__)
 
 
 class Container(containers.DeclarativeContainer):
@@ -262,6 +267,18 @@ class Container(containers.DeclarativeContainer):
     user = providers.Dependency(instance_of=UserInDB)
     tenant = providers.Dependency(instance_of=TenantInDB)
     aiohttp_client = providers.Object(aiohttp_client)
+
+    # Encryption service (singleton - shared across all repositories)
+    # NOTE: Must use get_settings() directly because config provider is never populated
+    # The config.settings provider chain is never initialized, so we use get_settings() module singleton
+    _settings = get_settings()
+    _logger.info(
+        f"Container: Initializing EncryptionService with encryption_key={'present' if _settings.encryption_key else 'MISSING'}"
+    )
+    encryption_service = providers.Singleton(
+        EncryptionService,
+        encryption_key=_settings.encryption_key,
+    )
 
     # Factories
     prompt_factory = providers.Factory(PromptFactory)
@@ -342,9 +359,10 @@ class Container(containers.DeclarativeContainer):
 
     # Repositories
     user_repo = providers.Factory(UsersRepository, session=session)
-    tenant_repo = providers.Factory(TenantRepository, session=session)
+    tenant_repo = providers.Factory(
+        TenantRepository, session=session, encryption_service=encryption_service
+    )
     settings_repo = providers.Factory(SettingsRepository, session=session)
-    tenant_repo = providers.Factory(TenantRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
@@ -465,6 +483,7 @@ class Container(containers.DeclarativeContainer):
         context_builder=context_builder,
         tenant=tenant,
         config=config,
+        encryption_service=encryption_service,
     )
 
     # Datastore
@@ -472,6 +491,7 @@ class Container(containers.DeclarativeContainer):
         CreateEmbeddingsService,
         tenant=tenant,
         config=config,
+        encryption_service=encryption_service,
     )
     datastore = providers.Factory(
         Datastore,
@@ -920,6 +940,7 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         tenant=tenant,
         config=config,
+        encryption_service=encryption_service,
     )
     crawler = providers.Factory(Crawler)
 

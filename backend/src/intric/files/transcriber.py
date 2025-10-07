@@ -15,6 +15,7 @@ from intric.transcription_models.infrastructure.adapters.whisper import (
 
 if TYPE_CHECKING:
     from intric.files.file_repo import FileRepository
+    from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
     from intric.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -27,10 +28,12 @@ class Transcriber:
         file_repo: "FileRepository",
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
+        encryption_service: Optional["EncryptionService"] = None,
     ):
         self.file_repo = file_repo
         self.tenant = tenant
         self.config = config or SETTINGS
+        self.encryption_service = encryption_service
 
     async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
         if file.blob is None or not AudioMimeTypes.has_value(file.mimetype):
@@ -68,12 +71,12 @@ class Transcriber:
         if self.tenant:
             credential_resolver = CredentialResolver(
                 tenant=self.tenant,
-                settings=self.config
+                settings=self.config,
+                encryption_service=self.encryption_service,
             )
 
         adapter = OpenAISTTModelAdapter(
-            model=transcription_model,
-            credential_resolver=credential_resolver
+            model=transcription_model, credential_resolver=credential_resolver
         )
 
         async with audio.to_wav(filepath) as wav_file:
