@@ -1,4 +1,5 @@
 import base64
+from typing import Optional
 
 from anthropic import AsyncAnthropic
 
@@ -14,6 +15,7 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 from intric.files.file_models import File
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.settings.credential_resolver import CredentialResolver
 
 logger = get_logger(__name__)
 
@@ -24,10 +26,21 @@ class ClaudeModelAdapter(CompletionModelAdapter):
     def __init__(
         self,
         model: CompletionModel,
-        async_client: AsyncAnthropic = AsyncAnthropic(api_key=get_settings().anthropic_api_key),
+        async_client: Optional[AsyncAnthropic] = None,
+        credential_resolver: Optional[CredentialResolver] = None,
     ):
         self.model = model
-        self.async_client = async_client
+
+        # If client is provided explicitly, use it
+        if async_client is not None:
+            self.async_client = async_client
+        # If credential_resolver is provided, resolve tenant-specific API key
+        elif credential_resolver is not None:
+            api_key = credential_resolver.get_api_key("anthropic")
+            self.async_client = AsyncAnthropic(api_key=api_key)
+        # Fall back to global settings
+        else:
+            self.async_client = AsyncAnthropic(api_key=get_settings().anthropic_api_key)
 
     def _get_kwargs(self, kwargs: ModelKwargs | None):
         if kwargs is None:
