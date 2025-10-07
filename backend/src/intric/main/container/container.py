@@ -463,10 +463,16 @@ class Container(containers.DeclarativeContainer):
     completion_service = providers.Factory(
         CompletionService,
         context_builder=context_builder,
+        tenant=tenant,
+        config=config,
     )
 
     # Datastore
-    create_embeddings_service = providers.Factory(CreateEmbeddingsService)
+    create_embeddings_service = providers.Factory(
+        CreateEmbeddingsService,
+        tenant=tenant,
+        config=config,
+    )
     datastore = providers.Factory(
         Datastore,
         user=user,
@@ -912,6 +918,8 @@ class Container(containers.DeclarativeContainer):
     transcriber = providers.Factory(
         Transcriber,
         file_repo=file_repo,
+        tenant=tenant,
+        config=config,
     )
     crawler = providers.Factory(Crawler)
 

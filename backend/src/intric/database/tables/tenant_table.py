@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import BigInteger, Column, ForeignKey, String, Table
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import Base, BasePublic
@@ -18,6 +19,9 @@ class Tenants(BasePublic):
     provisioning: Mapped[bool] = mapped_column(default=False)
     security_enabled: Mapped[bool] = mapped_column(default=False)
     state: Mapped[str] = mapped_column(String, default=TenantState.ACTIVE.value)
+    api_credentials: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
 
     # relationships
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")

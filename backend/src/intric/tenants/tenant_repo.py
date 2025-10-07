@@ -1,8 +1,10 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import HttpUrl
+from sqlalchemy import cast, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -80,3 +82,107 @@ class TenantRepository:
         return await self.delegate.get_by(
             conditions={Tenants.zitadel_org_id: zitadel_org_id}
         )
+
+    async def update_api_credential(
+        self,
+        tenant_id: UUID,
+        provider: str,
+        credential: dict[str, Any],
+    ) -> TenantInDB:
+        """Update or add API credential using JSONB set operation.
+
+        Uses PostgreSQL's jsonb_set function to efficiently update a single
+        provider's credentials without loading/modifying/saving the entire JSONB object.
+
+        Args:
+            tenant_id: The UUID of the tenant
+            provider: The provider name (e.g., "openai", "azure", "anthropic")
+            credential: The credential dictionary containing api_key and optional fields
+
+        Returns:
+            Updated TenantInDB instance with refreshed api_credentials
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                api_credentials=func.jsonb_set(
+                    Tenants.api_credentials,
+                    [provider.lower()],
+                    cast(credential, JSONB),
+                    True,  # create_if_missing
+                )
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        return await self.delegate.get_model_from_query(stmt)
+
+    async def delete_api_credential(
+        self,
+        tenant_id: UUID,
+        provider: str,
+    ) -> TenantInDB:
+        """Remove API credential using JSONB delete operator.
+
+        Uses PostgreSQL's JSONB #- operator to efficiently remove a single
+        provider's credentials from the JSONB object.
+
+        Args:
+            tenant_id: The UUID of the tenant
+            provider: The provider name to remove (e.g., "openai", "azure")
+
+        Returns:
+            Updated TenantInDB instance with refreshed api_credentials
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                api_credentials=Tenants.api_credentials.op("#-")(
+                    f"{{{provider.lower()}}}"
+                )
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        return await self.delegate.get_model_from_query(stmt)
+
+    async def get_api_credentials_masked(
+        self,
+        tenant_id: UUID,
+    ) -> dict[str, str]:
+        """Get credentials with masked keys (last 4 chars only).
+
+        Retrieves all API credentials for a tenant and masks the api_key values
+        to show only the last 4 characters. Safe for displaying in UI.
+
+        Args:
+            tenant_id: The UUID of the tenant
+
+        Returns:
+            Dictionary of provider -> masked key (e.g., {"openai": "...xyz1"})
+            Empty dict if no credentials exist
+        """
+        stmt = sa.select(Tenants.api_credentials).where(Tenants.id == tenant_id)
+        result = await self.session.execute(stmt)
+        credentials = result.scalar_one()
+
+        if not credentials:
+            return {}
+
+        masked = {}
+        for provider, cred in credentials.items():
+            # Handle both dict format and legacy string format
+            if isinstance(cred, dict):
+                api_key = cred.get("api_key", "")
+            else:
+                api_key = str(cred)
+
+            # Mask the key - show last 4 chars or "***" for short keys
+            if len(api_key) > 4:
+                masked[provider] = f"...{api_key[-4:]}"
+            else:
+                masked[provider] = "***"
+
+        return masked
