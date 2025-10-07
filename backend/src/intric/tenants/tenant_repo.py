@@ -4,6 +4,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from pydantic import HttpUrl
 from sqlalchemy import cast, func
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,7 +141,7 @@ class TenantRepository:
             .where(Tenants.id == tenant_id)
             .values(
                 api_credentials=Tenants.api_credentials.op("#-")(
-                    f"{{{provider.lower()}}}"
+                    cast([provider.lower()], postgresql.ARRAY(sa.Text))
                 )
             )
             .returning(Tenants)
