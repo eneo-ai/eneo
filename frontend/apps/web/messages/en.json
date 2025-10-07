@@ -1198,5 +1198,6 @@
   "resource_apps": "apps",
   "resource_results": "results",
   "resource_user_groups": "user groups",
-  "resource_files": "files"
+  "resource_files": "files",
+  "websearch_notice": "Your input will be sent to a search engine to find relevant information"
 }
