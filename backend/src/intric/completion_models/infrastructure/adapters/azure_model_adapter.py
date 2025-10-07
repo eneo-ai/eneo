@@ -1,3 +1,5 @@
+from typing import Optional
+
 from openai import AsyncAzureOpenAI
 
 from intric.ai_models.completion_models.completion_model import (
@@ -10,19 +12,34 @@ from intric.completion_models.infrastructure.adapters.openai_model_adapter impor
     OpenAIModelAdapter,
 )
 from intric.main.config import get_settings
+from intric.settings.credential_resolver import CredentialResolver
 
 
 class AzureOpenAIModelAdapter(OpenAIModelAdapter):
     def __init__(
         self,
         model: CompletionModel,
+        credential_resolver: Optional[CredentialResolver] = None,
     ):
         self.model = model
-        self.client: AsyncAzureOpenAI = AsyncAzureOpenAI(
-            api_key=get_settings().azure_api_key,
-            azure_endpoint=get_settings().azure_endpoint,
-            api_version=get_settings().azure_api_version,
-        )
+
+        # If credential_resolver is provided, resolve tenant-specific API key
+        if credential_resolver is not None:
+            api_key = credential_resolver.get_api_key("azure")
+            azure_endpoint = credential_resolver.get_setting("azure_endpoint")
+            azure_api_version = credential_resolver.get_setting("azure_api_version")
+            self.client: AsyncAzureOpenAI = AsyncAzureOpenAI(
+                api_key=api_key,
+                azure_endpoint=azure_endpoint,
+                api_version=azure_api_version,
+            )
+        # Fall back to global settings
+        else:
+            self.client: AsyncAzureOpenAI = AsyncAzureOpenAI(
+                api_key=get_settings().azure_api_key,
+                azure_endpoint=get_settings().azure_endpoint,
+                api_version=get_settings().azure_api_version,
+            )
 
     def _get_kwargs(self, kwargs):
         kwargs = super()._get_kwargs(kwargs)

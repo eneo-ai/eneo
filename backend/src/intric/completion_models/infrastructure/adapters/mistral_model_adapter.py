@@ -1,3 +1,5 @@
+from typing import Optional
+
 from mistralai import Mistral
 from tenacity import (
     retry,
@@ -19,6 +21,7 @@ from intric.completion_models.infrastructure.adapters.openai_model_adapter impor
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
+from intric.settings.credential_resolver import CredentialResolver
 
 logger = get_logger(__name__)
 
@@ -26,8 +29,13 @@ TOKENS_RESERVED_FOR_COMPLETION = 1000
 
 
 class MistralModelAdapter(OpenAIModelAdapter):
-    def __init__(self, model: CompletionModel):
+    def __init__(
+        self,
+        model: CompletionModel,
+        credential_resolver: Optional[CredentialResolver] = None,
+    ):
         self.model = model
+        self.credential_resolver = credential_resolver
 
     def _build_tools_from_context(self, context: Context):
         if not context.function_definitions:
@@ -49,6 +57,12 @@ class MistralModelAdapter(OpenAIModelAdapter):
             for function_definition in context.function_definitions
         ]
 
+    def _get_api_key(self) -> str:
+        """Get API key from credential resolver or fall back to global settings."""
+        if self.credential_resolver is not None:
+            return self.credential_resolver.get_api_key("mistral")
+        return get_settings().mistral_api_key
+
     @retry(
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
@@ -63,7 +77,7 @@ class MistralModelAdapter(OpenAIModelAdapter):
         kwargs = self._get_kwargs(model_kwargs)
 
         try:
-            async with Mistral(api_key=get_settings().mistral_api_key) as mistral:
+            async with Mistral(api_key=self._get_api_key()) as mistral:
                 response = await mistral.chat.complete_async(
                     model=self.model.name, messages=query, **kwargs
                 )
@@ -92,7 +106,7 @@ class MistralModelAdapter(OpenAIModelAdapter):
         )
         async def stream_generator():
             try:
-                async with Mistral(api_key=get_settings().mistral_api_key) as mistral:
+                async with Mistral(api_key=self._get_api_key()) as mistral:
                     res = await mistral.chat.stream_async(
                         model=self.model.name,
                         messages=query,

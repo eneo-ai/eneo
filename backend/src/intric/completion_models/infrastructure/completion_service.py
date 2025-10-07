@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
@@ -23,9 +23,10 @@ from intric.completion_models.infrastructure.adapters import (
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from intric.main.config import SETTINGS
+from intric.main.config import SETTINGS, Settings
 from intric.main.logging import get_logger
 from intric.sessions.session import SessionInDB
+from intric.settings.credential_resolver import CredentialResolver
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     )
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.main.container.container import Container
+    from intric.tenants.tenant import TenantInDB
 
 logger = get_logger(__name__)
 
@@ -48,6 +50,8 @@ class CompletionService:
     def __init__(
         self,
         context_builder: ContextBuilder,
+        tenant: Optional["TenantInDB"] = None,
+        config: Optional[Settings] = None,
     ):
         self._adapters = {
             ModelFamily.OPEN_AI: OpenAIModelAdapter,
@@ -58,18 +62,29 @@ class CompletionService:
             ModelFamily.MISTRAL: MistralModelAdapter,
         }
         self.context_builder = context_builder
+        self.tenant = tenant
+        self.config = config or SETTINGS
 
     def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+        # Create credential resolver with tenant context if tenant is available
+        credential_resolver = None
+        if self.tenant:
+            credential_resolver = CredentialResolver(
+                tenant=self.tenant,
+                settings=self.config
+            )
+
         # Check for LiteLLM model first
         if model.litellm_model_name:
-            return LiteLLMModelAdapter(model)
-        
+            return LiteLLMModelAdapter(model, credential_resolver=credential_resolver)
+
         # Fall back to existing family-based selection
         adapter_class = self._adapters.get(model.family.value)
         if not adapter_class:
             raise ValueError(f"No adapter found for modelfamily {model.family.value}")
 
-        return adapter_class(model)
+        # Inject credential_resolver into family-based adapters
+        return adapter_class(model, credential_resolver=credential_resolver)
 
     @staticmethod
     def is_valid_arguments(arguments: str):
