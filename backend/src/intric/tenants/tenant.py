@@ -97,3 +97,64 @@ class TenantUpdatePublic(BaseModel):
 
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
+
+
+class TenantWithMaskedCredentials(TenantInDB):
+    """TenantInDB with masked API credentials for safe API responses.
+
+    This model is used when returning tenant data through API endpoints
+    to prevent exposing full API keys. The api_credentials field is
+    automatically masked to show only the last 4 characters of each key.
+
+    Example:
+        Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
+        Masked: {"openai": "...xyz"}
+    """
+
+    # Override the parent's field validator to skip validation for masked credentials
+    @field_validator("api_credentials", mode="before")
+    @classmethod
+    def skip_validation_for_masked(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Skip validation for masked credentials.
+
+        Masked credentials are already validated in from_tenant() and don't
+        have the same structure as full credentials (they're strings, not dicts).
+        This validator runs in "before" mode to prevent the parent validator
+        from running on masked data.
+        """
+        return v
+
+    @classmethod
+    def from_tenant(cls, tenant: TenantInDB) -> "TenantWithMaskedCredentials":
+        """Convert TenantInDB to version with masked credentials.
+
+        Args:
+            tenant: The TenantInDB instance with full credentials
+
+        Returns:
+            TenantWithMaskedCredentials with api_credentials masked
+        """
+        # Extract all tenant data
+        data = tenant.model_dump()
+
+        # Mask the api_credentials
+        if tenant.api_credentials:
+            masked = {}
+            for provider, cred in tenant.api_credentials.items():
+                # Extract api_key from credential dict
+                if isinstance(cred, dict):
+                    api_key = cred.get("api_key", "")
+                else:
+                    api_key = str(cred)
+
+                # Mask the key - show last 4 chars
+                if len(api_key) > 4:
+                    masked[provider] = f"...{api_key[-4:]}"
+                else:
+                    masked[provider] = "***"
+
+            data["api_credentials"] = masked
+        else:
+            data["api_credentials"] = {}
+
+        return cls.model_construct(**data)

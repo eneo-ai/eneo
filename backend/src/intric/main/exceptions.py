@@ -28,6 +28,7 @@ class ErrorCodes(int, Enum):
     INTERNAL_HTTP_ERROR = 9023
     INTERNAL_SERVER_ERROR = 9024
     TENANT_SUSPENDED = 9025
+    API_KEY_NOT_CONFIGURED = 9026
 
 
 class NotFoundException(Exception):
@@ -142,6 +143,10 @@ class TenantSuspendedException(Exception):
     pass
 
 
+class APIKeyNotConfiguredException(Exception):
+    pass
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -188,4 +193,5 @@ EXCEPTION_MAP = {
         ErrorCodes.INTERNAL_SERVER_ERROR,
     ),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
+    APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
 }
