@@ -21,7 +21,7 @@
     {#if link}
       <Button
         href={link}
-        is={trigger && trigger[0]}
+        is={trigger && trigger[0] ? [trigger[0]] : []}
         padding={icon ? "icon-leading" : undefined}
         class="{icon ? '-ml-1' : '-ml-2'} max-w-full"
       >

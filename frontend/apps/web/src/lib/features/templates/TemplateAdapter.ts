@@ -1,4 +1,5 @@
 import type { AppTemplate, AssistantTemplate, Intric, JSONRequestBody } from "@intric/intric-js";
+import { m } from "$lib/paraglide/messages";
 import { appTemplateCategories, assistantTemplateCategories } from "./TemplateCategories";
 
 export type GenericTemplate = {
@@ -38,7 +39,11 @@ export function createAssistantTemplateAdapter(params: {
       return await intric.assistants.create({ spaceId: currentSpaceId, name, from_template });
     },
     getResourceName() {
-      return { singular: "assistant", singularCapitalised: "Assistant" };
+      const resourceName = m.resource_assistant();
+      return {
+        singular: resourceName,
+        singularCapitalised: resourceName.charAt(0).toUpperCase() + resourceName.slice(1)
+      };
     },
     getCategorisedTemplates(templates) {
       return Object.entries(assistantTemplateCategories).map(([category, info]) => {
@@ -66,7 +71,11 @@ export function createAppTemplateAdapter(params: {
       return await intric.apps.create({ spaceId: currentSpaceId, name, from_template });
     },
     getResourceName() {
-      return { singular: "app", singularCapitalised: "App" };
+      const resourceName = m.resource_app();
+      return {
+        singular: resourceName,
+        singularCapitalised: resourceName.charAt(0).toUpperCase() + resourceName.slice(1)
+      };
     },
     getCategorisedTemplates(templates) {
       return Object.entries(appTemplateCategories).map(([category, info]) => {
