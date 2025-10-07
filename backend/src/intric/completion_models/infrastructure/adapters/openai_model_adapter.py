@@ -1,5 +1,6 @@
 import base64
 import json
+from typing import Optional
 
 from openai import AsyncOpenAI
 
@@ -16,6 +17,7 @@ from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.settings.credential_resolver import CredentialResolver
 
 logger = get_logger(__name__)
 
@@ -27,10 +29,22 @@ class OpenAIModelAdapter(CompletionModelAdapter):
     def __init__(
         self,
         model: CompletionModel,
-        client: AsyncOpenAI = AsyncOpenAI(api_key=get_settings().openai_api_key),
+        client: Optional[AsyncOpenAI] = None,
+        credential_resolver: Optional[CredentialResolver] = None,
     ):
         self.model = model
-        self.client = client
+
+        # If client is provided explicitly, use it
+        if client is not None:
+            self.client = client
+        # If credential_resolver is provided, resolve tenant-specific API key
+        elif credential_resolver is not None:
+            api_key = credential_resolver.get_api_key("openai")
+            self.client = AsyncOpenAI(api_key=api_key)
+        # Fall back to global settings
+        else:
+            self.client = AsyncOpenAI(api_key=get_settings().openai_api_key)
+
         self.extra_headers = None
 
     def _get_kwargs(self, kwargs: ModelKwargs | None):

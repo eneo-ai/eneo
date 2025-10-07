@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
@@ -11,29 +11,46 @@ from intric.embedding_models.infrastructure.adapters.openai_embeddings import (
 )
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
+from intric.main.config import SETTINGS, Settings
+from intric.settings.credential_resolver import CredentialResolver
 
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.tenants.tenant import TenantInDB
 
 
 class CreateEmbeddingsService:
-    def __init__(self):
+    def __init__(
+        self,
+        tenant: Optional["TenantInDB"] = None,
+        config: Optional[Settings] = None,
+    ):
         self._adapters = {
             ModelFamily.OPEN_AI: OpenAIEmbeddingAdapter,
             ModelFamily.E5: E5Adapter,
         }
+        self.tenant = tenant
+        self.config = config or SETTINGS
 
     def _get_adapter(self, model: "EmbeddingModel") -> EmbeddingModelAdapter:
+        # Create credential resolver with tenant context if tenant is available
+        credential_resolver = None
+        if self.tenant:
+            credential_resolver = CredentialResolver(
+                tenant=self.tenant,
+                settings=self.config
+            )
+
         # Check for LiteLLM model first
         if model.litellm_model_name:
-            return LiteLLMEmbeddingAdapter(model)
-        
+            return LiteLLMEmbeddingAdapter(model, credential_resolver=credential_resolver)
+
         # Fall back to existing family-based selection
         adapter_class = self._adapters.get(model.family.value)
         if not adapter_class:
             raise ValueError(f"No adapter found for hosting {model.family.value}")
 
-        return adapter_class(model)
+        return adapter_class(model, credential_resolver=credential_resolver)
 
     async def get_embeddings(
         self,
