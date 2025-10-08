@@ -89,11 +89,95 @@ class MistralModelAdapter(OpenAIModelAdapter):
             logger.error(f"Error calling Mistral API: {e}")
             raise
 
+    @retry(
+        wait=wait_random_exponential(min=1, max=20),
+        stop=stop_after_attempt(3),
+        retry=retry_if_not_exception_type(BadRequestException),
+        reraise=True,
+    )
+    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 1: Create stream connection before EventSourceResponse.
+        Can raise exceptions for authentication, connection, rate limit errors.
+        """
+        query = self.create_query_from_context(context=context)
+        kwargs = self._get_kwargs(model_kwargs)
+        tools = self._build_tools_from_context(context=context)
+
+        try:
+            # Create Mistral client and stream connection
+            # Note: We need to keep the client alive, so we return both
+            mistral_client = Mistral(api_key=self._get_api_key())
+            res = await mistral_client.chat.stream_async(
+                model=self.model.name,
+                messages=query,
+                tools=tools,
+                **kwargs,
+            )
+            # Return tuple of (client, stream) so client stays alive
+            return (mistral_client, res)
+
+        except Exception as e:
+            logger.error(f"Error creating Mistral stream: {e}")
+            raise
+
+    async def iterate_stream(self, stream, context: Context = None, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 2: Iterate pre-created stream inside EventSourceResponse.
+        Yields error events for mid-stream failures.
+        """
+        from intric.ai_models.completion_models.completion_model import ResponseType
+
+        # Unpack the tuple from prepare_streaming
+        mistral_client, event_stream_response = stream
+
+        try:
+            async with event_stream_response as event_stream:
+                async for event in event_stream:
+                    choice = event.data.choices[0]
+                    delta = choice.delta
+
+                    completion = Completion()
+
+                    if choice.finish_reason:
+                        completion.stop = True
+
+                    if delta.tool_calls:
+                        tool_call = delta.tool_calls[0]
+
+                        completion.tool_call = FunctionCall(
+                            name=tool_call.function.name,
+                            arguments=tool_call.function.arguments,
+                        )
+
+                    elif delta.content:
+                        completion.text = delta.content
+
+                    yield completion
+
+        except Exception as exc:
+            # Mid-stream errors: yield error event instead of raising
+            logger.error(f"Error during Mistral stream iteration: {exc}")
+            yield Completion(
+                text="",
+                error=f"Stream error: {str(exc)}",
+                error_code=500,
+                response_type=ResponseType.ERROR,
+                stop=True
+            )
+        finally:
+            # Clean up the client
+            await mistral_client.close()
+
     def get_response_streaming(
         self,
         context: Context,
         model_kwargs: ModelKwargs | None = None,
     ):
+        """
+        Legacy method for backward compatibility.
+        Uses two-phase pattern internally.
+        """
         query = self.create_query_from_context(context=context)
         kwargs = self._get_kwargs(model_kwargs)
         tools = self._build_tools_from_context(context=context)
@@ -105,40 +189,12 @@ class MistralModelAdapter(OpenAIModelAdapter):
             reraise=True,
         )
         async def stream_generator():
-            try:
-                async with Mistral(api_key=self._get_api_key()) as mistral:
-                    res = await mistral.chat.stream_async(
-                        model=self.model.name,
-                        messages=query,
-                        tools=tools,
-                        **kwargs,
-                    )
+            """Legacy implementation using two-phase pattern internally."""
+            # Phase 1: Create stream (can raise exceptions)
+            stream = await self.prepare_streaming(context, model_kwargs)
 
-                    async with res as event_stream:
-                        async for event in event_stream:
-                            choice = event.data.choices[0]
-                            delta = choice.delta
-
-                            completion = Completion()
-
-                            if choice.finish_reason:
-                                completion.stop = True
-
-                            if delta.tool_calls:
-                                tool_call = delta.tool_calls[0]
-
-                                completion.tool_call = FunctionCall(
-                                    name=tool_call.function.name,
-                                    arguments=tool_call.function.arguments,
-                                )
-
-                            elif delta.content:
-                                completion.text = delta.content
-
-                            yield completion
-
-            except Exception as e:
-                logger.error(f"Error streaming from Mistral API: {e}")
-                raise
+            # Phase 2: Iterate stream (yields error events for failures)
+            async for chunk in self.iterate_stream(stream, context, model_kwargs):
+                yield chunk
 
         return stream_generator()

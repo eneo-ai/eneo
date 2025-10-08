@@ -10,6 +10,20 @@ for _logger in logging.root.manager.loggerDict:
     else:
         logging.getLogger(_logger).setLevel(logging.CRITICAL)
 
+# Always suppress SQLAlchemy loggers AFTER other logger configuration (too verbose for normal operation)
+# Must override the loop above which may set them to INFO/CRITICAL
+# Disable propagation to prevent logs from reaching root logger
+sqlalchemy_loggers = [
+    "sqlalchemy.engine",
+    "sqlalchemy.pool",
+    "sqlalchemy.orm",
+    "sqlalchemy.dialects",
+]
+for logger_name in sqlalchemy_loggers:
+    sa_logger = logging.getLogger(logger_name)
+    sa_logger.setLevel(logging.WARNING)
+    sa_logger.propagate = False  # Don't propagate to root logger
+
 
 # noqa Copied from https://dev.to/taikedz/simple-python-logging-and-a-digression-on-dependencies-trust-and-copypasting-code-229o
 class SimpleLogger(logging.Logger):

@@ -29,6 +29,7 @@ class ResponseType(str, Enum):
     INTRIC_EVENT = "intric_event"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    ERROR = "error"
 
 
 @dataclass
@@ -54,6 +55,8 @@ class Completion:
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
     stop: bool = False
+    error: Optional[str] = None
+    error_code: Optional[int] = None
 
 
 class CompletionModelBase(BaseModel):

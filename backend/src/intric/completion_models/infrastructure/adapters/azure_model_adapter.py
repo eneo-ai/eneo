@@ -12,7 +12,11 @@ from intric.completion_models.infrastructure.adapters.openai_model_adapter impor
     OpenAIModelAdapter,
 )
 from intric.main.config import get_settings
+from intric.main.exceptions import APIKeyNotConfiguredException
+from intric.main.logging import get_logger
 from intric.settings.credential_resolver import CredentialResolver
+
+logger = get_logger(__name__)
 
 
 class AzureOpenAIModelAdapter(OpenAIModelAdapter):
@@ -22,23 +26,52 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
         credential_resolver: Optional[CredentialResolver] = None,
     ):
         self.model = model
+        settings = get_settings()
 
-        # If credential_resolver is provided, resolve tenant-specific API key
+        # If credential_resolver is provided, resolve tenant-specific credentials
+        # This will raise ValueError (converted to APIKeyNotConfiguredException) if key is missing
         if credential_resolver is not None:
-            api_key = credential_resolver.get_api_key("azure")
-            azure_endpoint = credential_resolver.get_setting("azure_endpoint")
-            azure_api_version = credential_resolver.get_setting("azure_api_version")
+            try:
+                # Get API key (required)
+                api_key = credential_resolver.get_api_key("azure")
+
+                # Get endpoint - tenant-specific or global
+                azure_endpoint = credential_resolver.get_credential_field(
+                    "azure", "endpoint", settings.azure_endpoint
+                )
+
+                # Get API version - tenant-specific or global
+                api_version = credential_resolver.get_credential_field(
+                    "azure", "api_version", settings.azure_api_version
+                )
+
+            except ValueError as e:
+                logger.error(
+                    "Azure credential resolution failed",
+                    extra={
+                        "model": model.name,
+                        "error": str(e),
+                    },
+                )
+                raise APIKeyNotConfiguredException(str(e))
+
+            # Create client with tenant-specific or global configuration
             self.client: AsyncAzureOpenAI = AsyncAzureOpenAI(
                 api_key=api_key,
                 azure_endpoint=azure_endpoint,
-                api_version=azure_api_version,
+                api_version=api_version,
             )
         # Fall back to global settings
         else:
+            if not settings.azure_api_key:
+                raise APIKeyNotConfiguredException(
+                    "No API key configured for provider 'azure'. "
+                    "Please contact your administrator to configure credentials for this provider."
+                )
             self.client: AsyncAzureOpenAI = AsyncAzureOpenAI(
-                api_key=get_settings().azure_api_key,
-                azure_endpoint=get_settings().azure_endpoint,
-                api_version=get_settings().azure_api_version,
+                api_key=settings.azure_api_key,
+                azure_endpoint=settings.azure_endpoint,
+                api_version=settings.azure_api_version,
             )
 
     def _get_kwargs(self, kwargs):
@@ -57,6 +90,8 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
         model_kwargs: ModelKwargs | None = None,
     ):
         query = self.create_query_from_context(context=context)
+        # All error handling is in get_response_open_ai.get_response
+        # which properly handles AuthenticationError, PermissionDeniedError, etc.
         return await get_response_open_ai.get_response(
             client=self.client,
             model_name=self.model.deployment_name,
@@ -64,12 +99,43 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
             model_kwargs=self._get_kwargs(model_kwargs),
         )
 
+    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 1: Create stream connection before EventSourceResponse.
+        Can raise exceptions for authentication, Azure firewall, rate limit errors.
+        """
+        query = self.create_query_from_context(context=context)
+
+        # This can raise exceptions - that's what we want for pre-flight
+        return await get_response_open_ai.prepare_stream(
+            client=self.client,
+            model_name=self.model.deployment_name,
+            messages=query,
+            model_kwargs=self._get_kwargs(model_kwargs),
+        )
+
+    async def iterate_stream(self, stream, context: Context = None, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 2: Iterate pre-created stream inside EventSourceResponse.
+        Yields error events for mid-stream failures.
+        """
+        # Delegate to shared utility
+        async for chunk in get_response_open_ai.iterate_stream(stream):
+            yield chunk
+
     def get_response_streaming(
         self,
         context: Context,
         model_kwargs: ModelKwargs | None = None,
     ):
+        """
+        Legacy method for backward compatibility.
+        Uses two-phase pattern internally via get_response_open_ai.get_response_streaming.
+        """
         query = self.create_query_from_context(context=context)
+        # All error handling is in get_response_open_ai.get_response_streaming
+        # which properly raises exceptions for errors before streaming
+        # and yields error events for errors during streaming (unavoidable)
         return get_response_open_ai.get_response_streaming(
             client=self.client,
             model_name=self.model.deployment_name,

@@ -63,7 +63,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         Ensures provider keys are valid and credentials have required fields.
         Azure provider requires additional fields beyond api_key.
         """
-        valid_providers = {"openai", "azure", "anthropic", "berget", "mistral", "ovhcloud"}
+        valid_providers = {"openai", "azure", "anthropic", "berget", "mistral", "ovhcloud", "vllm"}
 
         for provider, cred in v.items():
             if provider not in valid_providers:

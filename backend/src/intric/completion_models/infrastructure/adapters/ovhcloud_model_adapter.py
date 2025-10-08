@@ -6,7 +6,7 @@ from intric.ai_models.completion_models.completion_model import CompletionModel
 from intric.completion_models.infrastructure.adapters.openai_model_adapter import (
     OpenAIModelAdapter,
 )
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.settings.credential_resolver import CredentialResolver
 
 
@@ -17,12 +17,13 @@ class OVHCloudModelAdapter(OpenAIModelAdapter):
         credential_resolver: Optional[CredentialResolver] = None,
     ):
         self.model = model
+        settings = get_settings()
 
         # Resolve API key from credential resolver or fall back to global settings
         if credential_resolver is not None:
-            ovhcloud_api_key = credential_resolver.get_setting("ovhcloud_api_key")
+            ovhcloud_api_key = credential_resolver.get_api_key("ovhcloud")
         else:
-            ovhcloud_api_key = SETTINGS.ovhcloud_api_key
+            ovhcloud_api_key = settings.ovhcloud_api_key
 
         self.client = AsyncOpenAI(
             api_key=ovhcloud_api_key, base_url=model.base_url

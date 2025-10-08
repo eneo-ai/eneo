@@ -235,13 +235,30 @@ class CompletionService:
                 model_kwargs=model_kwargs,
             )
         else:
-            # Will be an async generator - not awaitable
-            completion = model_adapter.get_response_streaming(
+            # Two-phase streaming pattern:
+            # Phase 1: Create stream connection BEFORE returning (can raise exceptions)
+            # This happens eagerly, so exceptions propagate before HTTP response starts
+            stream_obj = await model_adapter.prepare_streaming(
                 context=context,
                 model_kwargs=model_kwargs,
             )
 
-            completion = self._handle_tool_call(completion)
+            # Phase 2: Create generator that iterates the pre-created stream
+            # This generator yields error events for mid-stream failures
+            async def streaming_wrapper():
+                """
+                Generator that iterates pre-created stream.
+                The stream was already created and validated, so we're past
+                the pre-flight checks. Any errors here are mid-stream failures.
+                """
+                async for chunk in model_adapter.iterate_stream(
+                    stream=stream_obj,
+                    context=context,
+                    model_kwargs=model_kwargs,
+                ):
+                    yield chunk
+
+            completion = self._handle_tool_call(streaming_wrapper())
 
         return CompletionModelResponse(
             completion=completion,
