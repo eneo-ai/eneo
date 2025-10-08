@@ -13,6 +13,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import AppInput from "./AppInput.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   const {
@@ -46,7 +47,7 @@
   let isSubmitting = false;
   async function createRun() {
     if (inputs.files.length === 0 && !inputs.text) {
-      alert("Input required to run app!");
+      alert(m.input_required_to_run_app());
       return;
     }
 
@@ -70,7 +71,7 @@
     } catch (err) {
       const msg = err instanceof IntricError ? err.getReadableMessage() : err;
       console.error(err);
-      alert(`Error running this app\n${msg}`);
+      alert(m.error_running_app({ msg }));
       isSubmitting = false;
     }
   }
@@ -107,7 +108,7 @@
       <AppInput app={$app} bind:inputData={inputs}></AppInput>
     </div>
 
-    <Tooltip text={hasData ? undefined : "Input data is required to run this app"}>
+    <Tooltip text={hasData ? undefined : m.input_data_required_tooltip()}>
       <Button
         disabled={!hasData || isSubmitting}
         unstyled
@@ -115,12 +116,12 @@
         class="border-stronger bg-dynamic-default text-on-fill hover:border-dynamic-default hover:bg-dynamic-dimmer hover:text-dynamic-stronger flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg shadow-lg "
       >
         <IconPlay />
-        {isSubmitting ? "Submitting..." : "Submit"}
+        {isSubmitting ? m.submitting() : m.submit()}
       </Button>
     </Tooltip>
   </div>
 </div>
 
 {#if isDragging}
-  <AttachmentDropArea bind:isDragging label="Drop files here to upload them to {$app.name}" />
+  <AttachmentDropArea bind:isDragging label={m.drop_files_here_upload({ appName: $app.name })} />
 {/if}

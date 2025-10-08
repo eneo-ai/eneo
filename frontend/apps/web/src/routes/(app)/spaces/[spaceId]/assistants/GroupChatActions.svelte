@@ -11,6 +11,7 @@
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let groupChat: GroupChatSparse;
 
@@ -27,7 +28,7 @@
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete groupChat.");
+      alert(m.could_not_delete_group_chat());
       console.error(e);
     }
   });
@@ -55,7 +56,7 @@
           padding="icon-leading"
         >
           <IconEdit size="sm" />
-          Edit</Button
+          {m.edit()}</Button
         >
       {/if}
       {#if groupChat.permissions?.includes("publish")}
@@ -68,10 +69,10 @@
         >
           {#if groupChat.published}
             <IconArrowDownToLine size="sm"></IconArrowDownToLine>
-            Unpublish
+            {m.unpublish()}
           {:else}
             <IconArrowUpToLine size="sm"></IconArrowUpToLine>
-            Publish
+            {m.publish()}
           {/if}
         </Button>
       {/if}
@@ -84,7 +85,7 @@
           }}
           padding="icon-leading"
         >
-          <IconTrash size="sm" />Delete</Button
+          <IconTrash size="sm" />{m.delete()}</Button
         >
       {/if}
     </Dropdown.Menu>
@@ -93,16 +94,15 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete groupChat</Dialog.Title>
+    <Dialog.Title>{m.delete_group_chat()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to delete <span class="italic">{groupChat.name}</span
-      >?</Dialog.Description
+      >{m.confirm_delete_group_chat({ groupChatName: groupChat.name })}</Dialog.Description
     >
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteGroupChat}
-        >{deleteGroupChat.isLoading ? "Deleting..." : "Delete"}</Button
+        >{deleteGroupChat.isLoading ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

@@ -23,7 +23,21 @@ logger = get_logger(__name__)
 class OpenAISTTModelAdapter:
     def __init__(self, model: TranscriptionModel):
         self.model = model
-        self.client = AsyncOpenAI(api_key=SETTINGS.openai_api_key, base_url=model.base_url)
+
+        # Determine API key based on base URL
+        if "api.berget.ai" in model.base_url:
+            api_key = SETTINGS.berget_api_key
+            logger.info(
+                f"Using Berget API for model {model.name} with base URL {model.base_url}"
+            )
+        else:
+            api_key = SETTINGS.openai_api_key
+            logger.info(
+                f"Using OpenAI API for model {model.name} with base URL {model.base_url}"
+            )
+        logger.debug(f"API Key: {'set' if api_key else 'not set'}")
+        logger.debug(f"Base URL: {model.base_url}")
+        self.client = AsyncOpenAI(api_key=api_key, base_url=model.base_url)
 
     async def get_text_from_file(self, audio_file: AudioFile):
         text = ""
@@ -50,7 +64,9 @@ class OpenAISTTModelAdapter:
                 # Add markdown formatting with timestamp
                 if chunk_index > 0:
                     text += "\n\n"
-                text += f"### {start_time_formatted} - {end_time_formatted}\n\n{block_text}"
+                text += (
+                    f"### {start_time_formatted} - {end_time_formatted}\n\n{block_text}"
+                )
                 chunk_index += 1
 
         return text
@@ -62,7 +78,9 @@ class OpenAISTTModelAdapter:
         reraise=True,
     )
     async def _get_text_from_file(self, file: Path):
-        language = "sv" if self.model.name == "KBLab/kb-whisper-large" else openai.NOT_GIVEN
+        language = (
+            "sv" if self.model.name == "KBLab/kb-whisper-large" else openai.NOT_GIVEN
+        )
         try:
             transcription = await self.client.audio.transcriptions.create(
                 model=self.model.name,

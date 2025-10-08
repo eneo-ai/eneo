@@ -11,6 +11,7 @@
   import AssistantSettingsAttachments from "./AssistantSettingsAttachments.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import dayjs from "dayjs";
@@ -18,6 +19,7 @@
   import { page } from "$app/state";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -40,10 +42,32 @@
 
   let cancelUploadsAndClearQueue: () => void;
 
+  // Behavior-specific change detection for models with model-specific parameters
+  $: hasBehaviorChanges = (() => {
+    if (!$currentChanges.diff.completion_model_kwargs) return false;
+
+    // For reasoning models or LiteLLM models, only show behavior changes if behavior-relevant fields changed
+    const hasModelSpecificParams = $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name;
+    if (hasModelSpecificParams) {
+      const original = $resource.completion_model_kwargs || {};
+      const updated = $update.completion_model_kwargs || {};
+
+      // Only check temperature and top_p for behavior changes
+      const behaviorFieldsChanged =
+        original.temperature !== updated.temperature ||
+        original.top_p !== updated.top_p;
+
+      return behaviorFieldsChanged;
+    }
+
+    // For regular models, show changes if any kwargs changed
+    return true;
+  })();
+
   beforeNavigate((navigate) => {
     if (
       $currentChanges.hasUnsavedChanges &&
-      !confirm("You have unsaved changes. Do you want to discard all changes?")
+      !confirm(m.unsaved_changes_warning())
     ) {
       navigate.cancel();
       return;
@@ -64,7 +88,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – {$resource.name}</title
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {$resource.name}</title
   >
 </svelte:head>
 
@@ -75,7 +99,7 @@
         title: $resource.name,
         href: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`
       }}
-      title="Edit"
+      title={m.edit()}
     ></Page.Title>
 
     <Page.Flex>
@@ -86,36 +110,70 @@
           on:click={() => {
             cancelUploadsAndClearQueue();
             discardChanges();
-          }}>Discard all changes</Button
+          }}>{m.discard_all_changes()}</Button
         >
 
         <Button
           variant="positive"
-          class="w-32"
+          class="w-32 h-8 whitespace-nowrap"
           on:click={async () => {
             cancelUploadsAndClearQueue();
+            
+            // Clean up incompatible parameters when switching models
+            if ($update.completion_model_kwargs && $currentChanges.diff.completion_model) {
+              const cleanedKwargs = { ...$update.completion_model_kwargs };
+              
+              // If model changed, reset to safe defaults for the new model
+              const newModel = $update.completion_model;
+              const originalModel = $resource.completion_model;
+              
+              // Check if we switched between different model families/types
+              const modelChanged = newModel?.id !== originalModel?.id;
+              
+              if (modelChanged) {
+                // Reset model-specific parameters that may not be compatible
+                
+                // Remove reasoning_effort if new model doesn't support reasoning
+                if (!newModel?.reasoning) {
+                  delete cleanedKwargs.reasoning_effort;
+                }
+                
+                // Remove verbosity if new model doesn't support it
+                const supportsVerbosity = newModel?.litellm_model_name || 
+                                         newModel?.name?.toLowerCase().includes('gpt-5');
+                if (!supportsVerbosity) {
+                  delete cleanedKwargs.verbosity;
+                }
+                
+                // Note: Behavior parameter reset is now handled by SelectBehaviourV2 component
+                // when models are switched, so we don't need to reset them here during save
+              }
+              
+              $update.completion_model_kwargs = cleanedKwargs;
+            }
+            
             await saveChanges();
             showSavesChangedNotice = true;
             setTimeout(() => {
               showSavesChangedNotice = false;
             }, 5000);
-          }}>{$isSaving ? "Saving..." : "Save changes"}</Button
+          }}>{$isSaving ? m.loading() : m.save_changes()}</Button
         >
       {:else}
         {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>All changes saved!</p>
+          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>Done</Button>
+        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
 
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="General">
+      <Settings.Group title={m.general()}>
         <Settings.Row
-          title="Name"
-          description="Give this assistant a name that will be displayed to its users."
+          title={m.name()}
+          description={m.assistant_name_description()}
           hasChanges={$currentChanges.diff.name !== undefined}
           revertFn={() => {
             discardChanges("name");
@@ -131,8 +189,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Description"
-          description="A brief introducion to this assistant that will be shown when starting a new session."
+          title={m.description()}
+          description={m.assistant_description_description()}
           hasChanges={$currentChanges.diff.description !== undefined}
           revertFn={() => {
             discardChanges("description");
@@ -140,7 +198,7 @@
           let:aria
         >
           <textarea
-            placeholder={`Hi, I'm ${$update.name}!\nAsk me anything to get started.`}
+            placeholder={m.assistant_placeholder({ name: $update.name })}
             {...aria}
             bind:value={$update.description}
             class="border-default bg-primary ring-default placeholder:text-muted min-h-24 rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
@@ -148,10 +206,10 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title="Instructions">
+      <Settings.Group title={m.instructions()}>
         <Settings.Row
-          title="Prompt"
-          description="Describe how this assistant should behave and how it will answer questions."
+          title={m.prompt()}
+          description={m.describe_assistant_behavior()}
           hasChanges={$currentChanges.diff.prompt !== undefined}
           revertFn={() => {
             discardChanges("prompt");
@@ -161,7 +219,7 @@
         >
           <div slot="toolbar" class="text-secondary">
             <PromptVersionDialog
-              title="Prompt history for {$resource.name}"
+              title="{m.prompt_history_for({ name: $resource.name })}"
               loadPromptVersionHistory={() => {
                 return data.intric.assistants.listPrompts({ id: data.assistant.id });
               }}
@@ -184,8 +242,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Attachments"
-          description="Attach further instructions, for example guidelines or important information. The assistant will always see everything included as an attachment."
+          title={m.attachments()}
+          description={m.attach_further_instructions()}
           hasChanges={$currentChanges.diff.attachments !== undefined}
           revertFn={() => {
             cancelUploadsAndClearQueue();
@@ -197,8 +255,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Personal knowledge"
-          description="Select additional sources from your personal space that this assistant will be able to search for relevant answers."
+          title={m.knowledge()}
+          description={m.select_additional_knowledge()}
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
@@ -217,8 +275,8 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Organization knowledge"
-          description="Select additional sources from your organization's space that this assistant will be able to search for relevant answers."
+          title={m.organization_knowledge()}
+          description={m.organization_knowledge_description()}
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
@@ -237,10 +295,10 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title="AI Settings">
+      <Settings.Group title={m.ai_settings()}>
         <Settings.Row
-          title="Completion model"
-          description="This model will be used to process the assistant's input and generate a response."
+          title={m.completion_model()}
+          description={m.this_model_will_be_used()}
           hasChanges={$currentChanges.diff.completion_model !== undefined}
           revertFn={() => {
             discardChanges("completion_model");
@@ -255,9 +313,9 @@
         </Settings.Row>
 
         <Settings.Row
-          title="Model behaviour"
-          description="Select a preset for how this model should behave, or configure its parameters manually."
-          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+          title={m.model_behaviour()}
+          description={m.select_preset_behavior()}
+          hasChanges={hasBehaviorChanges}
           revertFn={() => {
             discardChanges("completion_model_kwargs");
           }}
@@ -265,18 +323,35 @@
         >
           <SelectBehaviourV2
             bind:kwArgs={$update.completion_model_kwargs}
+            selectedModel={$update.completion_model}
             isDisabled={!supportsTemperature($update.completion_model?.name)}
             {aria}
           ></SelectBehaviourV2>
         </Settings.Row>
+
+        {#if $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name}
+        <Settings.Row
+          title="Model settings"
+          description="Configure model-specific parameters for advanced control over the response."
+          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+          revertFn={() => {
+            discardChanges("completion_model_kwargs");
+          }}
+        >
+          <SelectModelSpecificSettings
+            bind:kwArgs={$update.completion_model_kwargs}
+            selectedModel={$update.completion_model}
+          ></SelectModelSpecificSettings>
+        </Settings.Row>
+        {/if}
       </Settings.Group>
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}
-        <Settings.Group title="Publishing">
+        <Settings.Group title={m.publishing()}>
           {#if data.assistant.permissions?.includes("publish")}
             <Settings.Row
-              title="Status"
-              description="Publishing your assistant will make it available to all users of this space, including viewers."
+              title={m.status()}
+              description={m.publishing_description()}
             >
               <PublishingSetting
                 endpoints={data.intric.assistants}
@@ -291,20 +366,20 @@
             revertFn={() => {
               discardChanges("insight_enabled");
             }}
-            title="Insights"
-            description="Collect insights about this assistant's usage and allow space editors and admins to access the full history of user questions."
+            title={m.insights()}
+            description={m.insights_description()}
           >
             <div class="border-default flex h-14 border-b py-2">
               <Tooltip
                 text={data.assistant.permissions?.includes("insight_toggle")
                   ? undefined
-                  : "Only space admins can toggle insights."}
+                  : m.only_space_admins_toggle()}
                 class="w-full"
               >
                 <Input.RadioSwitch
                   bind:value={$update.insight_enabled}
-                  labelTrue="Enable insights"
-                  labelFalse="Disable insights"
+                  labelTrue={m.enable_insights()}
+                  labelFalse={m.disable_insights()}
                   disabled={!data.assistant.permissions?.includes("insight_toggle")}
                 ></Input.RadioSwitch>
               </Tooltip>

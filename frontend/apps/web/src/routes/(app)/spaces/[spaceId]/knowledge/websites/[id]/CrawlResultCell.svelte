@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { CrawlRun } from "@intric/intric-js";
   import { Label } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let crawl: CrawlRun;
   export let align: "start" | "end" | "center" = "start";
@@ -12,62 +13,67 @@
   const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
 
   function totalLabel(): { label: string; color: Label.LabelColor } {
-    let label = `Crawled ${crawl.pages_crawled} pages`;
-    if (crawl.files_downloaded ?? 0 > 0) {
-      label += ` and ${crawl.files_downloaded} files`;
+    if ((crawl.files_downloaded ?? 0) > 0) {
+      return {
+        color: "blue",
+        label: m.crawled_pages_and_files({ pages: crawl.pages_crawled, files: crawl.files_downloaded })
+      };
+    } else {
+      return {
+        color: "blue",
+        label: m.crawled_pages({ count: crawl.pages_crawled })
+      };
     }
-    return {
-      color: "blue",
-      label
-    };
   }
 
   function failedLabel(): { label: string; color: Label.LabelColor } {
-    let label = "";
-    if (crawl.pages_failed) {
-      label += ` ${crawl.pages_failed} pages`;
+    if (crawl.pages_failed && crawl.files_failed) {
+      return {
+        color: "orange",
+        label: m.pages_and_files_failed({ pages: crawl.pages_failed, files: crawl.files_failed })
+      };
+    } else if (crawl.pages_failed) {
+      return {
+        color: "orange",
+        label: m.pages_failed({ count: crawl.pages_failed })
+      };
+    } else {
+      return {
+        color: "orange",
+        label: m.files_failed({ count: crawl.files_failed })
+      };
     }
-    if (crawl.files_failed && crawl.pages_failed) {
-      label += ` and `;
-    }
-    if (crawl.files_failed) {
-      label += `${crawl.files_failed} files`;
-    }
-    label += " failed";
-    return {
-      color: "orange",
-      label
-    };
   }
 
   function successLabel(): { label: string; color: Label.LabelColor } {
-    let label = "";
-    if (successPages > 0) {
-      label += ` ${successPages} pages`;
-    }
     if (successPages && successFiles) {
-      label += ` and `;
+      return {
+        color: "green",
+        label: m.pages_and_files_succeeded({ pages: successPages, files: successFiles })
+      };
+    } else if (successPages > 0) {
+      return {
+        color: "green",
+        label: m.pages_succeeded({ count: successPages })
+      };
+    } else {
+      return {
+        color: "green",
+        label: m.files_succeeded({ count: successFiles })
+      };
     }
-    if (successFiles) {
-      label += `${crawl.files_downloaded} files`;
-    }
-    label += " succeeded";
-    return {
-      color: "green",
-      label
-    };
   }
 
   function crawlStatus(): { label: string; color: Label.LabelColor } {
     if (crawl.status === "failed") {
       return {
         color: "orange",
-        label: "Crawl failed"
+        label: m.crawl_failed()
       };
     } else {
       return {
         color: "blue",
-        label: "Crawl still running..."
+        label: m.crawl_still_running()
       };
     }
   }

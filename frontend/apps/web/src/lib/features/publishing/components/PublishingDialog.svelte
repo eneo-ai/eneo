@@ -3,6 +3,7 @@
   import type { PublishableResource, PublishableResourceEndpoints } from "../Publisher";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { m } from "$lib/paraglide/messages";
 
   const { refreshCurrentSpace } = getSpacesManager();
 
@@ -32,7 +33,7 @@
       }
       $openController = false;
     } catch (e) {
-      alert(`Could not change ${resource.name}'s status.`);
+      alert(m.could_not_change_status({ name: resource.name }));
       console.error(e);
     }
   }
@@ -40,13 +41,13 @@
   function updateStrings(resource: PublishableResource) {
     if (resource.published) {
       return {
-        action: "Unpublish",
-        description: `Do you really want to unpublish "${resource.name}"? Viewers in this space will no longer be able to access this resource.`
+        action: m.unpublish(),
+        description: m.do_you_really_want_to_unpublish({ name: resource.name })
       };
     } else {
       return {
-        action: "Publish",
-        description: `Do you want to publish "${resource.name}"? This will allow all users (including viewers) in this space to view and access this resource.`
+        action: m.publish(),
+        description: m.do_you_want_to_publish({ name: resource.name })
       };
     }
   }
@@ -72,9 +73,9 @@
     <Dialog.Description>{strings.description}</Dialog.Description>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant={resource.published ? "destructive" : "primary"} on:click={toggleState}
-        >{isLoading ? "Loading..." : strings.action}</Button
+        >{isLoading ? m.loading() : strings.action}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

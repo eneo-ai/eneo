@@ -15,6 +15,7 @@
   import { Navigation } from "$lib/components/layout";
   import { IconUsage } from "@intric/icons/usage";
   import { IconKey } from "@intric/icons/key";
+  import { m } from "$lib/paraglide/messages";
   let currentRoute = "";
   $: currentRoute = $page.url.pathname;
 
@@ -31,7 +32,7 @@
     href="/admin"
     isActive={isSelected("/admin", currentRoute)}
     icon={IconLibrary}
-    label="Organisation"
+    label={m.organisation()}
   />
 
   <div class="border-default my-2 border-b-[0.5px]"></div>
@@ -39,30 +40,30 @@
     href="/admin/models"
     isActive={isSelected("/admin/models", currentRoute)}
     icon={IconCPU}
-    label="Models"
+    label={m.models()}
   />
   <Navigation.Link
     href="/admin/security-classifications"
     isActive={isSelected("/admin/security-classifications", currentRoute)}
     icon={IconKey}
-    label="Security"
+    label={m.security()}
   />
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link
     href="/admin/usage"
     isActive={isSelected("/admin/usage", currentRoute)}
     icon={IconUsage}
-    label="Usage"
+    label={m.usage()}
   />
   <Navigation.Link
     href="/admin/insights"
     isActive={isSelected("/admin/insights", currentRoute)}
     icon={IconBulb}
-    label="Insights"
+    label={m.insights()}
   >
     <span
       class="hidden rounded-md border border-[var(--beta-indicator)] px-1 py-0.5 text-xs font-normal !tracking-normal text-[var(--beta-indicator)] md:block"
-      >Beta</span
+      >{m.beta()}</span
     >
   </Navigation.Link>
   <div class="border-default my-2 border-b-[0.5px]"></div>
@@ -70,18 +71,18 @@
     href="/admin/legacy/users"
     isActive={isSelected("/admin/legacy/users", currentRoute)}
     icon={IconAssistant}
-    label="Users"
+    label={m.users()}
   />
   <Navigation.Link
     href="/admin/legacy/user-groups"
     isActive={isSelected("/admin/legacy/user-groups", currentRoute)}
     icon={IconAssistants}
-    label="User groups"
+    label={m.user_groups()}
   />
   <Navigation.Link
     href="/admin/legacy/roles"
     isActive={isSelected("/admin/legacy/roles", currentRoute)}
     icon={IconThumb}
-    label="Roles"
+    label={m.roles()}
   />
 </Navigation.Menu>

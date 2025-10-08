@@ -3,6 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import CreateService from "./CreateService.svelte";
   import ServicesTable from "./ServicesTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -10,12 +11,12 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.personal ? "Personal" : $currentSpace.name} – Services</title>
+  <title>{m.app_name()} – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.services()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Services"></Page.Title>
+    <Page.Title title={m.services()}></Page.Title>
     {#if $currentSpace.hasPermission("create", "service")}
       <CreateService></CreateService>
     {/if}

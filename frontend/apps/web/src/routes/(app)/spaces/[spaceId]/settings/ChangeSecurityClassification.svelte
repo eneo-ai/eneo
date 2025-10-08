@@ -9,6 +9,7 @@
   import { IntricError, type Intric, type SecurityClassification } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
 
@@ -68,8 +69,8 @@
 </script>
 
 <Settings.Row
-  title="Security classification"
-  description="Select a security classification for this space. This will determine which AI models are available."
+  title={m.security_classification()}
+  description={m.select_security_classification_for_space()}
 >
   {#key $currentSpace.security_classification}
     <SelectSecurityClassification
@@ -90,7 +91,7 @@
     <div
       class="bg-warning-dimmer border-warning-default text-warning-stronger flex flex-col items-start gap-2 border-l-4 p-2"
     >
-      <div>The following <span class="font-bold">{title}</span> will no longer be available:</div>
+      <div>{m.the_following_will_no_longer_be_available({ type: title })}</div>
       <ul class=" list-disc pl-4">
         {#each items as item (item.name)}
           <li>{item.name}</li>
@@ -102,45 +103,44 @@
 
 <Dialog.Root openController={showDryRunDialog}>
   <Dialog.Content width="medium">
-    <Dialog.Title>Change security classification</Dialog.Title>
+    <Dialog.Title>{m.change_security_classification()}</Dialog.Title>
     <Dialog.Description
-      >You're about to change the security classification of this space.<br />Do you want to
-      proceed?</Dialog.Description
+      >{m.you_are_about_to_change_security_classification()}<br />{m.do_you_want_to_proceed()}</Dialog.Description
     >
     <Dialog.Section class="flex flex-col gap-4 p-4">
       <div class="border-default flex flex-col gap-2 border-b">
-        <span class="font-bold">Selected classification:</span>
-        <span class="font-mono">{classification?.name ?? "No Classification"}</span>
+        <span class="font-bold">{m.selected_classification()}</span>
+        <span class="font-mono">{classification?.name ?? m.no_classification()}</span>
       </div>
       <div class="border-default flex flex-col gap-2 border-b">
-        <span class="font-bold">Affected resources:</span>
+        <span class="font-bold">{m.affected_resources()}</span>
 
         {#if check.isLoading}
           <div class="flex gap-2">
             <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
-            Loading results...
+            {m.loading_results()}
           </div>
         {:else if affectedModels.length > 0}
           <div class="flex flex-col gap-2">
-            {@render access("models", affectedModels)}
-            {@render access("assistants", result?.assistants)}
-            {@render access("group chats", result?.group_chats)}
-            {@render access("apps", result?.apps)}
-            {@render access("services", result?.services)}
+            {@render access(m.models(), affectedModels)}
+            {@render access(m.assistants(), result?.assistants)}
+            {@render access(m.group_chats(), result?.group_chats)}
+            {@render access(m.apps(), result?.apps)}
+            {@render access(m.services(), result?.services)}
           </div>
         {:else}
           <div
             class="bg-positive-dimmer border-positive-default text-positive-stronger flex items-center gap-2 border-l-4 p-2"
           >
-            <IconCheck></IconCheck> No changes in functionality
+            <IconCheck></IconCheck> {m.no_changes_in_functionality()}
           </div>
         {/if}
       </div>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
-      <Button onclick={update} variant="primary">Confirm</Button>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button onclick={update} variant="primary">{m.confirm()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

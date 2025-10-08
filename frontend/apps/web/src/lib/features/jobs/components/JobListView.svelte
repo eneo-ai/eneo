@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Job } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { m } from "$lib/paraglide/messages";
 
   export let jobs: Job[];
   export let title: string;
@@ -23,9 +24,9 @@
           {#if job.status === "in progress" || job.status === "queued"}
             <IconLoadingSpinner class="animate-spin" />
           {:else if job.status === "failed"}
-            <div class="text-negative-default w-48 text-right font-medium">Failed</div>
+            <div class="text-negative-default w-48 text-right font-medium">{m.failed()}</div>
           {:else if job.status === "complete"}
-            <div class="text-positive-default w-48 text-right font-medium">Done</div>
+            <div class="text-positive-default w-48 text-right font-medium">{m.done()}</div>
           {/if}
         </div>
       {/each}

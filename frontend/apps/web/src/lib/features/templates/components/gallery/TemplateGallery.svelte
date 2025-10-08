@@ -5,6 +5,7 @@
   import { dynamicColour } from "$lib/core/colours";
   import { getTemplateController } from "../../TemplateController";
   import TemplateLanguageSwitcher from "./TemplateLanguageSwitcher.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   let {
     getCategorisedTemplates,
@@ -22,10 +23,9 @@
     <Dialog.Section class="mt-2">
       <div class="flex items-center justify-between px-10 pt-12 pb-10">
         <div class="border-default flex w-full flex-col">
-          <h3 class="px-4 pb-1 text-2xl font-bold">Select a template</h3>
+          <h3 class="px-4 pb-1 text-2xl font-bold">{m.select_a_template()}</h3>
           <p class="text-secondary max-w-[50ch] px-4">
-            Get started with one of the templates below. You can edit the {resourceName.singular} any
-            time after creation.
+            {m.get_started_with_template({ resourceName: resourceName.singular })}
           </p>
         </div>
         <TemplateLanguageSwitcher></TemplateLanguageSwitcher>
@@ -73,7 +73,7 @@
       <Button
         on:click={() => {
           $showTemplateGallery = false;
-        }}>Cancel</Button
+        }}>{m.cancel()}</Button
       >
       <Button
         is={close}
@@ -84,7 +84,7 @@
           if (currentlySelected) {
             selectTemplate(currentlySelected);
           }
-        }}>Choose template</Button
+        }}>{m.choose_template()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

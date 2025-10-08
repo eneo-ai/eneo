@@ -18,6 +18,18 @@ const MobilityguardCookie = "mobilityguard-verifier" as const;
 const scopes = ["openid", "email"];
 
 export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }) {
+  // Only generate an url if the environment is correctly set
+  if (!env.MOBILITYGUARD_CLIENT_ID || !env.MOBILITY_GUARD_AUTH) {
+    // Log helpful warnings for missing configuration
+    if (env.MOBILITY_GUARD_AUTH && !env.MOBILITYGUARD_CLIENT_ID) {
+      console.warn("MobilityGuard is configured but MOBILITYGUARD_CLIENT_ID is not set");
+    }
+    if (env.MOBILITYGUARD_CLIENT_ID && !env.MOBILITY_GUARD_AUTH) {
+      console.warn("MOBILITYGUARD_CLIENT_ID is set but MOBILITY_GUARD_AUTH is not configured");
+    }
+    return undefined;
+  }
+
   const { codeVerifier, codeChallenge } = await createCodePair();
 
   event.cookies.set(MobilityguardCookie, codeVerifier, {
@@ -31,7 +43,7 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
 
   const searchParams = new URLSearchParams({
     scope: scopes.join(" "),
-    client_id: "intric",
+    client_id: env.MOBILITYGUARD_CLIENT_ID,
     response_type: "code",
     redirect_uri: `${event.url.origin}/login/callback`,
     state: encodeState({
@@ -46,43 +58,135 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
 }
 
 export async function loginWithMobilityguard(code: string): Promise<boolean> {
+  // Only try to login if the environment is correctly set
+  if (!env.MOBILITYGUARD_CLIENT_ID || !env.MOBILITY_GUARD_AUTH) {
+    console.error(
+      "[OIDC] Missing configuration (MobilityGuard):",
+      {
+        hasClientId: !!env.MOBILITYGUARD_CLIENT_ID,
+        hasAuthUrl: !!env.MOBILITY_GUARD_AUTH
+      }
+    );
+    return false;
+  }
+
   const event = getRequestEvent();
   const code_verifier = event.cookies.get(MobilityguardCookie);
 
   if (!code_verifier) {
+    console.error(
+      "[OIDC] No code_verifier cookie found. Cookies may be disabled or expired (MobilityGuard).",
+      {
+        cookieName: MobilityguardCookie,
+        origin: event.url.origin
+      }
+    );
     return false;
   }
+
+  console.debug(
+    "[OIDC] Starting login (MobilityGuard)",
+    {
+      hasCode: !!code,
+      hasCodeVerifier: !!code_verifier,
+      redirectUri: `${event.url.origin}/login/callback`,
+      backendUrl: env.INTRIC_BACKEND_URL
+    }
+  );
 
   const body = JSON.stringify({
     code,
     code_verifier,
     scope: scopes.join("+"),
-    redirect_uri: `${event.url.origin}/login/callback`
+    redirect_uri: `${event.url.origin}/login/callback`,
+    client_id: env.MOBILITYGUARD_CLIENT_ID
   });
 
-  const response = await event.fetch(
-    `${env.INTRIC_BACKEND_URL}/api/v1/users/login/openid-connect/mobilityguard/`,
+  const backendUrl = `${env.INTRIC_BACKEND_URL}/api/v1/users/login/openid-connect/mobilityguard/`;
+  console.debug(
+    "[OIDC] Calling backend (MobilityGuard)",
     {
-      body,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      }
+      url: backendUrl,
+      redirectUri: `${event.url.origin}/login/callback`
     }
   );
 
-  if (!response.ok) {
+  try {
+    const response = await event.fetch(
+      backendUrl,
+      {
+        body,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      let errorDetails;
+      try {
+        errorDetails = JSON.parse(responseText);
+      } catch {
+        errorDetails = responseText;
+      }
+
+      console.error(
+        "[OIDC] Backend login failed (MobilityGuard)",
+        {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorDetails,
+          url: backendUrl
+        }
+      );
+
+      // Log different error scenarios
+      if (response.status === 401) {
+        console.error("[OIDC] Authentication failed - invalid credentials or token");
+      } else if (response.status === 403) {
+        console.error("[OIDC] Access forbidden - user may be inactive or tenant suspended");
+      } else if (response.status === 500) {
+        console.error("[OIDC] Server configuration error - check backend logs");
+      } else if (response.status === 502) {
+        console.error("[OIDC] Network/gateway error - check provider connectivity");
+      }
+
+      return false;
+    }
+
+    console.debug("[OIDC] Backend login successful");
+
+    event.cookies.delete(MobilityguardCookie, { path: "/" });
+
+    const data = await response.json();
+    const { access_token } = data;
+
+    if (!access_token) {
+      console.error(
+        "[OIDC] No access token in response",
+        { responseKeys: Object.keys(data) }
+      );
+      return false;
+    }
+
+    // Bit weird renaming going on here, but that is how it is, as the backend calls this "access token"
+    await setFrontendAuthCookie({ id_token: access_token });
+
+    console.debug("[OIDC] Login complete, auth cookie set");
+    return true;
+
+  } catch (error) {
+    console.error(
+      "[OIDC] Unexpected error during login (MobilityGuard)",
+      {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      }
+    );
     return false;
   }
-
-  event.cookies.delete(MobilityguardCookie, { path: "/" });
-
-  const data = await response.json();
-  const { access_token } = data;
-  // Bit weird renaming going on here, but that is how it is, as the backend calls this "access token"
-  await setFrontendAuthCookie({ id_token: access_token });
-
-  return true;
 }
 
 export function clearMobilityguardCookie(cookies: Cookies) {

@@ -9,6 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { derived } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   export let website: WebsiteSparse;
 
@@ -27,7 +28,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete crawl.");
+      alert(m.could_not_delete_crawl());
       console.error(e);
     }
     isProcessing = false;
@@ -81,7 +82,7 @@
       padding="icon-leading"
     >
       <IconEdit size="sm" />
-      Edit</Button
+      {m.edit()}</Button
     >
     {#if website.permissions?.includes("delete")}
       {#if !isOrgSpace}
@@ -92,7 +93,7 @@
           }}
           padding="icon-leading"
         >
-          <IconMove size="sm" />Move</Button
+          <IconMove size="sm" />{m.move()}</Button
         >
       {/if}
       <Button
@@ -103,7 +104,7 @@
         }}
         padding="icon-leading"
       >
-        <IconTrash size="sm" />Delete</Button
+        <IconTrash size="sm" />{m.delete()}</Button
       >
     {/if}
   </Dropdown.Menu>
@@ -111,17 +112,17 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete crawl</Dialog.Title>
+    <Dialog.Title>{m.delete_crawl()}</Dialog.Title>
     <Dialog.Description>
-      Do you really want to delete
+      {m.confirm_delete_crawl_start()}
       <span class="italic">
         {website.name ? `${website.name} (${website.url})` : website.url}
-      </span>?
+      </span>{m.confirm_delete_crawl_end()}
     </Dialog.Description>
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteWebsite}
-        >{isProcessing ? "Deleting..." : "Delete"}</Button
+        >{isProcessing ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>
@@ -131,7 +132,7 @@
 
 <Dialog.Root bind:isOpen={showMoveDialog}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Move website</Dialog.Title>
+    <Dialog.Title>{m.move_website()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
       <Select.Simple
@@ -140,20 +141,20 @@
         bind:value={moveDestination}
         fitViewport={true}
         class="border-default hover:bg-hover-dimmer rounded-t-md px-4 pt-4"
-        >Destination</Select.Simple
+        >{m.destination()}</Select.Simple
       >
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mx-4 mt-1.5 mb-4 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">Hint:</span>
-        The assistants in this space will no longer have access to this website.
+        <span class="font-bold">{m.hint()}:</span>
+        {m.move_website_hint()}
       </p>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={moveCollection}
-        >{isProcessing ? "Moving..." : "Move website"}</Button
+        >{isProcessing ? m.moving() : m.move_website()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

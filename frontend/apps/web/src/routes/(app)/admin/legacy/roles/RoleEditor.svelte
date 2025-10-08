@@ -10,6 +10,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { Permission, Role } from "@intric/intric-js";
   import { Dialog, Button, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
 
@@ -84,34 +85,34 @@
 <Dialog.Root bind:isOpen={showDialog}>
   {#if mode === "create"}
     <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>Create role</Button>
+      <Button variant="primary" is={trigger}>{m.create_role()}</Button>
     </Dialog.Trigger>
   {:else}
     <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger}>{disabled ? "View" : "Edit"}</Button>
+      <Button is={trigger}>{disabled ? m.view() : m.edit()}</Button>
     </Dialog.Trigger>
   {/if}
 
   <Dialog.Content width="medium" form>
     {#if mode === "create"}
-      <Dialog.Title>Create a new role</Dialog.Title>
+      <Dialog.Title>{m.create_a_new_role()}</Dialog.Title>
     {:else}
-      <Dialog.Title>Edit role</Dialog.Title>
+      <Dialog.Title>{m.edit_role()}</Dialog.Title>
     {/if}
 
     <Dialog.Section>
       <Input.Text
         bind:value={editableRole.name}
-        label="Role name"
-        description="A descriptive name for this role"
+        label={m.role_name()}
+        description={m.descriptive_name_for_this_role()}
         required
         {disabled}
         class="border-default hover:bg-hover-stronger border-b px-4 py-4"
       ></Input.Text>
       <div class="px-4 py-4">
         <div class="flex items-baseline justify-between pb-2 pl-3 font-medium">
-          Included permissions<span class="text-secondary px-2 text-[0.9rem] font-normal"
-            >What users of this role can manage</span
+          {m.included_permissions()}<span class="text-secondary px-2 text-[0.9rem] font-normal"
+            >{m.what_users_of_this_role_can_manage()}</span
           >
         </div>
         <div class="border-stronger bg-primary overflow-clip rounded-md border">
@@ -136,18 +137,18 @@
 
     <Dialog.Controls let:close>
       {#if !disabled}
-        <Button is={close}>Cancel</Button>
+        <Button is={close}>{m.cancel()}</Button>
         {#if mode === "create"}
           <Button variant="primary" on:click={create} type="submit" disabled={isProcessing}
-            >{isProcessing ? "Creating..." : "Create role"}</Button
+            >{isProcessing ? m.creating() : m.create_role()}</Button
           >
         {:else}
           <Button variant="primary" on:click={edit} disabled={isProcessing}
-            >{isProcessing ? "Saving..." : "Save changes"}</Button
+            >{isProcessing ? m.saving() : m.save_changes()}</Button
           >
         {/if}
       {:else}
-        <Button is={close} variant="outlined">Done</Button>
+        <Button is={close} variant="outlined">{m.done()}</Button>
       {/if}
     </Dialog.Controls>
   </Dialog.Content>

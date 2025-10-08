@@ -10,6 +10,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { Input, Tooltip } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let model: (CompletionModel | EmbeddingModel | TranscriptionModel) & {
     is_locked?: boolean | null | undefined;
@@ -37,10 +38,10 @@
   }
 
   $: tooltip = model.is_locked
-    ? `This model is available on request. Please contact ${environment.salesEmail}`
+    ? m.model_available_on_request({ email: environment.salesEmail })
     : model.is_org_enabled
-      ? "Toggle to disable model"
-      : "Toggle to enable model";
+      ? m.toggle_to_disable_model()
+      : m.toggle_to_enable_model();
 </script>
 
 <div class="-ml-3 flex items-center gap-4">

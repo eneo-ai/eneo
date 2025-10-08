@@ -7,6 +7,8 @@ import { IntricError, type IntricErrorCode } from "@intric/intric-js";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
 import { env } from "$env/dynamic/private";
 import { getEnvironmentConfig } from "./lib/core/environment.server";
+import { sequence } from "@sveltejs/kit/hooks";
+import { paraglideMiddleware } from "$lib/paraglide/server";
 
 function routeRequiresLogin(route: { id: string | null }): boolean {
   const routeIsPublic = route.id?.includes("(public)") ?? false;
@@ -47,7 +49,17 @@ const authHandle: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
-export const handle = authHandle;
+const paraglideHandle: Handle = ({ event, resolve }) =>
+  paraglideMiddleware(event.request, ({ request: localizedRequest, locale }) => {
+    event.request = localizedRequest;
+    return resolve(event, {
+      transformPageChunk: ({ html }) => {
+        return html.replace('%lang%', locale);
+      }
+    });
+  });
+
+export const handle = sequence(paraglideHandle, authHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;

@@ -8,6 +8,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { AssistantResponse } from "@intric/intric-js";
   import { Button, CodeBlock, Dialog } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let message: AssistantResponse;
 
@@ -39,18 +40,18 @@
       $isOpen = true;
       loadLog();
     }}
-    >{message.question === "" ? "Untitled" : message.question}
+    >{message.question === "" ? m.untitled() : message.question}
   </Button>
   <Dialog.Content width="medium">
-    <Dialog.Title>Details for "{message.question}"</Dialog.Title>
+    <Dialog.Title>{m.details_for({ question: message.question })}</Dialog.Title>
     <Dialog.Description hidden>Details for message with id {message.id}</Dialog.Description>
     {#if loadingLog}
-      Loading...
+      {m.loading()}
     {:else}
       <CodeBlock source={loggingDetails} class="max-h-[60vh]" />
     {/if}
     <Dialog.Controls let:close>
-      <Button variant="primary" is={close}>Done</Button>
+      <Button variant="primary" is={close}>{m.done()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

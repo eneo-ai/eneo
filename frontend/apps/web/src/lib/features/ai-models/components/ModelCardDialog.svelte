@@ -3,6 +3,7 @@
   import { writable } from "svelte/store";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   /** Pass in a publishable resource. Its state should be maintained from the outside */
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -14,17 +15,17 @@
   export let includeTrigger = true;
 
   const vision: Label.LabelItem = {
-    label: "Vision",
+    label: m.model_label_vision(),
     color: "moss"
   };
 
   const reasoning: Label.LabelItem = {
-    label: "Reasoning",
+    label: m.model_label_reasoning(),
     color: "amethyst"
   };
 
   const none: Label.LabelItem = {
-    label: "Basic",
+    label: m.basic(),
     color: "gray"
   };
 
@@ -45,11 +46,11 @@
       <div class="flex items-center gap-2">
         <Button is={trigger}><ModelNameAndVendor {model} /></Button>
         {#if "is_org_default" in model && model.is_org_default}
-          <Tooltip text="New apps and assistants will default to this model">
+          <Tooltip text={m.default_model_tooltip()}>
             <div
               class="border-positive-stronger text-positive-stronger w-20 cursor-default rounded-full border text-center text-sm"
             >
-              Default
+              {m.default_model()}
             </div>
           </Tooltip>
         {:else}
@@ -60,7 +61,7 @@
   {/if}
 
   <Dialog.Content width="dynamic">
-    <Dialog.Title>Model info for {"nickname" in model ? model.nickname : model.name}</Dialog.Title>
+    <Dialog.Title>{m.model_info_for()} {"nickname" in model ? model.nickname : model.name}</Dialog.Title>
 
     <Dialog.Section>
       <div class="flex flex-col gap-2 p-8">
@@ -80,7 +81,7 @@
             }
           ]}
           capitalize={false}
-          monospaced={true}>Model</Label.List
+          monospaced={true}>{m.model()}</Label.List
         >
         {#if "token_limit" in model && model.token_limit !== null}
           <Label.List
@@ -91,7 +92,7 @@
               }
             ]}
             capitalize={false}
-            monospaced={true}>Context size</Label.List
+            monospaced={true}>{m.context_size()}</Label.List
           >
         {/if}
         <Label.List
@@ -102,22 +103,22 @@
             }
           ]}
           capitalize={false}
-          monospaced={true}>Hosting region</Label.List
+          monospaced={true}>{m.hosting_region()}</Label.List
         >
         {#if capabilities}
           <Label.List content={capabilities} capitalize={false} monospaced={true}
-            >Capabilities</Label.List
+            >{m.capabilities()}</Label.List
           >
         {/if}
         <Label.List
           content={[
             {
-              label: model.open_source ? "Yes" : "No",
+              label: model.open_source ? m.yes() : m.no(),
               color: model.open_source ? "green" : "orange"
             }
           ]}
           capitalize={false}
-          monospaced={true}>Open Source</Label.List
+          monospaced={true}>{m.model_label_open_source()}</Label.List
         >
         <Label.List
           content={[
@@ -127,13 +128,13 @@
             }
           ]}
           capitalize={true}
-          monospaced={true}>Stability</Label.List
+          monospaced={true}>{m.stability()}</Label.List
         >
       </div>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close} variant="primary" class="!px-8">Done</Button>
+      <Button is={close} variant="primary" class="!px-8">{m.done()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

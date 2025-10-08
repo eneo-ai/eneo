@@ -8,6 +8,7 @@
   const {
     state: { attachments }
   } = getAttachmentManager();
+  import { m } from "$lib/paraglide/messages";
 </script>
 
 {#if $attachments && $attachments.length > 0}
@@ -42,10 +43,10 @@
           </div>
         </div>
 
-        <Tooltip text="Remove attachment" asFragment let:trigger>
+        <Tooltip text={m.remove_attachment()} asFragment let:trigger>
           <Button
             unstyled
-            aria-label="Remove this attachment"
+            aria-label={m.remove_this_attachment()}
             is={trigger}
             on:click={() => attachment.remove()}
             class="border-stronger bg-primary text-primary hover:bg-negative-default hover:text-on-fill absolute -top-2.5 -right-2 flex h-6 w-6 items-center justify-center rounded-full border p-0.5 group-hover:opacity-100 focus-within:opacity-100 lg:opacity-0"

@@ -14,6 +14,7 @@
   import InteractiveGraph from "./InteractiveGraph.svelte";
   import TenantAssistantTable from "./TenantAssistantTable.svelte";
   import { writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -21,26 +22,26 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Insights</title>
+  <title>Eneo.ai – {m.admin()} – {m.insights()}</title>
 </svelte:head>
 
 <Page.Root tabController={selectedTab}>
   <Page.Header>
-    <Page.Title title="Insights"></Page.Title>
+    <Page.Title title={m.insights()}></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="overview">Usage</Page.TabTrigger>
-      <Page.TabTrigger tab="assistants">Assistants</Page.TabTrigger>
+      <Page.TabTrigger tab="overview">{m.usage()}</Page.TabTrigger>
+      <Page.TabTrigger tab="assistants">{m.assistants()}</Page.TabTrigger>
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
     <Page.Tab id="overview">
       {#if $selectedTab === "overview"}
         <Settings.Page>
-          <Settings.Group title="Statistics">
+          <Settings.Group title={m.statistics()}>
             <Settings.Row
               fullWidth
-              title="Assistant usage"
-              description="Discover how people are interacting with your organsisation's assistants."
+              title={m.assistant_usage()}
+              description={m.assistant_usage_description()}
             >
               <div class="h-[600px]">
                 <div
@@ -50,7 +51,7 @@
                     <div class="flex h-full w-full items-center justify-center">
                       <div class="flex flex-col items-center justify-center gap-2 pt-3">
                         <IconLoadingSpinner class="animate-spin" />
-                        Loading data...
+                        {m.loading_data()}
                       </div>
                     </div>
                   {:then loadedData}
@@ -61,7 +62,7 @@
                       <div class="border-stronger flex h-1/3 flex-col justify-between border-b p-6">
                         <div class="flex gap-2">
                           <IconAssistants />
-                          Assistants created
+                          {m.assistants_created()}
                         </div>
                         <span class="self-end text-[2.75rem] font-medium"
                           >{loadedData.assistants.length}</span
@@ -71,7 +72,7 @@
                       <div class="border-stronger flex h-1/3 flex-col justify-between border-b p-6">
                         <div class="flex gap-2">
                           <IconSession />
-                          Conversations started
+                          {m.conversations_started()}
                         </div>
                         <span class="self-end text-[2.75rem] font-medium"
                           >{loadedData.sessions.length}</span
@@ -81,7 +82,7 @@
                       <div class="border-stronger flex h-1/3 flex-col justify-between p-6">
                         <div class="flex gap-2">
                           <IconQuestionMark />
-                          Questions asked
+                          {m.questions_asked()}
                         </div>
                         <span class="self-end text-[2.75rem] font-medium"
                           >{loadedData.questions.length}</span

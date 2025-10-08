@@ -2,6 +2,7 @@
   import { page } from "$app/stores";
   import { getAppContext } from "$lib/core/AppContext";
   import { Button, Dialog } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const { tenant } = getAppContext();
 
@@ -13,32 +14,31 @@
   function copyInviteLink() {
     try {
       navigator.clipboard.writeText(inviteLink);
-      copyButtonText = "Copied!";
+      copyButtonText = m.copied();
       setTimeout(() => {
-        copyButtonText = "Copy invite link";
+        copyButtonText = m.copy_invite_link();
       }, 2000);
     } catch (error) {
-      alert("Could not copy link.");
+      alert(m.could_not_copy_link());
     }
   }
 
-  let copyButtonText = "Copy invite link";
+  let copyButtonText = m.copy_invite_link();
 </script>
 
 <Dialog.Root bind:isOpen>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Your invite link</Dialog.Title>
+    <Dialog.Title>{m.your_invite_link()}</Dialog.Title>
 
     <Dialog.Section>
       <div class="flex flex-col gap-4 p-4">
         <p>
-          Send <span class="italice">{user.email}</span> the link below so they can create their account.
+          {m.send_email_link_instructions({ email: user.email })}
         </p>
         <p
           class="border-accent-default bg-accent-dimmer text-accent-stronger border-l-2 px-4 py-2 text-sm"
         >
-          <span class="font-bold">Note:</span> Please make sure they sign up with the same email address
-          you have registered.
+          <span class="font-bold">{m.note()}</span> {m.signup_same_email_note()}
         </p>
         <div class="bg-primary flex items-center justify-between rounded-lg border p-1 shadow-sm">
           <span class="pl-2 font-mono">{inviteLink}</span>
@@ -48,7 +48,7 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button variant="primary" is={close}>Done</Button>
+      <Button variant="primary" is={close}>{m.done()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

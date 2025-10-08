@@ -18,6 +18,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -51,20 +52,20 @@
 
 <Dialog.Root {openController}>
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Select security classification</Dialog.Title>
+    <Dialog.Title>{m.select_security_classification()}</Dialog.Title>
 
     <Dialog.Section class="p-4" scrollable={false}>
       <SelectSecurityClassification {classifications} bind:value></SelectSecurityClassification>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button
         variant="primary"
         onclick={update}
         type="submit"
         disabled={value?.id === model.security_classification?.id || update.isLoading}
-        >{update.isLoading ? "Saving..." : "Save changes"}</Button
+        >{update.isLoading ? m.saving() : m.save_changes()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

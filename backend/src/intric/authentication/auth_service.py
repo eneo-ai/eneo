@@ -7,7 +7,6 @@ from uuid import UUID
 
 import bcrypt
 import jwt
-from passlib.context import CryptContext
 from pydantic import ValidationError
 
 from intric.authentication.api_key_repo import ApiKeysRepository
@@ -30,34 +29,36 @@ JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
 JWT_SECRET = get_settings().jwt_secret
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
 class AuthService:
     def __init__(self, api_key_repo: ApiKeysRepository):
         self.api_key_repo = api_key_repo
 
     @staticmethod
-    def _generate_salt() -> str:
-        return bcrypt.gensalt().decode()
+    def _generate_salt() -> bytes:
+        return bcrypt.gensalt()
 
     @staticmethod
-    def _hash_password(password: str, salt: str) -> str:
-        return pwd_context.hash(password + salt)
+    def _hash_password(password: str, salt: bytes) -> str:
+        pwd_bytes = password.encode('utf-8')
+        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode('utf-8')
 
     @staticmethod
     def hash_api_key(api_key: str):
         return hashlib.sha256(api_key.encode()).hexdigest()
 
     def create_salt_and_hashed_password(self, plaintext_password: str | None):
-        salt = self._generate_salt()
-        hashed_password = self._hash_password(password=plaintext_password, salt=salt)
-        return salt, hashed_password
+        if plaintext_password == None:
+            plaintext_password = ""
+        pwd_bytes = plaintext_password.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+        return salt.decode(), hashed_password.decode('utf-8')
 
     @staticmethod
-    def verify_password(password: str, salt: str, hashed_pw: str) -> bool:
+    def verify_password(password: str, hashed_pw: str) -> bool:
         """Verify that incoming password+salt matches hashed pw"""
-        return pwd_context.verify(password + salt, hashed_pw)
+        password_byte_enc = password.encode('utf-8')
+        return bcrypt.checkpw(password = password_byte_enc , hashed_password = hashed_pw.encode('utf-8'))
 
     @staticmethod
     def generate_password(length: int):
@@ -182,28 +183,155 @@ class AuthService:
         signing_algos: list[str],
         client_id: str,
         options: dict = None,
+        correlation_id: str = None,
     ):
-        logger.debug(id_token)
+        correlation_id = correlation_id or "no-correlation-id"
 
-        jwt_decoded = jwt.api_jwt.decode_complete(
-            id_token,
-            key=key,
-            algorithms=signing_algos,
-            audience=client_id,
-            options=options,
+        logger.debug(
+            "OIDC: Starting JWT validation",
+            extra={
+                "correlation_id": correlation_id,
+                "client_id": client_id,
+                "signing_algos": signing_algos,
+                "options": options,
+                "id_token_length": len(id_token) if id_token else 0,
+            }
         )
 
-        logger.debug(jwt_decoded)
+        # Decode JWT header without verification to log details
+        try:
+            unverified_header = jwt.get_unverified_header(id_token)
+            logger.debug(
+                "JWT header decoded",
+                extra={
+                    "correlation_id": correlation_id,
+                    "alg": unverified_header.get("alg"),
+                    "kid": unverified_header.get("kid"),
+                    "typ": unverified_header.get("typ"),
+                }
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to decode JWT header",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error": str(e),
+                }
+            )
 
-        payload, header = jwt_decoded["payload"], jwt_decoded["header"]
+        try:
+            jwt_decoded = jwt.api_jwt.decode_complete(
+                id_token,
+                key=key,
+                algorithms=signing_algos,
+                audience=client_id,
+                options=options,
+            )
 
-        # get the pyjwt algorithm object
-        alg_obj = jwt.get_algorithm_by_name(header["alg"])
+            payload = jwt_decoded["payload"]
+            header = jwt_decoded["header"]
 
-        # compute at_hash, then validate / assert
-        digest = alg_obj.compute_hash_digest(access_token.encode())
-        at_hash = base64.urlsafe_b64encode(digest[: (len(digest) // 2)]).rstrip(b"=")
-        assert at_hash.decode() == payload["at_hash"]
+            logger.debug(
+                "JWT decoded successfully",
+                extra={
+                    "correlation_id": correlation_id,
+                    "audience_claim": payload.get("aud"),
+                    "issuer": payload.get("iss"),
+                    "subject": payload.get("sub"),
+                    "exp": payload.get("exp"),
+                    "iat": payload.get("iat"),
+                    "has_at_hash": "at_hash" in payload,
+                    "algorithm": header.get("alg"),
+                }
+            )
+
+        except jwt.ExpiredSignatureError as e:
+            logger.error(
+                "JWT has expired",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error": str(e),
+                }
+            )
+            raise
+        except jwt.InvalidAudienceError as e:
+            logger.error(
+                "JWT audience validation failed",
+                extra={
+                    "correlation_id": correlation_id,
+                    "expected_audience": client_id,
+                    "error": str(e),
+                }
+            )
+            raise
+        except jwt.InvalidSignatureError as e:
+            logger.error(
+                "JWT signature validation failed",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error": str(e),
+                }
+            )
+            raise
+        except jwt.PyJWTError as e:
+            logger.error(
+                "JWT validation failed",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                }
+            )
+            raise
+
+        # Verify at_hash
+        logger.debug(
+            "Verifying at_hash",
+            extra={
+                "correlation_id": correlation_id,
+                "has_at_hash": "at_hash" in payload,
+                "algorithm": header["alg"],
+            }
+        )
+
+        try:
+            # get the pyjwt algorithm object
+            alg_obj = jwt.get_algorithm_by_name(header["alg"])
+
+            # compute at_hash, then validate
+            digest = alg_obj.compute_hash_digest(access_token.encode())
+            computed_at_hash = base64.urlsafe_b64encode(digest[: (len(digest) // 2)]).rstrip(b"=").decode()
+            expected_at_hash = payload.get("at_hash")
+
+            if computed_at_hash != expected_at_hash:
+                logger.error(
+                    "at_hash verification failed",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "computed_at_hash": computed_at_hash,
+                        "expected_at_hash": expected_at_hash,
+                        "algorithm": header["alg"],
+                    }
+                )
+                raise jwt.InvalidTokenError(f"at_hash mismatch: expected {expected_at_hash}, got {computed_at_hash}")
+
+            logger.debug(
+                "at_hash verified successfully",
+                extra={"correlation_id": correlation_id}
+            )
+
+        except jwt.InvalidTokenError:
+            raise  # Re-raise the at_hash mismatch error
+        except Exception as e:
+            logger.error(
+                "at_hash verification error",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                }
+            )
+            raise jwt.InvalidTokenError(f"at_hash verification failed: {str(e)}")
 
         return payload
 
@@ -216,7 +344,19 @@ class AuthService:
         signing_algos: list[str],
         client_id: str,
         options: dict = None,
+        correlation_id: str = None,
     ) -> tuple[str, str]:
+        correlation_id = correlation_id or "no-correlation-id"
+
+        logger.debug(
+            "Extracting username and email from OpenID JWT",
+            extra={
+                "correlation_id": correlation_id,
+                "client_id": client_id,
+                "options": options,
+            }
+        )
+
         payload = self.get_payload_from_openid_jwt(
             id_token=id_token,
             access_token=access_token,
@@ -224,6 +364,31 @@ class AuthService:
             signing_algos=signing_algos,
             client_id=client_id,
             options=options,
+            correlation_id=correlation_id,
         )
 
-        return payload["sub"], payload["email"]
+        username = payload.get("sub")
+        email = payload.get("email")
+
+        if not username or not email:
+            logger.error(
+                "JWT payload missing required fields",
+                extra={
+                    "correlation_id": correlation_id,
+                    "has_sub": bool(username),
+                    "has_email": bool(email),
+                    "payload_keys": list(payload.keys()),
+                }
+            )
+            raise ValueError(f"JWT missing required claims - sub: {bool(username)}, email: {bool(email)}")
+
+        logger.debug(
+            "Successfully extracted username and email from JWT",
+            extra={
+                "correlation_id": correlation_id,
+                "username": username,
+                "email": email,
+            }
+        )
+
+        return username, email

@@ -61,6 +61,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm run setup:github
+      - name: Compile Paraglide messages
+        run: cd apps/web && pnpm run i18n:compile
       - name: Run svelte-check
         run: pnpm run check || echo "Svelte check failed but continuing..."
       - name: Run eslint (non-blocking)

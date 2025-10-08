@@ -5,6 +5,7 @@
   import { onDestroy, onMount } from "svelte";
 
   import dayjs from "dayjs";
+  import { m } from "$lib/paraglide/messages";
 
   export let onRecordingDone: (params: { blob: Blob; mimeType: string }) => void;
 
@@ -91,7 +92,7 @@
             recordingState = "processing";
 
             if (recordingBuffer.length === 0) {
-              const errorMsg = "No audio data was captured";
+              const errorMsg = m.no_audio_data_captured();
               recordingError = errorMsg;
               recordingStats.errors.push(errorMsg);
               recordingState = "error";
@@ -211,7 +212,7 @@
       window.requestAnimationFrame(onAnimationFrame);
     } catch (error) {
       const errorMsg =
-        "Failed to access microphone: " + (error instanceof Error ? error.message : String(error));
+        m.failed_to_access_microphone({ error: error instanceof Error ? error.message : String(error) });
       console.error(errorMsg, error);
       recordingError = errorMsg;
       recordingState = "error";
@@ -243,7 +244,7 @@
 
 <div class="flex flex-col items-center justify-center gap-2">
   <div data-is-recording={isRecording} data-state={recordingState} class="recording-widget">
-    <Tooltip text={isRecording ? "Stop recording" : "Start recording"}>
+    <Tooltip text={isRecording ? m.stop_recording() : m.start_recording()}>
       <button
         class="record-button"
         on:click={toggleRecording}
@@ -260,26 +261,26 @@
 
     {#if isRecording}
       <div class="px-6 py-2 font-mono">
-        <div>Time: {elapsedTime}</div>
+        <div>{m.time_label()}{elapsedTime}</div>
         <div class="text-xs">
           {(recordingStats.totalBytes / (1024 * 1024)).toFixed(2)}
           MB
         </div>
       </div>
     {:else if recordingState === "processing"}
-      <div class="px-6 py-2 font-mono">Processing recording...</div>
+      <div class="px-6 py-2 font-mono">{m.processing_recording()}</div>
     {:else if recordingState === "error"}
       <div class="error-message px-6 py-2">
-        <div>Recording error:</div>
+        <div>{m.recording_error()}</div>
         <div class="text-xs">{recordingError}</div>
         <button
           class="cursor-pointer text-xs underline"
           on:click={() => {
             console.warn("Recording diagnostics:", recordingStats);
-            alert("Recording diagnostic info has been logged to the console");
+            alert(m.diagnostics_logged_console());
           }}
         >
-          View diagnostics
+          {m.view_diagnostics()}
         </button>
       </div>
     {:else if audioURL}

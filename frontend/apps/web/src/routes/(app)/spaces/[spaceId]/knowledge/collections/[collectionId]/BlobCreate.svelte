@@ -4,6 +4,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { type Group } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let disabled = false;
   export let collection: Group;
@@ -38,24 +39,24 @@
 
 <Dialog.Root bind:isOpen={showDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button {disabled} variant="primary" is={trigger}>Add text</Button>
+    <Button {disabled} variant="primary" is={trigger}>{m.add_text()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>
-    <Dialog.Title>Add text</Dialog.Title>
+    <Dialog.Title>{m.add_text()}</Dialog.Title>
     <Dialog.Description hidden></Dialog.Description>
 
     <Dialog.Section>
       <Input.Text
         bind:value={title}
-        label="Title"
+        label={m.title()}
         required
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
 
       <Input.TextArea
         bind:value={text}
-        label="Content"
+        label={m.content()}
         required
         rows={15}
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
@@ -63,10 +64,9 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" on:click={uploadText}>
-        {#if isUploading}Submitting...{:else}
-          Submit{/if}</Button
+        {#if isUploading}{m.submitting()}{:else}{m.submit()}{/if}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

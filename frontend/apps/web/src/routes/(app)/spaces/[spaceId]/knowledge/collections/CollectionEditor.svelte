@@ -3,6 +3,7 @@
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Dialog, Button, Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   const {
@@ -59,17 +60,17 @@
 <Dialog.Root bind:isOpen={showDialog}>
   {#if mode === "create"}
     <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>Create collection</Button>
+      <Button variant="primary" is={trigger}>{m.create_collection()}</Button>
     </Dialog.Trigger>
   {/if}
 
   <Dialog.Content width="medium" form>
     {#if mode === "create"}
-      <Dialog.Title>Create a new collection</Dialog.Title>
-      <Dialog.Description hidden>Create a new collection</Dialog.Description>
+      <Dialog.Title>{m.create_new_collection()}</Dialog.Title>
+      <Dialog.Description hidden>{m.create_new_collection()}</Dialog.Description>
     {:else}
-      <Dialog.Title>Edit collection</Dialog.Title>
-      <Dialog.Description hidden>Edit the selected collection</Dialog.Description>
+      <Dialog.Title>{m.edit_collection()}</Dialog.Title>
+      <Dialog.Description hidden>{m.edit_collection()}</Dialog.Description>
     {/if}
 
     <Dialog.Section>
@@ -78,15 +79,14 @@
           <p
             class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
           >
-            <span class="font-bold">Warning:</span>
-            This space does currently not have any embedding models enabled. Enable at least one embedding
-            model to be able to create a collection.
+            <span class="font-bold">{m.warning()}:</span>
+            {m.no_embedding_models_warning()}
           </p>
           <div class="border-default border-b"></div>
         {/if}
         <Input.Text
           bind:value={collectionName}
-          label="Name"
+          label={m.name()}
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
@@ -98,7 +98,7 @@
       {:else}
         <Input.Text
           bind:value={collectionName}
-          label="Name"
+          label={m.name()}
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
@@ -106,18 +106,18 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       {#if mode === "create"}
         <Button
           variant="primary"
           on:click={createCollection}
           type="submit"
           disabled={isProcessing || $currentSpace.embedding_models.length === 0}
-          >{isProcessing ? "Creating..." : "Create collection"}</Button
+          >{isProcessing ? m.creating() : m.create_collection()}</Button
         >
       {:else if mode === "update"}
         <Button variant="primary" on:click={editCollection} type="submit"
-          >{isProcessing ? "Saving..." : "Save changes"}</Button
+          >{isProcessing ? m.saving() : m.save_changes()}</Button
         >
       {/if}
     </Dialog.Controls>

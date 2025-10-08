@@ -11,6 +11,7 @@
   import AddMember from "./AddMember.svelte";
   import MemberRole from "./MemberRole.svelte";
   import { Page, Settings } from "$lib/components/layout";
+  import { m } from "$lib/paraglide/messages";
 
   const { user } = getAppContext();
 
@@ -30,22 +31,22 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.name} – Members</title>
+  <title>{m.app_name()} – {$currentSpace.name} – {m.members()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Members"></Page.Title>
+    <Page.Title title={m.members()}></Page.Title>
     {#if $currentSpace.hasPermission("add", "member")}
       <AddMember></AddMember>
     {/if}
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="Current members">
+      <Settings.Group title={m.current_members()}>
         <Settings.Row
-          title="Admins & Editors"
-          description="People that can create and edit new assistants and apps, and manage this space's knowledge."
+          title={m.admins_editors()}
+          description={m.admins_editors_description()}
         >
           <div class="flex flex-grow flex-col">
             {#each editors as member (member.id)}
@@ -54,7 +55,7 @@
               >
                 <MemberChip {member}></MemberChip>
                 {#if user.id === member.id}
-                  <span class="text-primary">{member.email} (you)</span>
+                  <span class="text-primary">{member.email} ({m.you()})</span>
                 {:else}
                   <span class="text-primary">{member.email}</span>
                 {/if}
@@ -71,8 +72,8 @@
 
         {#if isViewerRoleAvailable}
           <Settings.Row
-            title="Viewers"
-            description="People that can see and use this space's published assistants and apps."
+            title={m.viewers()}
+            description={m.viewers_description()}
           >
             <div class="flex flex-grow flex-col">
               {#if viewers.length > 0}
@@ -82,7 +83,7 @@
                   >
                     <MemberChip {member}></MemberChip>
                     {#if user.id === member.id}
-                      <span class="text-primary">{member.email} (you)</span>
+                      <span class="text-primary">{member.email} ({m.you()})</span>
                     {:else}
                       <span class="text-primary">{member.email}</span>
                     {/if}
@@ -98,7 +99,7 @@
                 <div
                   class="border-default text-muted hover:bg-hover-dimmer flex items-center justify-between gap-4 border-b py-4 pr-4 pl-4"
                 >
-                  There are currently no viewers in this space
+                  {m.no_viewers_in_space()}
                 </div>
               {/if}
             </div>

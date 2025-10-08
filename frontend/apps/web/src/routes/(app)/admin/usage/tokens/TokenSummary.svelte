@@ -12,6 +12,7 @@
   import { CalendarDate } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     tokenStats: TokenUsageSummary;
@@ -45,13 +46,13 @@
 </script>
 
 <Settings.Page>
-  <Settings.Group title="Overview">
+  <Settings.Group title={m.overview()}>
     <TokenOverviewBar {tokenStats}></TokenOverviewBar>
   </Settings.Group>
-  <Settings.Group title="Details">
+  <Settings.Group title={m.details()}>
     <Settings.Row
-      title="Usage by model"
-      description="See this organisation's token usage by models and timeframe."
+      title={m.usage_by_model()}
+      description={m.see_token_usage_by_model()}
       fullWidth
     >
       <div slot="toolbar">

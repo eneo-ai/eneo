@@ -14,6 +14,7 @@
   import { createSelect } from "@melt-ui/svelte";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   type Member = Space["members"]["items"][number];
   type RoleOption = { label: string; value: SpaceRole["value"] | "remove" };
@@ -32,7 +33,7 @@
 
   const options: RoleOption[] = [
     ...$currentSpace.available_roles,
-    { label: "Remove", value: "remove" }
+    { label: m.remove_member(), value: "remove" }
   ];
 
   const {
@@ -60,7 +61,7 @@
       // Will cause an update in the parent page and remove this component instance form the tree
       refreshCurrentSpace();
     } catch (e) {
-      alert("Couldn't remove user.");
+      alert(m.couldnt_remove_user());
       console.error(e);
     }
   });
@@ -74,7 +75,7 @@
       // Await refreshing as that will update the actual label
       await refreshCurrentSpace();
     } catch (e) {
-      alert("Couldn't change role.");
+      alert(m.couldnt_change_role());
       console.error(e);
       // Reset selected
       $selected = { value: member.role };
@@ -96,7 +97,7 @@
 
 <div class="relative flex flex-col gap-1">
   <label class="sr-only pl-3 font-medium" {...$label} use:label>
-    Select a role for this member
+    {m.select_role_for_member()}
   </label>
 
   <Button is={[$trigger]}>
@@ -142,14 +143,14 @@
 
 <Dialog.Root alert bind:isOpen={showRemoveDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Remove member</Dialog.Title>
+    <Dialog.Title>{m.remove_member()}</Dialog.Title>
     <Dialog.Description
-      >Do you really want to remove <span class="italic">{member.email}</span> from this space?</Dialog.Description
+      >{m.confirm_remove_member({ memberEmail: member.email })}</Dialog.Description
     >
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={removeMember}
-        >{removeMember.isLoading ? "Removing..." : "Remove"}</Button
+        >{removeMember.isLoading ? m.removing() : m.remove()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

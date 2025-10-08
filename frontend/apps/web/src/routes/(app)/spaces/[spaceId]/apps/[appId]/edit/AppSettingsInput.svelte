@@ -2,6 +2,7 @@
   import { Settings } from "$lib/components/layout";
   import { getAppEditor } from "$lib/features/apps/AppEditor";
   import AppSettingsInputType from "./AppSettingsInputType.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { resource, update }
@@ -10,8 +11,8 @@
 
 {#each $update.input_fields as input, currentIndex (input)}
   <Settings.Row
-    title="Input description"
-    description="A label telling this app's users what data to provide via this input."
+    title={m.input_description()}
+    description={m.input_description_description()}
     hasChanges={$update.input_fields?.[currentIndex]?.description !==
       $resource.input_fields?.[currentIndex]?.description}
     let:aria
@@ -29,8 +30,8 @@
   </Settings.Row>
 
   <Settings.Row
-    title="Input type"
-    description="Select what type of media this input accepts and the kind of interface to display."
+    title={m.input_type()}
+    description={m.input_type_description()}
     hasChanges={$update.input_fields?.[currentIndex]?.type !==
       $resource.input_fields?.[currentIndex]?.type}
     revertFn={() => {

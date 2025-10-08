@@ -10,6 +10,7 @@
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import { modelOrgs } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import type { TokenUsageSummary } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     tokenStats: TokenUsageSummary;
@@ -24,7 +25,7 @@
           const org = info.model_org ?? "";
           if (!acc[org]) {
             acc[org] = {
-              label: org || "Unknown Organization",
+              label: org || m.unknown_organization(),
               tokenCount: 0,
               colour: modelOrgs[org].chartColour,
               org: org
@@ -40,8 +41,8 @@
 </script>
 
 <Settings.Row
-  title="Token summary (Last 30 days)"
-  description="See how many tokens this organisation's applications have been using broken down by vendor."
+  title={m.token_summary()}
+  description={m.token_summary_description()}
 >
   <div class="flex flex-col gap-4">
     <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full lg:mt-2">

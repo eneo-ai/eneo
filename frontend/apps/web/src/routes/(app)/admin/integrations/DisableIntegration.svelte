@@ -3,6 +3,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { TenantIntegration } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     integration: TenantIntegration;
@@ -33,22 +34,19 @@
 
 <Dialog.Root bind:isOpen>
   <Dialog.Trigger asFragment let:trigger>
-    <Button variant="destructive" is={trigger}>Disable integration</Button>
+    <Button variant="destructive" is={trigger}>{m.disable_integration()}</Button>
   </Dialog.Trigger>
 
   <Dialog.Content>
-    <Dialog.Title>Disable {integration.name} integration</Dialog.Title>
+    <Dialog.Title>{m.disable_name_integration({ name: integration.name })}</Dialog.Title>
     <Dialog.Description>
-      Do you really want to disable the integration for <span class="italic"
-        >{integration.name}</span
-      >?<br /><br />Disabling an integration will disconnect all users and remove all knowledge
-      across all spaces that was previously imported via this integration.
+      {m.do_you_really_want_to_disable_integration_for_name({ name: integration.name })}<br /><br />{m.disabling_integration_warning()}
     </Dialog.Description>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button on:click={disableIntegration} variant="destructive">
-        {disableIntegration.isLoading ? "Loading..." : "Disable"}
+        {disableIntegration.isLoading ? m.loading() : m.disable()}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

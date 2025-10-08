@@ -44,7 +44,7 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 ### A Note on Flexibility
 
 > This `docker-compose.yml` file with Traefik is a convenient, all-in-one solution, but it is **not mandatory**.
-> 
+>
 > The Eneo frontend and backend images are self-contained and can be run in any container environment. You can integrate them into your own custom `docker-compose.yml` file or deploy them using other tools like Nginx, Caddy, or cloud-based load balancers if you prefer.
 
 ## 🚀 Deployment in 4 Steps
@@ -202,7 +202,7 @@ If you encounter issues, here are some common problems and their solutions.
 
 ### SSL Certificate Not Issued (HTTPS not working)
 - Confirm your domain's DNS A record correctly points to the server's IP
-- Check the Traefik logs for errors from Let's Encrypt: 
+- Check the Traefik logs for errors from Let's Encrypt:
   ```bash
   docker compose logs -f traefik
   ```

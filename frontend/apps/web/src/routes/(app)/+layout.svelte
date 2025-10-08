@@ -15,6 +15,7 @@
   import { IconEneo } from "@intric/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -51,7 +52,7 @@
 <a
   href={contentLink}
   class="bg-primary text-accent-stronger absolute top-1 left-1 z-50 h-0 w-0 overflow-hidden rounded-lg font-medium shadow-lg focus:block focus:h-auto focus:w-auto"
-  ><span class="block p-2">Jump to content</span></a
+  ><span class="block p-2">{m.jump_to_content()}</span></a
 >
 
 <div class="bg-secondary absolute inset-0"></div>
@@ -95,8 +96,8 @@
       </Button>
     </div>
     <nav class="flex h-[3.25rem] w-full overflow-x-auto">
-      <a href="/spaces/personal/chat" data-current={isPersonal ? "page" : undefined}>Personal</a>
-      <a href="/spaces/list" data-current={isSpacesGeneric ? "page" : undefined}>Spaces</a>
+      <a href="/spaces/personal/chat" data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
+      <a href="/spaces/list" data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
       {#if user.hasPermission("admin")}
         <a href="/spaces/organization/knowledge" data-current={isOrganization ? "page" : undefined}>Organization</a>
       {/if}
@@ -106,7 +107,7 @@
       <!-- Toggle -->
       {#if user.hasPermission("admin")}
         <a href="/admin" data-current={currentRoute.startsWith("/admin") ? "page" : undefined}
-          >Admin</a
+          >{m.admin()}</a
         >
       {/if}
 

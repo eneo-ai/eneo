@@ -8,6 +8,7 @@
   import { quadInOut } from "svelte/easing";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let currentApp: { id: string; name: string };
 
@@ -54,7 +55,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
   >
-    Select an app
+    {m.select_an_app()}
   </div>
   {#each $currentSpace.applications.apps as app (app.id)}
     <div

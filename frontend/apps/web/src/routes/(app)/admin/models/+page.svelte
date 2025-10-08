@@ -10,6 +10,7 @@
   import CompletionModelsTable from "./CompletionModelsTable.svelte";
   import EmbeddingModelsTable from "./EmbeddingModelsTable.svelte";
   import TranscriptionModelsTable from "./TranscriptionModelsTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -17,16 +18,16 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Models</title>
+  <title>Eneo.ai – {m.admin()} – {m.models()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Models"></Page.Title>
+    <Page.Title title={m.models()}></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="completion_models">Completion models</Page.TabTrigger>
-      <Page.TabTrigger tab="embedding_models">Embedding models</Page.TabTrigger>
-      <Page.TabTrigger tab="transcription_models">Transcription models</Page.TabTrigger>
+      <Page.TabTrigger tab="completion_models">{m.completion_models()}</Page.TabTrigger>
+      <Page.TabTrigger tab="embedding_models">{m.embedding_models()}</Page.TabTrigger>
+      <Page.TabTrigger tab="transcription_models">{m.transcription_models()}</Page.TabTrigger>
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>

@@ -6,6 +6,8 @@
   import { browser } from "$app/environment";
   import { LoadingScreen } from "$lib/components/layout";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
+  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const { data } = $props();
 
@@ -22,7 +24,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Login</title>
+  <title>Eneo.ai – {m.login()}</title>
 </svelte:head>
 
 {#if data.zitadelLink}
@@ -31,8 +33,8 @@
   <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
     <div class="box w-[400px] justify-center">
       <h1 class="flex justify-center">
-        <EneoWordMark class="text-brand-intric h-16 w-24" />
-        <span class="sr-only">Eneo</span>
+        <IntricWordMark class="text-brand-intric h-16 w-24" />
+        <span class="sr-only">{m.app_name()}</span>
       </h1>
 
       <div aria-live="polite">
@@ -40,21 +42,63 @@
           <div
             class="bg-positive-dimmer text-positive-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
           >
-            Successfully logged out!
+            {m.logout_success()}
           </div>{/if}
         {#if message === "expired"}
           <div
             class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
           >
-            Session expired. Please login again.
+            {m.session_expired_please_login_again()}
           </div>{/if}
         {#if message === "mobilityguard_login_error"}
           <div
             class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
           >
-            The selected login method was not successful. Please use a different login method or try
-            again later.
-          </div>{/if}
+            <strong>{m.authentication_failed()}</strong>
+            {m.authentication_failed_details()}
+            <ul class="list-disc list-inside mt-1">
+              <li>{m.invalid_credentials()}</li>
+              <li>{m.account_restrictions()}</li>
+              <li>{m.system_configuration_issues()}</li>
+            </ul>
+            {m.try_again_contact_admin()}
+          </div>
+        {:else if message === "mobilityguard_oauth_error"}
+          <div
+            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>{m.authentication_provider_error()}</strong>
+            {m.authentication_service_error()}
+          </div>
+        {:else if message === "mobilityguard_access_denied"}
+          <div
+            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>{m.access_denied()}</strong>
+            {m.access_denied_eneo()}
+          </div>
+        {:else if message === "mobilityguard_invalid_request"}
+          <div
+            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>{m.invalid_request()}</strong>
+            {m.invalid_login_request()}
+          </div>
+        {:else if message === "no_code_received" || message === "no_state_received"}
+          <div
+            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>{m.login_process_interrupted()}</strong>
+            {m.authentication_incomplete()}
+          </div>
+        {:else if message && message.includes("error")}
+          <div
+            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            <strong>{m.login_failed_general()}</strong>
+            {m.authentication_error_occurred()}
+          </div>
+        {/if}
       </div>
 
       <form
@@ -79,55 +123,55 @@
 
         {#if loginFailed}
           <div class="label-negative bg-label-dimmer text-label-stronger rounded-lg p-4">
-            Incorrect credentials. Please provide a valid username and a valid password.
+            {m.incorrect_credentials()}
           </div>
         {/if}
 
         {#if showUsernameAndPassword || !data.mobilityguardLink}
           <Input.Text
-            label="Email"
+            label={m.email()}
             value=""
             name="email"
             autocomplete="username"
             type="email"
             required
             hiddenLabel={true}
-            placeholder="Email"
+            placeholder={m.email()}
           ></Input.Text>
 
           <Input.Text
-            label="Password"
+            label={m.password()}
             value=""
             name="password"
             autocomplete="current-password"
             type="password"
             required
             hiddenLabel={true}
-            placeholder="Password"
+            placeholder={m.password()}
           ></Input.Text>
 
           <Button type="submit" disabled={isAwaitingLoginResponse} variant="primary">
             {#if isAwaitingLoginResponse}
-              Logging in...
+              {m.logging_in()}
             {:else}
-              Login
+              {m.login()}
             {/if}
           </Button>
         {:else}
-          <Button variant="primary" href={data.mobilityguardLink}>Login</Button>
+          <Button variant="primary" href={data.mobilityguardLink}>{m.login()}</Button>
         {/if}
       </form>
     </div>
     <div class="absolute bottom-10 mt-12 flex justify-center">
       {#if showUsernameAndPassword && data.mobilityguardLink}
-        <Button variant="outlined" class="text-secondary" href="/login?">Hide Login Fields</Button>
+        <Button variant="outlined" class="text-secondary" href="/login?">{m.hide_login_fields()}</Button>
       {:else if data.mobilityguardLink}
         <Button
           variant="outlined"
           class="text-secondary"
           href="/login?showUsernameAndPassword=true"
         >
-          Show Login Fields
+          {m.show_login_fields()}
         </Button>
       {/if}
     </div>

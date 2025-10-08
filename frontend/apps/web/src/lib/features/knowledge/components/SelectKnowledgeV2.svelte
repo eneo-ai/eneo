@@ -10,6 +10,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAvailableKnowledge } from "../getAvailableKnowledge";
   import { tick } from "svelte";
+  import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
 
@@ -196,7 +197,6 @@
           org.push(item);
         }
       }
-      console.log("3",{ personal, org })
       return { personal, org };
     };
 
@@ -265,11 +265,11 @@
         <div class="flex-grow"></div>
         {#if collection.metadata.num_info_blobs > 0}
           <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            {collection.metadata.num_info_blobs} files
+            {collection.metadata.num_info_blobs} {m.resource_files()}
           </span>
         {:else}
           <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            Empty
+            {m.empty()}
           </span>
         {/if}
         <Button variant="destructive" padding="icon" on:click={() => {
@@ -328,7 +328,7 @@
         <div class="flex-grow"></div>
         {#if collection.metadata.num_info_blobs > 0}
           <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            {collection.metadata.num_info_blobs} files
+            {collection.metadata.num_info_blobs} {m.resource_files()}
           </span>
         {:else}
           <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
@@ -407,7 +407,7 @@
           $openOrg = false;
         }}
       >
-        <IconPlus class="min-w-7" />Add knowledge (Personal)
+        <IconPlus class="min-w-7" />{m.add_knowledge_personal()}
       </button>
     {/if}
 
@@ -446,7 +446,7 @@
                   <div class="flex-grow"></div>
                   {#if collection.metadata.num_info_blobs > 0}
                     <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                      {collection.metadata.num_info_blobs} files
+                      {collection.metadata.num_info_blobs} {m.resource_files()}
                     </span>
                   {:else}
                     <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
@@ -477,7 +477,7 @@
           </div>
         {/each}
       {:else}
-        <p class="knowledge-message">No Personal sources available.</p>
+        <p class="knowledge-message">{m.no_personal_sources()}</p>
       {/if}
     </div>
   </section>
@@ -510,7 +510,7 @@
           $openPersonal = false;
         }}
       >
-        <IconPlus class="min-w-7" />Add knowledge (Organization)
+        <IconPlus class="min-w-7" />{m.add_knowledge_organization()}
       </button>
     {/if}
 
@@ -529,7 +529,7 @@
               </span>
               <span class="flex-grow"></span>
               <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-warning">
-                Organization
+                {m.organization()}
               </span>
             </div>
 
@@ -549,7 +549,7 @@
                   <div class="flex-grow"></div>
                   {#if collection.metadata.num_info_blobs > 0}
                     <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                      {collection.metadata.num_info_blobs} files
+                      {collection.metadata.num_info_blobs} {m.resource_files()}
                     </span>
                   {:else}
                     <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
@@ -580,7 +580,7 @@
           </div>
         {/each}
       {:else}
-        <p class="knowledge-message">No Organization sources available.</p>
+        <p class="knowledge-message">{m.no_organization_sources()}</p>
       {/if}
     </div>
   </section>

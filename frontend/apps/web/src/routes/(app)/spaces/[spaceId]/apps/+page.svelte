@@ -7,6 +7,7 @@
   import { createAppTemplateAdapter } from "$lib/features/templates/TemplateAdapter";
   import { initTemplateController } from "$lib/features/templates/TemplateController";
   import TemplateCreateAppHint from "$lib/features/templates/components/apps/TemplateCreateAppHint.svelte";
+  import { m } from "$lib/paraglide/messages";
   export let data;
 
   const {
@@ -28,12 +29,12 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.personal ? "Personal" : $currentSpace.name} – Apps</title>
+  <title>Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.apps()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Apps"></Page.Title>
+    <Page.Title title={m.apps()}></Page.Title>
     {#if $currentSpace.hasPermission("create", "app")}
       <TemplateCreateApp></TemplateCreateApp>
     {/if}

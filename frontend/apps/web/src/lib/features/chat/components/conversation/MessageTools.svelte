@@ -14,6 +14,7 @@
   let showCopiedMessage = $state(false);
 
   const faviconService = getFaviconUrlService();
+  import { m } from "$lib/paraglide/messages";
 </script>
 
 <div
@@ -22,7 +23,7 @@
   class="mb-6 flex flex-col items-start group-hover/message:opacity-100 md:-mb-2"
 >
   <div class="flex gap-2">
-    <Tooltip text="Copy response">
+    <Tooltip text={m.copy_response()}>
       <Button
         on:click={() => {
           navigator.clipboard.writeText(message.answer);
@@ -36,7 +37,7 @@
         padding="icon"
         ><IconCopy />
         {#if showCopiedMessage}
-          <span class="pr-2">Copied!</span>
+          <span class="pr-2">{m.copied()}</span>
         {/if}
       </Button>
     </Tooltip>
@@ -52,7 +53,7 @@
         <IconChevronRight
           class={referencesExpanded ? "rotate-90 transition-all" : "transition-all"}
         />
-        {message.references.length + message.web_search_references.length} references
+        {message.references.length + message.web_search_references.length} {m.references()}
       </Button>
     {/if}
   </div>

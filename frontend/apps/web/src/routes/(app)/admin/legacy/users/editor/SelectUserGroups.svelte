@@ -11,6 +11,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { UserGroup } from "@intric/intric-js";
   import { createCombobox } from "@melt-ui/svelte";
+  import { m } from "$lib/paraglide/messages";
 
   // Array of all currently selected collections
   export let selectedGroups: UserGroup[];
@@ -85,14 +86,14 @@
 <div class="px-4 py-4">
   <div class="flex flex-col gap-1 pb-4">
     <div>
-      <span class="pl-3 font-medium">User groups</span>
+      <span class="pl-3 font-medium">{m.user_groups()}</span>
     </div>
 
     <div class="flex items-center justify-between gap-2">
       <div class="relative flex w-full">
         <input
           bind:this={inputElement}
-          placeholder="Select a user group..."
+          placeholder={m.select_user_group()}
           {...$input}
           use:input
           class="border-stronger bg-primary ring-default placeholder:text-secondary disabled:bg-secondary disabled:text-muted
@@ -107,7 +108,7 @@
           <IconChevronDown class="absolute top-2 right-4 h-6 w-6" />
         </button>
       </div>
-      <Button variant="primary" disabled={$inputValue === ""} on:click={addToGroup}>Assign</Button>
+      <Button variant="primary" disabled={$inputValue === ""} on:click={addToGroup}>{m.assign()}</Button>
     </div>
   </div>
 
@@ -124,7 +125,7 @@
             variant="destructive"
             on:click={() => {
               removeFromGroup(selectedGroup);
-            }}>Remove</Button
+            }}>{m.remove()}</Button
           >
         </div>
       {/each}
@@ -158,7 +159,7 @@
         <li
           class="flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer hover:bg-hover-default"
         >
-          No results found
+          {m.no_results_found()}
         </li>
       {/each}
     </div>

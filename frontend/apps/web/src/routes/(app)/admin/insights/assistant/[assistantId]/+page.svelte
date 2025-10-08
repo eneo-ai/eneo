@@ -10,6 +10,7 @@
   import { page } from "$app/stores";
   import FilterPopup from "./FilterPopup.svelte";
   import QuestionTable from "./QuestionTable.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -31,18 +32,18 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – {data.assistant.name} – Insights</title>
+  <title>Eneo.ai – Admin – {data.assistant.name} – {m.insights()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
     <Page.Title
-      parent={{ title: "Insights", href: "/admin/insights?tab=assistants" }}
+      parent={{ title: m.insights(), href: "/admin/insights?tab=assistants" }}
       title={data.assistant.name}
     ></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="chat">Analyse</Page.TabTrigger>
-      <Page.TabTrigger tab="questions">Question history</Page.TabTrigger>
+      <Page.TabTrigger tab="chat">{m.analyse()}</Page.TabTrigger>
+      <Page.TabTrigger tab="questions">{m.question_history()}</Page.TabTrigger>
     </Page.Tabbar>
     <FilterPopup onUpdate={updateQuestions} {includeFollowups} dateRange={timeframe}></FilterPopup>
   </Page.Header>

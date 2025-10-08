@@ -9,6 +9,7 @@
   import MembersList from "../members/MembersList.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { Page } from "$lib/components/layout";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentSpace }
@@ -39,7 +40,7 @@
 
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.personal ? "Personal" : $currentSpace.name} – Overview</title>
+  <title>{m.app_name()} – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.overview()}</title>
 </svelte:head>
 
 {#snippet tile(params: { title: string; count: number; link: string })}
@@ -58,7 +59,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Overview"></Page.Title>
+    <Page.Title title={m.overview()}></Page.Title>
     <MembersList></MembersList>
   </Page.Header>
 
@@ -66,57 +67,57 @@
     <div class="flex flex-grow flex-col overflow-y-auto pt-4 pr-4 pl-2">
       <div class="flex items-center justify-start gap-4 pb-4">
         <h1 class="text-primary text-[2rem] font-extrabold">
-          {$currentSpace.personal ? `Hi, ${$userInfo.firstName}!` : $currentSpace.name}
+          {$currentSpace.personal ? m.hi_user_personal({ firstName: $userInfo.firstName }) : $currentSpace.name}
         </h1>
       </div>
       {#if $currentSpace.personal}
         <p class="text-primary min-h-20 max-w-[70ch]">
-          You can build and experiment with your own AI applications in your personal space.
+          {m.personal_space_description()}
         </p>
       {:else}
-        <p class="min-h-20">{$currentSpace.description ?? `Welcome to ${$currentSpace.name}`}</p>
+        <p class="min-h-20">{$currentSpace.description ?? m.welcome_to_space({ space: $currentSpace.name })}</p>
       {/if}
       <!-- <div class="flex-grow"></div> -->
 
       <div class="grid gap-4 pt-4 pb-4 md:grid-cols-3">
         {#if $currentSpace.hasPermission("read", "assistant")}
           {@render tile({
-            title: "Assistants",
+            title: m.assistants(),
             count: $currentSpace.applications.chat.length,
             link: "/assistants"
           })}
         {/if}
         {#if $currentSpace.hasPermission("read", "app")}
           {@render tile({
-            title: "Apps",
+            title: m.apps(),
             count: $currentSpace.applications.apps.length,
             link: "/apps"
           })}
         {/if}
         {#if $currentSpace.hasPermission("read", "service")}
           {@render tile({
-            title: "Services",
+            title: m.services(),
             count: $currentSpace.applications.services.length,
             link: "/services"
           })}
         {/if}
         {#if $currentSpace.hasPermission("read", "collection")}
           {@render tile({
-            title: "Collections",
+            title: m.collections(),
             count: localCollections.length,
             link: "/knowledge?tab=collections"
           })}
         {/if}
         {#if $currentSpace.hasPermission("read", "website")}
           {@render tile({
-            title: "Websites",
+            title: m.websites(),
             count: localWebsites.length,
             link: "/knowledge?tab=websites"
           })}
         {/if}
         {#if $currentSpace.hasPermission("read", "member")}
           {@render tile({
-            title: "Members",
+            title: m.members(),
             count: $currentSpace.members.length,
             link: "/members"
           })}

@@ -11,6 +11,7 @@
   import { IconWeb } from "@intric/icons/web";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
+  import { m } from "$lib/paraglide/messages";
 
   const chat = getChatService();
   const { featureFlags } = getAppContext();
@@ -97,7 +98,7 @@
 
   <div class="flex justify-between">
     <div class="flex items-center gap-2">
-      <AttachmentUploadIconButton label="Upload documents to your conversation" />
+      <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
         <MentionButton></MentionButton>
       {/if}
@@ -106,37 +107,37 @@
           class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
         >
           <Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
-            <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>Search</span></Input.Switch
+            <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
           >
         </div>
       {/if}
     </div>
 
     {#if chat.askQuestion.isLoading}
-      <Tooltip text="Cancel your request" placement="top" let:trigger asFragment>
+      <Tooltip text={m.cancel_your_request()} placement="top" let:trigger asFragment>
         <Button
           unstyled
-          aria-label="Cancel your request"
+          aria-label={m.cancel_your_request()}
           type="submit"
           is={trigger}
           on:click={() => abortController?.abort("User cancelled")}
           name="ask"
           class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
         >
-          Stop answer
+          {m.stop_answer()}
           <IconStopCircle />
         </Button>
       </Tooltip>
     {:else}
       <Button
         disabled={isAskingDisabled}
-        aria-label="Submit your question"
+        aria-label={m.submit_your_question()}
         type="submit"
         on:click={() => ask()}
         name="ask"
         class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
       >
-        Send
+        {m.send()}
         <IconEnter />
       </Button>
     {/if}

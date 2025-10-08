@@ -6,6 +6,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let knowledgeItem: IntegrationKnowledge;
 
@@ -24,7 +25,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert("Could not delete crawl.");
+      alert(m.could_not_delete_crawl());
       console.error(e);
     }
   });
@@ -48,7 +49,7 @@
         }}
         padding="icon-leading"
       >
-        <IconTrash size="sm" />Delete</Button
+        <IconTrash size="sm" />{m.delete()}</Button
       >
     {/if}
   </Dropdown.Menu>
@@ -56,17 +57,14 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete integration knowledge</Dialog.Title>
+    <Dialog.Title>{m.delete_integration_knowledge()}</Dialog.Title>
     <Dialog.Description>
-      Do you really want to delete
-      <span class="italic">
-        {knowledgeItem.name}
-      </span>? You will no longer be able to use this knowledge in your assistants.
+      {m.confirm_delete_integration_knowledge({ knowledgeName: knowledgeItem.name })}
     </Dialog.Description>
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={deleteKnowledge}
-        >{deleteKnowledge.isLoading ? "Deleting..." : "Delete"}</Button
+        >{deleteKnowledge.isLoading ? m.deleting() : m.delete()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

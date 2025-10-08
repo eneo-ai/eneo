@@ -13,6 +13,7 @@
   import SelectUserGroups from "./SelectUserGroups.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getAdminUserCtx } from "../ctx";
+  import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
 
@@ -69,7 +70,7 @@
 
   async function updateUser() {
     if (!user.username) {
-      alert("Can't use this edit dialog for users without username.");
+      alert(m.cant_edit_user_without_username());
       return;
     }
     const update = {
@@ -118,43 +119,43 @@
 <Dialog.Root bind:isOpen={showDialog}>
   {#if mode === "create"}
     <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>Create user</Button>
+      <Button variant="primary" is={trigger}>{m.create_user()}</Button>
     </Dialog.Trigger>
   {:else}
     <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger}>Edit</Button>
+      <Button is={trigger}>{m.edit()}</Button>
     </Dialog.Trigger>
   {/if}
 
   <Dialog.Content width="medium" form>
     {#if mode === "create"}
-      <Dialog.Title>Create a new user</Dialog.Title>
-      <Dialog.Description hidden>Create a new user</Dialog.Description>
+      <Dialog.Title>{m.create_a_new_user()}</Dialog.Title>
+      <Dialog.Description hidden>{m.create_a_new_user()}</Dialog.Description>
     {:else}
-      <Dialog.Title>Edit user</Dialog.Title>
-      <Dialog.Description hidden>Edit the selected user</Dialog.Description>
+      <Dialog.Title>{m.edit_user()}</Dialog.Title>
+      <Dialog.Description hidden>{m.edit_the_selected_user()}</Dialog.Description>
     {/if}
 
     <Dialog.Section>
       <div class="hover:bg-hover-dimmer">
         <Input.Text
           bind:value={username}
-          label="Username"
-          description="A unique username without spaces"
+          label={m.username()}
+          description={m.unique_username_description()}
           required
           class="border-default px-4 py-4  {mode === 'create' ? 'border-b' : ''}"
         ></Input.Text>
 
         {#if mode === "update"}
           <p class="border-default text-secondary border-b pr-4 pb-4 pl-6 text-sm">
-            Hint: Changing the username requires this user to logout and login again.
+            {m.username_change_logout_hint()}
           </p>
         {/if}
       </div>
 
       <Input.Text
         bind:value={editableUser.email}
-        label="Email"
+        label={m.email()}
         type="email"
         required
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
@@ -164,8 +165,8 @@
         bind:value={userPassword}
         minlength="7"
         maxlength="100"
-        label="Password"
-        description="Needs to be at least 7 characters long"
+        label={m.password()}
+        description={m.password_needs_7_chars()}
         required={mode === "create"}
         type="password"
         autocomplete="off"
@@ -181,11 +182,11 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close}>Cancel</Button>
+      <Button is={close}>{m.cancel()}</Button>
       {#if mode === "create"}
-        <Button variant="primary" on:click={createUser} type="submit">Create user</Button>
+        <Button variant="primary" on:click={createUser} type="submit">{m.create_user()}</Button>
       {:else}
-        <Button variant="primary" on:click={updateUser}>Save changes</Button>
+        <Button variant="primary" on:click={updateUser}>{m.save_changes()}</Button>
       {/if}
     </Dialog.Controls>
   </Dialog.Content>

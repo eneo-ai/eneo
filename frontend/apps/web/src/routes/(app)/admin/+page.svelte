@@ -9,6 +9,7 @@
   import { getAppContext } from "$lib/core/AppContext.js";
   import StorageOverviewBar from "./usage/storage/StorageOverviewBar.svelte";
   import TokenOverviewBar from "./usage/tokens/TokenOverviewBar.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const { tenant } = getAppContext();
   export let data;
@@ -20,11 +21,11 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Organisation"></Page.Title>
+    <Page.Title title={m.organisation()}></Page.Title>
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title="Usage">
+      <Settings.Group title={m.usage()}>
         <StorageOverviewBar storageStats={data.storageStats}></StorageOverviewBar>
         <TokenOverviewBar tokenStats={data.tokenStats}></TokenOverviewBar>
       </Settings.Group>

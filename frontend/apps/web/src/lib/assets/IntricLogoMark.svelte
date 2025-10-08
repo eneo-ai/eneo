@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SvelteHTMLElements } from "svelte/elements";
+  import { m } from "$lib/paraglide/messages";
 
   /* eslint-disable @typescript-eslint/no-unused-vars */
   type $$Props = SvelteHTMLElements["svg"];
@@ -9,7 +10,7 @@
   xmlns="http://www.w3.org/2000/svg"
   fill="currentColor"
   role="img"
-  aria-labelledby="intric-logo-alt"
+  aria-label={m.intric_logo()}
   viewBox="0 0 46.51 46.51"
   {...$$restProps}
   ><path

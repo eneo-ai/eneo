@@ -20,3 +20,10 @@
 
 # venv
 .venv/
+
+# claude
+.claude/*.local.json
+backend/openapi.json
+backend/.release-please-manifest.json
+
+.CLAUDE.md
