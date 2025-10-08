@@ -85,7 +85,26 @@ class CredentialResolver:
                 )
                 return api_key
 
-        # Fallback to global (only if tenant has NO credential for this provider)
+        # Strict mode: When tenant credentials enabled, each tenant MUST configure their own
+        # This prevents billing confusion (tenant thinks they use their own key, but actually use global)
+        if self.settings.tenant_credentials_enabled and self.tenant:
+            logger.error(
+                f"No credential configured for provider {provider}",
+                extra={
+                    "tenant_id": str(self.tenant.id),
+                    "tenant_name": self.tenant.name,
+                    "provider": provider,
+                    "mode": "strict",
+                },
+            )
+            raise ValueError(
+                f"No API key configured for provider '{provider}'. "
+                f"Tenant-specific credentials are enabled - each tenant must configure their own credentials. "
+                f"Please configure {provider.upper()} credentials via:\n"
+                f"PUT /api/v1/sysadmin/tenants/{self.tenant.id}/credentials/{provider}"
+            )
+
+        # Single-tenant mode: Fallback to global .env configuration
         env_map = {
             "openai": self.settings.openai_api_key,
             "anthropic": self.settings.anthropic_api_key,
@@ -105,13 +124,14 @@ class CredentialResolver:
                     "tenant_name": self.tenant.name if self.tenant else "N/A",
                     "provider": provider,
                     "credential_source": "global",
+                    "mode": "single-tenant",
                     "metric_name": "credential.global.resolved",
                     "metric_value": 1,
                 },
             )
             return global_key
 
-        # No credential available
+        # No credential available anywhere
         logger.error(
             f"No credential configured for provider {provider}",
             extra={
@@ -119,23 +139,10 @@ class CredentialResolver:
                 "provider": provider,
             },
         )
-
-        # Provide helpful error message based on whether tenant credentials are enabled
-        if self.settings.tenant_credentials_enabled and self.tenant:
-            tenant_id = self.tenant.id
-            error_msg = (
-                f"No API key configured for provider '{provider}'. "
-                f"Tenant-specific credentials are enabled. "
-                f"Please configure {provider.upper()} credentials via:\n"
-                f"PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}"
-            )
-        else:
-            error_msg = (
-                f"No API key configured for provider '{provider}'. "
-                f"Please set the global environment variable for {provider.upper()} API key."
-            )
-
-        raise ValueError(error_msg)
+        raise ValueError(
+            f"No API key configured for provider '{provider}'. "
+            f"Please set the global environment variable for {provider.upper()} API key."
+        )
 
     def get_credential_field(
         self,
