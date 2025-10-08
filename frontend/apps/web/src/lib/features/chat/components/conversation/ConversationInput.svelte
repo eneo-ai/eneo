@@ -94,7 +94,7 @@
 
 <div class="flex w-[100%] max-w-[74ch] flex-col md:w-full">
   {#if useWebSearch}
-    <div class="bg-red-100 text-red-800 border-l border-r border-t border-red-300 text-sm px-3 py-2 rounded-t-xl text-center md:rounded-t-xl">
+    <div class="bg-yellow-200 text-yellow-900 border-l border-r border-t border-yellow-400 text-sm px-3 py-2 rounded-t-xl text-center md:rounded-t-xl">
       {m.websearch_notice()}
     </div>
   {/if}
@@ -106,7 +106,7 @@
     onclick={() => {
       focusMentionInput();
     }}
-    class="{useWebSearch ? 'border-red-300 focus-within:border-red-400 hover:border-red-400' : 'border-default focus-within:border-stronger hover:border-stronger'} bg-primary ring-dimmer flex flex-col gap-2 border-t p-1.5 shadow-md ring-offset-0 transition-colors duration-300 focus-within:shadow-lg hover:ring-4 {useWebSearch ? 'rounded-b-xl rounded-t-none border-l border-r border-b md:rounded-b-xl md:rounded-t-none' : 'rounded-xl border'} md:border"
+    class="{useWebSearch ? 'border-yellow-400 focus-within:border-yellow-500 hover:border-yellow-500' : 'border-default focus-within:border-stronger hover:border-stronger'} bg-primary ring-dimmer flex flex-col gap-2 border-t p-1.5 shadow-md ring-offset-0 transition-colors duration-300 focus-within:shadow-lg hover:ring-4 {useWebSearch ? 'rounded-b-xl rounded-t-none border-l border-r border-b md:rounded-b-xl md:rounded-t-none' : 'rounded-xl border'} md:border"
   >
   <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
 
