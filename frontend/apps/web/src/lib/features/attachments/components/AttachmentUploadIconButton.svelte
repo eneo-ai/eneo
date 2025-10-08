@@ -35,7 +35,7 @@
     }
   }
 
-  function handleClick(e: MouseEvent) {
+  function handleInputClick(e: MouseEvent) {
     if (disabled) {
       e.preventDefault();
       e.stopPropagation();
@@ -52,12 +52,13 @@
     aria-label={label}
     multiple
     id="fileInput"
+    on:click={handleInputClick}
     on:change={uploadFiles}
+    {disabled}
     class="pointer-events-none absolute w-0 rounded-lg file:border-none file:bg-transparent file:text-transparent"
   />
   <label
     for="fileInput"
-    on:click={handleClick}
     class="bg-secondary text-primary flex h-9 items-center justify-center gap-1 rounded-lg pr-2 pl-1 {disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-hover-stronger'}"
     ><IconAttachment class="text-primary" />{m.attach_files()}</label
   >

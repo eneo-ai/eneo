@@ -120,7 +120,7 @@
         <div
           class="border-default flex items-center justify-center rounded-full border p-1.5 {$attachments.length > 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent-dimmer hover:text-accent-stronger hover:border-accent-default'}"
         >
-          <Input.Switch bind:value={useWebSearch} disabled={$attachments.length > 0} class="{$attachments.length > 0 ? '*:!cursor-not-allowed' : '*:!cursor-pointer'}">
+          <Input.Switch bind:value={useWebSearch} disabled={$attachments.length > 0} class={$attachments.length > 0 ? '*:!cursor-not-allowed' : '*:!cursor-pointer'}>
             <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
           >
         </div>
