@@ -76,6 +76,13 @@
 
   let useWebSearch = $state(false);
 
+  // Disable web search when there are attachments
+  $effect(() => {
+    if ($attachments.length > 0 && useWebSearch) {
+      useWebSearch = false;
+    }
+  });
+
   const shouldShowMentionButton = $derived.by(() => {
     const hasTools = chat.partner.tools.assistants.length > 0;
     const isEnabled =
@@ -85,28 +92,35 @@
   });
 </script>
 
-<!-- This interaction is just a convenience function -->
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<form
-  onclick={() => {
-    focusMentionInput();
-  }}
-  class="border-default bg-primary ring-dimmer focus-within:border-stronger hover:border-stronger flex w-[100%] max-w-[74ch] flex-col gap-2 border-t p-1.5 shadow-md ring-offset-0 transition-colors duration-300 focus-within:shadow-lg hover:ring-4 md:w-full md:rounded-xl md:border"
->
+<div class="flex w-[100%] max-w-[74ch] flex-col md:w-full">
+  {#if useWebSearch}
+    <div class="bg-yellow-200 text-yellow-900 border-l border-r border-t border-yellow-400 text-sm px-3 py-2 rounded-t-xl text-center md:rounded-t-xl">
+      {m.websearch_notice()}
+    </div>
+  {/if}
+
+  <!-- This interaction is just a convenience function -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <form
+    onclick={() => {
+      focusMentionInput();
+    }}
+    class="{useWebSearch ? 'border-yellow-400 focus-within:border-yellow-500 hover:border-yellow-500' : 'border-default focus-within:border-stronger hover:border-stronger'} bg-primary ring-dimmer flex flex-col gap-2 border-t p-1.5 shadow-md ring-offset-0 transition-colors duration-300 focus-within:shadow-lg hover:ring-4 {useWebSearch ? 'rounded-b-xl rounded-t-none border-l border-r border-b md:rounded-b-xl md:rounded-t-none' : 'rounded-xl border'} md:border"
+  >
   <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
 
   <div class="flex justify-between">
     <div class="flex items-center gap-2">
-      <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
+      <AttachmentUploadIconButton disabled={useWebSearch} label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
         <MentionButton></MentionButton>
       {/if}
       {#if chat.partner.type === "default-assistant" && featureFlags.showWebSearch}
         <div
-          class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
+          class="border-default flex items-center justify-center rounded-full border p-1.5 {$attachments.length > 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent-dimmer hover:text-accent-stronger hover:border-accent-default'}"
         >
-          <Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
+          <Input.Switch bind:value={useWebSearch} disabled={$attachments.length > 0} class={$attachments.length > 0 ? '*:!cursor-not-allowed' : '*:!cursor-pointer'}>
             <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
           >
         </div>
@@ -143,3 +157,4 @@
     {/if}
   </div>
 </form>
+</div>

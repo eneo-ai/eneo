@@ -1232,5 +1232,6 @@
   "resource_apps": "appar",
   "resource_results": "resultat",
   "resource_user_groups": "användargrupper",
-  "resource_files": "filer"
+  "resource_files": "filer",
+  "websearch_notice": "Ditt meddelande kommer att skickas till en sökmotor för att hitta relevant information"
 }
