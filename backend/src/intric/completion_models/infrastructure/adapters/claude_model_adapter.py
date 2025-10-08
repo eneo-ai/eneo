@@ -148,11 +148,43 @@ class ClaudeModelAdapter(CompletionModelAdapter):
             model_kwargs=self._get_kwargs(model_kwargs),
         )
 
+    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 1: Create stream connection before EventSourceResponse.
+        Can raise exceptions for authentication, connection, rate limit errors.
+        """
+        query = self.create_query_from_context(context=context)
+        tools = self._build_tools_from_context(context=context)
+
+        # This can raise exceptions - that's what we want for pre-flight
+        return await get_response_claude.prepare_stream(
+            client=self.async_client,
+            max_tokens=MAX_TOKENS,
+            model_name=self.model.name,
+            prompt=context.prompt,
+            messages=query,
+            model_kwargs=self._get_kwargs(model_kwargs),
+            tools=tools,
+        )
+
+    async def iterate_stream(self, stream, context: Context = None, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 2: Iterate pre-created stream inside EventSourceResponse.
+        Yields error events for mid-stream failures.
+        """
+        # Delegate to shared utility
+        async for chunk in get_response_claude.iterate_stream(stream):
+            yield chunk
+
     def get_response_streaming(
         self,
         context: Context,
         model_kwargs: ModelKwargs | None = None,
     ):
+        """
+        Legacy method for backward compatibility.
+        Uses two-phase pattern internally via get_response_claude.get_response_streaming.
+        """
         query = self.create_query_from_context(context=context)
         tools = self._build_tools_from_context(context=context)
         return get_response_claude.get_response_streaming(
