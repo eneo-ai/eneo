@@ -16,6 +16,7 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.config import get_settings
+from intric.main.exceptions import APIKeyNotConfiguredException
 from intric.main.logging import get_logger
 from intric.settings.credential_resolver import CredentialResolver
 
@@ -38,12 +39,29 @@ class OpenAIModelAdapter(CompletionModelAdapter):
         if client is not None:
             self.client = client
         # If credential_resolver is provided, resolve tenant-specific API key
+        # This will raise ValueError (converted to APIKeyNotConfiguredException) if key is missing
         elif credential_resolver is not None:
-            api_key = credential_resolver.get_api_key("openai")
+            try:
+                api_key = credential_resolver.get_api_key("openai")
+            except ValueError as e:
+                logger.error(
+                    "OpenAI credential resolution failed",
+                    extra={
+                        "model": model.name,
+                        "error": str(e),
+                    },
+                )
+                raise APIKeyNotConfiguredException(str(e))
             self.client = AsyncOpenAI(api_key=api_key)
         # Fall back to global settings
         else:
-            self.client = AsyncOpenAI(api_key=get_settings().openai_api_key)
+            settings = get_settings()
+            if not settings.openai_api_key:
+                raise APIKeyNotConfiguredException(
+                    "No API key configured for provider 'openai'. "
+                    "Please contact your administrator to configure credentials for this provider."
+                )
+            self.client = AsyncOpenAI(api_key=settings.openai_api_key)
 
         self.extra_headers = None
 
@@ -157,11 +175,42 @@ class OpenAIModelAdapter(CompletionModelAdapter):
             extra_headers=self.extra_headers,
         )
 
+    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 1: Create stream connection before EventSourceResponse.
+        Can raise exceptions for authentication, firewall, rate limit errors.
+        """
+        query = self.create_query_from_context(context=context)
+        tools = self._build_tools_from_context(context=context)
+
+        # This can raise exceptions - that's what we want for pre-flight
+        return await get_response_open_ai.prepare_stream(
+            client=self.client,
+            model_name=self.model.name,
+            messages=query,
+            model_kwargs=self._get_kwargs(model_kwargs),
+            tools=tools,
+            extra_headers=self.extra_headers,
+        )
+
+    async def iterate_stream(self, stream, context: Context = None, model_kwargs: ModelKwargs | None = None):
+        """
+        Phase 2: Iterate pre-created stream inside EventSourceResponse.
+        Yields error events for mid-stream failures.
+        """
+        # Delegate to shared utility
+        async for chunk in get_response_open_ai.iterate_stream(stream):
+            yield chunk
+
     def get_response_streaming(
         self,
         context: Context,
         model_kwargs: ModelKwargs | None = None,
     ):
+        """
+        Legacy method for backward compatibility.
+        Uses two-phase pattern internally via get_response_open_ai.get_response_streaming.
+        """
         query = self.create_query_from_context(context=context)
         tools = self._build_tools_from_context(context=context)
         return get_response_open_ai.get_response_streaming(

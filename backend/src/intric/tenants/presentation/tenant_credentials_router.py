@@ -47,7 +47,7 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "berget", "mistral", "ovhcloud"]
+Provider = Literal["openai", "anthropic", "azure", "berget", "mistral", "ovhcloud", "vllm"]
 
 
 class SetCredentialRequest(BaseModel):
@@ -68,6 +68,12 @@ class SetCredentialRequest(BaseModel):
             "endpoint": "https://my-resource.openai.azure.com",
             "api_version": "2024-02-15-preview",
             "deployment_name": "gpt-4"
+        }
+
+    Example for VLLM:
+        {
+            "api_key": "vllm-secret-key",
+            "endpoint": "http://tenant-vllm:8000"
         }
     """
 
