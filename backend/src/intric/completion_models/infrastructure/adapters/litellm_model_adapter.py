@@ -15,6 +15,7 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 )
 from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
 from intric.logging.logging import LoggingDetails
+from intric.main.config import get_settings
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
 from intric.settings.credential_resolver import CredentialResolver
@@ -237,16 +238,19 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 raise APIKeyNotConfiguredException(str(e))
 
             # Inject api_base for VLLM and other providers with custom endpoints
+            # VLLM requires endpoint - fallback to global VLLM_MODEL_URL for single-tenant deployments
+            settings = get_settings()
+            endpoint_fallback = settings.vllm_model_url if provider == "vllm" else None
             endpoint = self.credential_resolver.get_credential_field(
                 provider=provider,
                 field="endpoint",
-                fallback=None  # No global fallback for LiteLLM endpoint
+                fallback=endpoint_fallback
             )
 
             if endpoint:
                 kwargs["api_base"] = endpoint
                 logger.info(
-                    f"[LiteLLM] {self.litellm_model}: Injecting tenant endpoint for {provider}: {endpoint}"
+                    f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                 )
 
         logger.info(
@@ -356,16 +360,19 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 raise APIKeyNotConfiguredException(str(e))
 
             # Inject api_base for streaming
+            # VLLM requires endpoint - fallback to global VLLM_MODEL_URL for single-tenant deployments
+            settings = get_settings()
+            endpoint_fallback = settings.vllm_model_url if provider == "vllm" else None
             endpoint = self.credential_resolver.get_credential_field(
                 provider=provider,
                 field="endpoint",
-                fallback=None
+                fallback=endpoint_fallback
             )
 
             if endpoint:
                 kwargs["api_base"] = endpoint
                 logger.info(
-                    f"[LiteLLM] {self.litellm_model}: Injecting tenant endpoint for streaming {provider}: {endpoint}"
+                    f"[LiteLLM] {self.litellm_model}: Injecting endpoint for streaming {provider}: {endpoint}"
                 )
 
         logger.info(
