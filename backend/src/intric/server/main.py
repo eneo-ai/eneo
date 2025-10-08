@@ -69,102 +69,99 @@ def get_application():
 
     app.openapi = custom_openapi
 
+    @app.exception_handler(500)
+    async def custom_http_500_exception_handler(request, exc):
+        # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
+        # Solving this like this response:
+        #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
+        response = JSONResponse(status_code=500, content={
+                                "error": "Something went wrong"})
+
+        origin = request.headers.get("origin")
+
+        if origin:
+            # Have the middleware do the heavy lifting for us to parse
+            # all the config, then update our response headers
+            cors = CORSMiddleware(
+                app=app,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+                callback=get_origin,
+            )
+
+            # Logic directly from Starlette's CORSMiddleware:
+            # https://github.com/encode/starlette/blob/master/starlette/middleware/cors.py#L152
+
+            response.headers.update(cors.simple_headers)
+            has_cookie = "cookie" in request.headers
+
+            # If request includes any cookie headers, then we must respond
+            # with the specific origin instead of '*'.
+            if cors.allow_all_origins and has_cookie:
+                response.headers["Access-Control-Allow-Origin"] = origin
+
+            # If we only allow specific origins, then we have to mirror back
+            # the Origin header in the response.
+            elif not cors.allow_all_origins and await cors.is_allowed_origin(origin=origin):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers.add_vary_header("Origin")
+
+        return response
+
+    @app.get("/api/healthz")
+    async def get_healthz():
+        from intric.worker.redis import get_worker_health
+        from datetime import datetime, timezone
+        from fastapi import HTTPException
+
+        # Get worker health status
+        worker_health = await get_worker_health()
+
+        # Backend is always healthy if we can respond
+        backend_status = "HEALTHY"
+        backend_timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Determine overall system health
+        if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
+            overall_status = "HEALTHY"
+            status_code = 200
+        else:
+            overall_status = "UNHEALTHY"
+            status_code = 503
+
+        # Assemble health response
+        response_data = {
+            "detail": {
+                "status": overall_status,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "backend": {
+                    "status": backend_status,
+                    "last_heartbeat": backend_timestamp,
+                    "details": "Backend API server operational"
+                },
+                "worker": {
+                    "status": worker_health.status,
+                    "last_heartbeat": worker_health.last_heartbeat,
+                    "details": worker_health.details
+                }
+            }
+        }
+
+        if status_code == 503:
+            raise HTTPException(status_code=503, detail=response_data["detail"])
+
+        return response_data
+
+    @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
+    async def get_version():
+        return VersionResponse(version=get_settings().app_version)
+
     return app
 
 
 app = get_application()
-
-
-@app.exception_handler(500)
-async def custom_http_500_exception_handler(request, exc):
-    # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
-    # Solving this like this response:
-    #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
-    response = JSONResponse(status_code=500, content={
-                            "error": "Something went wrong"})
-
-    origin = request.headers.get("origin")
-
-    if origin:
-        # Have the middleware do the heavy lifting for us to parse
-        # all the config, then update our response headers
-        cors = CORSMiddleware(
-            app=app,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-            callback=get_origin,
-        )
-
-        # Logic directly from Starlette's CORSMiddleware:
-        # https://github.com/encode/starlette/blob/master/starlette/middleware/cors.py#L152
-
-        response.headers.update(cors.simple_headers)
-        has_cookie = "cookie" in request.headers
-
-        # If request includes any cookie headers, then we must respond
-        # with the specific origin instead of '*'.
-        if cors.allow_all_origins and has_cookie:
-            response.headers["Access-Control-Allow-Origin"] = origin
-
-        # If we only allow specific origins, then we have to mirror back
-        # the Origin header in the response.
-        elif not cors.allow_all_origins and await cors.is_allowed_origin(origin=origin):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers.add_vary_header("Origin")
-
-    return response
-
-
-@app.get("/api/healthz")
-async def get_healthz():
-    from intric.worker.redis import get_worker_health
-    from datetime import datetime, timezone
-    from fastapi import HTTPException
-
-    # Get worker health status
-    worker_health = await get_worker_health()
-
-    # Backend is always healthy if we can respond
-    backend_status = "HEALTHY"
-    backend_timestamp = datetime.now(timezone.utc).isoformat()
-
-    # Determine overall system health
-    if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
-        overall_status = "HEALTHY"
-        status_code = 200
-    else:
-        overall_status = "UNHEALTHY"
-        status_code = 503
-
-    # Assemble health response
-    response_data = {
-        "detail": {
-            "status": overall_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "backend": {
-                "status": backend_status,
-                "last_heartbeat": backend_timestamp,
-                "details": "Backend API server operational"
-            },
-            "worker": {
-                "status": worker_health.status,
-                "last_heartbeat": worker_health.last_heartbeat,
-                "details": worker_health.details
-            }
-        }
-    }
-
-    if status_code == 503:
-        raise HTTPException(status_code=503, detail=response_data["detail"])
-
-    return response_data
-
-
-@app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
-async def get_version():
-    return VersionResponse(version=get_settings().app_version)
 
 
 def start():
