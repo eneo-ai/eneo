@@ -153,7 +153,10 @@ class AuthService:
         else:
             key = plain_key
 
-        return await self.api_key_repo.get(key)
+        logger.debug(f"Looking up API key: {key[:20]}... (hashed={hash_key})")
+        result = await self.api_key_repo.get(key)
+        logger.debug(f"API key lookup result: {'Found' if result else 'Not found'}")
+        return result
 
     def get_username_from_token(self, token: str, secret_key: str) -> str:
         return self.get_jwt_payload(token, key=str(secret_key)).username

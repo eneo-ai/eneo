@@ -20,6 +20,11 @@ class DatabaseSessionManager:
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
     def init(self, host: str):
+        # If already initialized, don't reinitialize (important for tests)
+        if self._engine is not None:
+            logger.debug("Database already initialized, skipping reinitialization")
+            return
+
         self._engine = create_async_engine(host, pool_size=20, max_overflow=10)
         self._sessionmaker = async_sessionmaker(
             autocommit=False, bind=self._engine, autobegin=False
@@ -28,10 +33,12 @@ class DatabaseSessionManager:
 
     async def close(self):
         if self._engine is None:
-            raise Exception("DatabaseSessionManager is not initialized")
+            logger.debug("DatabaseSessionManager already closed or not initialized")
+            return
         await self._engine.dispose()
         self._engine = None
         self._sessionmaker = None
+        logger.debug("DatabaseSessionManager closed")
 
     @contextlib.asynccontextmanager
     async def connect(self) -> AsyncIterator[AsyncConnection]:

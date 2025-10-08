@@ -58,5 +58,84 @@ async def test_app_initialization(app):
 
     # Verify settings are accessible
     settings = get_settings()
-    assert settings.api_prefix == "/api"
+    assert settings.api_prefix == "/api/v1"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_tenant_and_users_exist(setup_database):
+    """Test that tenants and users exist in the database."""
+    from intric.database.database import sessionmanager
+    from intric.database.tables.tenant_table import Tenants
+    from intric.database.tables.users_table import Users
+    from sqlalchemy import select
+
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            # Check that at least one tenant exists
+            result = await session.execute(select(Tenants))
+            tenants = result.scalars().all()
+            assert len(tenants) > 0, "No tenants found in database"
+
+            # Check that at least one user exists
+            result = await session.execute(select(Users))
+            users = result.scalars().all()
+            assert len(users) > 0, "No users found in database"
+
+            # Verify user has a tenant relationship
+            first_user = users[0]
+            assert first_user.tenant_id is not None
+            assert first_user.tenant is not None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_authenticated_user_request(client, setup_database):
+    """Test that an authenticated user can access /api/users/me endpoint."""
+    from dependency_injector import providers
+    from intric.database.database import sessionmanager
+    from intric.database.tables.users_table import Users
+    from intric.main.container.container import Container
+    from sqlalchemy import select
+
+    # We know the test user email from the seed data
+    test_user_email = "test@example.com"
+
+    # Create API key for the test user using the container
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            # Get test user id
+            result = await session.execute(
+                select(Users.id).where(Users.email == test_user_email)
+            )
+            test_user_id = result.scalar_one()
+
+            # Create container with session
+            container = Container(session=providers.Object(session))
+
+            # Use auth service from container to create API key
+            auth_service = container.auth_service()
+            api_key_created = await auth_service.create_user_api_key(
+                prefix="test",
+                user_id=test_user_id,
+                delete_old=True
+            )
+
+            # Commit the transaction explicitly before making the HTTP request
+            await session.commit()
+
+    # Make authenticated request to /api/users/me
+    response = await client.get(
+        "/api/v1/users/me/",
+        headers={"X-API-Key": api_key_created.key}
+    )
+
+    # Verify response
+    assert response.status_code == 200
+    user_data = response.json()
+    assert user_data["email"] == "test@example.com"
+    assert user_data["username"] == "test_user"
+    assert user_data["id"] is not None
+    assert "predefined_roles" in user_data
+    assert len(user_data["predefined_roles"]) > 0
 

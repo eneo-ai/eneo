@@ -20,7 +20,6 @@ from typing import AsyncGenerator, Generator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
@@ -77,13 +76,14 @@ def redis_container() -> Generator[RedisContainer, None, None]:
         redis = redis.with_kwargs(network=_TEST_NETWORK)
 
     with redis:
+        # RedisContainer has built-in readiness checks, no need to call get_connection_url()
         yield redis
 
 
 @pytest.fixture(scope="session")
 def test_settings(
     postgres_container: PostgresContainer,
-    # redis_container: RedisContainer,
+    # redis_container: RedisContainer,  # Disabled for now - causing hangs
 ) -> Settings:
     """
     Create test settings using testcontainer connection strings.
@@ -93,17 +93,14 @@ def test_settings(
     if _IN_DEVCONTAINER:
         pg_host = postgres_container._container.name
         pg_port = 5432
-        # redis_host = redis_container._container.name
-        # redis_port = 6379
-        redis_host = "localhost"
-        redis_port = 6379
     else:
         pg_host = postgres_container.get_container_host_ip()
         pg_port = int(postgres_container.get_exposed_port(5432))
-        # redis_host = redis_container.get_container_host_ip()
-        # redis_port = int(redis_container.get_exposed_port(6379))
-        redis_host = "localhost"
-        redis_port = 6379
+
+    # Use localhost Redis for now (devcontainer has Redis service)
+    # TODO: Fix Redis testcontainer hanging issue
+    redis_host = "redis" if _IN_DEVCONTAINER else "localhost"
+    redis_port = 6379
 
     # Create test settings
     settings = Settings(
@@ -126,7 +123,7 @@ def test_settings(
         max_in_question=1000,
 
         # API settings
-        api_prefix="/api",
+        api_prefix="/api/v1",
         api_key_length=32,
         api_key_header_name="X-API-Key",
 
@@ -148,7 +145,8 @@ def test_settings(
         using_crawl=False,
 
         # OpenAPI mode (skip some startup dependencies)
-        openapi_only_mode=True,
+        # Note: Set to False for integration tests that need full app functionality
+        openapi_only_mode=False,
 
         # Development
         testing=True,
@@ -170,6 +168,12 @@ def override_settings_for_session(test_settings: Settings):
     # Set test settings
     set_settings(test_settings)
 
+    # Reinitialize auth definitions with new settings
+    # This is needed because API_KEY_HEADER and OAUTH2_SCHEME are created at import time
+    import intric.server.dependencies.auth_definitions as auth_defs
+    auth_defs.OAUTH2_SCHEME = auth_defs._get_oauth2_scheme()
+    auth_defs.API_KEY_HEADER = auth_defs._get_api_key_header()
+
     yield
 
     # Cleanup after all tests
@@ -179,11 +183,51 @@ def override_settings_for_session(test_settings: Settings):
 @pytest.fixture(scope="session")
 async def setup_database(test_settings: Settings):
     """
-    Initialize the database schema.
-    For now, this just ensures the database is accessible.
-    Later we'll add migrations and seed data.
+    Initialize the database schema and seed test data.
+    Runs Alembic migrations and creates a default tenant/user using init_db logic.
     """
-    # Initialize the database session manager with test settings
+    import psycopg2
+    from sqlalchemy import text
+    from alembic.config import Config
+    from alembic import command
+
+    # Import functions from init_db
+    import sys
+    sys.path.insert(0, "/workspace/backend")
+    from init_db import add_tenant_user
+
+    # Run alembic migrations programmatically with test database URL
+    alembic_cfg = Config("/workspace/backend/alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
+
+    try:
+        command.upgrade(alembic_cfg, "head")
+        print("Alembic migrations ran successfully.")
+    except Exception as e:
+        print(f"Error running alembic migrations: {e}")
+        raise
+
+    # Seed test tenant and user using init_db logic
+    conn = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+
+    add_tenant_user(
+        conn,
+        tenant_name="test_tenant",
+        quota_limit=1000000,
+        user_name="test_user",
+        user_email="test@example.com",
+        user_password="test_password",
+    )
+
+    conn.close()
+
+    # Initialize the database session manager with test settings AFTER migrations
     sessionmanager.init(test_settings.database_url)
 
     # Test that we can connect
@@ -198,13 +242,74 @@ async def setup_database(test_settings: Settings):
     await sessionmanager.close()
 
 
+@pytest.fixture(autouse=True)
+async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
+    """
+    Automatically truncate all tables and reseed after each test for full isolation.
+
+    Note: setup_database dependency ensures migrations run before cleanup is registered.
+    """
+    yield
+
+    # Clean up after each test - truncate everything and reseed
+    import psycopg2
+    from sqlalchemy import text
+    from init_db import add_tenant_user
+
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            # Truncate all tables except alembic_version
+            result = await session.execute(text("""
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = 'public' AND tablename != 'alembic_version'
+            """))
+            tables = result.scalars().all()
+
+            for table in tables:
+                await session.execute(text(f'TRUNCATE TABLE "{table}" RESTART IDENTITY CASCADE'))
+
+    # Reseed test tenant and user
+    conn = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+
+    add_tenant_user(
+        conn,
+        tenant_name="test_tenant",
+        quota_limit=1000000,
+        user_name="test_user",
+        user_email="test@example.com",
+        user_password="test_password",
+    )
+
+    conn.close()
+    print("Cleaned up and reseeded test database")
+
+
 @pytest.fixture
 async def app(setup_database):
     """
     Create a FastAPI application instance with test settings.
+    Note: sessionmanager is already initialized by setup_database,
+    so the app lifespan will use the same connection.
     """
+    # The app's lifespan will call sessionmanager.init() again, but since
+    # sessionmanager is a singleton, it should use the same instance.
+    # We DON'T use lifespan_context because it would close the sessionmanager
+    # on exit, which we need for cleanup_database fixture.
     application = get_application()
+
+    # Manually trigger startup only (not shutdown)
+    from intric.server.dependencies.lifespan import startup
+    await startup()
+
     yield application
+
+    # Note: We skip shutdown() to keep sessionmanager open for cleanup
 
 
 @pytest.fixture

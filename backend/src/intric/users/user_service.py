@@ -405,14 +405,19 @@ class UserService:
         api_key: str | None = None,
         with_quota_used: bool = False,
     ):
+        logger.debug(f"UserService.authenticate called - token: {bool(token)}, api_key: {bool(api_key)}")
         user_in_db = None
         if token is not None:
+            logger.debug("Attempting authentication with token")
             user_in_db = await self._get_user_from_token(token)
 
         elif api_key is not None:
+            logger.debug(f"Attempting authentication with API key: {api_key[:20] if api_key else None}...")
             user_in_db = await self._get_user_from_api_key(api_key)
+            logger.debug(f"API key authentication result: {user_in_db.email if user_in_db else 'None'}")
 
         if user_in_db is None:
+            logger.warning("Authentication failed - no user found")
             raise AuthenticationException("No authenticated user.")
 
         await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
