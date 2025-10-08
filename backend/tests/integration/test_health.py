@@ -2,6 +2,7 @@
 Basic integration tests to verify the test infrastructure works.
 """
 import pytest
+from sqlalchemy import text
 
 from intric.main.config import get_settings
 
@@ -21,28 +22,24 @@ async def test_settings_are_overridden():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_database_connection(setup_database):
+async def test_database_connection(db_session):
     """Verify we can connect to the test database."""
-    from intric.database.database import sessionmanager
-    from sqlalchemy import text
+    async with db_session() as session:
+        # Test basic query
+        result = await session.execute(text("SELECT version()"))
+        version = result.scalar()
+        assert version is not None
+        assert "PostgreSQL" in version
 
-    async with sessionmanager.session() as session:
-        async with session.begin():
-            # Test basic query
-            result = await session.execute(text("SELECT version()"))
-            version = result.scalar()
-            assert version is not None
-            assert "PostgreSQL" in version
+        # Test that pgvector extension can be enabled
+        await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-            # Test that pgvector extension can be enabled
-            await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-
-            # Verify extension is installed
-            result = await session.execute(
-                text("SELECT * FROM pg_extension WHERE extname = 'vector'")
-            )
-            extension = result.first()
-            assert extension is not None
+        # Verify extension is installed
+        result = await session.execute(
+            text("SELECT * FROM pg_extension WHERE extname = 'vector'")
+        )
+        extension = result.first()
+        assert extension is not None
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -53,7 +50,7 @@ async def test_app_initialization(app):
 
     # Check that routes are registered
     routes = [route.path for route in app.routes]
-    print(routes)
+
     assert "/api/healthz" in routes
 
     # Verify settings are accessible
@@ -63,79 +60,47 @@ async def test_app_initialization(app):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_tenant_and_users_exist(setup_database):
-    """Test that tenants and users exist in the database."""
-    from intric.database.database import sessionmanager
-    from intric.database.tables.tenant_table import Tenants
-    from intric.database.tables.users_table import Users
-    from sqlalchemy import select
+async def test_tenant_and_users_exist(db_container):
+    """Test that tenants and users exist in the database using repository services."""
+    async with db_container() as container:
+        # Check that at least one tenant exists
+        tenant_repo = container.tenant_repo()
+        tenants = await tenant_repo.get_all_tenants()
+        assert len(tenants) > 0, "No tenants found in database"
 
-    async with sessionmanager.session() as session:
-        async with session.begin():
-            # Check that at least one tenant exists
-            result = await session.execute(select(Tenants))
-            tenants = result.scalars().all()
-            assert len(tenants) > 0, "No tenants found in database"
+        # Check that at least one user exists
+        user_repo = container.user_repo()
+        users = await user_repo.get_all_users()
+        assert len(users) > 0, "No users found in database"
 
-            # Check that at least one user exists
-            result = await session.execute(select(Users))
-            users = result.scalars().all()
-            assert len(users) > 0, "No users found in database"
-
-            # Verify user has a tenant relationship
-            first_user = users[0]
-            assert first_user.tenant_id is not None
-            assert first_user.tenant is not None
+        # Verify user has a tenant relationship
+        first_user = users[0]
+        assert first_user.tenant_id is not None
+        assert first_user.tenant is not None
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_authenticated_user_request(client, setup_database):
-    """Test that an authenticated user can access /api/users/me endpoint."""
-    from dependency_injector import providers
-    from intric.database.database import sessionmanager
-    from intric.database.tables.users_table import Users
-    from intric.main.container.container import Container
-    from sqlalchemy import select
+async def test_authenticated_user_request(client, admin_user, admin_user_api_key):
+    """
+    Test that an authenticated user can access /api/users/me endpoint.
 
-    # We know the test user email from the seed data
-    test_user_email = "test@example.com"
-
-    # Create API key for the test user using the container
-    async with sessionmanager.session() as session:
-        async with session.begin():
-            # Get test user id
-            result = await session.execute(
-                select(Users.id).where(Users.email == test_user_email)
-            )
-            test_user_id = result.scalar_one()
-
-            # Create container with session
-            container = Container(session=providers.Object(session))
-
-            # Use auth service from container to create API key
-            auth_service = container.auth_service()
-            api_key_created = await auth_service.create_user_api_key(
-                prefix="test",
-                user_id=test_user_id,
-                delete_old=True
-            )
-
-            # Commit the transaction explicitly before making the HTTP request
-            await session.commit()
-
+    This test demonstrates the use of fixtures:
+    - admin_user: The default test user (test@example.com)
+    - admin_user_api_key: A fresh API key for the admin user
+    """
     # Make authenticated request to /api/users/me
     response = await client.get(
         "/api/v1/users/me/",
-        headers={"X-API-Key": api_key_created.key}
+        headers={"X-API-Key": admin_user_api_key.key}
     )
 
     # Verify response
     assert response.status_code == 200
     user_data = response.json()
-    assert user_data["email"] == "test@example.com"
-    assert user_data["username"] == "test_user"
-    assert user_data["id"] is not None
+    assert user_data["email"] == admin_user.email
+    assert user_data["username"] == admin_user.username
+    assert user_data["id"] == str(admin_user.id)
     assert "predefined_roles" in user_data
     assert len(user_data["predefined_roles"]) > 0
 

@@ -16,15 +16,22 @@ if not os.getenv("DOCKER_HOST"):
         os.environ["DOCKER_HOST"] = "tcp://host.docker.internal:2375"
 
 import asyncio
+import contextlib
 from typing import AsyncGenerator, Generator
 
+import psycopg2
 import pytest
+from alembic import command
+from alembic.config import Config
+from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
-from testcontainers.redis import RedisContainer
 
+from init_db import add_tenant_user
 from intric.database.database import sessionmanager
 from intric.main.config import Settings, reset_settings, set_settings
+from intric.main.container.container import Container
 from intric.server.main import get_application
 
 # Detect if we're in a devcontainer environment
@@ -63,23 +70,6 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
         postgres.get_connection_url()
         yield postgres
 
-
-@pytest.fixture(scope="session")
-def redis_container() -> Generator[RedisContainer, None, None]:
-    """
-    Start a Redis container for the test session.
-    """
-    redis = RedisContainer(image="redis:7-alpine")
-
-    # In devcontainer, use the same network; otherwise use default bridge network
-    if _TEST_NETWORK:
-        redis = redis.with_kwargs(network=_TEST_NETWORK)
-
-    with redis:
-        # RedisContainer has built-in readiness checks, no need to call get_connection_url()
-        yield redis
-
-
 @pytest.fixture(scope="session")
 def test_settings(
     postgres_container: PostgresContainer,
@@ -97,11 +87,6 @@ def test_settings(
         pg_host = postgres_container.get_container_host_ip()
         pg_port = int(postgres_container.get_exposed_port(5432))
 
-    # Use localhost Redis for now (devcontainer has Redis service)
-    # TODO: Fix Redis testcontainer hanging issue
-    redis_host = "redis" if _IN_DEVCONTAINER else "localhost"
-    redis_port = 6379
-
     # Create test settings
     settings = Settings(
         # PostgreSQL settings
@@ -112,8 +97,8 @@ def test_settings(
         postgres_db="integration_test_db",
 
         # Redis settings
-        redis_host=redis_host,
-        redis_port=redis_port,
+        redis_host="redis",
+        redis_port=6379,
 
         # File upload limits
         upload_file_to_session_max_size=10_000_000,
@@ -144,7 +129,6 @@ def test_settings(
         using_image_generation=False,
         using_crawl=False,
 
-        # OpenAPI mode (skip some startup dependencies)
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,
 
@@ -186,16 +170,6 @@ async def setup_database(test_settings: Settings):
     Initialize the database schema and seed test data.
     Runs Alembic migrations and creates a default tenant/user using init_db logic.
     """
-    import psycopg2
-    from sqlalchemy import text
-    from alembic.config import Config
-    from alembic import command
-
-    # Import functions from init_db
-    import sys
-    sys.path.insert(0, "/workspace/backend")
-    from init_db import add_tenant_user
-
     # Run alembic migrations programmatically with test database URL
     alembic_cfg = Config("/workspace/backend/alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
@@ -252,10 +226,6 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
     yield
 
     # Clean up after each test - truncate everything and reseed
-    import psycopg2
-    from sqlalchemy import text
-    from init_db import add_tenant_user
-
     async with sessionmanager.session() as session:
         async with session.begin():
             # Truncate all tables except alembic_version
@@ -304,6 +274,7 @@ async def app(setup_database):
     application = get_application()
 
     # Manually trigger startup only (not shutdown)
+    # Import here because it needs to be after settings are configured
     from intric.server.dependencies.lifespan import startup
     await startup()
 
@@ -323,7 +294,72 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
+# Database session fixtures
+
 @pytest.fixture
-def anyio_backend():
-    """Configure anyio backend for async tests."""
-    return "asyncio"
+def db_session(setup_database):
+    """
+    Provide a context manager for database sessions with active transactions.
+
+    Usage:
+        async with db_session() as session:
+            # use session here
+    """
+    @contextlib.asynccontextmanager
+    async def _session():
+        async with sessionmanager.session() as session, session.begin():
+            yield session
+
+    return _session
+
+
+@pytest.fixture
+def db_container(setup_database):
+    """
+    Provide a context manager for a database container with session.
+
+    This is the preferred way to access services that need database access.
+    The container comes pre-configured with a session in an active transaction.
+
+    Usage:
+        async with db_container() as container:
+            user_repo = container.user_repo()
+            user = await user_repo.get_user_by_email("test@example.com")
+    """
+    @contextlib.asynccontextmanager
+    async def _container():
+        async with sessionmanager.session() as session, session.begin():
+            container = Container(session=providers.Object(session))
+            yield container
+
+    return _container
+
+
+# User and authentication fixtures
+
+@pytest.fixture
+async def admin_user(db_container):
+    """
+    Get the default admin user created during database setup.
+    This is the test@example.com user with full tenant access.
+    """
+    async with db_container() as container:
+        user_repo = container.user_repo()
+        user = await user_repo.get_user_by_email("test@example.com")
+    return user
+
+
+@pytest.fixture
+async def admin_user_api_key(admin_user, db_container):
+    """
+    Create an API key for the admin user.
+    This fixture creates a fresh API key for each test.
+    """
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        api_key = await auth_service.create_user_api_key(
+            prefix="test",
+            user_id=admin_user.id,
+            delete_old=True
+        )
+    return api_key
