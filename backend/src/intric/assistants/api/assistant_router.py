@@ -12,7 +12,7 @@ from intric.assistants.api.assistant_models import (
 )
 from intric.authentication.auth_models import ApiKey
 from intric.database.database import AsyncSession, get_session_with_transaction
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, CursorPaginatedResponse, PaginatedResponse
 from intric.prompts.api.prompt_models import PromptSparse
@@ -357,7 +357,7 @@ async def transfer_assistant_to_space(
 @router.get(
     "/{id}/prompts/",
     response_model=PaginatedResponse[PromptSparse],
-    include_in_schema=SETTINGS.dev,
+    include_in_schema=get_settings().dev,
 )
 async def get_prompts(id: UUID, container: Container = Depends(get_container(with_user=True))):
     service = container.assistant_service()

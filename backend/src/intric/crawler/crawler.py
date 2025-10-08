@@ -14,7 +14,7 @@ from intric.crawler.parse_html import CrawledPage
 from intric.crawler.pipelines import FileNamePipeline
 from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.exceptions import CrawlerException
 from intric.websites.domain.crawl_run import CrawlType
 
@@ -26,12 +26,13 @@ class Crawl:
 
 
 def create_runner(filepath: str, files_dir: Optional[str] = None):
+    app_settings = get_settings()
     settings = {
         "FEEDS": {filepath: {"format": "jsonl", "item_classes": [CrawledPage]}},
-        "CLOSESPIDER_ITEMCOUNT": SETTINGS.closespider_itemcount,
-        "AUTOTHROTTLE_ENABLED": SETTINGS.autothrottle_enabled,
-        "ROBOTSTXT_OBEY": SETTINGS.obey_robots,
-        "DOWNLOAD_MAXSIZE": SETTINGS.upload_max_file_size,
+        "CLOSESPIDER_ITEMCOUNT": app_settings.closespider_itemcount,
+        "AUTOTHROTTLE_ENABLED": app_settings.autothrottle_enabled,
+        "ROBOTSTXT_OBEY": app_settings.obey_robots,
+        "DOWNLOAD_MAXSIZE": app_settings.upload_max_file_size,
     }
 
     if files_dir is not None:
@@ -42,7 +43,7 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
 
 
 class Crawler:
-    @crochet.wait_for(SETTINGS.crawl_max_length)
+    @crochet.wait_for(get_settings().crawl_max_length)
     @staticmethod
     def _run_crawl(
         url: str,
@@ -55,7 +56,7 @@ class Crawler:
         runner = create_runner(filepath=filepath, files_dir=files_dir)
         return runner.crawl(CrawlSpider, url=url)
 
-    @crochet.wait_for(SETTINGS.crawl_max_length)
+    @crochet.wait_for(get_settings().crawl_max_length)
     @staticmethod
     def _run_sitemap_crawl(sitemap_url: str, *, filepath: Path, files_dir: Optional[Path]):
         runner = create_runner(filepath=filepath)

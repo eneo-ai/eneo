@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from intric.allowed_origins.get_origin_callback import get_origin
 from intric.authentication import auth_dependencies
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan
@@ -31,7 +31,7 @@ def get_application():
         callback=get_origin,
     )
 
-    app.include_router(api_router, prefix=SETTINGS.api_prefix)
+    app.include_router(api_router, prefix=get_settings().api_prefix)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
@@ -42,7 +42,7 @@ def get_application():
 
         openapi_schema = get_openapi(
             title=api_documentation.TITLE,
-            version=SETTINGS.app_version,
+            version=get_settings().app_version,
             description=api_documentation.SUMMARY,
             tags=api_documentation.TAGS_METADATA,
             routes=app.routes,
@@ -164,7 +164,7 @@ async def get_healthz():
 
 @app.get("/version", dependencies=[Depends(auth_dependencies.get_current_active_user)])
 async def get_version():
-    return VersionResponse(version=SETTINGS.app_version)
+    return VersionResponse(version=get_settings().app_version)
 
 
 def start():

@@ -12,7 +12,7 @@ from tenacity import (
 )
 
 from intric.files.audio import AudioFile
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 from intric.transcription_models.domain import TranscriptionModel
@@ -25,13 +25,14 @@ class OpenAISTTModelAdapter:
         self.model = model
 
         # Determine API key based on base URL
+        settings = get_settings()
         if "api.berget.ai" in model.base_url:
-            api_key = SETTINGS.berget_api_key
+            api_key = settings.berget_api_key
             logger.info(
                 f"Using Berget API for model {model.name} with base URL {model.base_url}"
             )
         else:
-            api_key = SETTINGS.openai_api_key
+            api_key = settings.openai_api_key
             logger.info(
                 f"Using OpenAI API for model {model.name} with base URL {model.base_url}"
             )

@@ -23,7 +23,7 @@ from intric.completion_models.infrastructure.adapters import (
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.sessions.session import SessionInDB
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
@@ -142,7 +142,7 @@ class CompletionService:
 
         # Image generation only works on streaming for now
         # And only if feature flag is turned on
-        use_image_generation = use_image_generation and stream and SETTINGS.using_image_generation
+        use_image_generation = use_image_generation and stream and get_settings().using_image_generation
 
         context = self.context_builder.build_context(
             input_str=text_input,
