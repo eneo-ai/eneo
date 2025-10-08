@@ -15,6 +15,7 @@ from intric.sessions.session import (
     SessionFeedback,
     SessionMetadataPublic,
     SessionPublic,
+    SSEError,
     SSEFiles,
     SSEFirstChunk,
     SSEIntricEvent,
@@ -32,7 +33,7 @@ router = APIRouter()
     "/",
     responses=responses.streaming_response(
         response_codes=[400, 404],
-        models=[SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk],
+        models=[SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk, SSEError],
     ),
 )
 async def chat(
@@ -65,6 +66,7 @@ async def chat(
     - SSEIntricEvent: Internal events like generating an image
     - SSEFiles: Generated files/images responses
     - SSEFirstChunk: Initial response with metadata
+    - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
     """
     file_ids = [file.id for file in request.files]
     tool_assistant_id = None

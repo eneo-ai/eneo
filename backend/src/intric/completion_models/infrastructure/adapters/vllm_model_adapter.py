@@ -14,7 +14,7 @@ from intric.completion_models.infrastructure.adapters.openai_model_adapter impor
 )
 from intric.logging.logging import LoggingDetails
 from intric.logging.logging_templates import LLAMA_TEMPLATE
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.settings.credential_resolver import CredentialResolver
 
 JINJA_TEMPLATE = jinja2.Environment().from_string(LLAMA_TEMPLATE)
@@ -27,14 +27,12 @@ class VLMMModelAdapter(OpenAIModelAdapter):
         credential_resolver: Optional[CredentialResolver] = None,
     ):
         self.model = model
+        settings = get_settings()
 
-        # Resolve API key from credential resolver or fall back to global settings
-        if credential_resolver is not None:
-            vllm_api_key = credential_resolver.get_setting("vllm_api_key")
-            vllm_model_url = credential_resolver.get_setting("vllm_model_url")
-        else:
-            vllm_api_key = SETTINGS.vllm_api_key
-            vllm_model_url = SETTINGS.vllm_model_url
+        # VLLM is self-hosted, so credentials always come from global settings
+        # (no tenant-specific API keys for self-hosted infrastructure)
+        vllm_api_key = settings.vllm_api_key
+        vllm_model_url = settings.vllm_model_url
 
         self.client = AsyncOpenAI(
             api_key="EMPTY", base_url=model.base_url or vllm_model_url
