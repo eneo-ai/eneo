@@ -104,6 +104,7 @@
       padding="icon-leading"
       on:click={toggleEnabled}
       variant={model.is_org_enabled ? "destructive" : "positive-outlined"}
+      disabled={model.is_locked && !model.is_org_enabled}
     >
       {#if model.is_org_enabled}
         <IconCancel></IconCancel>
