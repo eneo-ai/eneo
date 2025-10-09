@@ -27,6 +27,7 @@ from intric.sessions.session import (
     SSEFirstChunk,
     SSEIntricEvent,
     SSEText,
+    SSEError,
 )
 
 if TYPE_CHECKING:
@@ -131,6 +132,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
         data = SSEIntricEvent(
             session_id=session_id,
             intric_event_type=IntricEventType.GENERATING_IMAGE,
+        )
+
+    if chunk.response_type == ResponseType.ERROR:
+        data = SSEError(
+            session_id=session_id,
+            error=chunk.error,
+            error_code=chunk.error_code,
         )
 
     return ServerSentEvent(data.model_dump_json(), event=chunk.response_type.value)

@@ -310,6 +310,7 @@ export interface paths {
      * - SSEIntricEvent: Internal events like generating an image
      * - SSEFiles: Generated files/images responses
      * - SSEFirstChunk: Initial response with metadata
+     * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
      */
     post: operations["chat_api_v1_conversations__post"];
   };
@@ -1028,7 +1029,20 @@ export interface paths {
     delete: operations["delete_user_api_v1_sysadmin_users__user_id___delete"];
   };
   "/api/v1/sysadmin/tenants/": {
-    /** Get Tenants */
+    /**
+     * Get Tenants
+     * @description Get all tenants with masked API credentials.
+     *
+     * Returns tenant information with API keys masked to show only last 4 characters.
+     * This prevents exposing full API keys through the API endpoint.
+     *
+     * Args:
+     *     domain: Optional domain filter
+     *     container: Dependency injection container
+     *
+     * Returns:
+     *     Paginated list of tenants with masked credentials
+     */
     get: operations["get_tenants_api_v1_sysadmin_tenants__get"];
     /** Create Tenant */
     post: operations["create_tenant_api_v1_sysadmin_tenants__post"];
@@ -1072,6 +1086,25 @@ export interface paths {
   "/api/v1/sysadmin/allowed-origins/{id}/": {
     /** Delete Origin */
     delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
+    /**
+     * Set tenant API credential
+     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name) are required.
+     */
+    put: operations["set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put"];
+    /**
+     * Delete tenant API credential
+     * @description Delete API credentials for a specific LLM provider for a tenant. System admin only.
+     */
+    delete: operations["delete_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/credentials": {
+    /**
+     * List tenant API credentials
+     * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
+     */
+    get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
   };
   "/api/v1/modules/": {
     /** Get Modules */
@@ -2226,6 +2259,52 @@ export interface components {
       published?: boolean;
       user: components["schemas"]["UserSparse"];
     };
+    /**
+     * CredentialInfo
+     * @description Information about a configured credential.
+     *
+     * Example:
+     *     {
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "configured_at": "2025-10-07T12:34:56.789Z",
+     *         "encryption_status": "encrypted",
+     *         "config": {
+     *             "endpoint": "https://my-resource.openai.azure.com",
+     *             "api_version": "2024-02-15-preview"
+     *         }
+     *     }
+     */
+    CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -2340,6 +2419,28 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+    };
+    /**
+     * DeleteCredentialResponse
+     * @description Response model for deleting tenant API credentials.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "anthropic",
+     *         "message": "API credential for anthropic deleted successfully"
+     *     }
+     */
+    DeleteCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Message */
+      message: string;
     };
     /** DeleteResponse */
     DeleteResponse: {
@@ -2580,7 +2681,8 @@ export interface components {
       | 9022
       | 9023
       | 9024
-      | 9025;
+      | 9025
+      | 9026;
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -3155,6 +3257,38 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
+    };
+    /**
+     * ListCredentialsResponse
+     * @description Response model for listing tenant credentials.
+     *
+     * Example:
+     *     {
+     *         "credentials": [
+     *             {
+     *                 "provider": "openai",
+     *                 "masked_key": "...xyz9",
+     *                 "configured_at": "2025-10-07T12:34:56.789Z",
+     *                 "encryption_status": "encrypted",
+     *                 "config": {}
+     *             },
+     *             {
+     *                 "provider": "azure",
+     *                 "masked_key": "...abc3",
+     *                 "configured_at": "2025-10-07T12:45:00.123Z",
+     *                 "encryption_status": "plaintext",
+     *                 "config": {
+     *                     "endpoint": "https://my-resource.openai.azure.com",
+     *                     "api_version": "2024-02-15-preview",
+     *                     "deployment_name": "gpt-4"
+     *                 }
+     *             }
+     *         ]
+     *     }
+     */
+    ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["CredentialInfo"][];
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -3823,13 +3957,13 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[TenantInDB] */
-    PaginatedResponse_TenantInDB_: {
+    /** PaginatedResponse[TenantWithMaskedCredentials] */
+    PaginatedResponse_TenantWithMaskedCredentials_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["TenantInDB"][];
+      items: components["schemas"]["TenantWithMaskedCredentials"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -4601,6 +4735,79 @@ export interface components {
       messages: components["schemas"]["Message"][];
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
+    /**
+     * SetCredentialRequest
+     * @description Request model for setting tenant API credentials.
+     *
+     * For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name)
+     * are required. For other providers, only api_key is required.
+     *
+     * Example for OpenAI:
+     *     {
+     *         "api_key": "sk-proj-abc123..."
+     *     }
+     *
+     * Example for Azure:
+     *     {
+     *         "api_key": "abc123...",
+     *         "endpoint": "https://my-resource.openai.azure.com",
+     *         "api_version": "2024-02-15-preview",
+     *         "deployment_name": "gpt-4"
+     *     }
+     *
+     * Example for VLLM:
+     *     {
+     *         "api_key": "vllm-secret-key",
+     *         "endpoint": "http://tenant-vllm:8000"
+     *     }
+     */
+    SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /**
+     * SetCredentialResponse
+     * @description Response model for setting tenant API credentials.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "message": "API credential for openai set successfully"
+     *     }
+     */
+    SetCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+    };
     /** SettingsPublic */
     SettingsPublic: {
       /**
@@ -4925,6 +5132,10 @@ export interface components {
        * @default []
        */
       modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
     };
     /** TenantIntegration */
     TenantIntegration: {
@@ -5006,6 +5217,62 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+    };
+    /**
+     * TenantWithMaskedCredentials
+     * @description TenantInDB with masked API credentials for safe API responses.
+     *
+     * This model is used when returning tenant data through API endpoints
+     * to prevent exposing full API keys. The api_credentials field is
+     * automatically masked to show only the last 4 characters of each key.
+     *
+     * Example:
+     *     Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
+     *     Masked: {"openai": "...xyz"}
+     */
+    TenantWithMaskedCredentials: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Privacy Policy */
+      privacy_policy?: string | null;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Quota Limit */
+      quota_limit: number;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /** @default active */
+      state?: components["schemas"]["TenantState"];
+      /**
+       * Security Enabled
+       * @default false
+       */
+      security_enabled?: boolean;
+      /**
+       * Modules
+       * @default []
+       */
+      modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -8311,6 +8578,7 @@ export interface operations {
    * - SSEIntricEvent: Internal events like generating an image
    * - SSEFiles: Generated files/images responses
    * - SSEFirstChunk: Initial response with metadata
+   * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
    */
   chat_api_v1_conversations__post: {
     parameters: {
@@ -8523,6 +8791,17 @@ export interface operations {
                     url: string;
                   };
                 };
+              },
+              {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Error */
+                error: string;
+                /** Error Code */
+                error_code?: number | null;
               }
             ]
           >;
@@ -12188,7 +12467,20 @@ export interface operations {
       };
     };
   };
-  /** Get Tenants */
+  /**
+   * Get Tenants
+   * @description Get all tenants with masked API credentials.
+   *
+   * Returns tenant information with API keys masked to show only last 4 characters.
+   * This prevents exposing full API keys through the API endpoint.
+   *
+   * Args:
+   *     domain: Optional domain filter
+   *     container: Dependency injection container
+   *
+   * Returns:
+   *     Paginated list of tenants with masked credentials
+   */
   get_tenants_api_v1_sysadmin_tenants__get: {
     parameters: {
       query?: {
@@ -12199,7 +12491,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_TenantInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_TenantWithMaskedCredentials_"];
         };
       };
       /** @description Validation Error */
@@ -12478,6 +12770,88 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set tenant API credential
+   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name) are required.
+   */
+  set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete tenant API credential
+   * @description Delete API credentials for a specific LLM provider for a tenant. System admin only.
+   */
+  delete_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant API credentials
+   * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
+   */
+  list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ListCredentialsResponse"];
+        };
       };
       /** @description Validation Error */
       422: {

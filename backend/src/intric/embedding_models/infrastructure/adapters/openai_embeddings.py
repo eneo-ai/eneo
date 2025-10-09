@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import openai
 from tenacity import (
@@ -17,6 +17,7 @@ from intric.main.logging import get_logger
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.info_blobs.info_blob import InfoBlobChunk
+    from intric.settings.credential_resolver import CredentialResolver
 
 
 logger = get_logger(__name__)
@@ -26,10 +27,17 @@ class OpenAIEmbeddingAdapter(EmbeddingModelAdapter):
     def __init__(
         self,
         model: "EmbeddingModel",
-        client=openai.AsyncOpenAI(api_key=get_settings().openai_api_key),
+        credential_resolver: Optional["CredentialResolver"] = None,
     ):
-        self.client = client
         super().__init__(model)
+
+        # Use tenant credentials if available, otherwise fall back to global settings
+        if credential_resolver:
+            api_key = credential_resolver.get_api_key("openai")
+        else:
+            api_key = get_settings().openai_api_key
+
+        self.client = openai.AsyncOpenAI(api_key=api_key)
 
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()

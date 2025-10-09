@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -53,6 +53,36 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
     modules: list[ModuleInDB] = []
+    api_credentials: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("api_credentials")
+    @classmethod
+    def validate_api_credentials(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate JSONB structure for API credentials.
+
+        Ensures provider keys are valid and credentials have required fields.
+        Azure provider requires additional fields beyond api_key.
+        """
+        valid_providers = {"openai", "azure", "anthropic", "berget", "mistral", "ovhcloud", "vllm"}
+
+        for provider, cred in v.items():
+            if provider not in valid_providers:
+                raise ValueError(f"Invalid provider: {provider}. Must be one of: {valid_providers}")
+
+            if not isinstance(cred, dict):
+                raise ValueError(f"Provider {provider} credentials must be a dict")
+
+            if "api_key" not in cred:
+                raise ValueError(f"Provider {provider} missing required field: api_key")
+
+            # Azure-specific validation - requires additional configuration fields
+            if provider == "azure":
+                required = {"api_key", "endpoint", "api_version", "deployment_name"}
+                missing = required - set(cred.keys())
+                if missing:
+                    raise ValueError(f"Azure provider missing required fields: {missing}")
+
+        return v
 
 
 class TenantUpdatePublic(BaseModel):
@@ -67,3 +97,76 @@ class TenantUpdatePublic(BaseModel):
 
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
+
+
+class TenantWithMaskedCredentials(TenantInDB):
+    """TenantInDB with masked API credentials for safe API responses.
+
+    This model is used when returning tenant data through API endpoints
+    to prevent exposing full API keys. The api_credentials field is
+    automatically masked to show only the last 4 characters of each key.
+
+    Example:
+        Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
+        Masked: {"openai": "...xyz"}
+    """
+
+    # Override the parent's field validator to skip validation for masked credentials
+    @field_validator("api_credentials", mode="before")
+    @classmethod
+    def skip_validation_for_masked(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Skip validation for masked credentials.
+
+        Masked credentials are already validated in from_tenant() and don't
+        have the same structure as full credentials (they're strings, not dicts).
+        This validator runs in "before" mode to prevent the parent validator
+        from running on masked data.
+        """
+        return v
+
+    @classmethod
+    def from_tenant(cls, tenant: TenantInDB) -> "TenantWithMaskedCredentials":
+        """Convert TenantInDB to version with masked credentials.
+
+        Args:
+            tenant: The TenantInDB instance with full credentials
+
+        Returns:
+            TenantWithMaskedCredentials with api_credentials masked
+
+        Note:
+            Preserves credential structure (endpoint, api_version, etc.)
+            but masks only the api_key field to prevent exposing encrypted values.
+        """
+        # Extract all tenant data
+        data = tenant.model_dump()
+
+        # Mask the api_credentials - preserve structure but mask api_key field only
+        if tenant.api_credentials:
+            masked = {}
+            for provider, cred in tenant.api_credentials.items():
+                if isinstance(cred, dict):
+                    # Preserve structure: copy all fields except mask api_key
+                    masked_cred = cred.copy()
+                    api_key = cred.get("api_key", "")
+
+                    # Mask the api_key field
+                    if len(api_key) > 4:
+                        masked_cred["api_key"] = f"...{api_key[-4:]}"
+                    else:
+                        masked_cred["api_key"] = "***"
+
+                    masked[provider] = masked_cred
+                else:
+                    # Legacy string format (shouldn't happen, but handle gracefully)
+                    api_key = str(cred)
+                    if len(api_key) > 4:
+                        masked[provider] = f"...{api_key[-4:]}"
+                    else:
+                        masked[provider] = "***"
+
+            data["api_credentials"] = masked
+        else:
+            data["api_credentials"] = {}
+
+        return cls.model_construct(**data)
