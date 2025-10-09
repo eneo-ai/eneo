@@ -132,18 +132,19 @@ async def get_tenants(domain: str | None = None, container: Container = Depends(
 
 @router.post(
     "/tenants/",
-    response_model=TenantInDB,
+    response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([400]),
 )
 async def create_tenant(tenant: TenantBase, container: Container = Depends(get_container())):
     tenant_service = container.tenant_service()
 
-    return await tenant_service.create_tenant(tenant)
+    created_tenant = await tenant_service.create_tenant(tenant)
+    return TenantWithMaskedCredentials.from_tenant(created_tenant)
 
 
 @router.post(
     "/tenants/{id}/",
-    response_model=TenantInDB,
+    response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([404]),
 )
 async def update_tenant(
@@ -153,18 +154,20 @@ async def update_tenant(
 ):
     tenant_service = container.tenant_service()
 
-    return await tenant_service.update_tenant(tenant, id)
+    updated_tenant = await tenant_service.update_tenant(tenant, id)
+    return TenantWithMaskedCredentials.from_tenant(updated_tenant)
 
 
 @router.delete(
     "/tenants/{id}/",
-    response_model=TenantInDB,
+    response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([404]),
 )
 async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_container())):
     tenant_service = container.tenant_service()
 
-    return await tenant_service.delete_tenant(id)
+    deleted_tenant = await tenant_service.delete_tenant(id)
+    return TenantWithMaskedCredentials.from_tenant(deleted_tenant)
 
 
 @router.get("/predefined-roles/")

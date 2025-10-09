@@ -133,25 +133,37 @@ class TenantWithMaskedCredentials(TenantInDB):
 
         Returns:
             TenantWithMaskedCredentials with api_credentials masked
+
+        Note:
+            Preserves credential structure (endpoint, api_version, etc.)
+            but masks only the api_key field to prevent exposing encrypted values.
         """
         # Extract all tenant data
         data = tenant.model_dump()
 
-        # Mask the api_credentials
+        # Mask the api_credentials - preserve structure but mask api_key field only
         if tenant.api_credentials:
             masked = {}
             for provider, cred in tenant.api_credentials.items():
-                # Extract api_key from credential dict
                 if isinstance(cred, dict):
+                    # Preserve structure: copy all fields except mask api_key
+                    masked_cred = cred.copy()
                     api_key = cred.get("api_key", "")
-                else:
-                    api_key = str(cred)
 
-                # Mask the key - show last 4 chars
-                if len(api_key) > 4:
-                    masked[provider] = f"...{api_key[-4:]}"
+                    # Mask the api_key field
+                    if len(api_key) > 4:
+                        masked_cred["api_key"] = f"...{api_key[-4:]}"
+                    else:
+                        masked_cred["api_key"] = "***"
+
+                    masked[provider] = masked_cred
                 else:
-                    masked[provider] = "***"
+                    # Legacy string format (shouldn't happen, but handle gracefully)
+                    api_key = str(cred)
+                    if len(api_key) > 4:
+                        masked[provider] = f"...{api_key[-4:]}"
+                    else:
+                        masked[provider] = "***"
 
             data["api_credentials"] = masked
         else:

@@ -407,6 +407,7 @@ embedding_models:
 
   - name: 'text-embedding-3-large-azure'
     family: 'openai'
+    litellm_model_name: 'azure/text-embedding-3-large'
     open_source: false
     dimensions: 3072
     max_input: 8191
