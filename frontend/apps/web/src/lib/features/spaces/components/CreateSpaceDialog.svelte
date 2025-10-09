@@ -18,6 +18,24 @@
 
   let newSpaceName = "";
   let isCreatingSpace = false;
+
+  async function createSpace() {
+    if (newSpaceName === "") return;
+    isCreatingSpace = true;
+    try {
+      const space = await spaces.createSpace({ name: newSpaceName });
+      if (space) {
+        $isOpen = false;
+        newSpaceName = "";
+        if (forwardToNewSpace) {
+          const routeId = space.personal ? "personal" : space.id;
+          await goto(`/spaces/${routeId}/overview`);
+        }
+      }
+    } finally {
+      isCreatingSpace = false;
+    }
+  }
 </script>
 
 <Dialog.Root bind:isOpen>
@@ -42,19 +60,8 @@
       <Button is={close}>{m.cancel()}</Button>
       <Button
         variant="primary"
-        on:click={async () => {
-          if (newSpaceName === "") return;
-          isCreatingSpace = true;
-          const space = await spaces.createSpace({ name: newSpaceName });
-          if (space) {
-            $isOpen = false;
-            newSpaceName = "";
-            if (forwardToNewSpace) {
-              goto(`/spaces/${space.id}`);
-            }
-          }
-          isCreatingSpace = false;
-        }}>{isCreatingSpace ? m.creating() : m.create_space()}</Button
+        on:click={createSpace}
+        >{isCreatingSpace ? m.creating() : m.create_space()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

@@ -19,7 +19,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.your_spaces()}></Page.Title>
-    <CreateSpaceDialog includeTrigger={true} forwardToNewSpace={false}></CreateSpaceDialog>
+    <CreateSpaceDialog includeTrigger={true} forwardToNewSpace={true}></CreateSpaceDialog>
   </Page.Header>
 
   <Page.Main>
