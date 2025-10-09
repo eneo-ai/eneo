@@ -2,6 +2,7 @@
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
 import os
+from pathlib import Path
 
 # IMPORTANT: Configure environment variables BEFORE importing testcontainers
 # Disable Ryuk (testcontainers cleanup container) in devcontainer environments
@@ -27,6 +28,7 @@ from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
+from testcontainers.redis import RedisContainer
 
 from init_db import add_tenant_user
 from intric.database.database import sessionmanager
@@ -70,10 +72,27 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
         postgres.get_connection_url()
         yield postgres
 
+
+@pytest.fixture(scope="session")
+def redis_container() -> Generator[RedisContainer | None, None, None]:
+    """
+    Start a Redis container for the test session (only when not in devcontainer).
+    In devcontainer, we use the existing Redis service.
+    """
+    if _IN_DEVCONTAINER:
+        # Don't create a container, use existing Redis service
+        yield None
+    else:
+        # Create Redis container for local testing
+        redis = RedisContainer(image="redis:7-alpine")
+        with redis:
+            yield redis
+
+
 @pytest.fixture(scope="session")
 def test_settings(
     postgres_container: PostgresContainer,
-    # redis_container: RedisContainer,  # Disabled for now - causing hangs
+    redis_container: RedisContainer | None,
 ) -> Settings:
     """
     Create test settings using testcontainer connection strings.
@@ -83,9 +102,13 @@ def test_settings(
     if _IN_DEVCONTAINER:
         pg_host = postgres_container._container.name
         pg_port = 5432
+        redis_host = "redis"  # Use existing Redis service in devcontainer
+        redis_port = 6379
     else:
         pg_host = postgres_container.get_container_host_ip()
         pg_port = int(postgres_container.get_exposed_port(5432))
+        redis_host = redis_container.get_container_host_ip()
+        redis_port = int(redis_container.get_exposed_port(6379))
 
     # Create test settings
     settings = Settings(
@@ -97,8 +120,9 @@ def test_settings(
         postgres_db="integration_test_db",
 
         # Redis settings
-        redis_host="redis",
-        redis_port=6379,
+        redis_host=redis_host,
+        redis_port=redis_port,
+        redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
 
         # File upload limits
         upload_file_to_session_max_size=10_000_000,
@@ -179,7 +203,9 @@ async def setup_database(test_settings: Settings):
     Runs Alembic migrations and creates a default tenant/user using init_db logic.
     """
     # Run alembic migrations programmatically with test database URL
-    alembic_cfg = Config("/workspace/backend/alembic.ini")
+    backend_dir = Path(__file__).parent.parent.parent
+    alembic_ini_path = backend_dir / "alembic.ini"
+    alembic_cfg = Config(str(alembic_ini_path))
     alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
 
     try:
