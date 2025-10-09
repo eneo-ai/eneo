@@ -152,23 +152,24 @@ class CredentialResolver:
         decrypt: bool = False,
     ) -> Optional[str]:
         """
-        Get any field from tenant credentials with fallback to global settings.
+        Get any field from tenant credentials with strict mode support.
 
         IMPORTANT: Same strict logic as get_api_key():
-        - If tenant HAS credential for provider → use exclusively (no fallback even if field invalid)
-        - If tenant has NO credential for provider → use fallback
+        - If tenant HAS credential for provider → use exclusively (no fallback even if field missing)
+        - If tenant has NO credential AND TENANT_CREDENTIALS_ENABLED=true → NO fallback (strict mode)
+        - If tenant has NO credential AND TENANT_CREDENTIALS_ENABLED=false → use fallback (single-tenant)
 
         Args:
             provider: Provider name (azure, vllm, openai, etc.)
             field: Field name (api_key, endpoint, api_version, deployment_name, etc.)
-            fallback: Global setting to use if tenant has NO credential for provider
+            fallback: Global setting to use in single-tenant mode only
             decrypt: Whether to decrypt value (True for api_key fields)
 
         Returns:
-            Field value from tenant credential or fallback, or None if neither exists
+            Field value from tenant credential, or fallback (single-tenant only), or None
 
         Examples:
-            # Get tenant-specific or global VLLM endpoint
+            # Get tenant-specific or global VLLM endpoint (single-tenant fallback)
             endpoint = resolver.get_credential_field("vllm", "endpoint", settings.vllm_model_url)
 
             # Get tenant-specific or global API key (with decryption)
@@ -226,7 +227,22 @@ class CredentialResolver:
                 )
                 return None
 
-        # Tenant has NO credential for this provider → fallback allowed
+        # Strict mode: When tenant credentials enabled, no fallback to global
+        # This prevents tenants from silently using shared infrastructure when they expect their own
+        if self.settings.tenant_credentials_enabled and self.tenant:
+            logger.debug(
+                f"Strict mode: No {field} configured for provider {provider}",
+                extra={
+                    "tenant_id": str(self.tenant.id),
+                    "tenant_name": self.tenant.name,
+                    "provider": provider,
+                    "field": field,
+                    "mode": "strict",
+                },
+            )
+            return None  # No fallback in strict mode
+
+        # Single-tenant mode: Fallback to global allowed
         if fallback:
             logger.info(
                 f"Credential field '{field}' resolved from global settings",
@@ -234,6 +250,7 @@ class CredentialResolver:
                     "provider": provider,
                     "field": field,
                     "source": "global",
+                    "mode": "single-tenant",
                 },
             )
             return fallback
