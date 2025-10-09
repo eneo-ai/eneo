@@ -13,6 +13,7 @@ from intric.ai_models.litellm_providers.provider_registry import LiteLLMProvider
 from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 
@@ -54,10 +55,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         Detect provider from model name.
 
         Args:
-            litellm_model_name: The LiteLLM model name (e.g., 'azure/text-embedding-ada-002', 'openai/text-embedding-3-small')
+            litellm_model_name: The LiteLLM model name (e.g., 'azure/text-embedding-ada-002', 'vllm/e5-mistral-7b')
 
         Returns:
-            Provider name (openai, azure, anthropic, berget, mistral, ovhcloud)
+            Provider name (openai, azure, anthropic, berget, mistral, ovhcloud, vllm)
         """
         if litellm_model_name.startswith("azure/"):
             return "azure"
@@ -69,6 +70,8 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             return "mistral"
         elif litellm_model_name.startswith("ovhcloud/"):
             return "ovhcloud"
+        elif litellm_model_name.startswith("vllm/"):
+            return "vllm"
         else:
             # Default to OpenAI for unprefixed models
             return "openai"
@@ -132,6 +135,20 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         status_code=503,
                         detail=f"Embedding service unavailable: {str(e)}"
                     )
+
+                # Inject endpoint for VLLM and other providers with custom endpoints
+                # VLLM requires endpoint - fallback to global VLLM_MODEL_URL for single-tenant deployments
+                settings = get_settings()
+                endpoint_fallback = settings.vllm_model_url if provider == "vllm" else None
+                endpoint = self.credential_resolver.get_credential_field(
+                    provider=provider,
+                    field="endpoint",
+                    fallback=endpoint_fallback
+                )
+
+                if endpoint:
+                    params['api_base'] = endpoint
+                    logger.info(f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}")
 
             logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts")
 
