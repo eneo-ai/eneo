@@ -158,6 +158,14 @@ def override_settings_for_session(test_settings: Settings):
     auth_defs.OAUTH2_SCHEME = auth_defs._get_oauth2_scheme()
     auth_defs.API_KEY_HEADER = auth_defs._get_api_key_header()
 
+    # Verify settings are correct
+    print("\n=== Integration Test Setup Verification ===")
+    print("✓ Test settings configured")
+    print(f"  - Database: {test_settings.postgres_db}")
+    print(f"  - User: {test_settings.postgres_user}")
+    print(f"  - Testing mode: {test_settings.testing}")
+    print(f"  - API prefix: {test_settings.api_prefix}")
+
     yield
 
     # Cleanup after all tests
@@ -204,11 +212,40 @@ async def setup_database(test_settings: Settings):
     # Initialize the database session manager with test settings AFTER migrations
     sessionmanager.init(test_settings.database_url)
 
-    # Test that we can connect
+    # Verify database connection
+    print("\n=== Database Verification ===")
     async with sessionmanager.session() as session:
         async with session.begin():
-            result = await session.execute(text("SELECT 1"))
-            assert result.scalar() == 1
+            # Test basic query
+            result = await session.execute(text("SELECT version()"))
+            version = result.scalar()
+            assert version is not None
+            assert "PostgreSQL" in version
+            print(f"✓ Database connected: {version.split(',')[0]}")
+
+            # Test pgvector extension
+            await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            result = await session.execute(
+                text("SELECT * FROM pg_extension WHERE extname = 'vector'")
+            )
+            extension = result.first()
+            assert extension is not None
+            print("✓ pgvector extension available")
+
+            # Verify tenant and users exist
+            from intric.main.container.container import Container
+            container = Container(session=providers.Object(session))
+
+            tenant_repo = container.tenant_repo()
+            tenants = await tenant_repo.get_all_tenants()
+            assert len(tenants) > 0
+            print(f"✓ Test tenant created: {tenants[0].name}")
+
+            user_repo = container.user_repo()
+            users = await user_repo.get_all_users()
+            assert len(users) > 0
+            assert users[0].tenant_id is not None
+            print(f"✓ Test user created: {users[0].email}")
 
     yield
 
@@ -277,6 +314,14 @@ async def app(setup_database):
     # Import here because it needs to be after settings are configured
     from intric.server.dependencies.lifespan import startup
     await startup()
+
+    # Verify app initialization
+    print("\n=== Application Verification ===")
+    print("✓ FastAPI app initialized")
+    routes = [route.path for route in application.routes]
+    assert "/api/healthz" in routes
+    print(f"✓ Routes registered: {len(routes)} routes")
+    print("✓ Ready for testing\n")
 
     yield application
 
