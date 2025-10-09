@@ -45,6 +45,12 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
                     "azure", "api_version", settings.azure_api_version
                 )
 
+                # Get deployment_name - tenant-specific or model default
+                deployment_name = credential_resolver.get_credential_field(
+                    "azure", "deployment_name", model.deployment_name
+                )
+                self._deployment_name = deployment_name or model.deployment_name
+
             except ValueError as e:
                 logger.error(
                     "Azure credential resolution failed",
@@ -73,6 +79,8 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
                 azure_endpoint=settings.azure_endpoint,
                 api_version=settings.azure_api_version,
             )
+            # Use model's deployment_name when using global settings
+            self._deployment_name = model.deployment_name
 
     def _get_kwargs(self, kwargs):
         kwargs = super()._get_kwargs(kwargs)
@@ -94,7 +102,7 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
         # which properly handles AuthenticationError, PermissionDeniedError, etc.
         return await get_response_open_ai.get_response(
             client=self.client,
-            model_name=self.model.deployment_name,
+            model_name=self._deployment_name,
             messages=query,
             model_kwargs=self._get_kwargs(model_kwargs),
         )
@@ -109,7 +117,7 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
         # This can raise exceptions - that's what we want for pre-flight
         return await get_response_open_ai.prepare_stream(
             client=self.client,
-            model_name=self.model.deployment_name,
+            model_name=self._deployment_name,
             messages=query,
             model_kwargs=self._get_kwargs(model_kwargs),
         )
@@ -138,7 +146,7 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
         # and yields error events for errors during streaming (unavoidable)
         return get_response_open_ai.get_response_streaming(
             client=self.client,
-            model_name=self.model.deployment_name,
+            model_name=self._deployment_name,
             messages=query,
             model_kwargs=self._get_kwargs(model_kwargs),
         )
