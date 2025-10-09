@@ -41,12 +41,14 @@
   let showCreateDialog: Dialog.OpenState;
 </script>
 
-{#if $currentSpace.personal && !showSelectPrompt}
+{#if ($currentSpace.personal || $currentSpace.organization) && !showSelectPrompt}
   <div
     class="group border-default relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b-[0.5px] pt-0.5 pr-5 pl-[1.4rem] font-medium"
   >
-    <SpaceChip space={$currentSpace}></SpaceChip>
-    <span class="text-primary flex-grow truncate pl-0.5 text-left">{m.personal_space()}</span>
+    <SpaceChip space={$currentSpace} />
+    <span class="text-primary flex-grow truncate pl-0.5 text-left">
+      {$currentSpace.personal ? m.personal_space() : m.organization_space()}
+    </span>
   </div>
 {:else}
   <Button
@@ -68,12 +70,14 @@
         {$currentSpace.name}
       </span>
     {/if}
-    <IconChevronUpDown class="text-muted group-hover:text-accent-stronger min-w-6" />
+    {#if (!$currentSpace.organization)}
+      <IconChevronUpDown class="text-muted group-hover:text-accent-stronger min-w-6" />
+    {/if}
   </Button>
 {/if}
 
 <!-- Selector drop down -->
-{#if $open}
+{#if $open && !$currentSpace.organization}
   <div
     {...$overlay}
     use:overlay
@@ -93,27 +97,22 @@
       <a href="/spaces/list" class="hover:underline">{m.your_spaces()}</a>
     </div>
 
-    <div class="relative max-h-[50vh] overflow-y-auto">
-      {#each $accessibleSpaces as space (space.id)}
-        {#if !space.personal}
-          <Button
-            unstyled
-            is={[$item]}
-            href="/spaces/{space.id}/overview"
-            class="group border-default hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
-          >
-            <SpaceChip {space}></SpaceChip>
-
-            <span class="flex-grow truncate text-left">
-              {space.name}
-            </span>
-            <div class="text-accent-stronger ml-2 min-w-5">
-              {#if space.id === $currentSpace.id && !showSelectPrompt}
-                <IconSelectedItem />
-              {/if}
-            </div>
-          </Button>
-        {/if}
+   <div class="relative max-h-[50vh] overflow-y-auto">
+      {#each $accessibleSpaces.filter((s) => !s.personal && !s.organization) as space (space.id)}
+        <Button
+          unstyled
+          is={[$item]}
+          href="/spaces/{space.id}/overview"
+          class="group border-default hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
+        >
+          <SpaceChip {space} />
+          <span class="flex-grow truncate text-left">{space.name}</span>
+          <div class="text-accent-stronger ml-2 min-w-5">
+            {#if space.id === $currentSpace.id && !showSelectPrompt}
+              <IconSelectedItem />
+            {/if}
+          </div>
+        </Button>
       {/each}
     </div>
     <Button

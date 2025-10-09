@@ -341,10 +341,13 @@ class SpaceAssembler:
             for model in space.transcription_models
             if model.is_org_enabled
         ]
-        default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
-            space.default_assistant,
-            permissions=self._get_default_assistant_permissions(space),
-        )
+
+        default_assistant = None
+        if getattr(space, "default_assistant", None) is not None:
+            default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
+                space.default_assistant,
+                permissions=self._get_default_assistant_permissions(space),
+            )
         available_roles = [SpaceRole(value=role) for role in actor.get_available_roles()]
         security_classification = None
         if self.user.tenant.security_enabled:
@@ -364,6 +367,7 @@ class SpaceAssembler:
             knowledge=knowledge,
             members=members,
             personal=space.is_personal(),
+            organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             available_roles=available_roles,
             security_classification=security_classification,
@@ -377,6 +381,7 @@ class SpaceAssembler:
             name=space.name,
             description=space.description,
             personal=space.is_personal(),
+            organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
         )
 
@@ -391,6 +396,7 @@ class SpaceAssembler:
             name=space.name,
             description=space.description,
             personal=space.is_personal(),
+            organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             applications=applications,
         )

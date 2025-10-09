@@ -1,9 +1,11 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
+from intric.spaces.utils.space_utils import effective_space_ids
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from intric.ai_models.completion_models.completion_model import CompletionModelSparse
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelSparse
@@ -36,6 +38,7 @@ from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
+from intric.database.tables.groups_spaces_table import GroupsSpaces
 from intric.database.tables.service_table import Services
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import (
@@ -51,6 +54,7 @@ from intric.main.exceptions import NotFoundException, UniqueException
 from intric.spaces.api.space_models import SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
+from intric.database.tables.websites_spaces_table import WebsitesSpaces
 
 if TYPE_CHECKING:
     from intric.apps import AppRepository
@@ -112,21 +116,42 @@ class SpaceRepository:
             ),
         ]
 
-    async def _get_collections(self, space_id: UUID):
-        query = (
-            sa.select(
-                CollectionsTable,
-                sa.func.coalesce(sa.func.count(InfoBlobs.id).label("infoblob_count")),
-            )
-            .outerjoin(InfoBlobs, CollectionsTable.id == InfoBlobs.group_id)
-            .where(CollectionsTable.space_id == space_id)
-            .group_by(CollectionsTable.id)
-            .order_by(CollectionsTable.created_at)
-            .options(selectinload(CollectionsTable.embedding_model))
+    async def _get_collections(self, space_ids: list[UUID]):
+        c = CollectionsTable
+        ib = InfoBlobs
+        gs = GroupsSpaces
+
+        ib_count_sq = (
+            sa.select(sa.func.count(sa.distinct(ib.id)))
+            .where(ib.group_id == c.id)
+            .correlate(c)
+            .scalar_subquery()
         )
 
-        res = await self.session.execute(query)
+        stmt = (
+            sa.select(
+                c,
+                sa.func.coalesce(ib_count_sq, 0).label("infoblob_count"),
+            )
+            .where(
+                sa.or_(
+                    c.space_id.in_(space_ids),
+                    sa.exists(
+                        sa.select(sa.literal(1))
+                        .select_from(gs)
+                        .where(gs.collection_id == c.id)
+                        .where(gs.space_id.in_(space_ids))
+                    ),
+                )
+            )
+            .order_by(c.created_at)
+            .options(selectinload(c.embedding_model))
+        )
+
+        res = await self.session.execute(stmt)
         return res.all()
+
+
 
     async def _get_completion_models(self, space_in_db: Spaces):
         space_id = space_in_db.id
@@ -386,114 +411,147 @@ class SpaceRepository:
 
     async def _set_collections(self, space_in_db: Spaces, collections: list["Collection"]):
         def _set_size_subquery(collection: "Collection"):
-            stmt = (
+            return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
                 .where(InfoBlobsTable.group_id == collection.id)
                 .scalar_subquery()
             )
 
-            return stmt
-
-        new_collections = [collection for collection in collections if collection.is_new]
-        existing_collections = [collection for collection in collections if not collection.is_new]
-
+        # Skapa nya collections (owner_space sätts EN gång vid skapande)
+        new_collections = [c for c in collections if c.is_new]
         if new_collections:
             stmt = sa.insert(CollectionsTable).values(
                 [
                     dict(
-                        id=collection.id,
-                        name=collection.name,
-                        size=_set_size_subquery(collection),
-                        tenant_id=collection.tenant_id,
-                        user_id=collection.user_id,
-                        embedding_model_id=collection.embedding_model.id,
-                        space_id=space_in_db.id,
+                        id=c.id,
+                        name=c.name,
+                        size=_set_size_subquery(c),
+                        tenant_id=c.tenant_id,
+                        user_id=c.user_id,
+                        embedding_model_id=c.embedding_model.id,
+                        space_id=c.space_id,  # Space_id blir som owner_space_id
                     )
-                    for collection in new_collections
+                    for c in new_collections
                 ]
             )
             await self.session.execute(stmt)
 
-        for collection in existing_collections:
+        # Uppdatera metadata på befintliga förutom space_id (Ägarbyte görs via annan metod)
+        existing = [c for c in collections if not c.is_new]
+        for c in existing:
             stmt = (
                 sa.update(CollectionsTable)
                 .values(
-                    name=collection.name,
-                    size=_set_size_subquery(collection),
-                    embedding_model_id=collection.embedding_model.id,
-                    space_id=space_in_db.id,
+                    name=c.name,
+                    size=_set_size_subquery(c),
+                    embedding_model_id=c.embedding_model.id,
                 )
-                .where(CollectionsTable.id == collection.id)
+                .where(CollectionsTable.id == c.id)
             )
             await self.session.execute(stmt)
 
-        # Delete all collections that are not in the list
-        stmt = (
-            sa.delete(CollectionsTable)
-            .where(CollectionsTable.space_id == space_in_db.id)
-            .where(CollectionsTable.id.notin_([collection.id for collection in collections]))
+        res = await self.session.execute(
+            sa.select(GroupsSpaces.collection_id).where(GroupsSpaces.space_id == space_in_db.id)
         )
-        await self.session.execute(stmt)
+        current_ids = {row[0] for row in res.all()}
 
+        desired_ids = {c.id for c in collections}
+
+        to_add = desired_ids - current_ids
+        to_remove = current_ids - desired_ids
+
+        if to_add:
+            ins = pg_insert(GroupsSpaces).values(
+                [dict(collection_id=cid, space_id=space_in_db.id) for cid in to_add]
+            )
+            ins = ins.on_conflict_do_nothing(
+                index_elements=[GroupsSpaces.collection_id, GroupsSpaces.space_id]
+            )
+            await self.session.execute(ins)
+
+        if to_remove:
+            await self.session.execute(
+                sa.delete(GroupsSpaces).where(
+                    sa.and_(
+                        GroupsSpaces.space_id == space_in_db.id,
+                        GroupsSpaces.collection_id.in_(to_remove),
+                    )
+                )
+            )
+            
     async def _set_websites(self, space_in_db: Spaces, websites: list["Website"]):
         def _set_size_subquery(website: "Website"):
-            stmt = (
+            return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
                 .where(InfoBlobsTable.website_id == website.id)
                 .scalar_subquery()
             )
 
-            return stmt
-
-        new_websites = [website for website in websites if website.is_new]
-        existing_websites = [website for website in websites if not website.is_new]
+        new_websites = [w for w in websites if w.is_new]
+        existing     = [w for w in websites if not w.is_new]
 
         if new_websites:
-            stmt = sa.insert(WebsitesTable).values(
-                [
-                    dict(
-                        id=website.id,
-                        name=website.name,
-                        url=website.url,
-                        download_files=website.download_files,
-                        crawl_type=website.crawl_type,
-                        update_interval=website.update_interval,
-                        size=_set_size_subquery(website),
-                        tenant_id=website.tenant_id,
-                        user_id=website.user_id,
-                        embedding_model_id=website.embedding_model.id,
-                        space_id=space_in_db.id,
-                    )
-                    for website in new_websites
-                ]
-            )
+            stmt = sa.insert(WebsitesTable).values([
+                dict(
+                    id=w.id,
+                    name=w.name,
+                    url=w.url,
+                    download_files=w.download_files,
+                    crawl_type=w.crawl_type,
+                    update_interval=w.update_interval,
+                    size=_set_size_subquery(w),
+                    tenant_id=w.tenant_id,
+                    user_id=w.user_id,
+                    embedding_model_id=w.embedding_model.id,
+                    space_id=w.space_id, 
+                )
+                for w in new_websites
+            ])
             await self.session.execute(stmt)
 
-        for website in existing_websites:
+        for w in existing:
             stmt = (
                 sa.update(WebsitesTable)
                 .values(
-                    name=website.name,
-                    url=website.url,
-                    download_files=website.download_files,
-                    crawl_type=website.crawl_type,
-                    update_interval=website.update_interval,
-                    size=_set_size_subquery(website),
-                    embedding_model_id=website.embedding_model.id,
-                    space_id=space_in_db.id,
+                    name=w.name,
+                    url=w.url,
+                    download_files=w.download_files,
+                    crawl_type=w.crawl_type,
+                    update_interval=w.update_interval,
+                    size=_set_size_subquery(w),
+                    embedding_model_id=w.embedding_model.id,
                 )
-                .where(WebsitesTable.id == website.id)
+                .where(WebsitesTable.id == w.id)
             )
             await self.session.execute(stmt)
 
-        # Delete all websites that are not in the list
-        stmt = (
-            sa.delete(WebsitesTable)
-            .where(WebsitesTable.space_id == space_in_db.id)
-            .where(WebsitesTable.id.notin_([website.id for website in websites]))
+        res = await self.session.execute(
+            sa.select(WebsitesSpaces.website_id).where(WebsitesSpaces.space_id == space_in_db.id)
         )
-        await self.session.execute(stmt)
+        current_ids = {row[0] for row in res.all()}
+        desired_ids = {w.id for w in websites}
 
+        to_add    = desired_ids - current_ids
+        to_remove = current_ids - desired_ids
+
+        if to_add:
+            ins = pg_insert(WebsitesSpaces).values(
+                [dict(website_id=wid, space_id=space_in_db.id) for wid in to_add]
+            ).on_conflict_do_nothing(
+                index_elements=[WebsitesSpaces.website_id, WebsitesSpaces.space_id]
+            )
+            await self.session.execute(ins)
+
+        if to_remove:
+            await self.session.execute(
+                sa.delete(WebsitesSpaces).where(
+                    sa.and_(
+                        WebsitesSpaces.space_id == space_in_db.id,
+                        WebsitesSpaces.website_id.in_(to_remove),
+                    )
+                )
+            )
+            
     async def _get_assistants(self, space_id: UUID):
         stmt = (
             sa.select(Assistants)
@@ -559,19 +617,31 @@ class SpaceRepository:
 
         return group_chats_db
 
-    async def _get_websites(self, space_id: UUID):
+    async def _get_websites(self, space_ids: list[UUID]):
+        ws = WebsitesTable
+        wss = WebsitesSpaces
+
         stmt = (
-            sa.select(WebsitesTable)
-            .where(WebsitesTable.space_id == space_id)
-            .options(
-                selectinload(WebsitesTable.latest_crawl).selectinload(CrawlRunsTable.job),
+            sa.select(ws)
+            .where(
+                sa.or_(
+                    ws.space_id.in_(space_ids),
+                    sa.exists(
+                        sa.select(sa.literal(1))
+                        .select_from(wss)
+                        .where(wss.website_id == ws.id)
+                        .where(wss.space_id.in_(space_ids))
+                    ),
+                )
             )
+            .options(
+                selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),
+            )
+            .order_by(ws.created_at)
         )
 
-        website_records = await self.session.execute(stmt)
-        websites_db = website_records.scalars()
-
-        return websites_db
+        result = await self.session.execute(stmt)
+        return result.unique().scalars().all()
 
     async def _get_apps(self, space_id: UUID):
         stmt = (
@@ -610,12 +680,14 @@ class SpaceRepository:
 
     async def _get_from_query(self, query: sa.Select):
         entry_in_db = await self._get_record_with_options(query)
-
         if not entry_in_db:
             return
 
-        collections = await self._get_collections(entry_in_db.id)
-        websites = await self._get_websites(space_id=entry_in_db.id)
+        space_ids = effective_space_ids(entry_in_db) 
+
+        collections = await self._get_collections(space_ids)
+        websites = await self._get_websites(space_ids)
+        integration_knowledge_union = await self._get_integration_knowledge_union(space_ids)
 
         completion_models = await self.completion_model_repo.all(with_deprecated=True)
         embedding_models = await self.embedding_model_repo.all(with_deprecated=True)
@@ -627,20 +699,19 @@ class SpaceRepository:
         services = await self._get_services(space_id=entry_in_db.id)
 
         return self.factory.create_space_from_db(
-            entry_in_db,
-            user=self.user,
-            collections_in_db=collections,
-            websites_in_db=websites,
-            completion_models=completion_models,
-            embedding_models=embedding_models,
-            transcription_models=transcription_models,
-            assistants_in_db=assistants,
-            group_chats_in_db=group_chats,
-            apps_in_db=apps,
-            services_in_db=services,
-            security_classification=entry_in_db.security_classification,
-        )
-
+        entry_in_db,
+        user=self.user,
+        collections_in_db=collections,
+        websites_in_db=websites,
+        completion_models=completion_models,
+        embedding_models=embedding_models,
+        transcription_models=transcription_models,
+        assistants_in_db=assistants,
+        group_chats_in_db=group_chats,
+        apps_in_db=apps,
+        services_in_db=services,
+        integration_knowledge_in_db=integration_knowledge_union, 
+    )
     async def _get_record_with_options(self, query):
         for option in self._options():
             query = query.options(option)
@@ -661,6 +732,7 @@ class SpaceRepository:
                 description=space.description,
                 tenant_id=space.tenant_id,
                 user_id=space.user_id,
+                tenant_space_id=space.tenant_space_id,
             )
             .returning(Spaces)
         )
@@ -854,3 +926,42 @@ class SpaceRepository:
         # find space through group chat
         if session.group_chat_id is not None:
             return await self.get_space_by_group_chat(group_chat_id=session.group_chat_id)
+
+    async def _get_integration_knowledge_union(self, space_ids: list[UUID]):
+        stmt = (
+            sa.select(IntegrationKnowledge)
+            .where(IntegrationKnowledge.space_id.in_(space_ids))
+            .options(
+                selectinload(IntegrationKnowledge.embedding_model),
+                selectinload(IntegrationKnowledge.user_integration)
+                    .selectinload(UserIntegrationDBModel.tenant_integration)
+                    .selectinload(TenantIntegrationDBModel.integration),
+            )
+            .order_by(IntegrationKnowledge.created_at)
+        )
+        rows = await self.session.execute(stmt)
+        return list(rows.scalars().all())
+    
+    async def get_space_by_name_and_tenant(self, name: str, tenant_id: UUID) -> Space | None:
+        q = sa.select(Spaces).where(
+            Spaces.name == name,
+            Spaces.tenant_id == tenant_id,
+            Spaces.user_id.is_(None),  
+        )
+        return await self._get_from_query(q)
+    
+    async def hard_delete_website(self, website_id: UUID, owner_space_id: UUID):
+        ws = WebsitesTable
+        wss = WebsitesSpaces
+
+        owned = await self.session.scalar(
+            sa.select(ws.id).where(
+                sa.and_(ws.id == website_id, ws.space_id == owner_space_id)
+            )
+        )
+        if not owned:
+            return
+
+        await self.session.execute(sa.delete(wss).where(wss.website_id == website_id))
+
+        await self.session.execute(sa.delete(ws).where(ws.id == website_id))

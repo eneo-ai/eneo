@@ -66,6 +66,7 @@ def test_toggle_security_classification():
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),
         user_id=None,
+        tenant_space_id=uuid.uuid4(),
         name="Test Space",
         description="Test Description",
         embedding_models=[embedding_model],
