@@ -10,8 +10,16 @@ from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelFamily,
     EmbeddingModelLegacy,
 )
+from intric.main.config import reset_settings
 from intric.tenants.tenant import TenantInDB
 from intric.users.user import UserInDB
+
+
+@pytest.fixture(autouse=True)
+def reset_settings_after_test():
+    """Reset settings after each test to prevent state leakage."""
+    yield
+    reset_settings()
 
 
 @pytest.fixture

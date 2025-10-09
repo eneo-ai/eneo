@@ -5,7 +5,7 @@ import pytest
 
 from intric.ai_models.ai_models_service import AIModelsService
 from intric.ai_models.completion_models.completion_model import CompletionModelFamily
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB
 from intric.user_groups.user_group import UserGroupInDB
@@ -134,7 +134,7 @@ async def test_embedding_models_flags_settings_not_exists(service: AIModelsServi
 
 
 async def test_azure_models_with_feature_flag_off(service: AIModelsService):
-    SETTINGS.using_azure_models = False
+    get_settings().using_azure_models = False
     service.completion_model_repo.get_models.return_value = [
         TEST_MODEL_GPT4,
         TEST_MODEL_CHATGPT,
@@ -148,7 +148,7 @@ async def test_azure_models_with_feature_flag_off(service: AIModelsService):
 
 
 async def test_azure_models_with_feature_flag_on(service: AIModelsService):
-    SETTINGS.using_azure_models = True
+    get_settings().using_azure_models = True
     service.completion_model_repo.get_models.return_value = [
         TEST_MODEL_GPT4,
         TEST_MODEL_CHATGPT,
