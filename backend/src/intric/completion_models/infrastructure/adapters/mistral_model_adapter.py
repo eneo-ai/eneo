@@ -178,10 +178,6 @@ class MistralModelAdapter(OpenAIModelAdapter):
         Legacy method for backward compatibility.
         Uses two-phase pattern internally.
         """
-        query = self.create_query_from_context(context=context)
-        kwargs = self._get_kwargs(model_kwargs)
-        tools = self._build_tools_from_context(context=context)
-
         @retry(
             wait=wait_random_exponential(min=1, max=20),
             stop=stop_after_attempt(3),

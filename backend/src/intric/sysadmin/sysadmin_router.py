@@ -28,7 +28,7 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdatePublic, TenantWithMaskedCredentials
+from intric.tenants.tenant import TenantBase, TenantUpdatePublic, TenantWithMaskedCredentials
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.authentication import auth
 
