@@ -1,4 +1,4 @@
-# intric backend
+# Eneo backend
 
 ## Environment variables
 
