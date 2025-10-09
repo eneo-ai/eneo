@@ -381,18 +381,25 @@ async def list_tenant_credentials(
     # Build credential info list
     credentials: list[CredentialInfo] = []
     for provider, metadata in credentials_metadata.items():
-        # Use tenant's updated_at as configured_at timestamp
-        configured_at: datetime = tenant.updated_at
         config: dict[str, Any] = {}
+        configured_at: datetime = tenant.updated_at  # Default to tenant updated_at
 
         # Extract provider-specific config (non-sensitive fields only)
         if tenant.api_credentials and provider in tenant.api_credentials:
             credential_data = tenant.api_credentials[provider]
             if isinstance(credential_data, dict):
-                # Build non-sensitive config (exclude api_key)
+                # Build non-sensitive config (exclude api_key and encrypted_at)
                 # For Azure: includes endpoint, api_version, deployment_name
                 # For other providers: empty dict
-                config = {k: v for k, v in credential_data.items() if k != "api_key"}
+                config = {k: v for k, v in credential_data.items() if k not in ("api_key", "encrypted_at")}
+
+                # Use per-credential encrypted_at if available, otherwise fall back to tenant.updated_at
+                if "encrypted_at" in credential_data:
+                    try:
+                        configured_at = datetime.fromisoformat(credential_data["encrypted_at"])
+                    except (ValueError, TypeError):
+                        # Invalid timestamp format - keep tenant.updated_at as fallback
+                        pass
 
         credentials.append(
             CredentialInfo(
