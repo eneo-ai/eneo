@@ -27,6 +27,14 @@ logger = get_logger(__name__)
 
 
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
+    def _mask_sensitive_params(self, params: dict) -> dict:
+        """Return copy of params with masked API key for safe logging."""
+        safe_params = params.copy()
+        if "api_key" in safe_params:
+            key = safe_params["api_key"]
+            safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
+        return safe_params
+
     def __init__(
         self,
         model: "EmbeddingModel",
@@ -150,7 +158,16 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     params['api_base'] = endpoint
                     logger.info(f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}")
 
-            logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: {params}")
+                # Inject api_version for Azure embeddings
+                if provider == "azure":
+                    api_version = self.credential_resolver.get_credential_field(
+                        "azure", "api_version", settings.azure_api_version
+                    )
+                    if api_version:
+                        params["api_version"] = api_version
+                        logger.info(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")
+
+            logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: {self._mask_sensitive_params(params)}")
 
             # Call LiteLLM API to get the embeddings
             response = await litellm.aembedding(**params)
