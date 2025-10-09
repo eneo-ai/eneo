@@ -230,7 +230,7 @@ class CredentialResolver:
         # Strict mode: When tenant credentials enabled, no fallback to global
         # This prevents tenants from silently using shared infrastructure when they expect their own
         if self.settings.tenant_credentials_enabled and self.tenant:
-            logger.debug(
+            logger.info(
                 f"Strict mode: No {field} configured for provider {provider}",
                 extra={
                     "tenant_id": str(self.tenant.id),
