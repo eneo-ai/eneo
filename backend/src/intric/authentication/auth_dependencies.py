@@ -6,12 +6,9 @@ from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_service import AuthService
 from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.logging import get_logger
 from intric.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
-
-logger = get_logger(__name__)
 
 
 async def _get_api_key_from_header(
@@ -33,11 +30,8 @@ async def get_current_active_user(
     api_key: str = Security(_get_api_key_from_header),
     container: Container = Depends(get_container()),
 ) -> UserInDB:
-    logger.debug(f"get_current_active_user called - token: {bool(token)}, api_key: {bool(api_key)}")
     user_service = container.user_service()
-    result = await user_service.authenticate(token, api_key)
-    logger.debug(f"Authentication result: {result.email if result else 'None'}")
-    return result
+    return await user_service.authenticate(token, api_key)
 
 
 async def get_current_active_user_with_quota(

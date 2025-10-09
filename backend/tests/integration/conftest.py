@@ -16,7 +16,6 @@ if not os.getenv("DOCKER_HOST"):
     elif os.path.exists("/.dockerenv"):
         os.environ["DOCKER_HOST"] = "tcp://host.docker.internal:2375"
 
-import asyncio
 import contextlib
 from typing import AsyncGenerator, Generator
 
@@ -40,14 +39,6 @@ from intric.server.main import get_application
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
 _IN_DEVCONTAINER = os.getenv("POSTGRES_HOST") == "db"
 _TEST_NETWORK = "eneo" if _IN_DEVCONTAINER else None
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(scope="session")
