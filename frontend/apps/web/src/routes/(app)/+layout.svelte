@@ -99,7 +99,7 @@
       <a href="/spaces/personal/chat" data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
       <a href="/spaces/list" data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
       {#if user.hasPermission("admin")}
-        <a href="/spaces/organization/knowledge" data-current={isOrganization ? "page" : undefined}>Organization</a>
+        <a href="/spaces/organization/knowledge" data-current={isOrganization ? "page" : undefined}>{m.organization()}</a>
       {/if}
 
       <div aria-hidden="true" class="flex-grow"></div>

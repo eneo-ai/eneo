@@ -74,9 +74,7 @@
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
       {#if isOrgSpace}
-        <span class="font-bold">{m.hint()}:&nbsp;</span>Remember to choose the correct embedding model
-          when creating a new collection. This is important for the end user, as it is not possible
-          to mix knowledge stored with different embedding models.
+        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning_organization()}
       {:else}
         <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning()}
       {/if}
