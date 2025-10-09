@@ -76,7 +76,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 )
             except ValueError as e:
                 logger.error(
-                    f"[LiteLLM] Credential validation failed during initialization",
+                    "[LiteLLM] Credential validation failed during initialization",
                     extra={
                         "model": model.name,
                         "provider": provider,

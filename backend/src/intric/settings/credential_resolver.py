@@ -190,7 +190,7 @@ class CredentialResolver:
                         if decrypt and self.encryption:
                             try:
                                 value = self.encryption.decrypt(value)
-                            except ValueError as e:
+                            except ValueError:
                                 logger.error(
                                     f"Failed to decrypt {field} for {provider}",
                                     extra={
