@@ -55,6 +55,7 @@
     "vitest": "^3.1.1"
   },
   "dependencies": {
-    "@inlang/paraglide-js": "^2.0.13"
+    "@inlang/paraglide-js": "^2.0.13",
+    "lucide-svelte": "^0.544.0"
   }
 }

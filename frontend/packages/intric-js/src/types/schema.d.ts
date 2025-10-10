@@ -254,6 +254,16 @@ export interface paths {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
   };
+  "/api/v1/assistants/{id}/token-estimate": {
+    /**
+     * Estimate token usage for text and files
+     * @description Estimate token usage for the given text and files in the context of this assistant.
+     *
+     * Returns token count, percentage of context window used, and detailed breakdown
+     * to help users understand their context usage before sending messages.
+     */
+    get: operations["estimate_tokens_api_v1_assistants__id__token_estimate_get"];
+  };
   "/api/v1/group-chats/{id}/": {
     /**
      * Get Group Chat
@@ -1615,6 +1625,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2317,6 +2328,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2600,6 +2612,8 @@ export interface components {
       size: number;
       /** Transcription */
       transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -3240,6 +3254,18 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /**
+     * ModelInfo
+     * @description Information about the model used by the assistant.
+     */
+    ModelInfo: {
+      /** Name */
+      name: string;
+      /** Token Limit */
+      token_limit: number;
+      /** Prompt Tokens */
+      prompt_tokens?: number | null;
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -5006,6 +5032,57 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+    };
+    /**
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
+     */
+    TokenEstimateBreakdown: {
+      /**
+       * Prompt
+       * @description Tokens used by assistant prompt
+       */
+      prompt: number;
+      /**
+       * Text
+       * @description Tokens used by user input text
+       */
+      text: number;
+      /**
+       * Files
+       * @description Total tokens used by all files
+       */
+      files: number;
+      /**
+       * File Details
+       * @description Per-file token counts
+       */
+      file_details?: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -7491,6 +7568,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -7789,6 +7868,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -8070,6 +8151,52 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Estimate token usage for text and files
+   * @description Estimate token usage for the given text and files in the context of this assistant.
+   *
+   * Returns token count, percentage of context window used, and detailed breakdown
+   * to help users understand their context usage before sending messages.
+   */
+  estimate_tokens_api_v1_assistants__id__token_estimate_get: {
+    parameters: {
+      query?: {
+        /** @description User input text */
+        text?: string;
+        /** @description Comma-separated file IDs */
+        file_ids?: string;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -8419,6 +8546,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                 };
               },
@@ -8461,6 +8590,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {

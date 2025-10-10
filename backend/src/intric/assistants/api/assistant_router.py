@@ -1,7 +1,8 @@
+import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intric.assistants.api import assistant_protocol
 from intric.assistants.api.assistant_models import (
@@ -9,6 +10,8 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    TokenEstimateResponse,
+    TokenEstimateBreakdown,
 )
 from intric.authentication.auth_models import ApiKey
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -32,6 +35,7 @@ from intric.sessions.session_protocol import (
 from intric.spaces.api.space_models import TransferApplicationRequest
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -385,3 +389,86 @@ async def publish_assistant(
     assistant, permissions = await service.publish_assistant(assistant_id=id, publish=published)
 
     return assembler.from_assistant_to_model(assistant=assistant, permissions=permissions)
+
+
+@router.get(
+    "/{id}/token-estimate",
+    response_model=TokenEstimateResponse,
+    responses=responses.get_responses([400, 404]),
+    summary="Estimate token usage for text and files",
+)
+async def estimate_tokens(
+    id: UUID,
+    text: str = Query(default="", description="User input text"),
+    file_ids: str = Query(default="", description="Comma-separated file IDs"),
+    container: Container = Depends(get_container(with_user=True)),
+) -> TokenEstimateResponse:
+    """
+    Estimate token usage for the given text and files in the context of this assistant.
+
+    Returns token count, percentage of context window used, and detailed breakdown
+    to help users understand their context usage before sending messages.
+    """
+    from intric.tokens.token_utils import count_tokens, count_assistant_prompt_tokens
+
+    service = container.assistant_service()
+    file_service = container.file_service()
+
+    assistant, _ = await service.get_assistant(assistant_id=id)
+
+    if not assistant.completion_model:
+        raise HTTPException(
+            status_code=400,
+            detail="Assistant has no model configured"
+        )
+
+    model_name = assistant.completion_model.name
+    token_limit = assistant.completion_model.token_limit
+
+    # Prompt tokens consume context that users need to account for
+    prompt_tokens = 0
+    if assistant.prompt and assistant.prompt.prompt:
+        prompt_tokens = count_assistant_prompt_tokens(assistant.prompt.prompt, model_name)
+
+    text_tokens = count_tokens(text, model_name) if text else 0
+    file_tokens = 0
+    file_token_details = {}
+    if file_ids:
+        # Parse and validate file IDs
+        file_id_list = []
+        for fid in file_ids.split(","):
+            if fid.strip():
+                try:
+                    file_id_list.append(UUID(fid.strip()))
+                except ValueError:
+                    logger.warning(f"Invalid UUID in file_ids: {fid}")
+                    continue
+        if file_id_list:
+            files = await file_service.get_files_by_ids(file_id_list)
+            for file in files:
+                tokens = 0
+                if file.text:
+                    try:
+                        tokens = count_tokens(file.text, model_name)
+                    except Exception as e:
+                        # Don't fail the request - provide fallback estimate
+                        logger.error(f"Failed to count tokens for file {file.id}: {e}")
+                        tokens = len(file.text) // 4
+
+                file_tokens += tokens
+                file_token_details[str(file.id)] = tokens
+
+    total_tokens = prompt_tokens + text_tokens + file_tokens
+    percentage = (total_tokens / token_limit) * 100 if token_limit > 0 else 0
+
+    return TokenEstimateResponse(
+        tokens=total_tokens,
+        percentage=round(percentage, 2),
+        limit=token_limit,
+        breakdown=TokenEstimateBreakdown(
+            prompt=prompt_tokens,
+            text=text_tokens,
+            files=file_tokens,
+            file_details=file_token_details
+        )
+    )

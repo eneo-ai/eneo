@@ -13,7 +13,7 @@
   import { IconBulb } from "@intric/icons/bulb";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { IconUsage } from "@intric/icons/usage";
+  import { ChartPie } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   let currentRoute = "";
@@ -52,7 +52,7 @@
   <Navigation.Link
     href="/admin/usage"
     isActive={isSelected("/admin/usage", currentRoute)}
-    icon={IconUsage}
+    icon={ChartPie}
     label={m.usage()}
   />
   <Navigation.Link
