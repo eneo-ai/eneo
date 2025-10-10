@@ -23,8 +23,8 @@
     <Dialog.Content width="small">
       <Dialog.Title>{m.delete_conversation()}</Dialog.Title>
       <Dialog.Description
-        >{m.do_you_really_want_to_delete()} <span class="italic">{conversation.name.slice(0, 200)}</span
-        >?</Dialog.Description
+        >{m.do_you_really_want_to_delete()}
+        <span class="italic">{conversation.name.slice(0, 200)}</span>?</Dialog.Description
       >
 
       <Dialog.Controls let:close>

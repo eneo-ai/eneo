@@ -22,11 +22,7 @@
 
 <Dialog.Root>
   <Dialog.Trigger asFragment let:trigger>
-    <Tooltip
-      text={!isPromptCreatedByUser
-        ? m.only_author_can_change_description()
-        : undefined}
-    >
+    <Tooltip text={!isPromptCreatedByUser ? m.only_author_can_change_description() : undefined}>
       <Button variant="outlined" disabled={!isPromptCreatedByUser} is={trigger}
         >{prompt.description ? m.edit_description() : m.add_description()}</Button
       >

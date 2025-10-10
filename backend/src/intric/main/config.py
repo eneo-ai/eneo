@@ -58,7 +58,16 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
 
-    # Mobilityguard
+    # Federation per tenant feature flag
+    federation_per_tenant_enabled: bool = False
+
+    # Generic OIDC config (renamed from MOBILITYGUARD_*)
+    oidc_discovery_endpoint: Optional[str] = None
+    oidc_client_id: Optional[str] = None
+    oidc_client_secret: Optional[str] = None
+    oidc_tenant_id: Optional[str] = None  # For backward compat with user creation
+
+    # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
     mobilityguard_discovery_endpoint: Optional[str] = None
     mobilityguard_client_id: Optional[str] = None
     mobilityguard_client_secret: Optional[str] = None
@@ -123,6 +132,29 @@ class Settings(BaseSettings):
     tenant_credentials_enabled: bool = False
     encryption_key: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_vars(cls, values):
+        """Auto-migrate MOBILITYGUARD_* to OIDC_* with deprecation warnings."""
+        migrations = [
+            ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
+            ("oidc_client_id", "mobilityguard_client_id"),
+            ("oidc_client_secret", "mobilityguard_client_secret"),
+            ("oidc_tenant_id", "mobilityguard_tenant_id"),
+        ]
+
+        for new_name, old_name in migrations:
+            # If new value not set but old value exists
+            if not values.get(new_name) and values.get(old_name):
+                values[new_name] = values[old_name]
+                logging.warning(
+                    f"DEPRECATION: Using {old_name.upper()}. "
+                    f"Please update to {new_name.upper()} in your .env file. "
+                    f"Legacy variables will be removed in v3.0"
+                )
+
+        return values
+
     @model_validator(mode="after")
     def validate_encryption_config(self):
         """Fail-fast if tenant credentials enabled without encryption key."""
@@ -138,6 +170,18 @@ class Settings(BaseSettings):
                 "ENCRYPTION_KEY set but TENANT_CREDENTIALS_ENABLED=false. "
                 "Key will be ignored. Set TENANT_CREDENTIALS_ENABLED=true to use tenant credentials."
             )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_federation_config(self):
+        """Fail-fast if federation enabled without encryption key."""
+        if self.federation_per_tenant_enabled and not self.encryption_key:
+            logging.error(
+                "Configuration error: FEDERATION_PER_TENANT_ENABLED=true requires ENCRYPTION_KEY\n"
+                "Generate key: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+            sys.exit(1)
 
         return self
 

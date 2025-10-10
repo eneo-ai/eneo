@@ -21,7 +21,9 @@
 </script>
 
 <svelte:head>
-  <title>{m.app_name()} – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.overview()}</title>
+  <title
+    >{m.app_name()} – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.overview()}</title
+  >
 </svelte:head>
 
 {#snippet tile(params: { title: string; count: number; link: string })}
@@ -48,7 +50,9 @@
     <div class="flex flex-grow flex-col overflow-y-auto pt-4 pr-4 pl-2">
       <div class="flex items-center justify-start gap-4 pb-4">
         <h1 class="text-primary text-[2rem] font-extrabold">
-          {$currentSpace.personal ? m.hi_user_personal({ firstName: $userInfo.firstName }) : $currentSpace.name}
+          {$currentSpace.personal
+            ? m.hi_user_personal({ firstName: $userInfo.firstName })
+            : $currentSpace.name}
         </h1>
       </div>
       {#if $currentSpace.personal}
@@ -56,7 +60,9 @@
           {m.personal_space_description()}
         </p>
       {:else}
-        <p class="min-h-20">{$currentSpace.description ?? m.welcome_to_space({ space: $currentSpace.name })}</p>
+        <p class="min-h-20">
+          {$currentSpace.description ?? m.welcome_to_space({ space: $currentSpace.name })}
+        </p>
       {/if}
       <!-- <div class="flex-grow"></div> -->
 

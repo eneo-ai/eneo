@@ -3,10 +3,10 @@
  * Uses paraglide messages from Svelte context
  */
 
-import { getContext } from 'svelte';
+import { getContext } from "svelte";
 
 // Context key for paraglide messages
-export const MESSAGES_CONTEXT_KEY = Symbol('messages');
+export const MESSAGES_CONTEXT_KEY = Symbol("messages");
 
 // Helper to get messages from paraglide context
 export function getUIMessage(key: string, params?: Record<string, unknown>) {

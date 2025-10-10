@@ -108,7 +108,9 @@
           <IconChevronDown class="absolute top-2 right-4 h-6 w-6" />
         </button>
       </div>
-      <Button variant="primary" disabled={$inputValue === ""} on:click={addToGroup}>{m.assign()}</Button>
+      <Button variant="primary" disabled={$inputValue === ""} on:click={addToGroup}
+        >{m.assign()}</Button
+      >
     </div>
   </div>
 

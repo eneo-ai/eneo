@@ -144,8 +144,7 @@
 <Dialog.Root alert bind:isOpen={showRemoveDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.remove_member()}</Dialog.Title>
-    <Dialog.Description
-      >{m.confirm_remove_member({ memberEmail: member.email })}</Dialog.Description
+    <Dialog.Description>{m.confirm_remove_member({ memberEmail: member.email })}</Dialog.Description
     >
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>

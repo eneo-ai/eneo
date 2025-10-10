@@ -47,10 +47,5 @@
   ]);
 </script>
 
-<Table.Root 
-  {viewModel} 
-  resourceName={m.resource_spaces()} 
-  gapX={1.5} 
-  gapY={1.5} 
-  layout="grid" 
+<Table.Root {viewModel} resourceName={m.resource_spaces()} gapX={1.5} gapY={1.5} layout="grid"
 ></Table.Root>

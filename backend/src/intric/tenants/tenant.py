@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 from typing import Any, Optional
 from uuid import UUID
@@ -46,6 +47,7 @@ class TenantPublic(PrivacyPolicyMixin, TenantBase):
 class TenantInDB(PrivacyPolicyMixin, InDB):
     name: str
     display_name: Optional[str] = None
+    slug: Optional[str] = None
     quota_limit: int
     domain: Optional[str] = None
     zitadel_org_id: Optional[str] = None
@@ -54,6 +56,30 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     security_enabled: bool = False
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
+    federation_config: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: Optional[str]) -> Optional[str]:
+        """Validate slug format (URL-safe, lowercase, alphanumeric + hyphens)."""
+        if v is None:
+            return v
+
+        # Must be lowercase alphanumeric with hyphens only
+        if not re.match(r"^[a-z0-9-]+$", v):
+            raise ValueError(
+                "Slug must contain only lowercase letters, numbers, and hyphens"
+            )
+
+        # Must not start or end with hyphen
+        if v.startswith("-") or v.endswith("-"):
+            raise ValueError("Slug cannot start or end with a hyphen")
+
+        # Length validation (DNS label limit)
+        if len(v) > 63:
+            raise ValueError("Slug cannot exceed 63 characters")
+
+        return v
 
     @field_validator("api_credentials")
     @classmethod
@@ -63,11 +89,21 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         Ensures provider keys are valid and credentials have required fields.
         Azure provider requires additional fields beyond api_key.
         """
-        valid_providers = {"openai", "azure", "anthropic", "berget", "mistral", "ovhcloud", "vllm"}
+        valid_providers = {
+            "openai",
+            "azure",
+            "anthropic",
+            "berget",
+            "mistral",
+            "ovhcloud",
+            "vllm",
+        }
 
         for provider, cred in v.items():
             if provider not in valid_providers:
-                raise ValueError(f"Invalid provider: {provider}. Must be one of: {valid_providers}")
+                raise ValueError(
+                    f"Invalid provider: {provider}. Must be one of: {valid_providers}"
+                )
 
             if not isinstance(cred, dict):
                 raise ValueError(f"Provider {provider} credentials must be a dict")
@@ -80,7 +116,39 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                 required = {"api_key", "endpoint", "api_version", "deployment_name"}
                 missing = required - set(cred.keys())
                 if missing:
-                    raise ValueError(f"Azure provider missing required fields: {missing}")
+                    raise ValueError(
+                        f"Azure provider missing required fields: {missing}"
+                    )
+
+        return v
+
+    @field_validator("federation_config")
+    @classmethod
+    def validate_federation_config(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate JSONB structure for federation config."""
+        if not v:
+            return {}
+
+        # Required fields for federation
+        required = {
+            "provider",
+            "client_id",
+            "client_secret",
+            "discovery_endpoint",
+        }
+        missing = required - set(v.keys())
+        if missing:
+            raise ValueError(f"Federation config missing required fields: {missing}")
+
+        # Provider is just a label - any string is valid (no validation needed)
+        # This allows any OIDC-compliant provider (Entra ID, Auth0, Okta, Keycloak, etc.)
+
+        # Validate allowed_domains (optional but recommended)
+        if "allowed_domains" in v:
+            if not isinstance(v["allowed_domains"], list):
+                raise ValueError("allowed_domains must be a list")
+            if not all(isinstance(d, str) for d in v["allowed_domains"]):
+                raise ValueError("allowed_domains must contain only strings")
 
         return v
 

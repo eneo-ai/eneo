@@ -16,7 +16,10 @@
     if ((crawl.files_downloaded ?? 0) > 0) {
       return {
         color: "blue",
-        label: m.crawled_pages_and_files({ pages: crawl.pages_crawled, files: crawl.files_downloaded })
+        label: m.crawled_pages_and_files({
+          pages: crawl.pages_crawled,
+          files: crawl.files_downloaded
+        })
       };
     } else {
       return {

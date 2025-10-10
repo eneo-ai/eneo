@@ -44,10 +44,7 @@
   <Page.Main>
     <Settings.Page>
       <Settings.Group title={m.current_members()}>
-        <Settings.Row
-          title={m.admins_editors()}
-          description={m.admins_editors_description()}
-        >
+        <Settings.Row title={m.admins_editors()} description={m.admins_editors_description()}>
           <div class="flex flex-grow flex-col">
             {#each editors as member (member.id)}
               <div
@@ -71,10 +68,7 @@
         </Settings.Row>
 
         {#if isViewerRoleAvailable}
-          <Settings.Row
-            title={m.viewers()}
-            description={m.viewers_description()}
-          >
+          <Settings.Row title={m.viewers()} description={m.viewers_description()}>
             <div class="flex flex-grow flex-col">
               {#if viewers.length > 0}
                 {#each viewers as member (member.id)}

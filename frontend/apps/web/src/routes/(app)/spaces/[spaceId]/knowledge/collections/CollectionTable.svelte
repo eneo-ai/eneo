@@ -76,15 +76,17 @@
   }
 </script>
 
-<Table.Root 
-  {viewModel} 
+<Table.Root
+  {viewModel}
   resourceName="collection"
   emptyMessage={m.there_are_currently_no_collections_configured()}
 >
   {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
     {#each $embeddingModels as embeddingModel (embeddingModel.id)}
       <Table.Group
-        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + ` (${m.disabled()})`}
+        title={embeddingModel.inSpace
+          ? embeddingModel.name
+          : embeddingModel.name + ` (${m.disabled()})`}
         filterFn={createModelFilter(embeddingModel)}
       ></Table.Group>
     {/each}

@@ -31,10 +31,7 @@
   });
 
   beforeNavigate((navigate) => {
-    if (
-      $currentChanges.hasUnsavedChanges &&
-      !confirm(m.unsaved_changes_warning())
-    ) {
+    if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
       navigate.cancel();
       return;
     }
@@ -172,10 +169,7 @@
       {#if data.groupChat.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}
         <Settings.Group title={m.publishing()}>
           {#if data.groupChat.permissions?.includes("publish")}
-            <Settings.Row
-              title={m.status()}
-              description={m.publishing_group_chat_description()}
-            >
+            <Settings.Row title={m.status()} description={m.publishing_group_chat_description()}>
               <PublishingSetting
                 endpoints={data.intric.groupChats}
                 resource={data.groupChat}

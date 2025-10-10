@@ -1,6 +1,7 @@
 import { createClient } from "./client/client";
 import { initAnalytics } from "./endpoints/analysis";
 import { initAssistants } from "./endpoints/assistants";
+import { initAuth } from "./endpoints/auth";
 import { initDashboard } from "./endpoints/dashboard";
 import { initFiles } from "./endpoints/files";
 import { initGroups } from "./endpoints/groups";
@@ -38,6 +39,7 @@ export function createIntric(args) {
   const client = createClient(args);
   return {
     apps: initApps(client),
+    auth: initAuth(client),
     groups: initGroups(client),
     users: initUser(client),
     userGroups: initUserGroups(client),

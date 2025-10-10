@@ -7,9 +7,9 @@
 import { json } from "@sveltejs/kit";
 
 export const GET = async () => {
-	return json({
-		status: "OK",
-		timestamp: new Date().toISOString(),
-		service: "frontend-web"
-	});
+  return json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    service: "frontend-web"
+  });
 };

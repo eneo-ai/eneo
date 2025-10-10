@@ -36,8 +36,9 @@
     </svg>
   {/if}
   {#if filterValue === ""}
-    {emptyMessage ?? getUIMessage('ui_no_items_configured', { count: 0, resourceNamePlural: resourceName })}
+    {emptyMessage ??
+      getUIMessage("ui_no_items_configured", { count: 0, resourceNamePlural: resourceName })}
   {:else}
-    {getUIMessage('ui_no_items_matching', { count: 0, resourceNamePlural: resourceName })}
+    {getUIMessage("ui_no_items_matching", { count: 0, resourceNamePlural: resourceName })}
   {/if}
 </div>

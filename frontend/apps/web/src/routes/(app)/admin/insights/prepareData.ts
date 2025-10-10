@@ -59,7 +59,15 @@ const getMaxCount = (obj: UsageData) => {
   return Math.ceil(Math.max(...counts) / 5) * 5;
 };
 
-const days = [m.monday(), m.tuesday(), m.wednesday(), m.thursday(), m.friday(), m.saturday(), m.sunday()];
+const days = [
+  m.monday(),
+  m.tuesday(),
+  m.wednesday(),
+  m.thursday(),
+  m.friday(),
+  m.saturday(),
+  m.sunday()
+];
 
 type PreparedData = Chart.Config["options"] & { dataset: Record<string, unknown>[] };
 

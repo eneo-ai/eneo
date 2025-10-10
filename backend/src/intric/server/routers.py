@@ -62,6 +62,10 @@ from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.tenants.presentation.tenant_credentials_router import (
     router as tenant_credentials_router,
 )
+from intric.tenants.presentation.tenant_federation_router import (
+    router as tenant_federation_router,
+)
+from intric.authentication.federation_router import router as federation_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
 
 router = APIRouter()
@@ -126,7 +130,9 @@ router.include_router(integration_auth_router, prefix="/integrations/auth", tags
 
 router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
+router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
+router.include_router(federation_router, prefix="", tags=["authentication"])  # Public auth endpoints (no prefix)
 router.include_router(documentation_router, prefix="")
 
 if get_settings().using_access_management:

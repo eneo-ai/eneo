@@ -3,7 +3,7 @@
   import type { PublishableResource } from "../Publisher";
 
   export let resource: PublishableResource;
-  
+
   import { m } from "$lib/paraglide/messages";
 </script>
 

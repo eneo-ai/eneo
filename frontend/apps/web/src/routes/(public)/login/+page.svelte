@@ -4,15 +4,19 @@
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
+  import { onMount } from "svelte";
   import { LoadingScreen } from "$lib/components/layout";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
 
   const { data } = $props();
 
   let loginFailed = $state(false);
   let isAwaitingLoginResponse = $state(false);
+  let showTenantSelector = $state(false);
+  let federationError = $state<string | null>(null);
 
   let message = $derived(page.url.searchParams.get("message") ?? null);
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
@@ -20,6 +24,53 @@
   // We don't redirect on the server so we can render a loader/spinner during the redirection period
   if (data.zitadelLink && browser) {
     window.location.href = data.zitadelLink;
+  }
+
+  // Check for tenant-based federation on mount
+  onMount(async () => {
+    if (!browser) return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const tenant = urlParams.get("tenant");
+
+    // If tenant parameter exists, initiate federated auth
+    if (tenant && /^[a-z0-9-]+$/.test(tenant)) {
+      try {
+        // Dynamic import to avoid SSR issues
+        const { intric } = await import("$lib/api/client");
+
+        const redirectUri = `${window.location.origin}/auth/callback`;
+        const response = await intric.initiateAuth({ tenant, redirectUri });
+
+        // Redirect to IdP
+        window.location.href = response.authorization_url;
+      } catch (err) {
+        console.error("Failed to initiate federation auth:", err);
+        federationError = m.failed_to_start_authentication();
+        showTenantSelector = false;
+      }
+    } else if (!data.zitadelLink && !data.mobilityguardLink) {
+      // No existing auth methods - show tenant selector
+      showTenantSelector = true;
+    }
+  });
+
+  async function handleTenantSelect(slug: string) {
+    try {
+      federationError = null;
+
+      // Dynamic import to avoid SSR issues
+      const { intric } = await import("$lib/api/client");
+
+      const redirectUri = `${window.location.origin}/auth/callback`;
+      const response = await intric.initiateAuth({ tenant: slug, redirectUri });
+
+      // Redirect to IdP
+      window.location.href = response.authorization_url;
+    } catch (err) {
+      console.error("Failed to initiate federation auth:", err);
+      federationError = m.failed_to_start_authentication();
+    }
   }
 </script>
 
@@ -29,6 +80,27 @@
 
 {#if data.zitadelLink}
   <LoadingScreen />
+{:else if showTenantSelector}
+  <!-- Tenant Selector for Federation -->
+  <div class="relative flex min-h-[100vh] w-[100vw] items-center justify-center py-8">
+    <div class="w-full max-w-6xl">
+      <h1 class="mb-8 flex justify-center">
+        <IntricWordMark class="text-brand-intric h-16 w-24" />
+        <span class="sr-only">{m.app_name()}</span>
+      </h1>
+
+      {#if federationError}
+        <div class="mx-auto mb-6 max-w-md">
+          <div class="bg-negative-dimmer text-negative-default flex flex-col gap-3 p-4 shadow-lg">
+            <strong>{m.authentication_failed()}</strong>
+            {federationError}
+          </div>
+        </div>
+      {/if}
+
+      <TenantSelector onTenantSelect={handleTenantSelect} baseUrl={window.location.origin} />
+    </div>
+  </div>
 {:else}
   <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
     <div class="box w-[400px] justify-center">
@@ -56,7 +128,7 @@
           >
             <strong>{m.authentication_failed()}</strong>
             {m.authentication_failed_details()}
-            <ul class="list-disc list-inside mt-1">
+            <ul class="mt-1 list-inside list-disc">
               <li>{m.invalid_credentials()}</li>
               <li>{m.account_restrictions()}</li>
               <li>{m.system_configuration_issues()}</li>
@@ -164,7 +236,9 @@
     </div>
     <div class="absolute bottom-10 mt-12 flex justify-center">
       {#if showUsernameAndPassword && data.mobilityguardLink}
-        <Button variant="outlined" class="text-secondary" href="/login?">{m.hide_login_fields()}</Button>
+        <Button variant="outlined" class="text-secondary" href="/login?"
+          >{m.hide_login_fields()}</Button
+        >
       {:else if data.mobilityguardLink}
         <Button
           variant="outlined"

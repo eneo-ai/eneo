@@ -1,7 +1,7 @@
 <script lang="ts">
   import { type GroupSparse } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
-  
+
   export let collection: Pick<GroupSparse, "metadata">;
 </script>
 

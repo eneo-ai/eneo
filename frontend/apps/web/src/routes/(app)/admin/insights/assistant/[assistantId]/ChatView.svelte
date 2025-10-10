@@ -113,7 +113,8 @@
 
   {#if message.answer === NOT_ANSWERED}
     <p class="text-secondary text-center transition-all" id="insights_description">
-      {m.discover_what_users_wanted({ assistant: assistant.name })} {m.ask_question_about_conversation_history()}
+      {m.discover_what_users_wanted({ assistant: assistant.name })}
+      {m.ask_question_about_conversation_history()}
     </p>
   {:else if message.answer !== ""}
     <div

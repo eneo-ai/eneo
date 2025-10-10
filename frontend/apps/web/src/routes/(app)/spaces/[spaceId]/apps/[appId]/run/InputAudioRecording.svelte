@@ -70,7 +70,8 @@
         <IconTrash />
         {m.discard()}</Button
       >
-      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button>
+      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button
+      >
       <Button
         variant="primary"
         on:click={() => {

@@ -4,20 +4,20 @@
   import { getLanguageStore } from "../core/language";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  
+
   const currentLanguage = getLanguageStore();
-  
+
   // Language display names
   const languageLabels: Record<Language, string> = {
     sv: m.swedish(),
     en: m.english()
   };
-  
+
   const selected = writable<{ label: string; value: Language }>({
     label: languageLabels[$currentLanguage],
     value: $currentLanguage
   });
-  
+
   $: $currentLanguage = $selected.value;
 </script>
 

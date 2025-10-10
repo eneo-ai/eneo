@@ -46,9 +46,5 @@
   $: table.update(blobs);
 </script>
 
-<Table.Root
-  {viewModel}
-  filter
-  resourceName="file"
-  emptyMessage={m.no_files_uploaded_yet()}
+<Table.Root {viewModel} filter resourceName="file" emptyMessage={m.no_files_uploaded_yet()}
 ></Table.Root>

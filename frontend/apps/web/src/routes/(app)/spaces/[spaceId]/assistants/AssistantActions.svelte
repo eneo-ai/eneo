@@ -137,9 +137,7 @@
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.delete_assistant()}</Dialog.Title>
-    <Dialog.Description
-      >{m.confirm_delete_assistant({ name: assistant.name })}</Dialog.Description
-    >
+    <Dialog.Description>{m.confirm_delete_assistant({ name: assistant.name })}</Dialog.Description>
 
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
