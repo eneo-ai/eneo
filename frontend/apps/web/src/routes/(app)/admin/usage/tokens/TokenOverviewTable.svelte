@@ -25,7 +25,6 @@
   const table = Table.createWithResource(visibleItems);
 
   const viewModel = table.createViewModel([
-
     table.columnPrimary({
       header: "Name",
       value: (item) => item.model_nickname,
@@ -77,12 +76,13 @@
     class="h-12"
     on:click={() => {
       showAllItems = !showAllItems;
-    }}>{showAllItems ? m.show_only_10_models() : m.show_all_models({ count: models.length })}</Button
+    }}
+    >{showAllItems ? m.show_only_10_models() : m.show_all_models({ count: models.length })}</Button
   >
 {/if}
 
 {#if models.length === 0}
-    <div class="text-center py-12">
-        <p class="text-gray-500">No model usage data available for this period</p>
-    </div>
+  <div class="py-12 text-center">
+    <p class="text-gray-500">No model usage data available for this period</p>
+  </div>
 {/if}

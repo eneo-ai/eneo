@@ -52,12 +52,12 @@
         {/if}
       </div>
     {:else}
-      <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pl-2 pr-4">
+      <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
         <h3 class="font-medium">{m.username()}</h3>
         <pre class="">{user.username}</pre>
       </div>
     {/if}
-    <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pl-2 pr-4">
+    <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
       <h3 class="font-medium">{m.email()}</h3>
       <pre class="">{user.email}</pre>
     </div>
@@ -68,20 +68,21 @@
       <SelectTheme></SelectTheme>
     </div>
     <div
-      class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-2 border-b pb-2 pl-2 pr-4 pt-4"
+      class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-2 border-b pt-4 pr-4 pb-2 pl-2"
     >
       <span class="font-medium" aria-hidden="true">{m.language()}</span>
       <SelectLanguage></SelectLanguage>
     </div>
-    <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pl-2 pr-4">
+    <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
       <h3 class="font-medium">{m.version()}</h3>
       <pre
         class="">Frontend: {versions.frontend} · Client: {versions.client} · Backend: {versions.backend}</pre>
     </div>
     {#if versions.preview}
-      <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pl-2 pr-4">
+      <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
         <h3 class="font-medium">{m.preview()}</h3>
-        <pre class="">{m.branch()}: {versions.preview.branch}<br />{m.commit()}: {versions.preview.commit}</pre>
+        <pre class="">{m.branch()}: {versions.preview.branch}<br />{m.commit()}: {versions.preview
+            .commit}</pre>
       </div>
     {/if}
   </Page.Main>

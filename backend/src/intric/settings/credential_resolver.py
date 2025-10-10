@@ -256,3 +256,104 @@ class CredentialResolver:
             return fallback
 
         return None
+
+    def get_federation_config(self) -> dict:
+        """
+        Get federation config with strict resolution (EXACT same pattern as get_api_key).
+
+        Resolution order:
+        1. Tenant has federation_config? → Use it exclusively (decrypt client_secret)
+        2. Strict mode (enabled + tenant exists) → ERROR (no fallback)
+        3. Single-tenant mode → Fallback to global OIDC_* env vars
+        4. No config anywhere → ERROR
+
+        Returns:
+            dict: Federation config with decrypted client_secret
+
+        Raises:
+            ValueError: No IdP configured (strict mode or no config anywhere)
+        """
+        # Check tenant-specific federation config first
+        if self.tenant and self.tenant.federation_config:
+            config = self.tenant.federation_config.copy()
+
+            # Decrypt client_secret if present
+            if self.encryption and config.get("client_secret"):
+                try:
+                    config["client_secret"] = self.encryption.decrypt(config["client_secret"])
+                except ValueError as e:
+                    logger.error(
+                        f"Failed to decrypt federation client_secret: {e}",
+                        extra={
+                            "tenant_id": str(self.tenant.id),
+                            "tenant_name": self.tenant.name,
+                        },
+                    )
+                    raise ValueError(
+                        "Failed to decrypt federation config. "
+                        "Encryption key may be incorrect or data corrupted."
+                    )
+
+            logger.info(
+                f"Federation config resolved for tenant {self.tenant.name} (provider: {config.get('provider')})",
+                extra={
+                    "tenant_id": str(self.tenant.id),
+                    "tenant_name": self.tenant.name,
+                    "provider": config.get("provider"),
+                    "credential_source": "tenant",
+                    "metric_name": "federation.tenant.resolved",
+                    "metric_value": 1,
+                },
+            )
+            return config
+
+        # Strict mode: When federation enabled, each tenant MUST configure their own
+        if self.settings.federation_per_tenant_enabled and self.tenant:
+            logger.error(
+                f"No federation config found for tenant {self.tenant.name} (strict mode)",
+                extra={
+                    "tenant_id": str(self.tenant.id),
+                    "tenant_name": self.tenant.name,
+                    "mode": "strict",
+                },
+            )
+            raise ValueError(
+                f"No identity provider configured for tenant '{self.tenant.name}'. "
+                f"Federation per tenant is enabled - each tenant must configure their own IdP. "
+                f"Please configure federation via:\n"
+                f"PUT /api/v1/sysadmin/tenants/{self.tenant.id}/federation"
+            )
+
+        # Single-tenant mode: Fallback to global OIDC_* configuration
+        if self.settings.oidc_discovery_endpoint and self.settings.oidc_client_secret:
+            config = {
+                "provider": "mobilityguard",  # Legacy global provider
+                "discovery_endpoint": self.settings.oidc_discovery_endpoint,
+                "client_id": self.settings.oidc_client_id,
+                "client_secret": self.settings.oidc_client_secret,
+                "tenant_id": self.settings.oidc_tenant_id,
+                "scopes": ["openid", "email", "profile"],
+            }
+
+            logger.info(
+                "Federation config resolved from global OIDC environment variables",
+                extra={
+                    "credential_source": "global",
+                    "mode": "single-tenant",
+                    "metric_name": "federation.global.resolved",
+                    "metric_value": 1,
+                },
+            )
+            return config
+
+        # No configuration available anywhere
+        logger.error(
+            "No federation config available for tenant or globally",
+            extra={
+                "tenant_id": str(self.tenant.id) if self.tenant else None,
+            },
+        )
+        raise ValueError(
+            "No identity provider configured. "
+            "Please set global OIDC_* environment variables or configure tenant-specific federation."
+        )

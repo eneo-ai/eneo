@@ -45,11 +45,7 @@
       <PublishingStatusChip {resource}></PublishingStatusChip>
     {/if}
   </div>
-  <Tooltip
-    text={hasUnsavedChanges
-      ? m.save_or_discard_changes_before_updating()
-      : undefined}
-  >
+  <Tooltip text={hasUnsavedChanges ? m.save_or_discard_changes_before_updating() : undefined}>
     <PublishingDialog
       {resource}
       endpoints={wrappedPublisher}

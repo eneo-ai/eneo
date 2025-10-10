@@ -4,10 +4,10 @@
   type $$Props = SvelteHTMLElements["div"];
 </script>
 
-<div 
-  role="img" 
+<div
+  role="img"
   aria-label={m.eneo_icon()}
-  class="font-bold select-none cursor-default"
+  class="cursor-default font-bold select-none"
   style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 16px; color: #4f46e5;"
   {...$$restProps}
 >

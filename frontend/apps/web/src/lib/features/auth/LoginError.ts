@@ -2,7 +2,8 @@ export const LoginErrorCode = {
   NO_VERIFIER: "Authentication session expired. Please ensure cookies are enabled and try again.",
   NO_TOKEN: "Failed to authenticate with Eneo. Please try again.",
   DECODE_ERROR: "Invalid authentication response received. Please try again.",
-  NO_CONFIG: "Authentication service is not properly configured. Please contact your administrator.",
+  NO_CONFIG:
+    "Authentication service is not properly configured. Please contact your administrator.",
   INVALID_CREDENTIALS: "Invalid username or password. Please check your credentials.",
   USER_INACTIVE: "Your account is inactive. Please contact your administrator.",
   TENANT_SUSPENDED: "Your organization's access is suspended. Please contact your administrator.",

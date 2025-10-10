@@ -24,7 +24,7 @@
           {data.message || m.authentication_error_occurred()}
         </div>
         {#if data.details}
-          <div class="text-sm mt-2 opacity-80">
+          <div class="mt-2 text-sm opacity-80">
             {m.details()}: {data.details}
           </div>
         {/if}

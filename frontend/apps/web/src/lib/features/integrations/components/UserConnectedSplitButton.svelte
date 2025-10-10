@@ -53,7 +53,9 @@
   <Dialog.Content width="dynamic">
     <Dialog.Title>{m.disconnect_name({ name: integration.name })}</Dialog.Title>
 
-    <Dialog.Description>{m.do_you_really_want_to_disconnect_name({ name: integration.name })}</Dialog.Description>
+    <Dialog.Description
+      >{m.do_you_really_want_to_disconnect_name({ name: integration.name })}</Dialog.Description
+    >
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
       <Button is={close} onclick={disconnect} variant="destructive">{m.disconnect()}</Button>

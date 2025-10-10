@@ -15,27 +15,21 @@ export const load = async (event) => {
   const errorDescription = event.url.searchParams.get("error_description");
 
   // Log callback parameters
-  console.debug(
-    "[OIDC Callback] Received callback",
-    {
-      hasCode: !!code,
-      hasState: !!state,
-      error,
-      errorDescription,
-      origin: event.url.origin
-    }
-  );
+  console.debug("[OIDC Callback] Received callback", {
+    hasCode: !!code,
+    hasState: !!state,
+    error,
+    errorDescription,
+    origin: event.url.origin
+  });
 
   // Handle OAuth errors from MobilityGuard
   if (error) {
-    console.error(
-      "[OIDC Callback] OAuth error received",
-      {
-        error,
-        errorDescription,
-        state
-      }
-    );
+    console.error("[OIDC Callback] OAuth error received", {
+      error,
+      errorDescription,
+      state
+    });
 
     // Map OAuth errors to user-friendly messages
     let message = "mobilityguard_oauth_error";
@@ -66,13 +60,10 @@ export const load = async (event) => {
   const decodedState = decodeState<LoginStateParam>(state);
   const redirectUrl = decodedState?.next ?? DEFAULT_LANDING_PAGE;
 
-  console.debug(
-    "[OIDC Callback] Processing login",
-    {
-      loginMethod: decodedState?.loginMethod,
-      redirectUrl
-    }
-  );
+  console.debug("[OIDC Callback] Processing login", {
+    loginMethod: decodedState?.loginMethod,
+    redirectUrl
+  });
 
   try {
     if (decodedState?.loginMethod === "mobilityguard") {
@@ -80,16 +71,14 @@ export const load = async (event) => {
       success = await loginWithMobilityguard(code);
       const duration = Date.now() - startTime;
 
-      console.debug(
-        "[OIDC Callback] Login attempt completed",
-        {
-          success,
-          durationMs: duration
-        }
-      );
+      console.debug("[OIDC Callback] Login attempt completed", {
+        success,
+        durationMs: duration
+      });
 
       if (!success) {
-        errorDetails = "Authentication failed. Please check your credentials and try again. If the problem persists, contact your administrator.";
+        errorDetails =
+          "Authentication failed. Please check your credentials and try again. If the problem persists, contact your administrator.";
       }
     }
 
@@ -97,15 +86,12 @@ export const load = async (event) => {
       success = await loginWithZitadel(code);
     }
   } catch (e) {
-    console.error(
-      "[OIDC Callback] Login error",
-      {
-        errorType: e instanceof LoginError ? "LoginError" : "UnknownError",
-        error: e instanceof Error ? e.message : String(e),
-        stack: e instanceof Error ? e.stack : undefined,
-        loginMethod: decodedState?.loginMethod
-      }
-    );
+    console.error("[OIDC Callback] Login error", {
+      errorType: e instanceof LoginError ? "LoginError" : "UnknownError",
+      error: e instanceof Error ? e.message : String(e),
+      stack: e instanceof Error ? e.stack : undefined,
+      loginMethod: decodedState?.loginMethod
+    });
 
     if (e instanceof LoginError) {
       errorInfo = e.getErrorShortCode();
@@ -123,23 +109,18 @@ export const load = async (event) => {
   }
 
   if (success) {
-    console.debug(
-      "[OIDC Callback] Login successful, redirecting",
-      { redirectUrl }
-    );
+    console.debug("[OIDC Callback] Login successful, redirecting", { redirectUrl });
     redirect(302, `/${redirectUrl.slice(1)}`);
   }
 
-  console.error(
-    "[OIDC Callback] Login failed, redirecting to error page",
-    {
-      loginMethod: decodedState?.loginMethod,
-      errorInfo,
-      errorDetails
-    }
-  );
+  console.error("[OIDC Callback] Login failed, redirecting to error page", {
+    loginMethod: decodedState?.loginMethod,
+    errorInfo,
+    errorDetails
+  });
 
-  const failedUrl = `/login/failed?message=${decodedState?.loginMethod}_login_error&info=${errorInfo}` +
+  const failedUrl =
+    `/login/failed?message=${decodedState?.loginMethod}_login_error&info=${errorInfo}` +
     (errorDetails ? `&details=${encodeURIComponent(errorDetails)}` : "");
 
   redirect(302, failedUrl);

@@ -21,7 +21,8 @@ export const load = async (event) => {
   } else if (message === "mobilityguard_access_denied") {
     userMessage = "Access was denied. You may not have permission to access this application.";
   } else if (message === "mobilityguard_invalid_request") {
-    userMessage = "The authentication request was invalid. Please clear your cookies and try again.";
+    userMessage =
+      "The authentication request was invalid. Please clear your cookies and try again.";
   } else if (errorInfo) {
     userMessage = LoginError.getMessageFromShortCode(errorInfo);
   } else {

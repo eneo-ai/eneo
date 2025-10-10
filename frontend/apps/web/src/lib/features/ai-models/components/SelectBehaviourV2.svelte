@@ -55,11 +55,14 @@
         };
       } else {
         // For custom behavior, preserve current kwargs if already custom, otherwise set defaults
-        const customArgs = getBehaviour(kwArgs) === "custom" ? kwArgs : {
-          ...kwArgs,
-          temperature: 1,
-          top_p: null
-        };
+        const customArgs =
+          getBehaviour(kwArgs) === "custom"
+            ? kwArgs
+            : {
+                ...kwArgs,
+                temperature: 1,
+                top_p: null
+              };
         kwArgs = customArgs;
       }
       return next;
@@ -125,7 +128,9 @@
   class:text-secondary={finalIsDisabled}
   class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
 >
-  <span class="capitalize">{$selected?.value ? behaviourLabels[$selected?.value] : m.no_behaviour_found()}</span>
+  <span class="capitalize"
+    >{$selected?.value ? behaviourLabels[$selected?.value] : m.no_behaviour_found()}</span
+  >
   <IconChevronDown />
 </button>
 
@@ -161,9 +166,7 @@
   >
     <div class="flex items-center gap-2">
       <p class="w-24" aria-label="Temperature setting" id="temperature_label">{m.temperature()}</p>
-      <Tooltip
-        text={m.temperature_tooltip()}
-      >
+      <Tooltip text={m.temperature_tooltip()}>
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
     </div>
@@ -189,7 +192,8 @@
   <p
     class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
   >
-    <span class="font-bold">Info:&nbsp;</span>This model uses model-specific parameters instead of behavior presets.
+    <span class="font-bold">Info:&nbsp;</span>This model uses model-specific parameters instead of
+    behavior presets.
   </p>
 {:else if isDisabled}
   <p

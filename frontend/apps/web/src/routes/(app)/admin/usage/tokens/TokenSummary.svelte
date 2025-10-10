@@ -50,11 +50,7 @@
     <TokenOverviewBar {tokenStats}></TokenOverviewBar>
   </Settings.Group>
   <Settings.Group title={m.details()}>
-    <Settings.Row
-      title={m.usage_by_model()}
-      description={m.see_token_usage_by_model()}
-      fullWidth
-    >
+    <Settings.Row title={m.usage_by_model()} description={m.see_token_usage_by_model()} fullWidth>
       <div slot="toolbar">
         <Input.DateRange bind:value={dateRange}></Input.DateRange>
       </div>

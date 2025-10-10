@@ -149,7 +149,10 @@
                 {#if userList.isLoadingUsers}
                   {m.loading_more()}
                 {:else}
-                  {m.load_more_users({ current: userList.filteredUsers.length, total: userList.totalCount })}
+                  {m.load_more_users({
+                    current: userList.filteredUsers.length,
+                    total: userList.totalCount
+                  })}
                 {/if}
               </Button>
             {/if}

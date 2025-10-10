@@ -17,11 +17,7 @@
   const security = getSecurityClassificationService();
 </script>
 
-<Settings.Row
-  fullWidth
-  title={m.classifications()}
-  description={m.classifications_description()}
->
+<Settings.Row fullWidth title={m.classifications()} description={m.classifications_description()}>
   <div slot="toolbar">
     <SecurityClassificationCreateDialog></SecurityClassificationCreateDialog>
   </div>
@@ -31,7 +27,8 @@
     <div
       class="border-strongest bg-primary relative z-0 mb-4 flex w-fit items-center gap-2 rounded-full border px-4 py-2 font-mono text-sm shadow-sm"
     >
-      <IconLockClosed></IconLockClosed> {m.highest_security()}
+      <IconLockClosed></IconLockClosed>
+      {m.highest_security()}
     </div>
     {#if security.classifications.length > 0}
       <table class=" w-full">
@@ -68,7 +65,8 @@
     <div
       class="border-strongest bg-primary relative z-0 mt-4 flex w-fit items-center gap-2 rounded-full border px-4 py-2 font-mono text-sm shadow-sm"
     >
-      <IconLockOpen></IconLockOpen> {m.lowest_security()}
+      <IconLockOpen></IconLockOpen>
+      {m.lowest_security()}
     </div>
   </div>
 </Settings.Row>

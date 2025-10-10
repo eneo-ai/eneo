@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  
+
   export let description: string | null | undefined;
   export let value: string | null;
   let text: string;

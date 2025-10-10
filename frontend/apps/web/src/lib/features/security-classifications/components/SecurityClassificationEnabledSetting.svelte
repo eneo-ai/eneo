@@ -45,12 +45,14 @@
   });
 </script>
 
-<Settings.Row
-  title={m.security_classification()}
-  description={m.enable_security_description()}
->
+<Settings.Row title={m.security_classification()} description={m.enable_security_description()}>
   <div class="border-default flex h-14 border-b py-2">
-    <Input.RadioSwitch bind:value={isEnabled} sideEffect={onValueChange} labelTrue={m.enabled()} labelFalse={m.disabled()}></Input.RadioSwitch>
+    <Input.RadioSwitch
+      bind:value={isEnabled}
+      sideEffect={onValueChange}
+      labelTrue={m.enabled()}
+      labelFalse={m.disabled()}
+    ></Input.RadioSwitch>
   </div>
 </Settings.Row>
 
@@ -89,7 +91,9 @@
           $showDisableDialog = false;
         }}>{m.cancel()}</Button
       >
-      <Button variant="destructive" onclick={disable} disabled={disable.isLoading}>{m.disable()}</Button>
+      <Button variant="destructive" onclick={disable} disabled={disable.isLoading}
+        >{m.disable()}</Button
+      >
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

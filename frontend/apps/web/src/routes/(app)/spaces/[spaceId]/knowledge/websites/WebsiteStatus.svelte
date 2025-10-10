@@ -31,7 +31,9 @@
         return {
           color: "yellow",
           label: m.sync_in_progress(),
-          tooltip: m.started_on({ date: dayjs(website.latest_crawl?.created_at).format("YYYY-MM-DD HH:mm") })
+          tooltip: m.started_on({
+            date: dayjs(website.latest_crawl?.created_at).format("YYYY-MM-DD HH:mm")
+          })
         };
       case "failed":
         return {

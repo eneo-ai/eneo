@@ -58,7 +58,8 @@
   class="border-dimmer hover:bg-hover-dimmer relative w-full border-b px-4 py-4"
 >
   <Select.Label>{m.completion_model()}</Select.Label>
-  <Select.Trigger placeholder={m.select_ellipsis()} error={unsupportedModelSelected}></Select.Trigger>
+  <Select.Trigger placeholder={m.select_ellipsis()} error={unsupportedModelSelected}
+  ></Select.Trigger>
   <Select.Options>
     <Select.OptionGroup label={m.stable_completion_models()}>
       {#each stableModels as model (model.id)}
@@ -72,8 +73,7 @@
         </Select.Item>
       {/each}
       {#if !stableModels.length}
-        <Select.Item disabled label={m.no_enabled_completion_models()} value={null}
-        ></Select.Item>
+        <Select.Item disabled label={m.no_enabled_completion_models()} value={null}></Select.Item>
       {/if}
     </Select.OptionGroup>
     {#if experimentalModels.length > 0}

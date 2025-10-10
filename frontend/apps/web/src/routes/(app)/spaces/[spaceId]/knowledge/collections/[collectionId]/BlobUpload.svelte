@@ -32,11 +32,7 @@
     });
 
     if (duplicateFiles.length > 0) {
-      if (
-        !confirm(
-          m.duplicate_files_warning({ fileList: duplicateFiles.join("\\n- ") })
-        )
-      ) {
+      if (!confirm(m.duplicate_files_warning({ fileList: duplicateFiles.join("\\n- ") }))) {
         return;
       }
     }
@@ -72,10 +68,7 @@
     <Dialog.Title>{m.upload_files()}</Dialog.Title>
     <Dialog.Description hidden></Dialog.Description>
 
-    <Input.Files 
-      bind:files 
-      {acceptedMimeTypes}
-    ></Input.Files>
+    <Input.Files bind:files {acceptedMimeTypes}></Input.Files>
 
     <Dialog.Controls let:close>
       {#if files.length > 0}
