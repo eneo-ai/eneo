@@ -1212,5 +1212,13 @@
   "resource_apps": "apps",
   "resource_results": "results",
   "resource_user_groups": "user groups",
-  "resource_files": "files"
+  "resource_files": "files",
+  "select_your_organization": "Select Your Organization",
+  "loading_organizations": "Loading organizations...",
+  "failed_to_load_organizations": "Failed to load organizations. Please try again.",
+  "no_organizations_available": "No organizations available",
+  "redirecting_to_authentication": "Redirecting to authentication...",
+  "completing_authentication": "Completing authentication...",
+  "invalid_organization_identifier": "Invalid organization identifier",
+  "failed_to_start_authentication": "Failed to start authentication. Please try again."
 }

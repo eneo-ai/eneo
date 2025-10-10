@@ -89,9 +89,9 @@
     {#if filter}
       <Input.Text
         bind:value={$filterValue}
-        label={getUIMessage('ui_filter')}
+        label={getUIMessage("ui_filter")}
         class="flex-grow"
-        placeholder={getUIMessage('ui_filter_items', { resourceName })}
+        placeholder={getUIMessage("ui_filter_items", { resourceName })}
         hiddenLabel={true}
         inputClass="!px-4"
       ></Input.Text>

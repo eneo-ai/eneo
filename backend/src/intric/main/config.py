@@ -58,7 +58,16 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
 
-    # Mobilityguard
+    # Federation per tenant feature flag
+    federation_per_tenant_enabled: bool = False
+
+    # Generic OIDC config (renamed from MOBILITYGUARD_*)
+    oidc_discovery_endpoint: Optional[str] = None
+    oidc_client_id: Optional[str] = None
+    oidc_client_secret: Optional[str] = None
+    oidc_tenant_id: Optional[str] = None  # For backward compat with user creation
+
+    # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
     mobilityguard_discovery_endpoint: Optional[str] = None
     mobilityguard_client_id: Optional[str] = None
     mobilityguard_client_secret: Optional[str] = None
@@ -139,6 +148,29 @@ class Settings(BaseSettings):
 
     # Tenant credential management
     tenant_credentials_enabled: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_vars(cls, values):
+        """Auto-migrate MOBILITYGUARD_* to OIDC_* with deprecation warnings."""
+        migrations = [
+            ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
+            ("oidc_client_id", "mobilityguard_client_id"),
+            ("oidc_client_secret", "mobilityguard_client_secret"),
+            ("oidc_tenant_id", "mobilityguard_tenant_id"),
+        ]
+
+        for new_name, old_name in migrations:
+            # If new value not set but old value exists
+            if not values.get(new_name) and values.get(old_name):
+                values[new_name] = values[old_name]
+                logging.warning(
+                    f"DEPRECATION: Using {old_name.upper()}. "
+                    f"Please update to {new_name.upper()} in your .env file. "
+                    f"Legacy variables will be removed in v3.0"
+                )
+
+        return values
 
     @computed_field
     @property

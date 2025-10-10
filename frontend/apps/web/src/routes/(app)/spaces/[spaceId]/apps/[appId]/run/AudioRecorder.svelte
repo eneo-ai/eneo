@@ -211,8 +211,9 @@
       mediaStreamNode.connect(analyserNode);
       window.requestAnimationFrame(onAnimationFrame);
     } catch (error) {
-      const errorMsg =
-        m.failed_to_access_microphone({ error: error instanceof Error ? error.message : String(error) });
+      const errorMsg = m.failed_to_access_microphone({
+        error: error instanceof Error ? error.message : String(error)
+      });
       console.error(errorMsg, error);
       recordingError = errorMsg;
       recordingState = "error";

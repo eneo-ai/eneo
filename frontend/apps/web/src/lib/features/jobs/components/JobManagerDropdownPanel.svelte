@@ -45,7 +45,9 @@
             {#if upload.status === "queued"}
               <div class="text-secondary w-48 min-w-48 text-right">{m.waiting()}</div>
             {:else if upload.status === "completed"}
-              <div class="text-positive-default w-48 min-w-48 text-right font-medium">{m.done()}</div>
+              <div class="text-positive-default w-48 min-w-48 text-right font-medium">
+                {m.done()}
+              </div>
             {:else if true}
               <div class="flex w-48 min-w-48 items-center gap-x-4">
                 <ProgressBar progress={upload.progress}></ProgressBar>

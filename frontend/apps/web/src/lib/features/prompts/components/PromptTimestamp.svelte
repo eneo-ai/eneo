@@ -10,7 +10,7 @@
   import utc from "dayjs/plugin/utc";
 
   dayjs.extend(utc);
-  
+
   import { m } from "$lib/paraglide/messages";
 
   export let prompt: {

@@ -6,7 +6,12 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
-  import { IntricError, type UserSortBy, type UserTokenUsage, type UserTokenUsageSummary } from "@intric/intric-js";
+  import {
+    IntricError,
+    type UserSortBy,
+    type UserTokenUsage,
+    type UserTokenUsageSummary
+  } from "@intric/intric-js";
   import UserOverviewBar from "./UserOverviewBar.svelte";
   import UserTokenTable from "./UserTokenTable.svelte";
   import { CalendarDate } from "@internationalized/date";
@@ -24,13 +29,12 @@
   const paginationState = $derived.by(() => {
     const searchParams = $page.url.searchParams;
     return {
-      page: parseInt(searchParams.get('page') || '1'),
+      page: parseInt(searchParams.get("page") || "1"),
       perPage: 25, // Fixed value
-      sortBy: (searchParams.get('sortBy') as UserSortBy) || "total_tokens",
-      sortOrder: (searchParams.get('sortOrder') as "asc" | "desc") || "desc"
+      sortBy: (searchParams.get("sortBy") as UserSortBy) || "total_tokens",
+      sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || "desc"
     };
   });
-
 
   const intric = getIntric();
 
@@ -41,7 +45,13 @@
     end: today
   });
 
-  async function updateUserStats(timeframe: { start: CalendarDate; end: CalendarDate }, page: number, perPage: number, sortBy: UserSortBy, sortOrder: string) {
+  async function updateUserStats(
+    timeframe: { start: CalendarDate; end: CalendarDate },
+    page: number,
+    perPage: number,
+    sortBy: UserSortBy,
+    sortOrder: string
+  ) {
     isLoading = true;
     error = null;
     try {
@@ -56,7 +66,7 @@
       });
     } catch (err: unknown) {
       error = err instanceof IntricError ? err.message : "unknown error";
-      console.error('Failed to load user token usage:', err);
+      console.error("Failed to load user token usage:", err);
     } finally {
       isLoading = false;
     }
@@ -64,40 +74,47 @@
 
   $effect(() => {
     if (dateRange.start && dateRange.end) {
-      updateUserStats(dateRange, paginationState.page, paginationState.perPage, paginationState.sortBy, paginationState.sortOrder);
+      updateUserStats(
+        dateRange,
+        paginationState.page,
+        paginationState.perPage,
+        paginationState.sortBy,
+        paginationState.sortOrder
+      );
     }
   });
 
-    function onUserClick(user: UserTokenUsage) {
+  function onUserClick(user: UserTokenUsage) {
     // Preserve current URL state by including pagination parameters
     const currentUrl = new URL($page.url);
     const params = new URLSearchParams();
 
     // Preserve pagination parameters for the back navigation
-    if (currentUrl.searchParams.get('page')) params.set('page', currentUrl.searchParams.get('page')!);
-    if (currentUrl.searchParams.get('sortBy')) params.set('sortBy', currentUrl.searchParams.get('sortBy')!);
-    if (currentUrl.searchParams.get('sortOrder')) params.set('sortOrder', currentUrl.searchParams.get('sortOrder')!);
+    if (currentUrl.searchParams.get("page"))
+      params.set("page", currentUrl.searchParams.get("page")!);
+    if (currentUrl.searchParams.get("sortBy"))
+      params.set("sortBy", currentUrl.searchParams.get("sortBy")!);
+    if (currentUrl.searchParams.get("sortOrder"))
+      params.set("sortOrder", currentUrl.searchParams.get("sortOrder")!);
 
-    const userDetailUrl = `/admin/usage/users/${user.user_id}${params.toString() ? '?' + params.toString() : ''}`;
+    const userDetailUrl = `/admin/usage/users/${user.user_id}${params.toString() ? "?" + params.toString() : ""}`;
     goto(userDetailUrl);
   }
 
   function onPageChange(newPage: number) {
     const url = new URL($page.url);
-    url.searchParams.set('page', newPage.toString());
+    url.searchParams.set("page", newPage.toString());
     goto(url, { replaceState: true });
   }
 
   function onSortChange(newSortBy: UserSortBy, newSortOrder: "asc" | "desc") {
     const url = new URL($page.url);
-    url.searchParams.set('sortBy', newSortBy);
-    url.searchParams.set('sortOrder', newSortOrder);
+    url.searchParams.set("sortBy", newSortBy);
+    url.searchParams.set("sortOrder", newSortOrder);
     // Reset to page 1 when sorting changes
-    url.searchParams.set('page', '1');
+    url.searchParams.set("page", "1");
     goto(url, { replaceState: true });
   }
-
-
 </script>
 
 <Settings.Page>
@@ -107,11 +124,7 @@
     {/if}
   </Settings.Group>
   <Settings.Group title={m.details()}>
-    <Settings.Row
-      title={m.usage_by_user()}
-      description={m.usage_by_user_description()}
-      fullWidth
-    >
+    <Settings.Row title={m.usage_by_user()} description={m.usage_by_user_description()} fullWidth>
       <div slot="toolbar" class="mb-4">
         <Input.DateRange bind:value={dateRange}></Input.DateRange>
       </div>

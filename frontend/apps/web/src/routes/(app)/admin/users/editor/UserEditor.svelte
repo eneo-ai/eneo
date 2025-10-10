@@ -21,11 +21,7 @@
     if (!userRole) return;
 
     if (user.id === currentUser.id && !userRole.permissions.includes("admin")) {
-      if (
-        !confirm(
-          m.role_change_admin_warning({ role: userRole.name })
-        )
-      ) {
+      if (!confirm(m.role_change_admin_warning({ role: userRole.name }))) {
         return;
       }
     }

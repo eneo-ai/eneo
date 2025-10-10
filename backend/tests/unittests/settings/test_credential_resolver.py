@@ -355,3 +355,160 @@ def test_legacy_string_format_credentials():
     # The code checks isinstance(tenant_cred, str) and uses it directly
     api_key = resolver.get_api_key("openai")
     assert api_key == "sk-legacy-string-key"
+
+
+# ============================================================================
+# Federation Config Tests
+# ============================================================================
+
+
+@pytest.fixture
+def tenant_with_federation():
+    """Tenant with federation config configured."""
+    return TenantInDB(
+        id=uuid4(),
+        name="federated-tenant",
+        display_name="Federated Tenant",
+        quota_limit=1024**3,
+        federation_config={
+            "provider": "entra-id",
+            "discovery_endpoint": "https://login.microsoftonline.com/tenant123/.well-known/openid-configuration",
+            "client_id": "app-client-id-456",
+            "client_secret": "encrypted-client-secret-789",
+            "allowed_domains": ["example.com"],
+        },
+    )
+
+
+@pytest.fixture
+def tenant_without_federation():
+    """Tenant with no federation config."""
+    return TenantInDB(
+        id=uuid4(),
+        name="non-federated-tenant",
+        display_name="Non-Federated Tenant",
+        quota_limit=1024**3,
+        federation_config={},
+    )
+
+
+@pytest.fixture
+def mock_settings_with_global_oidc(monkeypatch):
+    """Settings with global OIDC config set via environment variables."""
+    monkeypatch.setenv("OIDC_DISCOVERY_ENDPOINT", "https://oidc.global.com/.well-known/openid-configuration")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "global-client-id")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "global-client-secret")
+    monkeypatch.setenv("OIDC_TENANT_ID", "global-tenant-123")
+    return Settings()
+
+
+@pytest.fixture
+def mock_settings_no_oidc(monkeypatch):
+    """Settings with no global OIDC config."""
+    for key in ["OIDC_DISCOVERY_ENDPOINT", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_TENANT_ID"]:
+        monkeypatch.delenv(key, raising=False)
+    return Settings()
+
+
+@pytest.fixture
+def mock_settings_federation_enabled(monkeypatch):
+    """Settings with federation per tenant enabled."""
+    monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
+    # Must also set encryption key to avoid validation error
+    monkeypatch.setenv("ENCRYPTION_KEY", "test-encryption-key-32-chars-long!!")
+    return Settings()
+
+
+def test_tenant_federation_config_resolved(tenant_with_federation, mock_settings_with_global_oidc):
+    """Tenant federation config takes precedence over global OIDC config.
+
+    When a tenant has federation_config, it should be used exclusively,
+    even if global OIDC_* environment variables exist.
+    """
+    resolver = CredentialResolver(tenant_with_federation, mock_settings_with_global_oidc)
+
+    config = resolver.get_federation_config()
+
+    assert config["provider"] == "entra-id"
+    assert config["discovery_endpoint"] == "https://login.microsoftonline.com/tenant123/.well-known/openid-configuration"
+    assert config["client_id"] == "app-client-id-456"
+    assert config["client_secret"] == "encrypted-client-secret-789"
+    assert config["allowed_domains"] == ["example.com"]
+
+
+def test_fallback_to_global_oidc_when_no_tenant_federation(
+    tenant_without_federation, mock_settings_with_global_oidc
+):
+    """Global OIDC config used when tenant has no federation config.
+
+    When a tenant does NOT have federation_config, the global OIDC_*
+    environment variables should be used as fallback.
+    """
+    resolver = CredentialResolver(tenant_without_federation, mock_settings_with_global_oidc)
+
+    config = resolver.get_federation_config()
+
+    assert config["provider"] == "mobilityguard"  # Legacy global provider
+    assert config["discovery_endpoint"] == "https://oidc.global.com/.well-known/openid-configuration"
+    assert config["client_id"] == "global-client-id"
+    assert config["client_secret"] == "global-client-secret"
+    assert config["tenant_id"] == "global-tenant-123"
+    assert config["scopes"] == ["openid", "email", "profile"]
+
+
+def test_strict_mode_raises_when_no_tenant_federation(
+    tenant_without_federation, mock_settings_federation_enabled
+):
+    """Strict mode: ValueError when tenant has no federation config.
+
+    When FEDERATION_PER_TENANT_ENABLED=true and tenant has no federation_config,
+    should raise ValueError (no fallback to global OIDC).
+    """
+    resolver = CredentialResolver(tenant_without_federation, mock_settings_federation_enabled)
+
+    with pytest.raises(
+        ValueError,
+        match=r"No identity provider configured for tenant 'non-federated-tenant'.*Federation per tenant is enabled"
+    ):
+        resolver.get_federation_config()
+
+
+def test_raises_when_no_federation_anywhere(tenant_without_federation, mock_settings_no_oidc):
+    """ValueError raised when no federation config available (tenant or global).
+
+    When neither the tenant nor global environment has federation config,
+    a clear ValueError should be raised.
+    """
+    resolver = CredentialResolver(tenant_without_federation, mock_settings_no_oidc)
+
+    with pytest.raises(
+        ValueError,
+        match=r"No identity provider configured.*Please set global OIDC_\* environment variables"
+    ):
+        resolver.get_federation_config()
+
+
+def test_no_tenant_uses_global_oidc(mock_settings_with_global_oidc):
+    """When no tenant provided, only global OIDC config is used.
+
+    CredentialResolver should work without a tenant (e.g., system-level operations).
+    """
+    resolver = CredentialResolver(tenant=None, settings=mock_settings_with_global_oidc)
+
+    config = resolver.get_federation_config()
+
+    assert config["provider"] == "mobilityguard"
+    assert config["discovery_endpoint"] == "https://oidc.global.com/.well-known/openid-configuration"
+    assert config["client_id"] == "global-client-id"
+    assert config["client_secret"] == "global-client-secret"
+
+
+def test_no_tenant_no_global_oidc_raises(mock_settings_no_oidc):
+    """When no tenant and no global OIDC config, ValueError is raised."""
+    resolver = CredentialResolver(tenant=None, settings=mock_settings_no_oidc)
+
+    with pytest.raises(
+        ValueError,
+        match=r"No identity provider configured"
+    ):
+        resolver.get_federation_config()

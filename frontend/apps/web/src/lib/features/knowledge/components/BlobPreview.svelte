@@ -101,7 +101,9 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{blob.metadata.title}</Dialog.Title>
-    <Dialog.Description hidden>File contents of {blob.metadata.title}</Dialog.Description>
+    <Dialog.Description hidden
+      >{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description
+    >
 
     <Dialog.Section scrollable>
       <div class="p-4">

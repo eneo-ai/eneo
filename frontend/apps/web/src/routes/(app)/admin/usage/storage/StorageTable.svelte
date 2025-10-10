@@ -64,6 +64,7 @@
     class="h-12"
     on:click={() => {
       showAllSpaces = !showAllSpaces;
-    }}>{showAllSpaces ? m.show_only_10_spaces() : m.show_all_spaces({ count: spaces.length })}</Button
+    }}
+    >{showAllSpaces ? m.show_only_10_spaces() : m.show_all_spaces({ count: spaces.length })}</Button
   >
 {/if}

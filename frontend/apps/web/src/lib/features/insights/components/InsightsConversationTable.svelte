@@ -85,7 +85,10 @@
           {/if}
         </Button>
         <p role="status" aria-live="polite">
-          {m.loaded_conversations_count({ loaded: insights.conversations.length, total: insights.totalConversationCount })}
+          {m.loaded_conversations_count({
+            loaded: insights.conversations.length,
+            total: insights.totalConversationCount
+          })}
         </p>
       {:else if insights.totalConversationCount > 0}
         <p role="status" aria-live="polite">

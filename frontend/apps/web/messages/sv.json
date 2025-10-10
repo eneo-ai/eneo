@@ -1246,5 +1246,13 @@
   "resource_apps": "appar",
   "resource_results": "resultat",
   "resource_user_groups": "användargrupper",
-  "resource_files": "filer"
+  "resource_files": "filer",
+  "select_your_organization": "Välj din organisation",
+  "loading_organizations": "Laddar organisationer...",
+  "failed_to_load_organizations": "Misslyckades med att ladda organisationer. Försök igen.",
+  "no_organizations_available": "Inga organisationer tillgängliga",
+  "redirecting_to_authentication": "Omdirigerar till autentisering...",
+  "completing_authentication": "Slutför autentisering...",
+  "invalid_organization_identifier": "Ogiltig organisationsidentifierare",
+  "failed_to_start_authentication": "Misslyckades med att starta autentisering. Försök igen."
 }

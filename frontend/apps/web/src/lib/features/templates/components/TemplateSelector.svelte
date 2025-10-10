@@ -21,7 +21,9 @@
 
 <div class="outer relative flex flex-grow flex-col items-start justify-start text-left">
   <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
-    <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.create_a_new_resource({ resourceName: resourceName.singular })}</h3>
+    <h3 class="px-4 pb-1 text-2xl font-extrabold">
+      {m.create_a_new_resource({ resourceName: resourceName.singular })}
+    </h3>
     <p class="text-secondary max-w-[60ch] pr-36 pl-4">
       {#if featureFlags.showTemplates}
         {m.create_from_scratch_or_template({ resourceName: resourceName.singular })}
@@ -46,9 +48,7 @@
         >
           <div class="flex w-full items-center justify-start gap-2 text-left">
             <IconFile></IconFile>
-            <span class="text-dynamic-stronger line-clamp-2">
-              {m.create_blank_assistant()}</span
-            >
+            <span class="text-dynamic-stronger line-clamp-2"> {m.create_blank_assistant()}</span>
           </div>
         </button>
         <div class="relative flex">

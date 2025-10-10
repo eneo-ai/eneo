@@ -41,8 +41,38 @@ class TenantRepository:
         self.encryption = encryption_service
 
     async def add(self, tenant: TenantBase) -> TenantInDB:
+        """Create new tenant with auto-generated slug.
+
+        If the tenant doesn't have a slug, it will be auto-generated from the name.
+        This ensures all new tenants have slugs for federation routing.
+        """
         try:
-            return await self.delegate.add(tenant)
+            # Add tenant first to get ID
+            tenant_in_db = await self.delegate.add(tenant)
+
+            # Auto-generate slug if not provided
+            if not tenant_in_db.slug:
+                logger.info(
+                    f"Auto-generating slug for tenant {tenant_in_db.name}",
+                    extra={"tenant_id": str(tenant_in_db.id)},
+                )
+                slug = await self.generate_slug_for_tenant(tenant_in_db.id)
+
+                # Update tenant with generated slug
+                stmt = (
+                    sa.update(Tenants)
+                    .where(Tenants.id == tenant_in_db.id)
+                    .values(slug=slug, updated_at=datetime.now(timezone.utc))
+                    .returning(Tenants)
+                    .options(selectinload(Tenants.modules))
+                )
+                tenant_in_db = await self.delegate.get_model_from_query(stmt)
+                logger.info(
+                    f"Generated slug '{slug}' for tenant {tenant_in_db.name}",
+                    extra={"tenant_id": str(tenant_in_db.id), "slug": slug},
+                )
+
+            return tenant_in_db
         except IntegrityError as e:
             raise exceptions.UniqueException("Tenant name already exists.") from e
 
@@ -314,3 +344,181 @@ class TenantRepository:
             }
 
         return metadata
+
+    async def get_by_slug(self, slug: str) -> Optional[TenantInDB]:
+        """Get tenant by slug (for URL-based routing).
+
+        Args:
+            slug: The URL-safe slug identifier
+
+        Returns:
+            TenantInDB if found, None otherwise
+        """
+        stmt = (
+            sa.select(Tenants)
+            .where(Tenants.slug == slug)
+            .options(selectinload(Tenants.modules))
+        )
+        result = await self.session.execute(stmt)
+        tenant = result.scalar_one_or_none()
+
+        if tenant:
+            return TenantInDB.model_validate(tenant)
+        return None
+
+    async def generate_slug_for_tenant(self, tenant_id: UUID) -> str:
+        """Generate URL-safe slug from tenant name.
+
+        This method:
+        1. Converts tenant name to lowercase
+        2. Removes special characters
+        3. Replaces spaces with hyphens
+        4. Ensures uniqueness by appending counter if needed
+        5. Validates against slug rules (max 63 chars, no leading/trailing hyphens)
+
+        Args:
+            tenant_id: UUID of the tenant
+
+        Returns:
+            str: Generated unique slug
+
+        Raises:
+            ValueError: If tenant not found
+        """
+        import re
+
+        tenant = await self.get(tenant_id)
+        if not tenant:
+            raise ValueError(f"Tenant {tenant_id} not found")
+
+        # Convert to lowercase, remove special chars, replace spaces
+        slug = tenant.name.lower()
+        slug = re.sub(r"[^a-z0-9\s-]", "", slug)  # Remove special chars
+        slug = re.sub(r"\s+", "-", slug)  # Replace spaces with hyphens
+        slug = re.sub(r"-+", "-", slug)  # Collapse multiple hyphens
+        slug = slug.strip("-")  # Remove leading/trailing hyphens
+
+        # Ensure uniqueness (leave room for suffix)
+        base_slug = slug[:60]  # Leave room for counter suffix
+        counter = 0
+        while True:
+            check_slug = f"{base_slug}-{counter}" if counter > 0 else base_slug
+            existing = await self.get_by_slug(check_slug)
+            if not existing or existing.id == tenant_id:
+                logger.info(f"Generated slug '{check_slug}' for tenant {tenant.name}")
+                return check_slug
+            counter += 1
+
+    async def update_federation_config(
+        self,
+        tenant_id: UUID,
+        federation_config: dict[str, Any],
+    ) -> None:
+        """Set or update federation config for tenant.
+
+        IMPORTANT: client_secret must be encrypted BEFORE calling this method.
+
+        Args:
+            tenant_id: The UUID of the tenant
+            federation_config: Complete federation configuration dict with encrypted client_secret
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                federation_config=federation_config,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def delete_federation_config(self, tenant_id: UUID) -> None:
+        """Remove federation config for tenant.
+
+        Args:
+            tenant_id: The UUID of the tenant
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                federation_config={},
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def get_federation_config_with_metadata(
+        self, tenant_id: UUID
+    ) -> Optional[dict[str, Any]]:
+        """Get federation config with metadata (for admin API responses).
+
+        Returns configuration with masked client_secret for safe display in UI.
+
+        Args:
+            tenant_id: The UUID of the tenant
+
+        Returns:
+            dict with keys:
+            - provider: str
+            - client_id: str (unmasked)
+            - masked_secret: str (last 4 chars)
+            - issuer: str
+            - allowed_domains: list[str]
+            - encrypted_at: str (ISO timestamp)
+            - encryption_status: "encrypted" | "plaintext"
+
+            None if tenant has no federation config
+        """
+        stmt = sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
+        result = await self.session.execute(stmt)
+        config = result.scalar_one()
+
+        if not config:
+            return None
+
+        # Mask client_secret
+        client_secret = config.get("client_secret", "")
+        if len(client_secret) > 4:
+            masked_secret = f"...{client_secret[-4:]}"
+        else:
+            masked_secret = "***"
+
+        # Detect encryption status
+        # Check for Fernet encryption prefix (enc:fernet:v1:...)
+        if client_secret.startswith("enc:fernet:v"):
+            encryption_status = "encrypted"
+        elif client_secret and not client_secret.startswith("enc:"):
+            encryption_status = "plaintext"
+        else:
+            encryption_status = "plaintext"  # Fallback for empty or unknown format
+
+        return {
+            "provider": config.get("provider"),
+            "client_id": config.get("client_id"),
+            "masked_secret": masked_secret,
+            "issuer": config.get("issuer"),
+            "allowed_domains": config.get("allowed_domains", []),
+            "encrypted_at": config.get("encrypted_at"),
+            "encryption_status": encryption_status,
+        }
+
+    async def get_all_active(self) -> list[TenantInDB]:
+        """Get all active tenants for tenant selector.
+
+        Returns:
+            List of active TenantInDB instances
+        """
+        from intric.tenants.tenant import TenantState
+
+        stmt = (
+            sa.select(Tenants)
+            .where(Tenants.state == TenantState.ACTIVE.value)
+            .options(selectinload(Tenants.modules))
+        )
+        result = await self.session.execute(stmt)
+        tenants = result.scalars().all()
+
+        return [TenantInDB.model_validate(tenant) for tenant in tenants]
