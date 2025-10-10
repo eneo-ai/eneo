@@ -40,7 +40,7 @@
         const { intric } = await import("$lib/api/client");
 
         const redirectUri = `${window.location.origin}/auth/callback`;
-        const response = await intric.initiateAuth({ tenant, redirectUri });
+        const response = await intric.auth.initiateAuth({ tenant, redirectUri });
 
         // Redirect to IdP
         window.location.href = response.authorization_url;
@@ -63,7 +63,7 @@
       const { intric } = await import("$lib/api/client");
 
       const redirectUri = `${window.location.origin}/auth/callback`;
-      const response = await intric.initiateAuth({ tenant: slug, redirectUri });
+      const response = await intric.auth.initiateAuth({ tenant: slug, redirectUri });
 
       // Redirect to IdP
       window.location.href = response.authorization_url;
