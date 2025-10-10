@@ -635,7 +635,7 @@ class CompletionModelMigrationService:
         )
 
         # For assistants, we need to handle completion_model_kwargs specially
-        if entity_type == "assistant":
+        if entity_type == "assistants":
             return await self._migrate_assistants_with_kwargs(
                 from_model_id, to_model_id, tenant_id, table, tenant_condition
             )

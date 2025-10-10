@@ -4,6 +4,12 @@ Integration test fixtures using testcontainers for PostgreSQL and Redis.
 import os
 from pathlib import Path
 
+# Import shared fixture modules
+# These fixtures are automatically discovered by pytest
+pytest_plugins = [
+    "tests.integration.fixtures_completion_models",
+]
+
 # IMPORTANT: Configure environment variables BEFORE importing testcontainers
 # Disable Ryuk (testcontainers cleanup container) in devcontainer environments
 # Ryuk can have connection issues in nested Docker setups
@@ -381,7 +387,8 @@ def db_container(setup_database):
     Provide a context manager for a database container with session.
 
     This is the preferred way to access services that need database access.
-    The container comes pre-configured with a session in an active transaction.
+    The container comes pre-configured with a session, user, and tenant
+    in an active transaction.
 
     Usage:
         async with db_container() as container:
@@ -391,7 +398,22 @@ def db_container(setup_database):
     @contextlib.asynccontextmanager
     async def _container():
         async with sessionmanager.session() as session, session.begin():
-            container = Container(session=providers.Object(session))
+            # Create container with session first to fetch user and tenant
+            temp_container = Container(session=providers.Object(session))
+            user_repo = temp_container.user_repo()
+            tenant_repo = temp_container.tenant_repo()
+
+            # Fetch the test user and tenant
+            user = await user_repo.get_user_by_email("test@example.com")
+            tenants = await tenant_repo.get_all_tenants()
+            tenant = tenants[0] if tenants else None
+
+            # Create container with all dependencies
+            container = Container(
+                session=providers.Object(session),
+                user=providers.Object(user),
+                tenant=providers.Object(tenant),
+            )
             yield container
 
     return _container
