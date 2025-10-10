@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # CRITICAL WARNING: The 'name' field is used to SYNC models between this file and the database
-# 
+#
 # ⚠️  CHANGING OR REMOVING A MODEL'S 'name' WILL ORPHAN EXISTING DATA ⚠️
 #
 # What happens when you change/remove a model's 'name':
@@ -154,6 +154,7 @@ completion_models:
     org: OpenAI
     vision: true
     reasoning: false
+    litellm_model_name: openai/gpt-4o
 
   - name: 'gpt-4o-mini'
     nickname: 'GPT-4o mini'
