@@ -152,7 +152,7 @@ class CallbackRequest(BaseModel):
     ),
 )
 async def list_tenants(
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ) -> TenantListResponse:
     """
     Get list of all active tenants for selector grid.
@@ -203,7 +203,7 @@ async def initiate_auth(
     state: Optional[str] = Query(
         None, description="Optional frontend-generated CSRF state"
     ),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ) -> InitiateAuthResponse:
     """
     Get authorization URL for tenant's identity provider.
@@ -360,7 +360,7 @@ async def initiate_auth(
 )
 async def auth_callback(
     callback: CallbackRequest,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ):
     """
     Handle OIDC callback after user authenticates with IdP.

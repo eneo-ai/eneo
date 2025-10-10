@@ -1254,5 +1254,9 @@
   "redirecting_to_authentication": "Omdirigerar till autentisering...",
   "completing_authentication": "Slutför autentisering...",
   "invalid_organization_identifier": "Ogiltig organisationsidentifierare",
-  "failed_to_start_authentication": "Misslyckades med att starta autentisering. Försök igen."
+  "failed_to_start_authentication": "Misslyckades med att starta autentisering. Försök igen.",
+  "search_organizations": "Sök organisationer",
+  "search_by_name_or_municipality": "Sök efter namn eller kommun...",
+  "no_organizations_found": "Inga organisationer hittades",
+  "try_different_search_term": "Försök med ett annat sökord"
 }

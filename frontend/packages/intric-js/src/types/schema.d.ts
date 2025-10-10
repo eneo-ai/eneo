@@ -55,7 +55,7 @@ export interface paths {
   "/api/v1/users/login/openid-connect/mobilityguard/": {
     /**
      * Login With Mobilityguard
-     * @description OpenID Connect Login with mobilityguard.
+     * @description OpenID Connect Login (generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
   };
@@ -1106,6 +1106,30 @@ export interface paths {
      */
     get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/federation": {
+    /**
+     * Get tenant federation config
+     * @description View federation config with masked secrets. System admin only.
+     */
+    get: operations["get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get"];
+    /**
+     * Set tenant federation config
+     * @description Configure custom identity provider for tenant. System admin only.
+     */
+    put: operations["set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put"];
+    /**
+     * Delete tenant federation config
+     * @description Remove custom identity provider for tenant. System admin only.
+     */
+    delete: operations["delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/federation/test": {
+    /**
+     * Test tenant federation config
+     * @description Test connection to tenant's IdP. System admin only.
+     */
+    post: operations["test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post"];
+  };
   "/api/v1/modules/": {
     /** Get Modules */
     get: operations["get_modules_api_v1_modules__get"];
@@ -1118,6 +1142,27 @@ export interface paths {
      * @description Value is a list of module `id`'s to add to the `tenant_id`.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+  };
+  "/api/v1/auth/tenants": {
+    /**
+     * List tenants for selector
+     * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+     */
+    get: operations["list_tenants_api_v1_auth_tenants_get"];
+  };
+  "/api/v1/auth/initiate": {
+    /**
+     * Initiate OIDC authentication
+     * @description Get authorization URL for tenant's identity provider. No authentication required. Returns URL to redirect user to IdP login page.
+     */
+    get: operations["initiate_auth_api_v1_auth_initiate_get"];
+  };
+  "/api/v1/auth/callback": {
+    /**
+     * OIDC callback handler
+     * @description Handle OIDC callback, validate token, lookup user. No authentication required (public endpoint). Returns JWT token for authenticated user.
+     */
+    post: operations["auth_callback_api_v1_auth_callback_post"];
   };
   "/api/v1/api-docs": {
     /**
@@ -1831,6 +1876,22 @@ export interface components {
        */
       file: string;
     };
+    /**
+     * CallbackRequest
+     * @description OIDC callback with authorization code.
+     * @example {
+     *   "code": "authorization_code_from_idp",
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     * }
+     */
+    CallbackRequest: {
+      /** Code */
+      code: string;
+      /** State */
+      state: string;
+      /** Code Verifier */
+      code_verifier?: string | null;
+    };
     /** CollectionMetadata */
     CollectionMetadata: {
       /** Num Info Blobs */
@@ -2442,6 +2503,19 @@ export interface components {
       /** Message */
       message: string;
     };
+    /**
+     * DeleteFederationResponse
+     * @description Response model for deleting federation config.
+     */
+    DeleteFederationResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Message */
+      message: string;
+    };
     /** DeleteResponse */
     DeleteResponse: {
       /** Success */
@@ -2683,6 +2757,32 @@ export interface components {
       | 9024
       | 9025
       | 9026;
+    /**
+     * FederationInfo
+     * @description Information about configured federation.
+     */
+    FederationInfo: {
+      /** Provider */
+      provider: string;
+      /** Client Id */
+      client_id: string;
+      /** Masked Secret */
+      masked_secret: string;
+      /** Issuer */
+      issuer?: string | null;
+      /** Allowed Domains */
+      allowed_domains: string[];
+      /**
+       * Configured At
+       * Format: date-time
+       */
+      configured_at: string;
+      /**
+       * Encryption Status
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -3066,6 +3166,20 @@ export interface components {
     InfoBlobUpsertRequest: {
       /** Info Blobs */
       info_blobs: components["schemas"]["InfoBlobAddPublic"][];
+    };
+    /**
+     * InitiateAuthResponse
+     * @description Response with IdP authorization URL.
+     * @example {
+     *   "authorization_url": "https://idp.example.com/authorize?client_id=abc123&...",
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     * }
+     */
+    InitiateAuthResponse: {
+      /** Authorization Url */
+      authorization_url: string;
+      /** State */
+      state: string;
     };
     /** InputField */
     InputField: {
@@ -4808,6 +4922,54 @@ export interface components {
       /** Message */
       message: string;
     };
+    /**
+     * SetFederationRequest
+     * @description Request model for setting tenant federation config.
+     */
+    SetFederationRequest: {
+      /**
+       * Provider
+       * @description Identity provider label (e.g., 'mobilityguard', 'entra_id', 'okta', 'auth0')
+       */
+      provider: string;
+      /**
+       * Discovery Endpoint
+       * @description OIDC discovery endpoint URL
+       */
+      discovery_endpoint: string;
+      /**
+       * Client Id
+       * @description OAuth client ID
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description OAuth client secret
+       */
+      client_secret: string;
+      /**
+       * Allowed Domains
+       * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
+       */
+      allowed_domains?: string[];
+    };
+    /**
+     * SetFederationResponse
+     * @description Response model for setting federation config.
+     */
+    SetFederationResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Secret */
+      masked_secret: string;
+      /** Message */
+      message: string;
+    };
     /** SettingsPublic */
     SettingsPublic: {
       /**
@@ -5109,6 +5271,8 @@ export interface components {
       name: string;
       /** Display Name */
       display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
       /** Quota Limit */
       quota_limit: number;
       /** Domain */
@@ -5136,6 +5300,27 @@ export interface components {
       api_credentials?: {
         [key: string]: unknown;
       };
+      /** Federation Config */
+      federation_config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * TenantInfo
+     * @description Public tenant information for selector grid.
+     * @example {
+     *   "display_name": "Stockholm",
+     *   "name": "Stockholm Municipality",
+     *   "slug": "stockholm"
+     * }
+     */
+    TenantInfo: {
+      /** Slug */
+      slug: string;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name: string;
     };
     /** TenantIntegration */
     TenantIntegration: {
@@ -5165,6 +5350,28 @@ export interface components {
       items: components["schemas"]["TenantIntegration"][];
       /** Count */
       count: number;
+    };
+    /**
+     * TenantListResponse
+     * @description List of tenants for selector.
+     * @example {
+     *   "tenants": [
+     *     {
+     *       "display_name": "Stockholm",
+     *       "name": "Stockholm Municipality",
+     *       "slug": "stockholm"
+     *     },
+     *     {
+     *       "display_name": "Gothenburg",
+     *       "name": "Gothenburg Municipality",
+     *       "slug": "goteborg"
+     *     }
+     *   ]
+     * }
+     */
+    TenantListResponse: {
+      /** Tenants */
+      tenants: components["schemas"]["TenantInfo"][];
     };
     /** TenantPublic */
     TenantPublic: {
@@ -5246,6 +5453,8 @@ export interface components {
       name: string;
       /** Display Name */
       display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
       /** Quota Limit */
       quota_limit: number;
       /** Domain */
@@ -5271,6 +5480,10 @@ export interface components {
       modules?: components["schemas"]["ModuleInDB"][];
       /** Api Credentials */
       api_credentials?: {
+        [key: string]: unknown;
+      };
+      /** Federation Config */
+      federation_config?: {
         [key: string]: unknown;
       };
     };
@@ -6751,7 +6964,7 @@ export interface operations {
   };
   /**
    * Login With Mobilityguard
-   * @description OpenID Connect Login with mobilityguard.
+   * @description OpenID Connect Login (generic OIDC provider).
    */
   login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
     requestBody: {
@@ -12513,7 +12726,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Bad Request */
@@ -12546,7 +12759,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Not Found */
@@ -12574,7 +12787,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Not Found */
@@ -12861,6 +13074,127 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get tenant federation config
+   * @description View federation config with masked secrets. System admin only.
+   */
+  get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get: {
+    parameters: {
+      query?: {
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set tenant federation config
+   * @description Configure custom identity provider for tenant. System admin only.
+   */
+  set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
+    parameters: {
+      query?: {
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetFederationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete tenant federation config
+   * @description Remove custom identity provider for tenant. System admin only.
+   */
+  delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
+    parameters: {
+      query?: {
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Test tenant federation config
+   * @description Test connection to tenant's IdP. System admin only.
+   */
+  test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
+    parameters: {
+      query?: {
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Modules */
   get_modules_api_v1_modules__get: {
     responses: {
@@ -12914,6 +13248,95 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TenantInDB"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenants for selector
+   * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+   */
+  list_tenants_api_v1_auth_tenants_get: {
+    parameters: {
+      query?: {
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Initiate OIDC authentication
+   * @description Get authorization URL for tenant's identity provider. No authentication required. Returns URL to redirect user to IdP login page.
+   */
+  initiate_auth_api_v1_auth_initiate_get: {
+    parameters: {
+      query: {
+        /** @description Tenant slug (e.g., 'stockholm') */
+        tenant: string;
+        /** @description OAuth redirect URI (e.g., 'https://app.example.com/callback') */
+        redirect_uri: string;
+        /** @description Optional frontend-generated CSRF state */
+        state?: string | null;
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["InitiateAuthResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * OIDC callback handler
+   * @description Handle OIDC callback, validate token, lookup user. No authentication required (public endpoint). Returns JWT token for authenticated user.
+   */
+  auth_callback_api_v1_auth_callback_post: {
+    parameters: {
+      query?: {
+        with_user?: boolean;
+        with_user_from_assistant_api_key?: boolean;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CallbackRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */

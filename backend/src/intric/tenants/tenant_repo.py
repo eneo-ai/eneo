@@ -405,7 +405,14 @@ class TenantRepository:
             check_slug = f"{base_slug}-{counter}" if counter > 0 else base_slug
             existing = await self.get_by_slug(check_slug)
             if not existing or existing.id == tenant_id:
-                logger.info(f"Generated slug '{check_slug}' for tenant {tenant.name}")
+                # Update tenant with generated slug
+                stmt = (
+                    sa.update(Tenants)
+                    .where(Tenants.id == tenant_id)
+                    .values(slug=check_slug, updated_at=datetime.now(timezone.utc))
+                )
+                await self.session.execute(stmt)
+                logger.info(f"Generated and saved slug '{check_slug}' for tenant {tenant.name}")
                 return check_slug
             counter += 1
 

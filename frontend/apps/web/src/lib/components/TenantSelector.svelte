@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
+  import { Button, Input } from "@intric/ui";
 
   interface TenantInfo {
     slug: string;
@@ -19,17 +19,26 @@
   let tenants = $state<TenantInfo[]>([]);
   let loading = $state(true);
   let error = $state("");
+  let searchQuery = $state("");
+
+  let filteredTenants = $derived(
+    searchQuery.trim() === ""
+      ? tenants
+      : tenants.filter((t) =>
+          [t.display_name, t.name, t.slug]
+            .join(" ")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase())
+        )
+  );
 
   onMount(async () => {
     try {
+      // Dynamic import to avoid SSR issues
+      const { intric } = await import("$lib/api/client");
+
       // Fetch tenants from backend
-      const response = await fetch(`${baseUrl}/api/v1/auth/tenants`);
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch tenants");
-      }
-
-      const data = await response.json();
+      const data = await intric.auth.listTenants();
       tenants = data.tenants || [];
 
       // Check for last-used tenant in localStorage
@@ -106,25 +115,49 @@
     </div>
   </div>
 {:else}
-  <div class="mx-auto max-w-6xl px-4 py-8">
-    <h2 class="text-default mb-6 text-center text-2xl font-semibold">
+  <div class="mx-auto max-w-md px-4 py-8">
+    <h2 class="text-primary mb-6 text-center text-xl font-medium sm:text-2xl">
       {m.select_your_organization()}
     </h2>
 
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {#each tenants as tenant}
-        <button
-          class="border-default hover:border-accent-default rounded-lg border-2 p-6 text-left transition-all hover:shadow-lg"
-          onclick={() => handleTenantClick(tenant.slug)}
-        >
-          <h3 class="text-default mb-2 text-lg font-semibold">
-            {tenant.display_name}
-          </h3>
-          <p class="text-dimmer text-sm">
-            {tenant.name}
-          </p>
-        </button>
-      {/each}
+    <div class="mb-4">
+      <Input.Text
+        bind:value={searchQuery}
+        label={m.search_organizations()}
+        placeholder={m.search_by_name_or_municipality()}
+        autocomplete="off"
+        hiddenLabel={false}
+        inputClass="text-base"
+      />
+    </div>
+
+    <div class="border-default bg-primary flex max-h-96 flex-col gap-2 overflow-y-auto rounded-lg border p-3 shadow-md">
+      {#if filteredTenants.length === 0}
+        <div class="flex flex-col items-center gap-3 py-8 text-center">
+          <div class="text-primary text-base font-medium">
+            {m.no_organizations_found()}
+          </div>
+          <div class="text-muted text-sm">
+            {m.try_different_search_term()}
+          </div>
+        </div>
+      {:else}
+        {#each filteredTenants as tenant}
+          <button
+            class="border-default hover:border-accent-default focus-visible:border-accent-default hover:bg-secondary text-primary flex w-full items-center justify-between rounded-md border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-default focus-visible:ring-offset-2"
+            onclick={() => handleTenantClick(tenant.slug)}
+          >
+            <div class="flex flex-col gap-1">
+              <span class="text-primary text-base font-medium">
+                {tenant.display_name}
+              </span>
+              <span class="text-muted text-sm">
+                {tenant.name}
+              </span>
+            </div>
+          </button>
+        {/each}
+      {/if}
     </div>
   </div>
 {/if}

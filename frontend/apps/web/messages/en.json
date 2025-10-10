@@ -1220,5 +1220,9 @@
   "redirecting_to_authentication": "Redirecting to authentication...",
   "completing_authentication": "Completing authentication...",
   "invalid_organization_identifier": "Invalid organization identifier",
-  "failed_to_start_authentication": "Failed to start authentication. Please try again."
+  "failed_to_start_authentication": "Failed to start authentication. Please try again.",
+  "search_organizations": "Search organizations",
+  "search_by_name_or_municipality": "Search by name or municipality...",
+  "no_organizations_found": "No organizations found",
+  "try_different_search_term": "Try a different search term"
 }
