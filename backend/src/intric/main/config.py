@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     autothrottle_enabled: bool = True
     using_crawl: bool = True
 
+    # Migration
+    migration_auto_recalc_threshold: int = 30  # Auto-recalculate usage stats for migrations <= this threshold
+
     # integration callback
     oauth_callback_url: Optional[str] = None
 

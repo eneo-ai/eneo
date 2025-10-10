@@ -77,6 +77,24 @@ def get_container(
     return _get_container
 
 
+def get_container_for_sysadmin():
+    """Get a container for sysadmin endpoints that manage their own transactions.
+    
+    This function creates a container with a session that does NOT have a transaction
+    already started. This allows worker tasks and services to manage their own
+    transactions without running into "A transaction is already begun on this Session"
+    errors.
+    """
+    async def _get_container_for_sysadmin(
+        session: AsyncSession = Depends(get_session),
+    ):
+        return Container(
+            session=providers.Object(session),
+        )
+
+    return _get_container_for_sysadmin
+
+
 # TODO: Find a better place for this
 async def get_user_from_websocket(
     token: Annotated[str, Security(get_token_from_websocket_header)],
