@@ -9,6 +9,17 @@ import asyncio
 
 import pytest
 
+# Import shared fixture modules
+# These fixtures are automatically discovered by pytest
+# Organized to mirror the backend source structure (src/intric/*)
+pytest_plugins = [
+    "tests.integration.fixtures.completion_models",  # Completion model fixtures
+    "tests.integration.fixtures.assistants",         # Assistant fixtures
+    "tests.integration.fixtures.apps",               # App fixtures
+    "tests.integration.fixtures.services",           # Service fixtures
+    "tests.integration.fixtures.spaces",             # Space fixtures
+]
+
 
 @pytest.fixture(scope="session")
 def event_loop():
