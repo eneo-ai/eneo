@@ -1,6 +1,6 @@
 import uuid
 
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.models import InDB
 from tavily import AsyncTavilyClient
 
@@ -14,7 +14,7 @@ class WebSearchResult(InDB):
 
 class WebSearch:
     def __init__(self):
-        self.client = AsyncTavilyClient(api_key=SETTINGS.tavily_api_key)
+        self.client = AsyncTavilyClient(api_key=get_settings().tavily_api_key)
 
     async def search(self, search_query: str) -> list[WebSearchResult]:
         # Tavily max char limit is 400

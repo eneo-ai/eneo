@@ -7,9 +7,15 @@ from typing import Optional
 from uuid import UUID
 
 from intric.files.file_models import ContentDisposition
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 
-SIGNING_KEY = SETTINGS.url_signing_key.encode()
+
+def _get_signing_key():
+    """Get the signing key from settings."""
+    return get_settings().url_signing_key.encode()
+
+
+SIGNING_KEY = _get_signing_key()
 
 
 def generate_signed_token(
