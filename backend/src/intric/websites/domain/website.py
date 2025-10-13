@@ -5,6 +5,7 @@ from intric.base.base_entity import Entity
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
+from intric.websites.domain.http_auth_credentials import HttpAuthCredentials
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -15,8 +16,14 @@ if TYPE_CHECKING:
 
 
 class UpdateInterval(str, Enum):
+    """Defines how frequently a website should be crawled.
+
+    Why: Provides flexible scheduling options for automated crawling.
+    """
     NEVER = "never"
-    WEEKLY = "weekly"
+    DAILY = "daily"                    # Crawl every day at 3 AM Swedish time
+    EVERY_OTHER_DAY = "every_other_day"  # Crawl every 2 days at 3 AM Swedish time
+    WEEKLY = "weekly"                  # Crawl every Friday at 3 AM Swedish time
 
 
 class Website(Entity):
@@ -36,6 +43,8 @@ class Website(Entity):
         embedding_model: "EmbeddingModel",
         size: int,
         latest_crawl: Optional["CrawlRun"],
+        last_crawled_at: Optional["datetime"] = None,
+        http_auth: Optional[HttpAuthCredentials] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -49,6 +58,46 @@ class Website(Entity):
         self.embedding_model = embedding_model
         self.size = size
         self.latest_crawl = latest_crawl
+        self.last_crawled_at = last_crawled_at
+        self.http_auth = http_auth
+
+    @property
+    def requires_auth(self) -> bool:
+        """Domain rule: Website requires auth if credentials are present."""
+        return self.http_auth is not None
+
+    def set_http_auth(self, username: str, password: str) -> "Website":
+        """Set HTTP auth credentials for this website.
+
+        Why: Domain method enforces business rules and uses value object.
+
+        Args:
+            username: HTTP Basic Auth username
+            password: HTTP Basic Auth password
+
+        Returns:
+            self for method chaining
+
+        Raises:
+            ValueError: If credentials are invalid
+        """
+        self.http_auth = HttpAuthCredentials.from_website_url(
+            username=username,
+            password=password,
+            website_url=self.url
+        )
+        return self
+
+    def remove_http_auth(self) -> "Website":
+        """Remove HTTP auth credentials from this website.
+
+        Why: Explicit domain operation for auth removal.
+
+        Returns:
+            self for method chaining
+        """
+        self.http_auth = None
+        return self
 
     @classmethod
     def create(
@@ -61,8 +110,10 @@ class Website(Entity):
         crawl_type: CrawlType,
         update_interval: UpdateInterval,
         embedding_model: "EmbeddingModel",
+        http_auth_username: Optional[str] = None,
+        http_auth_password: Optional[str] = None,
     ) -> "Website":
-        return cls(
+        website = cls(
             id=None,
             created_at=None,
             updated_at=None,
@@ -77,13 +128,22 @@ class Website(Entity):
             embedding_model=embedding_model,
             size=0,
             latest_crawl=None,
+            last_crawled_at=None,
+            http_auth=None,
         )
+
+        # Set auth if both username and password provided
+        if http_auth_username and http_auth_password:
+            website.set_http_auth(http_auth_username, http_auth_password)
+
+        return website
 
     @classmethod
     def to_domain(
         cls,
         record: "WebsitesTable",
         embedding_model: "EmbeddingModel",
+        http_auth: Optional[HttpAuthCredentials] = None,
     ) -> "Website":
         return cls(
             id=record.id,
@@ -100,6 +160,8 @@ class Website(Entity):
             embedding_model=embedding_model,
             size=record.size,
             latest_crawl=CrawlRun.to_domain(record.latest_crawl) if record.latest_crawl else None,
+            last_crawled_at=record.last_crawled_at,
+            http_auth=http_auth,
         )
 
     def update(
@@ -109,6 +171,8 @@ class Website(Entity):
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
+        http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
+        http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
         if url is not NOT_PROVIDED:
             self.url = url
@@ -121,6 +185,28 @@ class Website(Entity):
         if update_interval is not NOT_PROVIDED:
             self.update_interval = update_interval
 
+        # Handle auth updates (both must be provided together or both None)
+        if http_auth_username is not NOT_PROVIDED or http_auth_password is not NOT_PROVIDED:
+            # If either is explicitly None, remove auth
+            if http_auth_username is None or http_auth_password is None:
+                self.remove_http_auth()
+            # If both provided, set/update auth
+            elif http_auth_username is not NOT_PROVIDED and http_auth_password is not NOT_PROVIDED:
+                self.set_http_auth(http_auth_username, http_auth_password)
+            # If only one provided, that's an error
+            else:
+                raise ValueError(
+                    "Both http_auth_username and http_auth_password must be provided together"
+                )
+
+        return self
+
+    def update_last_crawled_at(self, timestamp: "datetime") -> "Website":
+        """Update when this website was last crawled.
+
+        Why: Domain method ensures changes go through proper entity lifecycle.
+        """
+        self.last_crawled_at = timestamp
         return self
 
 
@@ -144,6 +230,7 @@ class WebsiteSparse(Entity):
         crawl_type: CrawlType,
         update_interval: UpdateInterval,
         size: int,
+        last_crawled_at: Optional["datetime"],
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
@@ -156,6 +243,7 @@ class WebsiteSparse(Entity):
         self.crawl_type = crawl_type
         self.update_interval = update_interval
         self.size = size
+        self.last_crawled_at = last_crawled_at
 
     @classmethod
     def to_domain(cls, record: "WebsitesTable") -> "WebsiteSparse":
@@ -173,4 +261,5 @@ class WebsiteSparse(Entity):
             crawl_type=record.crawl_type,
             update_interval=record.update_interval,
             size=record.size,
+            last_crawled_at=record.last_crawled_at,
         )

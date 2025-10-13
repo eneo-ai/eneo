@@ -203,3 +203,30 @@ class InfoBlobRepository:
         stmt = sa.select(InfoBlobs.title).where(InfoBlobs.website_id == website_id)
         result = await self.session.scalars(stmt)
         return list(result)
+
+    async def batch_delete_by_titles_and_website(
+        self, titles: list[str], website_id: UUID
+    ) -> int:
+        """Delete multiple info blobs by titles in a single query.
+
+        Why: Reduces N queries to 1 query for better performance during re-crawls.
+        Uses SQLAlchemy's .in_() method for efficient batch deletion.
+
+        Args:
+            titles: List of blob titles to delete
+            website_id: Website UUID for tenant isolation
+
+        Returns:
+            Number of blobs deleted
+        """
+        if not titles:
+            return 0
+
+        # Use SQLAlchemy's .in_() method for array-based deletion
+        # This is more efficient than N individual DELETE queries
+        stmt = sa.delete(InfoBlobs).where(
+            InfoBlobs.website_id == website_id, InfoBlobs.title.in_(titles)
+        )
+
+        result = await self.session.execute(stmt)
+        return result.rowcount

@@ -1,7 +1,8 @@
 from typing import Optional
 from uuid import UUID
+from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select
+from sqlalchemy import BigInteger, ForeignKey, and_, select, TIMESTAMP, String
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import EmbeddingModels
@@ -36,6 +37,26 @@ class Websites(BasePublic):
     crawl_type: Mapped[CrawlType] = mapped_column()
     update_interval: Mapped[str] = mapped_column()
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_crawled_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # HTTP Basic Auth fields (all nullable - feature is optional)
+    http_auth_username: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        comment='HTTP Basic Auth username'
+    )
+    encrypted_auth_password: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        comment='Fernet-encrypted password (base64 encoded)'
+    )
+    http_auth_domain: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        comment='Domain for auth (from URL netloc)'
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

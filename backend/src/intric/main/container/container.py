@@ -220,7 +220,9 @@ from intric.tenants.tenant_repo import TenantRepository
 from intric.tenants.tenant_service import TenantService
 from intric.token_usage.application.token_usage_service import TokenUsageService
 from intric.token_usage.infrastructure.token_usage_analyzer import TokenUsageAnalyzer
-from intric.token_usage.infrastructure.user_token_usage_analyzer import UserTokenUsageAnalyzer
+from intric.token_usage.infrastructure.user_token_usage_analyzer import (
+    UserTokenUsageAnalyzer,
+)
 from intric.transcription_models.application import TranscriptionModelCRUDService
 from intric.transcription_models.domain import TranscriptionModelRepository
 from intric.transcription_models.domain.transcription_model_service import (
@@ -233,10 +235,14 @@ from intric.users.user import UserInDB
 from intric.users.user_assembler import UserAssembler
 from intric.users.user_repo import UsersRepository
 from intric.users.user_service import UserService
+from intric.websites.application.crawl_scheduler_service import CrawlSchedulerService
 from intric.websites.application.website_crud_service import WebsiteCRUDService
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.crawl_service import CrawlService
 from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
+from intric.websites.infrastructure.http_auth_encryption import (
+    HttpAuthEncryptionService,
+)
 from intric.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
@@ -263,7 +269,9 @@ class Container(containers.DeclarativeContainer):
     app_template_factory = providers.Factory(AppTemplateFactory)
 
     # App factory must be defined before it's used by the space factory
-    app_factory = providers.Factory(AppFactory, app_template_factory=app_template_factory)
+    app_factory = providers.Factory(
+        AppFactory, app_template_factory=app_template_factory
+    )
 
     # Assistant factory must be defined before it's used by the space factory
     assistant_factory = providers.Factory(
@@ -329,30 +337,43 @@ class Container(containers.DeclarativeContainer):
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
     confluence_token_mapper = providers.Factory(OauthTokenMapper)
 
+    # HTTP auth encryption service (singleton for shared encryption key)
+    http_auth_encryption = providers.Singleton(HttpAuthEncryptionService)
+
     # Repositories
     user_repo = providers.Factory(UsersRepository, session=session)
     tenant_repo = providers.Factory(TenantRepository, session=session)
     settings_repo = providers.Factory(SettingsRepository, session=session)
     tenant_repo = providers.Factory(TenantRepository, session=session)
-    prompt_repo = providers.Factory(PromptRepository, session=session, factory=prompt_factory)
+    prompt_repo = providers.Factory(
+        PromptRepository, session=session, factory=prompt_factory
+    )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
     group_repo = providers.Factory(GroupRepository, session=session)
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
     allowed_origin_repo = providers.Factory(AllowedOriginRepository, session=session)
-    predefined_roles_repo = providers.Factory(PredefinedRolesRepository, session=session)
+    predefined_roles_repo = providers.Factory(
+        PredefinedRolesRepository, session=session
+    )
     role_repo = providers.Factory(RolesRepository, session=session)
-    completion_model_repo = providers.Factory(CompletionModelsRepository, session=session)
+    completion_model_repo = providers.Factory(
+        CompletionModelsRepository, session=session
+    )
     # TODO: rename when the first repo is not used anymore
     completion_model_repo2 = providers.Factory(
         CompletionModelRepository, session=session, user=user
     )
-    embedding_model_repo2 = providers.Factory(EmbeddingModelRepository, session=session, user=user)
+    embedding_model_repo2 = providers.Factory(
+        EmbeddingModelRepository, session=session, user=user
+    )
     transcription_model_repo = providers.Factory(
         TranscriptionModelRepository, session=session, user=user
     )
-    embedding_model_repo = providers.Factory(AdminEmbeddingModelsService, session=session)
+    embedding_model_repo = providers.Factory(
+        AdminEmbeddingModelsService, session=session
+    )
     website_sparse_repo = providers.Factory(WebsiteSparseRepository, session=session)
     integration_knowledge_repo = providers.Factory(
         IntegrationKnowledgeRepoImpl,
@@ -402,7 +423,9 @@ class Container(containers.DeclarativeContainer):
         prompt_repo=prompt_repo,
         transcription_model_repo=transcription_model_repo,
     )
-    app_run_repo = providers.Factory(AppRunRepository, session=session, factory=app_run_factory)
+    app_run_repo = providers.Factory(
+        AppRunRepository, session=session, factory=app_run_factory
+    )
     service_repo = providers.Factory(
         ServiceRepository,
         session=session,
@@ -418,6 +441,7 @@ class Container(containers.DeclarativeContainer):
         completion_model_repo=completion_model_repo2,
         transcription_model_repo=transcription_model_repo,
         embedding_model_repo=embedding_model_repo2,
+        http_auth_encryption=http_auth_encryption,
     )
     app_template_repo = providers.Factory(
         AppTemplateRepository, factory=app_template_factory, session=session
@@ -580,13 +604,17 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         task_service=task_service,
     )
-    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
+    quota_service = providers.Factory(
+        QuotaService, user=user, info_blob_repo=info_blob_repo
+    )
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
         user=user,
         repo=allowed_origin_repo,
     )
-    predefined_role_service = providers.Factory(PredefinedRolesService, repo=predefined_roles_repo)
+    predefined_role_service = providers.Factory(
+        PredefinedRolesService, repo=predefined_roles_repo
+    )
     role_service = providers.Factory(RolesService, user=user, repo=role_repo)
     settings_service = providers.Factory(
         SettingService,
@@ -594,7 +622,12 @@ class Container(containers.DeclarativeContainer):
         repo=settings_repo,
         ai_models_service=ai_models_service,
     )
-    crawl_service = providers.Factory(CrawlService, repo=crawl_run_repo, task_service=task_service)
+    crawl_service = providers.Factory(
+        CrawlService, repo=crawl_run_repo, task_service=task_service
+    )
+    crawl_scheduler_service = providers.Factory(
+        CrawlSchedulerService, website_sparse_repo=website_sparse_repo
+    )
     update_website_size_service = providers.Factory(
         UpdateWebsiteSizeService,
         session=session,
@@ -704,7 +737,9 @@ class Container(containers.DeclarativeContainer):
         assistant_service=assistant_service,
         space_repo=space_repo,
     )
-    user_group_service = providers.Factory(UserGroupsService, user=user, repo=user_groups_repo)
+    user_group_service = providers.Factory(
+        UserGroupsService, user=user, repo=user_groups_repo
+    )
     admin_service = providers.Factory(
         AdminService,
         user=user,

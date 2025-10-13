@@ -7,6 +7,14 @@
   /* TODO colours */
   const intervalInfo: Record<string, { label: string; color: Label.LabelColor; tooltip?: string }> =
     {
+      daily: {
+        color: "green",
+        label: m.every_day()
+      },
+      every_other_day: {
+        color: "green",
+        label: m.every_other_day()
+      },
       weekly: {
         color: "green",
         label: m.weekly()

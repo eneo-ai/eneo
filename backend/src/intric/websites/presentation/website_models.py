@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 from pydantic.networks import HttpUrl
 
 from intric.embedding_models.presentation.embedding_model_models import (
@@ -97,6 +97,10 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     latest_crawl: Optional[CrawlRunPublic]
     embedding_model: EmbeddingModelPublic
     metadata: WebsiteMetadata
+    requires_http_auth: bool = Field(
+        description="Whether this website requires HTTP Basic Authentication. "
+                    "Credentials are never exposed via API."
+    )
 
     @classmethod
     def from_domain(cls, website: Website):
@@ -118,6 +122,7 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             embedding_model=EmbeddingModelPublic.from_domain(website.embedding_model),
             metadata=WebsiteMetadata(size=website.size),
             permissions=website.permissions,
+            requires_http_auth=website.requires_auth,
         )
 
 
@@ -128,6 +133,34 @@ class WebsiteCreate(BaseModel):
     crawl_type: CrawlType = CrawlType.CRAWL
     update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: Optional[ModelId] = None
+    """Embedding model to use (defaults to space's default model if not specified)"""
+
+    http_auth_username: Optional[str] = Field(
+        None,
+        description="Username for HTTP Basic Authentication (optional)"
+    )
+    """Username for HTTP Basic Authentication. Required for auth-protected websites."""
+
+    http_auth_password: Optional[str] = Field(
+        None,
+        description="Password for HTTP Basic Authentication (optional). "
+                    "Must be provided together with username."
+    )
+    """Password for HTTP Basic Authentication. Must be provided with username."""
+
+    @field_validator('http_auth_password')
+    @classmethod
+    def validate_auth_fields_together(cls, v, info):
+        """Ensure username and password are provided together."""
+        username = info.data.get('http_auth_username')
+
+        # If one is provided, both must be provided
+        if (username and not v) or (v and not username):
+            raise ValueError(
+                "http_auth_username and http_auth_password must be provided together"
+            )
+
+        return v
 
 
 class WebsiteUpdate(BaseModel):
@@ -136,3 +169,60 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
+
+    http_auth_username: Union[str, None, NotProvided] = Field(
+        NOT_PROVIDED,
+        description="Username for HTTP Basic Authentication. "
+                    "Set to null to remove auth. Must be provided with password."
+    )
+    http_auth_password: Union[str, None, NotProvided] = Field(
+        NOT_PROVIDED,
+        description="Password for HTTP Basic Authentication. "
+                    "Set to null to remove auth. Must be provided with username."
+    )
+
+    @field_validator('http_auth_password')
+    @classmethod
+    def validate_auth_update_together(cls, v, info):
+        """Ensure username and password are updated together."""
+        username = info.data.get('http_auth_username')
+
+        # Both must be NOT_PROVIDED, both must be None, or both must have values
+        if username is NOT_PROVIDED and v is not NOT_PROVIDED:
+            raise ValueError("Cannot update password without username")
+        if v is NOT_PROVIDED and username is not NOT_PROVIDED:
+            raise ValueError("Cannot update username without password")
+
+        # If updating to None (removing auth), both must be None
+        if username is None and v is not None:
+            raise ValueError("To remove auth, both username and password must be null")
+        if v is None and username is not None:
+            raise ValueError("To remove auth, both username and password must be null")
+
+        return v
+
+
+class BulkCrawlRequest(BaseModel):
+    """Request model for triggering crawls on multiple websites."""
+
+    website_ids: list[UUID]
+    """List of website IDs to crawl (max 50 per request for safety)"""
+
+
+class BulkCrawlResponse(BaseModel):
+    """Response model for bulk crawl operations."""
+
+    total: int
+    """Total number of websites requested"""
+
+    queued: int
+    """Number of crawls successfully queued"""
+
+    failed: int
+    """Number of websites that failed to queue"""
+
+    crawl_runs: list[CrawlRunPublic]
+    """Details of successfully queued crawl runs"""
+
+    errors: list[dict[str, str]]
+    """List of errors for failed websites (website_id and error message)"""
