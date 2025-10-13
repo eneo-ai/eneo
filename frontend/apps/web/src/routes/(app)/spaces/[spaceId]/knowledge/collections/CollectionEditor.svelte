@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -38,15 +39,18 @@
   async function createCollection() {
     isProcessing = true;
     try {
-      await intric.groups.create({
-        spaceId: $currentSpace.id,
+      const { id: spaceId, routeId } = $currentSpace;
+      const newCollection = await intric.groups.create({
+        spaceId,
         name: collectionName,
         embedding_model: embeddingModel
       });
 
-      refreshCurrentSpace();
+      await refreshCurrentSpace("knowledge");
       collectionName = "";
+      embeddingModel = undefined;
       $showDialog = false;
+      await goto(`/spaces/${routeId}/knowledge/collections/${newCollection.id}`);
     } catch (error) {
       alert(error);
       console.error(error);
