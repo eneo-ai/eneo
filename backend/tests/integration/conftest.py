@@ -4,6 +4,7 @@ Integration test fixtures using testcontainers for PostgreSQL and Redis.
 import os
 from pathlib import Path
 
+
 # IMPORTANT: Configure environment variables BEFORE importing testcontainers
 # Disable Ryuk (testcontainers cleanup container) in devcontainer environments
 # Ryuk can have connection issues in nested Docker setups
@@ -381,17 +382,47 @@ def db_container(setup_database):
     Provide a context manager for a database container with session.
 
     This is the preferred way to access services that need database access.
-    The container comes pre-configured with a session in an active transaction.
+    The container comes pre-configured with a session, user, and tenant
+    in an active transaction.
 
     Usage:
+        # Default: uses admin user (test@example.com)
         async with db_container() as container:
             user_repo = container.user_repo()
-            user = await user_repo.get_user_by_email("test@example.com")
+            users = await user_repo.get_all_users()
+
+        # With custom user:
+        async with db_container(user=custom_user) as container:
+            # Services now use custom_user instead of admin user
+            service = container.some_service()
+
+        # With custom user and tenant:
+        async with db_container(user=custom_user, tenant=custom_tenant) as container:
+            service = container.some_service()
     """
     @contextlib.asynccontextmanager
-    async def _container():
+    async def _container(user=None, tenant=None):
         async with sessionmanager.session() as session, session.begin():
-            container = Container(session=providers.Object(session))
+            # Create container with session first to fetch user and tenant if not provided
+            temp_container = Container(session=providers.Object(session))
+
+            # Fetch default user if not provided
+            if user is None:
+                user_repo = temp_container.user_repo()
+                user = await user_repo.get_user_by_email("test@example.com")
+
+            # Fetch default tenant if not provided
+            if tenant is None:
+                tenant_repo = temp_container.tenant_repo()
+                tenants = await tenant_repo.get_all_tenants()
+                tenant = tenants[0] if tenants else None
+
+            # Create container with all dependencies
+            container = Container(
+                session=providers.Object(session),
+                user=providers.Object(user),
+                tenant=providers.Object(tenant),
+            )
             yield container
 
     return _container
