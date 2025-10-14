@@ -24,7 +24,12 @@
           {#if job.status === "in progress" || job.status === "queued"}
             <IconLoadingSpinner class="animate-spin" />
           {:else if job.status === "failed"}
-            <div class="text-negative-default w-48 text-right font-medium">{m.failed()}</div>
+            <div class="w-48 min-w-48 text-right">
+              <div class="text-negative-default font-medium">{m.failed()}</div>
+              {#if job.result_location}
+                <div class="text-secondary text-xs whitespace-normal">{job.result_location}</div>
+              {/if}
+            </div>
           {:else if job.status === "complete"}
             <div class="text-positive-default w-48 text-right font-medium">{m.done()}</div>
           {/if}
