@@ -342,12 +342,14 @@ export class ChatService {
 
         // Use the token-estimate endpoint
         const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
-          method: "get",
+          method: "post",
           params: {
-            path: { id: this.#chatPartner.id },
-            query: {
-              file_ids: fileIds.join(','),
-              text: fullText
+            path: { id: this.#chatPartner.id }
+          },
+          requestBody: {
+            "application/json": {
+              text: fullText,
+              file_ids: fileIds
             }
           }
         });
@@ -404,6 +406,13 @@ export class ChatService {
 
     // If attachments changed, recalculate file tokens from cached values
     if (attachmentsChanged) {
+      const estimateTokensFromSize = (fileSize?: number | null) => {
+        const fallbackSize = 100_000; // ~250 tokens fallback when size is unknown
+        const size = fileSize && fileSize > 0 ? fileSize : fallbackSize;
+        const bytesPerToken = 400; // generous average across supported formats
+        return Math.ceil(size / bytesPerToken);
+      };
+
       // Calculate total file tokens from cached per-file values
       let totalFileTokens = 0;
       for (const fileId of attachmentIds) {
@@ -412,7 +421,8 @@ export class ChatService {
           totalFileTokens += this.#fileTokenMap.get(fileId)!;
         } else {
           // Rough estimate for new files (will be updated by API)
-          const roughEstimate = 1000;
+          const attachment = attachments.find(file => file.id === fileId);
+          const roughEstimate = estimateTokensFromSize(attachment?.size);
           this.#fileTokenMap.set(fileId, roughEstimate);
           totalFileTokens += roughEstimate;
         }
@@ -464,44 +474,26 @@ export class ChatService {
         // Use the request attachment IDs that were captured at the time of the request
         const fileIds = requestAttachmentIdString.split(',').filter(Boolean);
 
-        // Use the token-estimate endpoint
-        // Truncate text to avoid URL length limits (keep under 6000 chars for safety)
-        const MAX_TEXT_LENGTH = 6000;
-        const truncatedText = text.length > MAX_TEXT_LENGTH
-          ? text.substring(0, MAX_TEXT_LENGTH)
-          : text;
-
         const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
-          method: "get",
+          method: "post",
           params: {
-            path: { id: this.#chatPartner.id },
-            query: {
-              file_ids: fileIds.join(','),
-              text: truncatedText
+            path: { id: this.#chatPartner.id }
+          },
+          requestBody: {
+            "application/json": {
+              text,
+              file_ids: fileIds
             }
           }
         });
 
-        // Learn token density from API response and scale if needed
-        let adjustedBreakdown = response?.breakdown;
         if (response?.breakdown) {
           const apiTextTokens = response.breakdown.text || 0;
-          const apiTextLength = text.length > MAX_TEXT_LENGTH ? MAX_TEXT_LENGTH : text.length;
+          const apiTextLength = text.length;
 
-          // Update learned ratio from API response (with smoothing)
           if (apiTextTokens > 0 && apiTextLength > 0) {
             const newCharsPerToken = apiTextLength / apiTextTokens;
-            // Smooth the learning: 80% old value, 20% new observation
             this.#learnedCharsPerToken = this.#learnedCharsPerToken * 0.8 + newCharsPerToken * 0.2;
-          }
-
-          // If text was truncated, scale up the token estimate proportionally
-          if (text.length > MAX_TEXT_LENGTH) {
-            const scaleFactor = text.length / MAX_TEXT_LENGTH;
-            adjustedBreakdown = {
-              ...response.breakdown,
-              text: Math.ceil(apiTextTokens * scaleFactor)
-            };
           }
         }
 
@@ -510,8 +502,8 @@ export class ChatService {
           return; // Silently skip stale responses
         }
 
-        if (adjustedBreakdown) {
-          const breakdown = adjustedBreakdown;
+        const breakdown = response?.breakdown;
+        if (breakdown) {
 
           // Update per-file token cache with accurate values from API
           if (response?.breakdown?.file_details) {

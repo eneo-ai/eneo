@@ -53,8 +53,18 @@ class ModelInfo(BaseModel):
     prompt_tokens: Optional[int] = None
 
 
+class TokenEstimateRequest(BaseModel):
+    """Request payload for estimating tokens."""
+
+    text: str = Field(default="", description="User input text to evaluate")
+    file_ids: list[UUID] = Field(
+        default_factory=list, description="List of file IDs to include in the estimate"
+    )
+
+
 class TokenEstimateBreakdown(BaseModel):
     """Breakdown of token usage by source."""
+
     prompt: int = Field(description="Tokens used by assistant prompt")
     text: int = Field(description="Tokens used by user input text")
     files: int = Field(description="Total tokens used by all files")

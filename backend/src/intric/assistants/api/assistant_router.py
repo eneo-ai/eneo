@@ -10,6 +10,7 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    TokenEstimateRequest,
     TokenEstimateResponse,
     TokenEstimateBreakdown,
 )
@@ -36,6 +37,11 @@ from intric.spaces.api.space_models import TransferApplicationRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# These limits keep the endpoint responsive while still supporting large-context models.
+DEFAULT_CHARS_PER_TOKEN = 6  # Generous factor to cover dense languages
+MAX_TOTAL_FILE_SIZE = 50_000_000  # 50 MB
+MAX_ABSOLUTE_TEXT_LENGTH = 2_000_000  # 2 MB safeguard in case of misconfigured models
 
 
 @router.post(
@@ -391,7 +397,7 @@ async def publish_assistant(
     return assembler.from_assistant_to_model(assistant=assistant, permissions=permissions)
 
 
-@router.get(
+@router.post(
     "/{id}/token-estimate",
     response_model=TokenEstimateResponse,
     responses=responses.get_responses([400, 404]),
@@ -399,16 +405,16 @@ async def publish_assistant(
 )
 async def estimate_tokens(
     id: UUID,
-    text: str = Query(default="", description="User input text"),
-    file_ids: str = Query(default="", description="Comma-separated file IDs"),
+    payload: TokenEstimateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ) -> TokenEstimateResponse:
-    """
-    Estimate token usage for the given text and files in the context of this assistant.
+    """Estimate token usage for the given text and files for this assistant.
 
-    Returns token count, percentage of context window used, and detailed breakdown
-    to help users understand their context usage before sending messages.
+    The Space Actor + FileService stack already enforces tenant and ownership
+    boundaries; this endpoint adds lightweight guardrails to keep the operation
+    responsive while supporting large-context models.
     """
+
     from intric.tokens.token_utils import count_tokens, count_assistant_prompt_tokens
 
     service = container.assistant_service()
@@ -417,46 +423,64 @@ async def estimate_tokens(
     assistant, _ = await service.get_assistant(assistant_id=id)
 
     if not assistant.completion_model:
-        raise HTTPException(
-            status_code=400,
-            detail="Assistant has no model configured"
-        )
+        raise HTTPException(status_code=400, detail="Assistant has no model configured")
 
     model_name = assistant.completion_model.name
     token_limit = assistant.completion_model.token_limit
 
-    # Prompt tokens consume context that users need to account for
+    max_chars = min(
+        MAX_ABSOLUTE_TEXT_LENGTH,
+        int(token_limit * DEFAULT_CHARS_PER_TOKEN) if token_limit else MAX_ABSOLUTE_TEXT_LENGTH,
+    )
+
+    text = payload.text or ""
+    if len(text) > max_chars:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Text input is too large for this assistant's context window. "
+                f"Reduce the size below {max_chars:,} characters."
+            ),
+        )
+
+    file_ids = payload.file_ids or []
+
     prompt_tokens = 0
     if assistant.prompt and assistant.prompt.prompt:
         prompt_tokens = count_assistant_prompt_tokens(assistant.prompt.prompt, model_name)
 
     text_tokens = count_tokens(text, model_name) if text else 0
-    file_tokens = 0
-    file_token_details = {}
-    if file_ids:
-        # Parse and validate file IDs
-        file_id_list = []
-        for fid in file_ids.split(","):
-            if fid.strip():
-                try:
-                    file_id_list.append(UUID(fid.strip()))
-                except ValueError:
-                    logger.warning(f"Invalid UUID in file_ids: {fid}")
-                    continue
-        if file_id_list:
-            files = await file_service.get_files_by_ids(file_id_list)
-            for file in files:
-                tokens = 0
-                if file.text:
-                    try:
-                        tokens = count_tokens(file.text, model_name)
-                    except Exception as e:
-                        # Don't fail the request - provide fallback estimate
-                        logger.error(f"Failed to count tokens for file {file.id}: {e}")
-                        tokens = len(file.text) // 4
 
-                file_tokens += tokens
-                file_token_details[str(file.id)] = tokens
+    file_tokens = 0
+    file_token_details: dict[str, int] = {}
+    if file_ids:
+        files = await file_service.get_files_by_ids(file_ids)
+        accessible_ids = {file.id for file in files}
+        missing_ids = [str(file_id) for file_id in file_ids if file_id not in accessible_ids]
+        if missing_ids:
+            logger.debug("Skipped token estimate for filtered file IDs: %s", missing_ids)
+
+        total_file_size = sum(file.size for file in files if file.size is not None)
+        if total_file_size > MAX_TOTAL_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Combined file content exceeds 50 MB limit. "
+                    "Remove one or more files and try again."
+                ),
+            )
+
+        for file in files:
+            tokens = 0
+            if file.text:
+                try:
+                    tokens = count_tokens(file.text, model_name)
+                except Exception as exc:  # pragma: no cover - defensive logging path
+                    logger.error("Failed to count tokens for file %s: %s", file.id, exc)
+                    tokens = len(file.text) // 4
+
+            file_tokens += tokens
+            file_token_details[str(file.id)] = tokens
 
     total_tokens = prompt_tokens + text_tokens + file_tokens
     percentage = (total_tokens / token_limit) * 100 if token_limit > 0 else 0
@@ -469,6 +493,6 @@ async def estimate_tokens(
             prompt=prompt_tokens,
             text=text_tokens,
             files=file_tokens,
-            file_details=file_token_details
-        )
+            file_details=file_token_details,
+        ),
     )
