@@ -79,11 +79,15 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Install dependencies
+        working-directory: ./backend
+        run: uv sync
+
       - name: Get changed Python files
         id: changed-files
         run: |
           # Get changed Python files in backend directory
-          CHANGED_FILES=$(git diff --name-only --diff-filter=AM origin/main...HEAD -- 'backend/**/*.py' | tr '\n' ' ')
+          CHANGED_FILES=$(git diff --name-only --diff-filter=AM origin/main...HEAD -- 'backend/**/*.py' | sed 's|^backend/||' | tr '\n' ' ')
           echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
           echo "Changed Python files: $CHANGED_FILES"
           if [ -z "$CHANGED_FILES" ]; then
@@ -95,16 +99,16 @@ jobs:
 
       - name: 🚨 Critical Issues Check (BLOCKING)
         if: steps.changed-files.outputs.skip == 'false'
+        working-directory: ./backend
         run: |
-          cd backend
           uv run ruff check ${{ steps.changed-files.outputs.files }} --config pyproject.toml --output-format github
         # This step will FAIL the workflow for critical issues
 
       - name: 💅 Style & Format Check (NON-BLOCKING)
         if: steps.changed-files.outputs.skip == 'false'
+        working-directory: ./backend
         run: |
           echo "Checking style issues in: ${{ steps.changed-files.outputs.files }}"
-          cd backend
           uv run ruff check --config pyproject.toml --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
         continue-on-error: true
 
