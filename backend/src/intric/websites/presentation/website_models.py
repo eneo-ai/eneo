@@ -99,13 +99,28 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     metadata: WebsiteMetadata
     requires_http_auth: bool = Field(
         description="Whether this website requires HTTP Basic Authentication. "
-                    "Credentials are never exposed via API."
+        "Credentials are never exposed via API."
+    )
+    consecutive_failures: int = Field(
+        default=0,
+        description="Number of consecutive crawl failures. Resets to 0 on successful crawl.",
+    )
+    next_retry_at: Optional[datetime] = Field(
+        default=None,
+        description="When to retry after failures (null = no backoff). "
+        "Uses exponential backoff: 1h → 2h → 4h → 8h → 16h → 24h max.",
+    )
+    is_auto_disabled: bool = Field(
+        description="True if website was auto-disabled after 10 consecutive failures. "
+        "User must manually change update_interval to re-enable."
     )
 
     @classmethod
     def from_domain(cls, website: Website):
         latest_crawl = (
-            CrawlRunPublic.from_domain(website.latest_crawl) if website.latest_crawl else None
+            CrawlRunPublic.from_domain(website.latest_crawl)
+            if website.latest_crawl
+            else None
         )
 
         return cls(
@@ -123,6 +138,9 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             metadata=WebsiteMetadata(size=website.size),
             permissions=website.permissions,
             requires_http_auth=website.requires_auth,
+            consecutive_failures=website.consecutive_failures,
+            next_retry_at=website.next_retry_at,
+            is_auto_disabled=website.is_auto_disabled,
         )
 
 
@@ -136,23 +154,22 @@ class WebsiteCreate(BaseModel):
     """Embedding model to use (defaults to space's default model if not specified)"""
 
     http_auth_username: Optional[str] = Field(
-        None,
-        description="Username for HTTP Basic Authentication (optional)"
+        None, description="Username for HTTP Basic Authentication (optional)"
     )
     """Username for HTTP Basic Authentication. Required for auth-protected websites."""
 
     http_auth_password: Optional[str] = Field(
         None,
         description="Password for HTTP Basic Authentication (optional). "
-                    "Must be provided together with username."
+        "Must be provided together with username.",
     )
     """Password for HTTP Basic Authentication. Must be provided with username."""
 
-    @field_validator('http_auth_password')
+    @field_validator("http_auth_password")
     @classmethod
     def validate_auth_fields_together(cls, v, info):
         """Ensure username and password are provided together."""
-        username = info.data.get('http_auth_username')
+        username = info.data.get("http_auth_username")
 
         # If one is provided, both must be provided
         if (username and not v) or (v and not username):
@@ -173,19 +190,19 @@ class WebsiteUpdate(BaseModel):
     http_auth_username: Union[str, None, NotProvided] = Field(
         NOT_PROVIDED,
         description="Username for HTTP Basic Authentication. "
-                    "Set to null to remove auth. Must be provided with password."
+        "Set to null to remove auth. Must be provided with password.",
     )
     http_auth_password: Union[str, None, NotProvided] = Field(
         NOT_PROVIDED,
         description="Password for HTTP Basic Authentication. "
-                    "Set to null to remove auth. Must be provided with username."
+        "Set to null to remove auth. Must be provided with username.",
     )
 
-    @field_validator('http_auth_password')
+    @field_validator("http_auth_password")
     @classmethod
     def validate_auth_update_together(cls, v, info):
         """Ensure username and password are updated together."""
-        username = info.data.get('http_auth_username')
+        username = info.data.get("http_auth_username")
 
         # Both must be NOT_PROVIDED, both must be None, or both must have values
         if username is NOT_PROVIDED and v is not NOT_PROVIDED:

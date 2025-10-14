@@ -4,11 +4,10 @@ Why: Centralizes scheduling logic for better maintainability and testing.
 Engine-agnostic design allows future crawler engines without changes.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from intric.main.logging import get_logger
-from intric.websites.domain.website import UpdateInterval
 
 if TYPE_CHECKING:
     from intric.websites.domain.website import WebsiteSparse
@@ -38,7 +37,7 @@ class CrawlSchedulerService:
         """
         logger.info("Determining websites due for crawling")
 
-        today = datetime.now().date()
+        today = datetime.now(timezone.utc).date()  # Use UTC to match DB and cron
         due_websites = await self.website_sparse_repo.get_due_websites(today)
 
         logger.info(f"Found {len(due_websites)} websites due for crawling")

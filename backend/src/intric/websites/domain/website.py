@@ -20,10 +20,13 @@ class UpdateInterval(str, Enum):
 
     Why: Provides flexible scheduling options for automated crawling.
     """
+
     NEVER = "never"
-    DAILY = "daily"                    # Crawl every day at 3 AM Swedish time
-    EVERY_OTHER_DAY = "every_other_day"  # Crawl every 2 days at 3 AM Swedish time
-    WEEKLY = "weekly"                  # Crawl every Friday at 3 AM Swedish time
+    DAILY = "daily"  # Crawl every day at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
+    EVERY_OTHER_DAY = "every_other_day"  # Crawl every 2 days at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
+    WEEKLY = (
+        "weekly"  # Crawl every Friday at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
+    )
 
 
 class Website(Entity):
@@ -45,6 +48,8 @@ class Website(Entity):
         latest_crawl: Optional["CrawlRun"],
         last_crawled_at: Optional["datetime"] = None,
         http_auth: Optional[HttpAuthCredentials] = None,
+        consecutive_failures: int = 0,
+        next_retry_at: Optional["datetime"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -60,11 +65,24 @@ class Website(Entity):
         self.latest_crawl = latest_crawl
         self.last_crawled_at = last_crawled_at
         self.http_auth = http_auth
+        self.consecutive_failures = consecutive_failures
+        self.next_retry_at = next_retry_at
 
     @property
     def requires_auth(self) -> bool:
         """Domain rule: Website requires auth if credentials are present."""
         return self.http_auth is not None
+
+    @property
+    def is_auto_disabled(self) -> bool:
+        """Domain rule: Website is auto-disabled if circuit breaker triggered.
+
+        Why: Distinguishes user-set NEVER from system auto-disable after failures.
+        """
+        return (
+            self.update_interval == UpdateInterval.NEVER
+            and self.consecutive_failures >= 10
+        )
 
     def set_http_auth(self, username: str, password: str) -> "Website":
         """Set HTTP auth credentials for this website.
@@ -82,9 +100,7 @@ class Website(Entity):
             ValueError: If credentials are invalid
         """
         self.http_auth = HttpAuthCredentials.from_website_url(
-            username=username,
-            password=password,
-            website_url=self.url
+            username=username, password=password, website_url=self.url
         )
         return self
 
@@ -159,9 +175,13 @@ class Website(Entity):
             update_interval=record.update_interval,
             embedding_model=embedding_model,
             size=record.size,
-            latest_crawl=CrawlRun.to_domain(record.latest_crawl) if record.latest_crawl else None,
+            latest_crawl=CrawlRun.to_domain(record.latest_crawl)
+            if record.latest_crawl
+            else None,
             last_crawled_at=record.last_crawled_at,
             http_auth=http_auth,
+            consecutive_failures=record.consecutive_failures,
+            next_retry_at=record.next_retry_at,
         )
 
     def update(
@@ -184,14 +204,25 @@ class Website(Entity):
             self.crawl_type = crawl_type
         if update_interval is not NOT_PROVIDED:
             self.update_interval = update_interval
+            # Reset circuit breaker when user manually changes schedule
+            # Why: User action indicates intent to retry, regardless of past failures
+            if self.consecutive_failures >= 10:
+                self.consecutive_failures = 0
+                self.next_retry_at = None
 
         # Handle auth updates (both must be provided together or both None)
-        if http_auth_username is not NOT_PROVIDED or http_auth_password is not NOT_PROVIDED:
+        if (
+            http_auth_username is not NOT_PROVIDED
+            or http_auth_password is not NOT_PROVIDED
+        ):
             # If either is explicitly None, remove auth
             if http_auth_username is None or http_auth_password is None:
                 self.remove_http_auth()
             # If both provided, set/update auth
-            elif http_auth_username is not NOT_PROVIDED and http_auth_password is not NOT_PROVIDED:
+            elif (
+                http_auth_username is not NOT_PROVIDED
+                and http_auth_password is not NOT_PROVIDED
+            ):
                 self.set_http_auth(http_auth_username, http_auth_password)
             # If only one provided, that's an error
             else:
@@ -231,6 +262,8 @@ class WebsiteSparse(Entity):
         update_interval: UpdateInterval,
         size: int,
         last_crawled_at: Optional["datetime"],
+        consecutive_failures: int = 0,
+        next_retry_at: Optional["datetime"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
@@ -244,6 +277,8 @@ class WebsiteSparse(Entity):
         self.update_interval = update_interval
         self.size = size
         self.last_crawled_at = last_crawled_at
+        self.consecutive_failures = consecutive_failures
+        self.next_retry_at = next_retry_at
 
     @classmethod
     def to_domain(cls, record: "WebsitesTable") -> "WebsiteSparse":
@@ -262,4 +297,6 @@ class WebsiteSparse(Entity):
             update_interval=record.update_interval,
             size=record.size,
             last_crawled_at=record.last_crawled_at,
+            consecutive_failures=record.consecutive_failures,
+            next_retry_at=record.next_retry_at,
         )

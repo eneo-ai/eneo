@@ -30,12 +30,14 @@ async def crawl(job_id: str, params: CrawlTask, container: Container):
     return await crawl_task(job_id=job_id, params=params, container=container)
 
 
-@worker.cron_job(hour=1, minute=0)  # Daily at 1:00 UTC (3:00 AM Swedish time)
+@worker.cron_job(
+    hour=1, minute=0
+)  # Daily at 1:00 UTC (2:00 AM Swedish winter, 3:00 AM summer)
 async def crawl_all_websites(container: Container):
     """Daily cron job to process websites based on their update intervals.
 
     Why: Single daily cron is simpler to maintain than multiple schedules.
-    Runs at 3 AM Swedish time to minimize user impact.
+    Runs at 1:00 UTC to minimize user impact (2 AM Swedish winter / 3 AM Swedish summer).
 
     Schedule handles:
     - DAILY: Every day

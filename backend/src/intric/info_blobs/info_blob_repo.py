@@ -28,7 +28,9 @@ class InfoBlobRepository:
             InfoBlobInDB,
             with_options=[
                 selectinload(InfoBlobs.group),
-                selectinload(InfoBlobs.group).selectinload(CollectionsTable.embedding_model),
+                selectinload(InfoBlobs.group).selectinload(
+                    CollectionsTable.embedding_model
+                ),
                 selectinload(InfoBlobs.embedding_model),
                 selectinload(InfoBlobs.website),
             ],
@@ -48,7 +50,9 @@ class InfoBlobRepository:
         return website
 
     async def _get_integration_knowledge(self, knowledge_id: UUID):
-        stmt = sa.select(IntegrationKnowledge).where(IntegrationKnowledge.id == knowledge_id)
+        stmt = sa.select(IntegrationKnowledge).where(
+            IntegrationKnowledge.id == knowledge_id
+        )
         knowledge = await self.session.scalar(stmt)
 
         return knowledge
@@ -93,7 +97,9 @@ class InfoBlobRepository:
 
         stmt = (
             sa.update(InfoBlobs)
-            .values(size=sa.func.coalesce(chunks_size_subquery + current_size_subquery, 0))
+            .values(
+                size=sa.func.coalesce(chunks_size_subquery + current_size_subquery, 0)
+            )
             .where(InfoBlobs.id == info_blob_id)
             .returning(InfoBlobs)
         )
@@ -123,12 +129,16 @@ class InfoBlobRepository:
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
 
-    async def delete_by_title_and_group(self, title: str, group_id: UUID) -> InfoBlobInDB:
+    async def delete_by_title_and_group(
+        self, title: str, group_id: UUID
+    ) -> InfoBlobInDB:
         return await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
 
-    async def delete_by_title_and_website(self, title: str, website_id: UUID) -> InfoBlobInDB:
+    async def delete_by_title_and_website(
+        self, title: str, website_id: UUID
+    ) -> InfoBlobInDB:
         return await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.website_id: website_id}
         )
@@ -147,14 +157,18 @@ class InfoBlobRepository:
         return await self.delegate.get_models_from_query(query)
 
     async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
-        return await self.delegate.filter_by(conditions={InfoBlobs.website_id: website_id})
+        return await self.delegate.filter_by(
+            conditions={InfoBlobs.website_id: website_id}
+        )
 
     async def delete(self, id: int) -> InfoBlobInDB:
         return await self.delegate.delete(id)
 
     async def get_count_of_group(self, group_id: UUID):
         stmt = (
-            sa.select(sa.func.count()).select_from(InfoBlobs).where(InfoBlobs.group_id == group_id)
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.group_id == group_id)
         )
 
         return await self.session.scalar(stmt)
@@ -230,3 +244,22 @@ class InfoBlobRepository:
 
         result = await self.session.execute(stmt)
         return result.rowcount
+
+    async def get_content_hash(self, website_id: UUID, title: str) -> bytes | None:
+        """Get content hash for a specific page.
+
+        Why: Enables content-based change detection to skip re-processing unchanged pages.
+        Uses composite index (website_id, title) for efficient lookup.
+
+        Args:
+            website_id: Website UUID
+            title: Page title/URL
+
+        Returns:
+            32-byte SHA-256 hash or None if page doesn't exist or hash not computed
+        """
+        stmt = sa.select(InfoBlobs.content_hash).where(
+            InfoBlobs.website_id == website_id, InfoBlobs.title == title
+        )
+        result = await self.session.scalar(stmt)
+        return result

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
@@ -57,18 +57,25 @@ class WebsiteSparseRepository:
         Returns:
             List of websites due for crawling
         """
-        # Calculate threshold timestamps
-        one_day_ago = datetime.combine(today, datetime.min.time()) - timedelta(days=1)
-        two_days_ago = datetime.combine(today, datetime.min.time()) - timedelta(days=2)
-        seven_days_ago = datetime.combine(today, datetime.min.time()) - timedelta(days=7)
+        # Calculate threshold timestamps with timezone awareness
+        # Why: Comparing against TIMESTAMP(timezone=True) column requires timezone-aware datetimes
+        one_day_ago = datetime.combine(
+            today, datetime.min.time(), tzinfo=timezone.utc
+        ) - timedelta(days=1)
+        two_days_ago = datetime.combine(
+            today, datetime.min.time(), tzinfo=timezone.utc
+        ) - timedelta(days=2)
+        seven_days_ago = datetime.combine(
+            today, datetime.min.time(), tzinfo=timezone.utc
+        ) - timedelta(days=7)
 
         # DAILY: crawl if last_crawled_at is NULL or >= 1 day ago
         cond_daily = sa.and_(
             WebsitesTable.update_interval == UpdateInterval.DAILY,
             sa.or_(
                 WebsitesTable.last_crawled_at.is_(None),
-                WebsitesTable.last_crawled_at <= one_day_ago
-            )
+                WebsitesTable.last_crawled_at <= one_day_ago,
+            ),
         )
 
         # EVERY_OTHER_DAY: crawl if NULL or >= 2 days ago
@@ -76,8 +83,8 @@ class WebsiteSparseRepository:
             WebsitesTable.update_interval == UpdateInterval.EVERY_OTHER_DAY,
             sa.or_(
                 WebsitesTable.last_crawled_at.is_(None),
-                WebsitesTable.last_crawled_at <= two_days_ago
-            )
+                WebsitesTable.last_crawled_at <= two_days_ago,
+            ),
         )
 
         # WEEKLY: only on Fridays AND >= 7 days ago (or never crawled)
@@ -87,16 +94,29 @@ class WebsiteSparseRepository:
                 WebsitesTable.update_interval == UpdateInterval.WEEKLY,
                 sa.or_(
                     WebsitesTable.last_crawled_at.is_(None),
-                    WebsitesTable.last_crawled_at <= seven_days_ago
-                )
+                    WebsitesTable.last_crawled_at <= seven_days_ago,
+                ),
             )
         else:
             # Not Friday - no weekly websites are due
             cond_weekly = sa.literal(False)
 
-        # Combine all conditions
+        # Circuit breaker condition: Only crawl sites that are not in backoff period
+        # Why: Prevent wasted resources on persistently failing websites
+        # NULL = no failures, non-NULL = backoff until this time
+        # Use explicit UTC to match timezone-aware column and avoid DB timezone issues
+        now_utc = datetime.now(timezone.utc)
+        cond_circuit_breaker = sa.or_(
+            WebsitesTable.next_retry_at.is_(None),
+            WebsitesTable.next_retry_at <= now_utc,
+        )
+
+        # Combine all conditions with circuit breaker
         stmt = sa.select(WebsitesTable).where(
-            sa.or_(cond_daily, cond_every_other_day, cond_weekly)
+            sa.and_(
+                sa.or_(cond_daily, cond_every_other_day, cond_weekly),
+                cond_circuit_breaker,
+            )
         )
 
         websites_db = await self.session.scalars(stmt)

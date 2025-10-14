@@ -1,6 +1,7 @@
 import asyncio
+import hashlib
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from dependency_injector import providers
@@ -12,6 +13,8 @@ from intric.main.config import SETTINGS
 from intric.websites.crawl_dependencies.crawl_models import (
     CrawlTask,
 )
+# Note: Only using hashlib for file content hashing (works reliably)
+# Page content hashing removed due to dynamic content (timestamps, etc.)
 
 logger = get_logger(__name__)
 
@@ -23,7 +26,7 @@ async def process_page_with_retry(
     params,
     website,
     max_retries: int | None = None,
-    retry_delay: float | None = None
+    retry_delay: float | None = None,
 ) -> tuple[bool, str | None]:
     """Process a single page with retry logic.
 
@@ -65,7 +68,7 @@ async def process_page_with_retry(
         except Exception as e:
             if attempt < max_retries - 1:
                 # Calculate exponential backoff: 1s, 2s, 4s
-                delay = retry_delay * (2 ** attempt)
+                delay = retry_delay * (2**attempt)
                 logger.warning(
                     f"Failed to process page {page.url} (attempt {attempt + 1}/{max_retries}): {str(e)}. "
                     f"Retrying in {delay}s...",
@@ -75,7 +78,7 @@ async def process_page_with_retry(
                         "page_url": page.url,
                         "attempt": attempt + 1,
                         "max_retries": max_retries,
-                    }
+                    },
                 )
                 await asyncio.sleep(delay)
             else:
@@ -88,7 +91,7 @@ async def process_page_with_retry(
                         "tenant_id": str(website.tenant_id),
                         "page_url": page.url,
                         "attempts": max_retries,
-                    }
+                    },
                 )
                 return False, error_msg
 
@@ -136,11 +139,13 @@ async def queue_website_crawls(container: Container):
                         "tenant_id": str(website.tenant_id),
                         "space_id": str(website.space_id),
                         "user_id": str(website.user_id),
-                    }
+                    },
                 )
                 continue
 
-        logger.info(f"Crawl queueing completed: {successful_crawls} successful, {failed_crawls} failed")
+        logger.info(
+            f"Crawl queueing completed: {successful_crawls} successful, {failed_crawls} failed"
+        )
 
     return True
 
@@ -150,12 +155,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     async with task_manager.set_status_on_exception():
         # Initialize timing tracking for performance analysis
         timings = {
-            'fetch_existing_titles': 0.0,
-            'crawl_and_parse': 0.0,
-            'process_pages': 0.0,
-            'process_files': 0.0,
-            'cleanup_deleted': 0.0,
-            'update_size': 0.0,
+            "fetch_existing_titles": 0.0,
+            "crawl_and_parse": 0.0,
+            "process_pages": 0.0,
+            "process_files": 0.0,
+            "cleanup_deleted": 0.0,
+            "update_size": 0.0,
         }
 
         # Get resources
@@ -177,7 +182,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "website_id": str(params.website_id),
                     "website_tenant_id": str(website.tenant_id),
                     "container_tenant_id": str(current_tenant.id),
-                }
+                },
             )
             raise Exception(
                 f"Tenant isolation violation: website {params.website_id} "
@@ -198,7 +203,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "website_id": str(params.website_id),
                     "tenant_id": str(website.tenant_id),
-                }
+                },
             )
 
         num_pages = 0
@@ -206,6 +211,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         num_failed_pages = 0
         num_failed_files = 0
         num_deleted_blobs = 0
+        num_skipped_files = 0  # Files with unchanged content (hash match)
 
         # Unfortunately, in this type of background task we still need to care about the session atm
         session = container.session()
@@ -214,8 +220,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         # Why: Fail-fast with clear error message instead of confusing 401 errors during crawl
         # If database has auth fields but domain object doesn't, decryption failed
         from intric.database.tables.websites_table import Websites as WebsitesTable
+
         website_db_check = await session.execute(
-            sa.select(WebsitesTable.http_auth_username).where(WebsitesTable.id == params.website_id)
+            sa.select(WebsitesTable.http_auth_username).where(
+                WebsitesTable.id == params.website_id
+            )
         )
         has_auth_in_db = website_db_check.scalar() is not None
 
@@ -226,17 +235,32 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "website_id": str(params.website_id),
                     "tenant_id": str(website.tenant_id),
-                }
+                },
             )
             raise Exception(
                 f"HTTP auth decryption failed for website {params.website_id}. "
                 "Check WEBSITE_AUTH_ENCRYPTION_KEY configuration."
             )
 
-        # Measure time to fetch existing titles
+        # Fetch existing titles for stale detection and file hashes for skip optimization
         start = time.time()
-        existing_titles = await info_blob_repo.get_titles_of_website(params.website_id)
-        timings['fetch_existing_titles'] = time.time() - start
+        from intric.database.tables.info_blobs_table import InfoBlobs
+
+        stmt = sa.select(InfoBlobs.title, InfoBlobs.content_hash).where(
+            InfoBlobs.website_id == params.website_id
+        )
+        result = await session.execute(stmt)
+
+        # Build lookups for O(1) operations
+        existing_file_hashes = {}  # filename -> hash (for files only)
+        existing_titles = []
+        for title, hash_bytes in result:
+            existing_titles.append(title)
+            # Only store hashes for files (not URLs) - files have simple stems like "document.pdf"
+            if hash_bytes is not None and not title.startswith("http"):
+                existing_file_hashes[title] = hash_bytes
+
+        timings["fetch_existing_titles"] = time.time() - start
 
         # ✅ PERFORMANCE FIX: Use set instead of list for O(1) membership tests
         # This changes O(n²) to O(n) when checking "if title not in crawled_titles"
@@ -252,7 +276,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             http_user=http_user,  # Pass auth credentials as strings
             http_pass=http_pass,
         ) as crawl:
-            timings['crawl_and_parse'] = time.time() - start
+            timings["crawl_and_parse"] = time.time() - start
 
             # Measure page processing time
             process_start = time.time()
@@ -260,7 +284,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             for page in crawl.pages:
                 num_pages += 1
 
-                # Use retry logic for each page
+                # Process page with retry logic
                 success, error_message = await process_page_with_retry(
                     page=page,
                     uploader=uploader,
@@ -270,7 +294,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
                 if success:
-                    # ✅ PERFORMANCE FIX: Use set.add() instead of list.append()
                     crawled_titles.add(page.url)
                 else:
                     num_failed_pages += 1
@@ -280,17 +303,42 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "website_id": str(params.website_id),
                             "tenant_id": str(website.tenant_id),
                             "page_url": page.url,
-                        }
+                        },
                     )
-            timings['process_pages'] = time.time() - process_start
+            timings["process_pages"] = time.time() - process_start
 
             # Measure file processing time
             file_start = time.time()
-            # Process downloaded files
+            # Process downloaded files with content hash checking
             for file in crawl.files:
                 num_files += 1
                 try:
                     filename = file.stem
+
+                    # ✅ PERFORMANCE OPTIMIZATION: Hash checking for files
+                    # Hash raw bytes directly (no HTML normalization for files)
+                    file_bytes = file.read_bytes()
+                    new_file_hash = hashlib.sha256(file_bytes).digest()
+
+                    existing_file_hash = existing_file_hashes.get(filename)
+
+                    if (
+                        existing_file_hash is not None
+                        and new_file_hash == existing_file_hash
+                    ):
+                        # File unchanged - skip processing
+                        num_skipped_files += 1
+                        crawled_titles.add(filename)
+                        logger.debug(
+                            f"Skipping unchanged file: {filename}",
+                            extra={
+                                "website_id": str(params.website_id),
+                                "file_name": filename,
+                            },
+                        )
+                        continue
+
+                    # File changed or new - process normally
                     # Create explicit savepoint for proper transaction handling
                     savepoint = await session.begin_nested()
                     try:
@@ -299,6 +347,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             filename=filename,
                             website_id=params.website_id,
                             embedding_model=website.embedding_model,
+                            content_hash=new_file_hash,  # Store hash during creation
                         )
                         await savepoint.commit()
                         # ✅ PERFORMANCE FIX: Use set.add() instead of list.append()
@@ -313,16 +362,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "website_id": str(params.website_id),
                             "tenant_id": str(website.tenant_id),
                             "filename": filename,
-                        }
+                        },
                     )
                     num_failed_files += 1
-            timings['process_files'] = time.time() - file_start
+            timings["process_files"] = time.time() - file_start
 
         # Measure cleanup phase (delete stale blobs)
         cleanup_start = time.time()
         # ✅ PERFORMANCE FIX: Batch delete instead of N individual queries
         # Collect stale titles (set difference is O(n))
-        stale_titles = [title for title in existing_titles if title not in crawled_titles]
+        stale_titles = [
+            title for title in existing_titles if title not in crawled_titles
+        ]
 
         # Batch delete in ONE query instead of N individual queries
         if stale_titles:
@@ -336,31 +387,37 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "website_id": str(params.website_id),
                         "num_stale": len(stale_titles),
                         "num_deleted": num_deleted_blobs,
-                    }
+                    },
                 )
         else:
             num_deleted_blobs = 0
-        timings['cleanup_deleted'] = time.time() - cleanup_start
+        timings["cleanup_deleted"] = time.time() - cleanup_start
 
         # Measure website size update
         update_start = time.time()
         await update_website_size_service.update_website_size(website_id=website.id)
-        timings['update_size'] = time.time() - update_start
+        timings["update_size"] = time.time() - update_start
 
         # Update last_crawled_at timestamp
         # Why: Track crawl completion time independently from record updates
+        # Use database server time for timezone correctness
         from intric.database.tables.websites_table import Websites as WebsitesTable
+
         stmt = (
             sa.update(WebsitesTable)
             .where(WebsitesTable.id == params.website_id)
             .where(WebsitesTable.tenant_id == website.tenant_id)  # Tenant isolation
-            .values(last_crawled_at=datetime.now())
+            .values(last_crawled_at=sa.func.now())
         )
         await session.execute(stmt)
 
+        # Calculate file skip rate for performance analysis
+        file_skip_rate = (num_skipped_files / num_files * 100) if num_files > 0 else 0
+
         logger.info(
             f"Crawler finished. {num_pages} pages, {num_failed_pages} failed. "
-            f"{num_files} files, {num_failed_files} failed. "
+            f"{num_files} files, {num_failed_files} failed, "
+            f"{num_skipped_files} skipped (unchanged) [{file_skip_rate:.1f}%]. "
             f"{num_deleted_blobs} blobs deleted."
         )
 
@@ -381,8 +438,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "pages_failed": num_failed_pages,
                 "files_crawled": num_files,
                 "files_failed": num_failed_files,
+                "files_skipped": num_skipped_files,
+                "file_skip_rate_percent": file_skip_rate,
                 "blobs_deleted": num_deleted_blobs,
-            }
+            },
         )
 
         crawl_run = await crawl_run_repo.one(params.run_id)
@@ -394,6 +453,95 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         )
         await crawl_run_repo.update(crawl_run)
 
-        task_manager.result_location = f"/api/v1/websites/{params.website_id}/info-blobs/"
+        # ✅ CIRCUIT BREAKER: Update failure tracking and exponential backoff
+        # Why: Prevent wasted resources on persistently failing websites
+        from intric.database.tables.websites_table import Websites as WebsitesTable
+
+        # Determine if crawl was successful
+        # Success = at least one item (page or file) AND not everything failed
+        total_items = num_pages + num_files
+        total_failed = num_failed_pages + num_failed_files
+
+        crawl_successful = total_items > 0 and total_failed < total_items
+
+        if crawl_successful:
+            # Success: Reset circuit breaker
+            logger.info(
+                f"Crawl successful, resetting circuit breaker for website {params.website_id}"
+            )
+            stmt = (
+                sa.update(WebsitesTable)
+                .where(WebsitesTable.id == params.website_id)
+                .where(WebsitesTable.tenant_id == website.tenant_id)
+                .values(consecutive_failures=0, next_retry_at=None)
+            )
+            await session.execute(stmt)
+        else:
+            # Failure: Increment counter and apply exponential backoff
+            # Get current failure count
+            current_failures_stmt = sa.select(WebsitesTable.consecutive_failures).where(
+                WebsitesTable.id == params.website_id
+            )
+            current_failures = await session.scalar(current_failures_stmt) or 0
+            new_failures = current_failures + 1
+
+            # Auto-disable threshold: Stop trying after too many failures
+            # Why: Prevents wasting resources on permanently dead sites
+            MAX_FAILURES_BEFORE_DISABLE = 10
+
+            if new_failures >= MAX_FAILURES_BEFORE_DISABLE:
+                # Auto-disable: Set update_interval to NEVER
+                from intric.websites.domain.website import UpdateInterval
+
+                logger.error(
+                    f"Website {params.website_id} auto-disabled after {new_failures} consecutive failures. "
+                    f"User action required to re-enable.",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "url": website.url,
+                        "consecutive_failures": new_failures,
+                    },
+                )
+
+                stmt = (
+                    sa.update(WebsitesTable)
+                    .where(WebsitesTable.id == params.website_id)
+                    .where(WebsitesTable.tenant_id == website.tenant_id)
+                    .values(
+                        consecutive_failures=new_failures,
+                        update_interval=UpdateInterval.NEVER,  # Auto-disable
+                        next_retry_at=None,  # Clear retry time
+                    )
+                )
+                await session.execute(stmt)
+            else:
+                # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
+                # Formula: 2^(n-1) gives: 1st=1h, 2nd=2h, 3rd=4h, 4th=8h, 5th=16h, 6th+=24h
+                backoff_hours = min(2 ** (new_failures - 1), 24)
+                next_retry = datetime.now(timezone.utc) + timedelta(hours=backoff_hours)
+
+                logger.warning(
+                    f"Crawl failed for website {params.website_id}. "
+                    f"Failure {new_failures}/{MAX_FAILURES_BEFORE_DISABLE}, "
+                    f"backoff {backoff_hours}h until {next_retry.isoformat()}",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "consecutive_failures": new_failures,
+                        "backoff_hours": backoff_hours,
+                        "next_retry_at": next_retry.isoformat(),
+                    },
+                )
+
+                stmt = (
+                    sa.update(WebsitesTable)
+                    .where(WebsitesTable.id == params.website_id)
+                    .where(WebsitesTable.tenant_id == website.tenant_id)
+                    .values(consecutive_failures=new_failures, next_retry_at=next_retry)
+                )
+                await session.execute(stmt)
+
+        task_manager.result_location = (
+            f"/api/v1/websites/{params.website_id}/info-blobs/"
+        )
 
     return task_manager.successful()

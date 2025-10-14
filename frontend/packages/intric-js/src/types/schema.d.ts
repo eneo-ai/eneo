@@ -6428,6 +6428,22 @@ export interface components {
        * @description Whether this website requires HTTP Basic Authentication. Credentials are never exposed via API.
        */
       requires_http_auth: boolean;
+      /**
+       * Consecutive Failures
+       * @description Number of consecutive crawl failures. Resets to 0 on successful crawl.
+       * @default 0
+       */
+      consecutive_failures?: number;
+      /**
+       * Next Retry At
+       * @description When to retry after failures (null = no backoff). Uses exponential backoff: 1h → 2h → 4h → 8h → 16h → 24h max.
+       */
+      next_retry_at?: string | null;
+      /**
+       * Is Auto Disabled
+       * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
+       */
+      is_auto_disabled: boolean;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {

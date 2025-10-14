@@ -23,8 +23,12 @@ class CrawlRuns(BasePublic):
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
-    website_id: Mapped[UUID] = mapped_column(ForeignKey("websites.id", ondelete="CASCADE"))
-    job_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Jobs.id, ondelete="SET NULL"))
+    website_id: Mapped[UUID] = mapped_column(
+        ForeignKey("websites.id", ondelete="CASCADE")
+    )
+    job_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Jobs.id, ondelete="SET NULL")
+    )
 
     # Relationships
     job: Mapped[Jobs] = relationship()
@@ -43,19 +47,25 @@ class Websites(BasePublic):
 
     # HTTP Basic Auth fields (all nullable - feature is optional)
     http_auth_username: Mapped[Optional[str]] = mapped_column(
-        String,
-        nullable=True,
-        comment='HTTP Basic Auth username'
+        String, nullable=True, comment="HTTP Basic Auth username"
     )
     encrypted_auth_password: Mapped[Optional[str]] = mapped_column(
-        String,
-        nullable=True,
-        comment='Fernet-encrypted password (base64 encoded)'
+        String, nullable=True, comment="Fernet-encrypted password (base64 encoded)"
     )
     http_auth_domain: Mapped[Optional[str]] = mapped_column(
-        String,
+        String, nullable=True, comment="Domain for auth (from URL netloc)"
+    )
+
+    # Circuit breaker fields for failure handling
+    consecutive_failures: Mapped[int] = mapped_column(
+        default=0,
+        server_default="0",
+        comment="Number of consecutive crawl failures for exponential backoff",
+    )
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
         nullable=True,
-        comment='Domain for auth (from URL netloc)'
+        comment="Timestamp when website should be retried after failures",
     )
 
     # Foreign keys
@@ -65,7 +75,9 @@ class Websites(BasePublic):
     group_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CollectionsTable.id, ondelete="SET NULL")
     )
-    space_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
+    space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE")
+    )
 
     # Relationships
     group: Mapped[CollectionsTable] = relationship()
@@ -84,7 +96,9 @@ class Websites(BasePublic):
 
         latest_crawl_relationship = relationship(
             CrawlRuns,
-            primaryjoin=and_(CrawlRuns.id == most_recent_crawl, CrawlRuns.website_id == cls.id),
+            primaryjoin=and_(
+                CrawlRuns.id == most_recent_crawl, CrawlRuns.website_id == cls.id
+            ),
             uselist=False,
             viewonly=True,
         )
