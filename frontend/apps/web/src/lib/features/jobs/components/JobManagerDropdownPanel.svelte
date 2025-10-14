@@ -44,9 +44,16 @@
             <div class="flex-shrink truncate pr-4">{upload.file.name}</div>
             {#if upload.status === "queued"}
               <div class="text-secondary w-48 min-w-48 text-right">{m.waiting()}</div>
+            {:else if upload.status === "failed"}
+              <div class="w-48 min-w-48 text-right">
+                <div class="text-negative-default font-medium">{m.failed()}</div>
+                {#if upload.errorMessage}
+                  <div class="text-secondary text-xs whitespace-normal">{upload.errorMessage}</div>
+                {/if}
+              </div>
             {:else if upload.status === "completed"}
               <div class="text-positive-default w-48 min-w-48 text-right font-medium">{m.done()}</div>
-            {:else if true}
+            {:else}
               <div class="flex w-48 min-w-48 items-center gap-x-4">
                 <ProgressBar progress={upload.progress}></ProgressBar>
                 <div class="w-10 text-end">

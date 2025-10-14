@@ -43,9 +43,11 @@ class JobService:
 
         return await self.job_repo.update_job(job_id, job_update)
 
-    async def fail_job(self, job_id: UUID):
+    async def fail_job(self, job_id: UUID, error_message: str | None = None):
         job_update = JobUpdate(
-            status=Status.FAILED, finished_at=datetime.now(timezone.utc)
+            status=Status.FAILED,
+            finished_at=datetime.now(timezone.utc),
+            result_location=error_message,
         )
 
         return await self.job_repo.update_job(job_id, job_update)

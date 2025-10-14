@@ -4,6 +4,7 @@ import { createContext } from "$lib/core/context";
 import type { Intric, Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
 
+import { m } from "$lib/paraglide/messages";
 export { getJobManager, initJobManager };
 
 const [getJobManager, setJobManager] =
@@ -52,9 +53,9 @@ function createJobManager(data: { intric: Intric }) {
       return [];
     }
     const updatedJobs = new Map(
-      // For now we ignore failed jobs in the UI
+      // Keep failed jobs so that we can show their messages in the UI
       jobs
-        .filter((job) => job.status === "in progress" || job.status === "queued")
+        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed")
         .map((job) => [job.id, job])
     );
     if (updatedJobs.size < currentJobs.size) {
@@ -77,7 +78,8 @@ function createJobManager(data: { intric: Intric }) {
       await updateJobs();
       updateJobsInterval = setInterval(async () => {
         const jobs = await updateJobs();
-        if (jobs.length === 0) {
+        const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+        if (!hasActiveJobs) {
           stopUpdatePolling();
         }
       }, updateJobsFrequency_ms);
@@ -99,10 +101,11 @@ function createJobManager(data: { intric: Intric }) {
   type Upload = {
     id: string;
     file: File;
-    status: "queued" | "uploading" | "completed";
+    status: "queued" | "uploading" | "completed" | "failed";
     /// Destination for this file
     groupId: string;
     progress: number;
+    errorMessage?: string;
   };
 
   const currentUploads: Map<string, Upload> = new Map();
@@ -115,7 +118,14 @@ function createJobManager(data: { intric: Intric }) {
   function queueUploads(groupId: string, files: File[]) {
     files.forEach((file) => {
       const id = crypto.randomUUID();
-      currentUploads.set(id, { id, file, status: "queued", progress: 0, groupId });
+      currentUploads.set(id, {
+        id,
+        file,
+        status: "queued",
+        progress: 0,
+        groupId,
+        errorMessage: undefined
+      });
       waitingUploads.add(id);
     });
 
@@ -137,13 +147,16 @@ function createJobManager(data: { intric: Intric }) {
             group_id: upload.groupId,
             file: upload.file,
             onProgress: (ev) => {
-              upload.progress = Math.floor((ev.loaded / ev.total) * 100);
+              if (ev.total > 0) {
+                upload.progress = Math.floor((ev.loaded / ev.total) * 100);
+              }
             }
           })
           .then((job) => {
             // Delete from running uploads
             runningUploads.delete(uploadId);
             upload.status = "completed";
+            upload.errorMessage = undefined;
             addJob(job);
             // Delete from upload list
             // This does not directly update the store, but next time the store is updated this upload will no longer be included
@@ -151,13 +164,22 @@ function createJobManager(data: { intric: Intric }) {
             continueUploadQueue();
           })
           .catch((error) => {
-            alert(
-              `We encountered an error uploading the file ${upload.file.name}\n${error.message}`
-            );
+            const fallbackMessage = m.file_upload_error();
+            const message =
+              error instanceof Error && error.message
+                ? error.message
+                : fallbackMessage;
+            alert(`${fallbackMessage}: ${upload.file.name}\n${message}`);
             runningUploads.delete(uploadId);
-            currentUploads.delete(upload.id);
+            upload.status = "failed";
+            upload.errorMessage = message;
+            upload.progress = 0;
+            currentUploads.set(upload.id, upload);
             console.error("Upload error:", error);
             continueUploadQueue();
+          })
+          .finally(() => {
+            currentUploadsStore.set([...currentUploads.values()]);
           });
       }
     }
@@ -186,16 +208,22 @@ function createJobManager(data: { intric: Intric }) {
   }
 
   function clearFinishedUploads() {
-    const remainingJobs = [...currentUploads.values()].filter(
-      (upload) => upload.status !== "completed"
-    );
-    currentUploadsStore.set(remainingJobs);
+    for (const [id, upload] of currentUploads.entries()) {
+      if (upload.status === "completed" || upload.status === "failed") {
+        currentUploads.delete(id);
+      }
+    }
+    currentUploadsStore.set([...currentUploads.values()]);
   }
 
   const currentlyRunningJobs = derived(
     [currentJobStore, currentUploadsStore],
     ([jobs, uploads]) => {
-      return jobs.length + uploads.length;
+      const activeJobs = jobs.filter((job) => job.status === "in progress" || job.status === "queued");
+      const activeUploads = uploads.filter((upload) =>
+        upload.status === "queued" || upload.status === "uploading"
+      );
+      return activeJobs.length + activeUploads.length;
     }
   );
 

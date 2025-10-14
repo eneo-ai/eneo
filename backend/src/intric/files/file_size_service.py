@@ -39,6 +39,21 @@ class FileSizeService:
         return False
 
     @staticmethod
+    def get_file_size(file: IO):
+        if hasattr(file, "seekable") and file.seekable():
+            current_position = file.tell()
+            file.seek(0, os.SEEK_END)
+            size = file.tell()
+            file.seek(current_position)
+            return size
+
+        total_size = 0
+        for chunk in file:
+            total_size += len(chunk)
+        file.seek(0)
+        return total_size
+
+    @staticmethod
     def get_file_checksum(filepath: Path):
         """Taken from https://stackoverflow.com/a/44873382"""
         h = hashlib.sha256()
