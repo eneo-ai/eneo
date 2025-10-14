@@ -10,7 +10,7 @@
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
   },
-  "packageManager": "bun@1.2.23",
+  "packageManager": "bun@1.3.0",
   "engines": {
     "node": ">=18"
   },

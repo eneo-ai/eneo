@@ -1,5 +1,5 @@
 # Stage 1: Builder using Bun
-FROM oven/bun:1.2.23-slim AS builder
+FROM oven/bun:1.3.0-slim AS builder
 
 WORKDIR /app
 COPY . .

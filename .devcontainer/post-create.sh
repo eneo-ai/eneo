@@ -35,7 +35,7 @@ uv tool install pre-commit
 pre-commit install
 
 # Install Bun
-curl -fsSL https://bun.com/install | bash -s "bun-v1.2.23"
+curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
 
 # Add Bun to PATH for this session
 export PATH="$HOME/.bun/bin:$PATH"
