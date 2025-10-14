@@ -38,7 +38,7 @@
   }
 
   $: tooltip = model.is_locked
-    ? m.model_available_on_request({ email: environment.salesEmail })
+    ? m.model_available_on_request()
     : model.is_org_enabled
       ? m.toggle_to_disable_model()
       : m.toggle_to_enable_model();
