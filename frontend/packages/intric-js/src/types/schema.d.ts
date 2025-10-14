@@ -257,12 +257,13 @@ export interface paths {
   "/api/v1/assistants/{id}/token-estimate": {
     /**
      * Estimate token usage for text and files
-     * @description Estimate token usage for the given text and files in the context of this assistant.
+     * @description Estimate token usage for the given text and files for this assistant.
      *
-     * Returns token count, percentage of context window used, and detailed breakdown
-     * to help users understand their context usage before sending messages.
+     * The Space Actor + FileService stack already enforces tenant and ownership
+     * boundaries; this endpoint adds lightweight guardrails to keep the operation
+     * responsive while supporting large-context models.
      */
-    get: operations["estimate_tokens_api_v1_assistants__id__token_estimate_get"];
+    post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
   };
   "/api/v1/group-chats/{id}/": {
     /**
@@ -5940,6 +5941,23 @@ export interface components {
       };
     };
     /**
+     * TokenEstimateRequest
+     * @description Request payload for estimating tokens.
+     */
+    TokenEstimateRequest: {
+      /**
+       * Text
+       * @description User input text to evaluate
+       * @default
+       */
+      text?: string;
+      /**
+       * File Ids
+       * @description List of file IDs to include in the estimate
+       */
+      file_ids?: string[];
+    };
+    /**
      * TokenEstimateResponse
      * @description Response model for token usage estimation.
      */
@@ -9095,21 +9113,21 @@ export interface operations {
   };
   /**
    * Estimate token usage for text and files
-   * @description Estimate token usage for the given text and files in the context of this assistant.
+   * @description Estimate token usage for the given text and files for this assistant.
    *
-   * Returns token count, percentage of context window used, and detailed breakdown
-   * to help users understand their context usage before sending messages.
+   * The Space Actor + FileService stack already enforces tenant and ownership
+   * boundaries; this endpoint adds lightweight guardrails to keep the operation
+   * responsive while supporting large-context models.
    */
-  estimate_tokens_api_v1_assistants__id__token_estimate_get: {
+  estimate_tokens_api_v1_assistants__id__token_estimate_post: {
     parameters: {
-      query?: {
-        /** @description User input text */
-        text?: string;
-        /** @description Comma-separated file IDs */
-        file_ids?: string;
-      };
       path: {
         id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TokenEstimateRequest"];
       };
     };
     responses: {
