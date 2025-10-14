@@ -7,11 +7,8 @@ Tests website failure tracking and exponential backoff including:
 - Success resets circuit breaker
 """
 
-import pytest
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
-
-from intric.websites.domain.website import UpdateInterval, WebsiteSparse
 
 
 class TestCircuitBreakerSchedulerLogic:
@@ -96,11 +93,7 @@ class TestCircuitBreakerSuccessScenarios:
 
     def test_reset_values_on_success(self):
         """Test that success resets circuit breaker fields."""
-        # Before success: 3 failures, next retry in future
-        consecutive_failures = 3
-        next_retry_at = datetime.now(timezone.utc) + timedelta(hours=8)
-
-        # After success: should reset
+        # After success: should reset to initial state
         consecutive_failures_after = 0
         next_retry_at_after = None
 
@@ -163,7 +156,7 @@ class TestCircuitBreakerEdgeCases:
 
     def test_zero_failures_means_immediate_retry(self):
         """Test that zero failures means next_retry_at is None."""
-        consecutive_failures = 0
+        # With zero failures, next_retry_at should be None
         next_retry_at = None
 
         # Should be able to crawl immediately
@@ -229,8 +222,6 @@ class TestCircuitBreakerIntegration:
 
     def test_persistently_failing_website(self):
         """Simulate a website that keeps failing."""
-        now = datetime.now(timezone.utc)
-
         failure_sequence = []
         consecutive_failures = 0
 
@@ -254,15 +245,13 @@ class TestCircuitBreakerIntegration:
         """Simulate alternating success and failure."""
         # Start clean
         consecutive_failures = 0
-        next_retry_at = None
 
         # Fail once
         consecutive_failures = 1
         assert min(2**consecutive_failures, 24) == 2
 
-        # Recover
+        # Recover (success resets counter)
         consecutive_failures = 0
-        next_retry_at = None
 
         # Fail again
         consecutive_failures = 1
