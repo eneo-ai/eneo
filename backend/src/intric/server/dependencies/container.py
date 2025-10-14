@@ -2,7 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from dependency_injector import providers
-from fastapi import Depends, Security, WebSocketException
+from fastapi import Depends, Request, Security, WebSocketException
 
 from intric.database.database import (
     AsyncSession,
@@ -10,6 +10,7 @@ from intric.database.database import (
     get_session_with_transaction,
     sessionmanager,
 )
+from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
@@ -21,6 +22,22 @@ from intric.server.dependencies.auth_definitions import (
 from intric.users.setup import setup_user
 
 logger = get_logger(__name__)
+
+
+async def _get_api_key_from_header(
+    request: Request,
+) -> str | None:
+    """
+    Dynamically get API key from the header specified in settings.
+
+    Note: We use this instead of APIKeyHeader Security class because APIKeyHeader
+    doesn't work correctly with FastAPI's AsyncClient test client - it returns None
+    even when headers are present. This approach using Request.headers.get() works
+    in both production and test environments.
+    """
+    header_name = get_settings().api_key_header_name
+    api_key = request.headers.get(header_name)
+    return api_key
 
 
 def get_container(
@@ -43,7 +60,7 @@ def get_container(
 
     async def _get_container_with_user(
         token: str = Security(OAUTH2_SCHEME),
-        api_key: str = Security(API_KEY_HEADER),
+        api_key: str = Security(_get_api_key_from_header),
         container: Container = Depends(_get_container),
     ):
         user = await container.user_service().authenticate(token=token, api_key=api_key)

@@ -169,10 +169,9 @@ def override_settings_for_session(test_settings: Settings):
     set_settings(test_settings)
 
     # Reinitialize auth definitions with new settings
-    # This is needed because API_KEY_HEADER and OAUTH2_SCHEME are created at import time
+    # This is needed because OAUTH2_SCHEME is created at import time
     import intric.server.dependencies.auth_definitions as auth_defs
     auth_defs.OAUTH2_SCHEME = auth_defs._get_oauth2_scheme()
-    auth_defs.API_KEY_HEADER = auth_defs._get_api_key_header()
 
     # Verify settings are correct
     print("\n=== Integration Test Setup Verification ===")

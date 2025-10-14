@@ -179,7 +179,7 @@ async def migrate_model_usage(
     """Migrate all usage from one model to another with safety checks"""
     import logging
     logger = logging.getLogger(__name__)
-    
+
     logger.info(
         "Starting migrate_model_usage endpoint",
         extra={
