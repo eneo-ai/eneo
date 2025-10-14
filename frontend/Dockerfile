@@ -1,25 +1,24 @@
-FROM node:20-bullseye-slim AS base
-
-# Stage 1: Get turbo and prepare docker prune/build
-FROM base AS builder
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-# https://github.com/pnpm/pnpm/issues/9029
-RUN npm i -g corepack@latest
-RUN corepack enable
+# Stage 1: Builder using Bun
+FROM oven/bun:1.3.0-slim AS builder
 
 WORKDIR /app
 COPY . .
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
-RUN pnpm run build
 
-# Stage 3: Run app
+# Install dependencies with Bun (uses frozen lockfile)
+RUN bun install --frozen-lockfile
+
+# Build the application
+RUN bun run build
+
+# Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
-FROM base AS runner
+FROM node:20-bullseye-slim AS runner
+
 WORKDIR /app
 COPY --from=builder /app/apps/web/build build/
 COPY --from=builder /app/apps/web/package.json .
+
 EXPOSE 3000
 USER node
 ENV NODE_ENV="production"

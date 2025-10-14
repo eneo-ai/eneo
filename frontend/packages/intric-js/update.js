@@ -36,7 +36,7 @@ async function updateClient(baseUrl) {
 function updateSchema(baseUrl) {
   return new Promise((resolve, reject) => {
     exec(
-      `pnpm exec openapi-typescript ${baseUrl}/openapi.json -o src/types/schema.d.ts`,
+      `bun x openapi-typescript ${baseUrl}/openapi.json -o src/types/schema.d.ts`,
       (err, stdout, stderr) => {
         if (err) {
           console.log(err);
@@ -53,7 +53,7 @@ function updateSchema(baseUrl) {
 
 function runFormatter() {
   return new Promise((resolve, reject) => {
-    const formatProcess = spawn("pnpm", ["run", "format"], { stdio: "inherit" });
+    const formatProcess = spawn("bun", ["run", "format"], { stdio: "inherit" });
 
     formatProcess.on("close", (code) => {
       if (code === 0) {
