@@ -357,3 +357,132 @@ class CredentialResolver:
             "No identity provider configured. "
             "Please set global OIDC_* environment variables or configure tenant-specific federation."
         )
+
+    def get_redirect_uri(self) -> str:
+        """
+        Get redirect_uri for OIDC flows.
+
+        Universal resolution for single-tenant and multi-tenant:
+        1. Tenant federation_config.canonical_public_origin (multi-tenant)
+        2. Global settings.public_origin (single-tenant fallback)
+        3. Error if neither configured
+
+        The canonical_public_origin can be ANY externally-reachable URL:
+        - Proxy URL: https://m00-https-eneo-test.login.sundsvall.se
+        - Clean URL: https://stockholm.eneo.se
+        - Whatever works for that tenant's network topology!
+
+        Returns:
+            str: Complete redirect_uri (origin + path)
+
+        Raises:
+            ValueError: No public origin configured
+
+        Examples:
+            # Single-tenant mode
+            resolver = CredentialResolver(tenant=None, settings=settings)
+            uri = resolver.get_redirect_uri()
+            # Returns: https://{settings.public_origin}/login/callback
+
+            # Multi-tenant mode
+            resolver = CredentialResolver(tenant=tenant_obj, settings=settings)
+            uri = resolver.get_redirect_uri()
+            # Returns: https://{tenant.federation_config.canonical_public_origin}/login/callback
+        """
+        # Get federation config (handles tenant/global resolution)
+        try:
+            federation_config = self.get_federation_config()
+        except ValueError as e:
+            logger.error(
+                "Cannot compute redirect_uri: federation config missing or invalid",
+                extra={
+                    "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    "error": str(e),
+                },
+            )
+            raise ValueError(
+                f"Cannot compute redirect_uri: {e}. "
+                "Ensure OIDC configuration is set up correctly."
+            ) from e
+
+        # Check tenant-specific origin in federation_config
+        origin = federation_config.get("canonical_public_origin")
+
+        # Fallback to global public_origin (single-tenant mode)
+        # Explicit check for None or empty/whitespace strings
+        if origin is None or not origin.strip():
+            origin = self.settings.public_origin
+
+        # Normalize origin by stripping whitespace
+        if isinstance(origin, str):
+            origin = origin.strip()
+
+        if not origin:
+            # Context-aware error message
+            if self.settings.federation_per_tenant_enabled and self.tenant:
+                # Strict mode: tenant MUST configure their own origin
+                logger.error(
+                    f"No canonical_public_origin configured for tenant {self.tenant.name} (strict mode)",
+                    extra={
+                        "tenant_id": str(self.tenant.id),
+                        "tenant_name": self.tenant.name,
+                        "mode": "strict",
+                    },
+                )
+                raise ValueError(
+                    f"No public origin configured for tenant '{self.tenant.name}'. "
+                    f"Federation per tenant is enabled - each tenant must configure canonical_public_origin. "
+                    f"Please configure via:\n"
+                    f"PUT /api/v1/sysadmin/tenants/{self.tenant.id}/federation\n"
+                    f'Body: {{"canonical_public_origin": "https://your-tenant.eneo.se"}}'
+                )
+            else:
+                # Single-tenant mode: need global config
+                tenant_context = f" for tenant '{self.tenant.name}'" if self.tenant else ""
+                logger.error(
+                    f"No public origin configured{tenant_context}",
+                    extra={
+                        "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    },
+                )
+                raise ValueError(
+                    "No public origin configured. "
+                    "Please set PUBLIC_ORIGIN environment variable in your .env file. "
+                    "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
+                )
+
+        # Origin should already be validated and normalized by Settings/Tenant validators
+        # But double-check HTTPS as defense in depth
+        if not origin.startswith("https://"):
+            logger.error(
+                f"Public origin must be HTTPS: {origin}",
+                extra={
+                    "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    "origin": origin,
+                },
+            )
+            raise ValueError(
+                f"Public origin must be an https:// URL for security. Got: {origin}"
+            )
+
+        # Normalize: strip trailing slash (defense in depth)
+        origin = origin.rstrip("/")
+
+        # Get redirect path (support customization per tenant)
+        redirect_path = federation_config.get("redirect_path", "/login/callback")
+
+        redirect_uri = f"{origin}{redirect_path}"
+
+        logger.info(
+            "Redirect URI resolved successfully",
+            extra={
+                "tenant_id": str(self.tenant.id) if self.tenant else None,
+                "tenant_name": self.tenant.name if self.tenant else "single-tenant",
+                "redirect_uri": redirect_uri,
+                "source": "tenant" if federation_config.get("canonical_public_origin") else "global",
+                "metric_name": "oidc.redirect_uri.resolved",
+                "metric_value": 1,
+            },
+        )
+
+        return redirect_uri

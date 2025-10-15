@@ -197,9 +197,6 @@ async def list_tenants(
 )
 async def initiate_auth(
     tenant: str = Query(..., description="Tenant slug (e.g., 'stockholm')"),
-    redirect_uri: str = Query(
-        ..., description="OAuth redirect URI (e.g., 'https://app.example.com/callback')"
-    ),
     state: Optional[str] = Query(
         None, description="Optional frontend-generated CSRF state"
     ),
@@ -211,13 +208,13 @@ async def initiate_auth(
     This endpoint:
     1. Looks up tenant by slug
     2. Resolves tenant's federation config (tenant-specific or global)
-    3. Generates server-signed state (includes tenant context for callback)
-    4. Builds authorization URL with IdP parameters
-    5. Returns URL for frontend to redirect user
+    3. Computes redirect_uri server-side from canonical_public_origin
+    4. Generates server-signed state (includes tenant context for callback)
+    5. Builds authorization URL with IdP parameters
+    6. Returns URL for frontend to redirect user
 
     Args:
         tenant: Tenant slug (from URL parameter)
-        redirect_uri: OAuth redirect URI where IdP sends callback
         state: Optional frontend-generated state for CSRF protection
         container: Dependency injection container
 
@@ -226,7 +223,7 @@ async def initiate_auth(
 
     Raises:
         HTTPException 404: Tenant not found or no slug configured
-        HTTPException 500: No IdP configured for tenant
+        HTTPException 500: No IdP configured for tenant or no public origin
     """
     tenant_repo = container.tenant_repo()
     settings = get_settings()
@@ -268,6 +265,24 @@ async def initiate_auth(
             detail=f"No identity provider configured for tenant '{tenant}'",
         )
 
+    # Resolve redirect_uri server-side
+    try:
+        redirect_uri = credential_resolver.get_redirect_uri()
+    except ValueError as e:
+        logger.error(
+            "Failed to resolve redirect_uri for tenant",
+            extra={
+                "tenant_id": str(tenant_obj.id),
+                "tenant_slug": tenant,
+                "error": str(e),
+            },
+        )
+        raise HTTPException(
+            500,
+            f"No public origin configured for tenant '{tenant}'. "
+            "Contact administrator to configure canonical_public_origin.",
+        )
+
     # Generate server-signed state (includes tenant context for callback validation)
     # State format: JWT with expiry (10 minutes)
     correlation_id = secrets.token_hex(8)  # Generate correlation ID for request tracing
@@ -277,8 +292,8 @@ async def initiate_auth(
         "tenant_slug": tenant,
         "frontend_state": state or "",
         "nonce": secrets.token_hex(16),
-        "redirect_uri": redirect_uri,
-        "correlation_id": correlation_id,  # Add correlation ID to state
+        "redirect_uri": redirect_uri,  # Server-computed, consistent
+        "correlation_id": correlation_id,
         "exp": int(time.time()) + 600,  # Expires in 10 minutes
         "iat": int(time.time()),  # Issued at timestamp
     }
@@ -334,11 +349,12 @@ async def initiate_auth(
     authorization_url = f"{authorization_endpoint}?{urlencode(params)}"
 
     logger.info(
-        f"Authentication initiated for tenant {tenant} (provider: {federation_config.get('provider')})",
+        f"Authentication initiated for tenant {tenant}",
         extra={
             "tenant_id": str(tenant_obj.id),
             "tenant_slug": tenant,
             "provider": federation_config.get("provider"),
+            "redirect_uri": redirect_uri,  # Log server-computed value
             "correlation_id": correlation_id,
         },
     )
@@ -395,6 +411,7 @@ async def auth_callback(
             callback.state, settings.jwt_secret, algorithms=["HS256"]
         )
     except pyjwt.ExpiredSignatureError:
+        # Note: correlation_id not available yet (state decode failed)
         logger.error(
             "State token expired",
             extra={"detail": "Authorization session expired (10 minute timeout)"},
@@ -404,6 +421,7 @@ async def auth_callback(
             detail="Authorization session expired. Please try logging in again.",
         )
     except pyjwt.PyJWTError as e:
+        # Note: correlation_id not available yet (state decode failed)
         logger.error(
             "Invalid state parameter",
             extra={"error": str(e)},
@@ -417,7 +435,7 @@ async def auth_callback(
     tenant_slug = state_payload["tenant_slug"]
     redirect_uri = state_payload["redirect_uri"]
     # Extract correlation ID from state (flows from initiate endpoint)
-    correlation_id = state_payload.get("correlation_id", secrets.token_hex(16))
+    correlation_id = state_payload.get("correlation_id", secrets.token_hex(8))
 
     # Get tenant and federation config
     tenant_repo = container.tenant_repo()
@@ -430,6 +448,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tenant not found",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     encryption_service = container.encryption_service()
@@ -440,11 +459,73 @@ async def auth_callback(
     )
     federation_config = credential_resolver.get_federation_config()
 
+    # SECURITY: Validate redirect_uri from state matches tenant's expected redirect_uri
+    # This provides defense-in-depth against:
+    # 1. State JWT forgery (if JWT_SECRET is compromised)
+    # 2. Configuration drift (if canonical_public_origin changed during auth flow)
+    # 3. Cross-tenant redirect_uri confusion
+    try:
+        expected_redirect_uri = credential_resolver.get_redirect_uri()
+    except ValueError as e:
+        logger.error(
+            "Failed to resolve expected redirect_uri for validation",
+            extra={
+                "tenant_id": str(tenant_id),
+                "tenant_slug": tenant_slug,
+                "correlation_id": correlation_id,
+                "error": str(e),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to validate redirect_uri configuration",
+            headers={"X-Correlation-ID": correlation_id},
+        )
+
+    if redirect_uri != expected_redirect_uri:
+        logger.error(
+            "Redirect URI mismatch between state and tenant configuration",
+            extra={
+                "tenant_id": str(tenant_id),
+                "tenant_slug": tenant_slug,
+                "state_redirect_uri": redirect_uri,
+                "expected_redirect_uri": expected_redirect_uri,
+                "correlation_id": correlation_id,
+                "potential_cause": "Configuration changed during auth flow or state JWT tampering",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Redirect URI mismatch - authentication flow invalid. "
+                "This may occur if tenant configuration changed during login. "
+                "Please try logging in again. "
+                "If this persists, contact your administrator."
+            ),
+            headers={"X-Correlation-ID": correlation_id},
+        )
+
+    logger.debug(
+        "Redirect URI validated successfully",
+        extra={
+            "tenant_id": str(tenant_id),
+            "redirect_uri": redirect_uri,
+            "correlation_id": correlation_id,
+        },
+    )
+
     # Resolve token endpoint
     token_endpoint = federation_config.get("token_endpoint")
     if not token_endpoint and federation_config.get("discovery_endpoint"):
-        discovery = await fetch_discovery(federation_config["discovery_endpoint"])
-        token_endpoint = discovery.get("token_endpoint")
+        try:
+            discovery = await fetch_discovery(federation_config["discovery_endpoint"])
+            token_endpoint = discovery.get("token_endpoint")
+        except HTTPException as e:
+            raise HTTPException(
+                status_code=e.status_code,
+                detail=e.detail,
+                headers={"X-Correlation-ID": correlation_id}
+            ) from e
 
     if not token_endpoint:
         logger.error(
@@ -457,6 +538,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to resolve token endpoint",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # Exchange code for tokens
@@ -489,6 +571,7 @@ async def auth_callback(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Failed to exchange authorization code for tokens",
+                headers={"X-Correlation-ID": correlation_id},
             )
         token_response = await resp.json()
 
@@ -508,13 +591,21 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing id_token or access_token in response",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # Resolve JWKS URI
     jwks_uri = federation_config.get("jwks_uri")
     if not jwks_uri and federation_config.get("discovery_endpoint"):
-        discovery = await fetch_discovery(federation_config["discovery_endpoint"])
-        jwks_uri = discovery.get("jwks_uri")
+        try:
+            discovery = await fetch_discovery(federation_config["discovery_endpoint"])
+            jwks_uri = discovery.get("jwks_uri")
+        except HTTPException as e:
+            raise HTTPException(
+                status_code=e.status_code,
+                detail=e.detail,
+                headers={"X-Correlation-ID": correlation_id}
+            ) from e
 
     if not jwks_uri:
         logger.error(
@@ -527,6 +618,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to resolve JWKS URI",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # Validate ID token using existing auth_service method
@@ -568,6 +660,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to validate ID token signature",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # Validate and decode ID token (conditional at_hash validation from Task 2)
@@ -609,6 +702,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email claim not found in ID token",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # CRITICAL: Email domain validation
@@ -630,6 +724,7 @@ async def auth_callback(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Email domain '{email_domain}' is not allowed for this organization. "
                 f"Contact your administrator to add your domain.",
+                headers={"X-Correlation-ID": correlation_id},
             )
 
     # Lookup existing user (NO user creation - users must already exist)
@@ -649,6 +744,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User not found. Contact your administrator for access.",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # Verify user belongs to correct tenant
@@ -665,6 +761,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied for this organization.",
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     # Create JWT token for existing user

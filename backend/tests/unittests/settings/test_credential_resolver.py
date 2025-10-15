@@ -512,3 +512,89 @@ def test_no_tenant_no_global_oidc_raises(mock_settings_no_oidc):
         match=r"No identity provider configured"
     ):
         resolver.get_federation_config()
+
+
+# ============================================================================
+# Redirect URI Tests
+# ============================================================================
+
+
+def test_get_redirect_uri_single_tenant_with_proxy_url(monkeypatch):
+    """Test single-tenant with proxy URL (Sundsvall case)."""
+    monkeypatch.setenv("PUBLIC_ORIGIN", "https://m00-https-eneo-test.login.sundsvall.se")
+    monkeypatch.setenv("OIDC_DISCOVERY_ENDPOINT", "https://example.com/.well-known/openid-configuration")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "test-client")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "test-secret")
+
+    settings = Settings()
+    resolver = CredentialResolver(tenant=None, settings=settings)
+
+    redirect_uri = resolver.get_redirect_uri()
+
+    assert redirect_uri == "https://m00-https-eneo-test.login.sundsvall.se/login/callback"
+
+
+def test_get_redirect_uri_multi_tenant_with_clean_url(monkeypatch):
+    """Test multi-tenant with clean URL (Stockholm case)."""
+    monkeypatch.setenv("OIDC_DISCOVERY_ENDPOINT", "https://example.com/.well-known/openid-configuration")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "test-client")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "test-secret")
+
+    settings = Settings()
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Stockholm",
+        quota_limit=1024**3,
+        federation_config={
+            "provider": "entra_id",
+            "client_id": "stockholm-client",
+            "client_secret": "secret",
+            "discovery_endpoint": "https://login.microsoftonline.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://stockholm.eneo.se",
+        },
+    )
+    resolver = CredentialResolver(tenant=tenant, settings=settings)
+
+    redirect_uri = resolver.get_redirect_uri()
+
+    assert redirect_uri == "https://stockholm.eneo.se/login/callback"
+
+
+def test_get_redirect_uri_custom_path(monkeypatch):
+    """Test custom redirect_path per tenant."""
+    monkeypatch.setenv("OIDC_DISCOVERY_ENDPOINT", "https://example.com/.well-known/openid-configuration")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "test-client")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "test-secret")
+
+    settings = Settings()
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Custom",
+        quota_limit=1024**3,
+        federation_config={
+            "provider": "okta",
+            "client_id": "client",
+            "client_secret": "secret",
+            "discovery_endpoint": "https://okta.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://custom.eneo.se",
+            "redirect_path": "/auth/callback",
+        },
+    )
+    resolver = CredentialResolver(tenant=tenant, settings=settings)
+
+    redirect_uri = resolver.get_redirect_uri()
+
+    assert redirect_uri == "https://custom.eneo.se/auth/callback"
+
+
+def test_get_redirect_uri_no_config_raises(monkeypatch):
+    """Test that missing config raises ValueError."""
+    # Clear all OIDC env vars
+    for key in ["PUBLIC_ORIGIN", "OIDC_DISCOVERY_ENDPOINT", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"]:
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings()
+    resolver = CredentialResolver(tenant=None, settings=settings)
+
+    with pytest.raises(ValueError, match="No public origin configured"):
+        resolver.get_redirect_uri()
