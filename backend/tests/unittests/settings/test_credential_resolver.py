@@ -182,6 +182,55 @@ def test_case_insensitive_provider_names(
     assert resolver.get_api_key("ANTHROPIC") == "sk-tenant-anthropic-key-456"
 
 
+def test_missing_required_field_for_tenant_raises():
+    """Tenant credential missing required field should raise ValueError."""
+
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="tenant-missing-endpoint",
+        quota_limit=1024**3,
+        api_credentials={
+            "vllm": {
+                "api_key": "tenant-vllm-key",
+                # endpoint intentionally omitted to simulate misconfiguration
+            }
+        },
+    )
+
+    settings = Settings(
+        tenant_credentials_enabled=True,
+        vllm_model_url="http://global-vllm",
+    )
+
+    resolver = CredentialResolver(tenant, settings)
+
+    match_text = "missing required field 'endpoint'"
+    with pytest.raises(ValueError, match=match_text):
+        resolver.get_credential_field("vllm", "endpoint", fallback="http://fallback")
+
+
+def test_missing_field_in_single_tenant_mode_uses_fallback():
+    """When strict mode disabled, missing field falls back to global value."""
+
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="single-tenant",
+        quota_limit=1024**3,
+        api_credentials={},
+    )
+
+    fallback_endpoint = "http://shared-vllm"
+    settings = Settings(
+        tenant_credentials_enabled=False,
+        vllm_model_url=fallback_endpoint,
+    )
+
+    resolver = CredentialResolver(tenant, settings)
+
+    endpoint = resolver.get_credential_field("vllm", "endpoint", fallback=fallback_endpoint)
+    assert endpoint == fallback_endpoint
+
+
 def test_all_six_providers(monkeypatch):
     """All six providers work correctly (openai, azure, anthropic, berget, mistral, ovhcloud).
 
