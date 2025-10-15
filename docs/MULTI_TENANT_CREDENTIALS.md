@@ -374,15 +374,15 @@ curl -X PUT /api/v1/sysadmin/tenants/goteborg1/credentials/vllm \
 
 ```bash
 # Tenant A: Uses OpenAI (international, cost-effective)
-PUT /tenants/tenant_a/credentials/openai
+PUT /api/v1/sysadmin/tenants/tenant_a/credentials/openai
 {"api_key": "sk-tenant-a-key"}
 
 # Tenant B: Uses Azure (Sweden data residency required)
-PUT /tenants/tenant_b/credentials/azure
+PUT /api/v1/sysadmin/tenants/tenant_b/credentials/azure
 {"api_key": "azure-key", "endpoint": "https://sweden.openai.azure.com", ...}
 
 # Tenant C: Uses on-prem VLLM (high security requirements)
-PUT /tenants/tenant_c/credentials/vllm
+PUT /api/v1/sysadmin/tenants/tenant_c/credentials/vllm
 {"api_key": "onprem-key", "endpoint": "https://tenant-c.municipality.se:8000"}
 ```
 
@@ -391,7 +391,7 @@ PUT /tenants/tenant_c/credentials/vllm
 
 ```bash
 # Each tenant has their own Azure OpenAI resource
-PUT /tenants/stockholm/credentials/azure
+PUT /api/v1/sysadmin/tenants/stockholm/credentials/azure
 {
   "api_key": "stockholm-azure-key",
   "endpoint": "https://stockholm.openai.azure.com",
@@ -399,7 +399,7 @@ PUT /tenants/stockholm/credentials/azure
   "deployment_name": "gpt-4-stockholm"
 }
 
-PUT /tenants/goteborg/credentials/azure
+PUT /api/v1/sysadmin/tenants/goteborg/credentials/azure
 {
   "api_key": "goteborg-azure-key",
   "endpoint": "https://goteborg.openai.azure.com",

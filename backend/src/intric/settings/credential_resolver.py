@@ -185,7 +185,7 @@ class CredentialResolver:
                 # (NO fallback to global, even if field is missing/invalid)
                 if isinstance(tenant_cred, dict):
                     value = tenant_cred.get(field)
-                    if value:
+                    if value not in (None, ""):
                         # Decrypt if requested
                         if decrypt and self.encryption:
                             try:
@@ -216,16 +216,20 @@ class CredentialResolver:
                         )
                         return value
 
-                # Tenant has credential but field missing → return None (no fallback)
-                logger.debug(
-                    f"Tenant has {provider} credential but '{field}' field missing",
+                # Tenant has credential but required field missing → block fallback
+                logger.error(
+                    f"Missing required field '{field}' for provider {provider}",
                     extra={
                         "tenant_id": str(self.tenant.id),
+                        "tenant_name": self.tenant.name,
                         "provider": provider,
                         "field": field,
                     },
                 )
-                return None
+                raise ValueError(
+                    f"Tenant credential for provider '{provider}' is missing required field '{field}'. "
+                    f"Please configure the credential via PUT /api/v1/sysadmin/tenants/{self.tenant.id}/credentials/{provider}."
+                )
 
         # Strict mode: When tenant credentials enabled, no fallback to global
         # This prevents tenants from silently using shared infrastructure when they expect their own

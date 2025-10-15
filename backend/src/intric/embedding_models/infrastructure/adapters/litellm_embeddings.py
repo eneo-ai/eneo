@@ -167,7 +167,11 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         params["api_version"] = api_version
                         logger.info(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")
 
-            logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: {self._mask_sensitive_params(params)}")
+            safe_params = {k: v for k, v in params.items() if k != "input"}
+            logger.info(
+                f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
+                f"{self._mask_sensitive_params(safe_params)}"
+            )
 
             # Call LiteLLM API to get the embeddings
             response = await litellm.aembedding(**params)
