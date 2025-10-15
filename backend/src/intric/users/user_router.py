@@ -80,6 +80,51 @@ async def login_with_mobilityguard(
 
     settings = config.get_settings()
 
+    # Compute redirect_uri server-side (ignore frontend-provided value)
+    encryption_service = container.encryption_service()
+    from intric.settings.credential_resolver import CredentialResolver
+    credential_resolver = CredentialResolver(
+        tenant=None,  # Single-tenant mode - no tenant context
+        settings=settings,
+        encryption_service=encryption_service,
+    )
+
+    try:
+        redirect_uri = credential_resolver.get_redirect_uri()
+    except ValueError as e:
+        logger.error(
+            "Failed to resolve redirect_uri",
+            extra={
+                "correlation_id": correlation_id,
+                "error": str(e),
+            },
+        )
+        raise HTTPException(
+            500,
+            "OIDC redirect_uri not configured. Set PUBLIC_ORIGIN environment variable.",
+        )
+
+    # Override frontend-provided redirect_uri with server-computed value (defense in depth)
+    if openid_connect_login.redirect_uri != redirect_uri:
+        logger.warning(
+            "Redirect URI mismatch - using server-configured value",
+            extra={
+                "correlation_id": correlation_id,
+                "frontend_provided": openid_connect_login.redirect_uri,
+                "server_computed": redirect_uri,
+            },
+        )
+        openid_connect_login.redirect_uri = redirect_uri
+
+    logger.info(
+        "OIDC login initiated (single-tenant)",
+        extra={
+            "correlation_id": correlation_id,
+            "redirect_uri": redirect_uri,
+            "source": "server-computed from PUBLIC_ORIGIN",
+        },
+    )
+
     # Check required configuration
     if not settings.oidc_discovery_endpoint:
         logger.error(

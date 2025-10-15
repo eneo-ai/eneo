@@ -3,12 +3,77 @@ import logging
 import os
 import sys
 from typing import Optional
+from urllib.parse import urlparse
 
 from intric.definitions import ROOT_DIR
 from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MANIFEST_LOCATION = f"{ROOT_DIR}/.release-please-manifest.json"
+
+
+def validate_public_origin(origin: str | None) -> str | None:
+    """
+    Validate and normalize public origin.
+
+    Rules:
+    - Must be HTTPS (production security)
+    - Must have hostname
+    - No path, query, or fragment allowed
+    - Normalize: lowercase hostname, strip trailing slash
+
+    Args:
+        origin: Raw origin string (e.g., "https://Example.com/")
+
+    Returns:
+        str | None: Normalized origin or None if input was None
+
+    Raises:
+        ValueError: Invalid origin format
+
+    Examples:
+        >>> validate_public_origin("https://Stockholm.Eneo.se/")
+        "https://stockholm.eneo.se"
+
+        >>> validate_public_origin("http://insecure.com")
+        ValueError: public_origin must use https://
+    """
+    if origin is None:
+        return None
+
+    # Explicitly reject empty string (after stripping whitespace)
+    origin = origin.strip()
+    if not origin:
+        raise ValueError("public_origin cannot be an empty string")
+    parsed = urlparse(origin)
+
+    # Validate HTTPS scheme
+    if parsed.scheme != "https":
+        raise ValueError(
+            f"public_origin must use https://, got: {origin}"
+        )
+
+    # Validate hostname exists
+    if not parsed.hostname:
+        raise ValueError(f"public_origin missing hostname: {origin}")
+
+    # Validate no path (except "/" which we'll strip)
+    if parsed.path not in ("", "/"):
+        raise ValueError(
+            f"public_origin must not include path: {origin}"
+        )
+
+    # Validate no query or fragment
+    if parsed.query or parsed.fragment:
+        raise ValueError(
+            f"public_origin must not include query or fragment: {origin}"
+        )
+
+    # Normalize: lowercase hostname, preserve non-default port
+    host = parsed.hostname.lower()
+    port = f":{parsed.port}" if parsed.port and parsed.port != 443 else ""
+
+    return f"https://{host}{port}"
 
 
 def _set_app_version():
@@ -66,6 +131,13 @@ class Settings(BaseSettings):
     oidc_client_id: Optional[str] = None
     oidc_client_secret: Optional[str] = None
     oidc_tenant_id: Optional[str] = None  # For backward compat with user creation
+
+    # Public-facing origin for OIDC redirect_uri (single-tenant fallback)
+    # This is the externally-reachable URL for the application
+    # May be a proxy URL (e.g., https://m00-https-eneo-test.login.sundsvall.se)
+    # or a direct URL (e.g., https://eneo.sundsvall.se)
+    # Must match what users see in their browser and what's registered in IdP
+    public_origin: Optional[str] = None
 
     # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
     mobilityguard_discovery_endpoint: Optional[str] = None
@@ -172,6 +244,43 @@ class Settings(BaseSettings):
 
         return values
 
+    @model_validator(mode="after")
+    def validate_public_origin_format(self):
+        """Validate and normalize public_origin."""
+        if self.public_origin:
+            try:
+                self.public_origin = validate_public_origin(self.public_origin)
+            except ValueError as e:
+                logging.error(
+                    f"Invalid PUBLIC_ORIGIN configuration: {e}\n"
+                    f"Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
+                )
+                sys.exit(1)
+        return self
+
+    @model_validator(mode="after")
+    def validate_jwt_secret_strength(self):
+        """
+        Enforce strong JWT secret in production.
+
+        JWT secret is used for signing OIDC state tokens and user authentication tokens.
+        Weak secrets enable token forgery and session hijacking.
+
+        Minimum 32 characters (~256 bits) required for production security.
+        """
+        if not self.dev and not self.testing:
+            secret = (self.jwt_secret or "").strip()
+            if len(secret) < 32:
+                logging.error(
+                    "JWT_SECRET too weak for production\n"
+                    "Minimum 32 characters required for security.\n"
+                    "Current length: %d characters\n"
+                    "Generate strong secret: python -c 'import secrets; print(secrets.token_hex(32))'",
+                    len(secret)
+                )
+                sys.exit(1)
+
+        return self
     @computed_field
     @property
     def sync_database_url(self) -> str:

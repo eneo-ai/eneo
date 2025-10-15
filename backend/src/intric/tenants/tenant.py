@@ -143,6 +143,26 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         # Provider is just a label - any string is valid (no validation needed)
         # This allows any OIDC-compliant provider (Entra ID, Auth0, Okta, Keycloak, etc.)
 
+        # Validate canonical_public_origin (optional field)
+        if "canonical_public_origin" in v:
+            from intric.main.config import validate_public_origin
+            try:
+                v["canonical_public_origin"] = validate_public_origin(
+                    v["canonical_public_origin"]
+                )
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid canonical_public_origin in federation_config: {e}"
+                )
+
+        # Validate redirect_path (optional field)
+        if "redirect_path" in v:
+            redirect_path = v["redirect_path"]
+            if not isinstance(redirect_path, str):
+                raise ValueError("redirect_path must be a string")
+            if not redirect_path.startswith("/"):
+                raise ValueError("redirect_path must start with /")
+
         # Validate allowed_domains (optional but recommended)
         if "allowed_domains" in v:
             if not isinstance(v["allowed_domains"], list):

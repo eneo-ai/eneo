@@ -7,6 +7,36 @@ import {
 } from "$lib/features/auth/auth.server";
 import { env } from "$env/dynamic/private";
 
+/**
+ * Get the configured public origin for OIDC redirect URIs.
+ *
+ * SECURITY: Uses explicit PUBLIC_ORIGIN configuration instead of
+ * event.url.origin to prevent redirect_uri mismatches behind reverse proxies.
+ *
+ * @returns The configured public origin (e.g., "https://eneo.sundsvall.se")
+ * @throws Error if PUBLIC_ORIGIN is not configured
+ */
+function getPublicOrigin(): string {
+  if (!env.PUBLIC_ORIGIN) {
+    throw new Error(
+      '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
+      'Set it to the externally-reachable URL for this application. ' +
+      'Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se'
+    );
+  }
+
+  // Validate format (basic check)
+  if (!env.PUBLIC_ORIGIN.startsWith('https://')) {
+    throw new Error(
+      '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
+      `Got: ${env.PUBLIC_ORIGIN}`
+    );
+  }
+
+  // Remove trailing slash if present
+  return env.PUBLIC_ORIGIN.replace(/\/$/, '');
+}
+
 export const load = async (event) => {
   // always delete cookies
   clearFrontendCookies(event);
@@ -29,7 +59,7 @@ export const load = async (event) => {
     // Otherwise we first redirect to Zitadel for logout and wait until we come back from there
     const searchParams = new URLSearchParams({
       client_id: env.ZITADEL_PROJECT_CLIENT_ID!,
-      post_logout_redirect_uri: `${event.url.origin}/logout`,
+      post_logout_redirect_uri: `${getPublicOrigin()}/logout`,
       state: encodeState({
         completed: true,
         message
