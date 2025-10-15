@@ -12,7 +12,8 @@ openai = "^1.4"
 python-dotenv = "^0.21.1"
 pydantic = {extras = ["email"], version = "^2"}
 tenacity = "^8.2.1"
-tiktoken = "^0"
+tiktoken = "^0.11.0"
+packaging = "24.1"  # Pin to 24.1 to avoid 'packaging.licenses' error
 numpy = "^1.24.2"
 python-pptx = "^0.6.21"
 arrow = "^1.2.3"

@@ -254,6 +254,17 @@ export interface paths {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
   };
+  "/api/v1/assistants/{id}/token-estimate": {
+    /**
+     * Estimate token usage for text and files
+     * @description Estimate token usage for the given text and files for this assistant.
+     *
+     * The Space Actor + FileService stack already enforces tenant and ownership
+     * boundaries; this endpoint adds lightweight guardrails to keep the operation
+     * responsive while supporting large-context models.
+     */
+    post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
+  };
   "/api/v1/group-chats/{id}/": {
     /**
      * Get Group Chat
@@ -623,6 +634,55 @@ export interface paths {
   "/api/v1/completion-models/{id}/": {
     /** Update Completion Model */
     post: operations["update_completion_model_api_v1_completion_models__id___post"];
+  };
+  "/api/v1/completion-models/{model_id}/usage": {
+    /**
+     * Get Model Usage
+     * @description Get usage statistics for a specific model (pre-aggregated for performance)
+     */
+    get: operations["get_model_usage_api_v1_completion_models__model_id__usage_get"];
+  };
+  "/api/v1/completion-models/{model_id}/usage/details": {
+    /**
+     * Get Model Usage Details
+     * @description Get detailed list of entities using this model with cursor pagination
+     */
+    get: operations["get_model_usage_details_api_v1_completion_models__model_id__usage_details_get"];
+  };
+  "/api/v1/completion-models/{model_id}/migrate": {
+    /**
+     * Migrate Model Usage
+     * @description Migrate all usage from one model to another with safety checks
+     */
+    post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
+  };
+  "/api/v1/completion-models/usage-summary": {
+    /**
+     * Get All Models Usage Summary
+     * @description Get usage summary for all models (optimized with pre-aggregation)
+     */
+    get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
+  };
+  "/api/v1/completion-models/{model_id}/migration-history": {
+    /**
+     * Get Model Migration History
+     * @description Get migration history for a specific model (from or to this model)
+     */
+    get: operations["get_model_migration_history_api_v1_completion_models__model_id__migration_history_get"];
+  };
+  "/api/v1/completion-models/migration-history": {
+    /**
+     * Get All Migration History
+     * @description Get all migration history for the tenant
+     */
+    get: operations["get_all_migration_history_api_v1_completion_models_migration_history_get"];
+  };
+  "/api/v1/completion-models/migration-history/{migration_id}": {
+    /**
+     * Get Migration History By Id
+     * @description Get a specific migration history record by ID
+     */
+    get: operations["get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get"];
   };
   "/api/v1/embedding-models/": {
     /** Get Embedding Models */
@@ -1072,6 +1132,61 @@ export interface paths {
   "/api/v1/sysadmin/allowed-origins/{id}/": {
     /** Delete Origin */
     delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/usage-stats/recalculate": {
+    /**
+     * Recalculate Tenant Usage Statistics
+     * @description Recalculate usage statistics for a specific tenant.
+     *
+     * This endpoint is intended for tenant-specific administrative operations,
+     * such as fixing usage statistics for a particular tenant.
+     */
+    post: operations["recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post"];
+  };
+  "/api/v1/sysadmin/system/usage-stats/recalculate-all": {
+    /**
+     * Recalculate All Tenants Usage Statistics
+     * @description Recalculate usage statistics for all active tenants.
+     *
+     * This endpoint is intended for system-wide administrative operations,
+     * such as bulk recalculation of usage statistics across all tenants.
+     */
+    post: operations["recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/completion-models/{model_id}/migrate": {
+    /**
+     * Migrate Completion Model For Tenant
+     * @description Migrate completion model usage for a specific tenant.
+     *
+     * This endpoint allows system administrators to migrate all usage from one
+     * completion model to another for a specific tenant. This is useful for:
+     * - Migrating tenants away from deprecated models
+     * - Consolidating model usage
+     * - Fixing model configurations for specific tenants
+     *
+     * Args:
+     *     tenant_id: UUID of the tenant to migrate
+     *     model_id: UUID of the source model to migrate from
+     *     migration_request: Details of the migration (target model, entity types, etc.)
+     */
+    post: operations["migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post"];
+  };
+  "/api/v1/sysadmin/system/completion-models/{model_id}/migrate-all-tenants": {
+    /**
+     * Migrate Completion Model For All Tenants
+     * @description Migrate completion model usage for all active tenants.
+     *
+     * This endpoint allows system administrators to migrate all usage from one
+     * completion model to another across all active tenants. This is useful for:
+     * - Deprecating models system-wide
+     * - Migrating to newer model versions
+     * - Consolidating model usage across the entire system
+     *
+     * Args:
+     *     model_id: UUID of the source model to migrate from
+     *     migration_request: Details of the migration (target model, entity types, etc.)
+     */
+    post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
   "/api/v1/modules/": {
     /** Get Modules */
@@ -1615,6 +1730,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2317,6 +2433,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2600,6 +2717,8 @@ export interface components {
       size: number;
       /** Transcription */
       transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -3224,6 +3343,44 @@ export interface components {
       questions: components["schemas"]["QuestionMetadata"][];
     };
     /**
+     * MigrationResult
+     * @description Result of a model migration operation.
+     */
+    MigrationResult: {
+      /** Success */
+      success: boolean;
+      /** Migrated Count */
+      migrated_count: number;
+      /** Failed Count */
+      failed_count: number;
+      /** Details */
+      details: {
+        [key: string]: number;
+      };
+      /** Duration */
+      duration: number;
+      /**
+       * Migration Id
+       * Format: uuid
+       */
+      migration_id: string;
+      /**
+       * Warnings
+       * @default []
+       */
+      warnings?: string[];
+      /**
+       * Auto Recalculated
+       * @default false
+       */
+      auto_recalculated?: boolean;
+      /**
+       * Requires Manual Recalculation
+       * @default false
+       */
+      requires_manual_recalculation?: boolean;
+    };
+    /**
      * ModelFamily
      * @enum {string}
      */
@@ -3240,6 +3397,18 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /**
+     * ModelInfo
+     * @description Information about the model used by the assistant.
+     */
+    ModelInfo: {
+      /** Name */
+      name: string;
+      /** Token Limit */
+      token_limit: number;
+      /** Prompt Tokens */
+      prompt_tokens?: number | null;
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -3261,6 +3430,68 @@ export interface components {
       frequency_penalty?: number | null;
       /** Top K */
       top_k?: number | null;
+    };
+    /**
+     * ModelMigrationHistory
+     * @description Historical record of a model migration.
+     */
+    ModelMigrationHistory: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * From Model Id
+       * Format: uuid
+       */
+      from_model_id: string;
+      /** From Model Name */
+      from_model_name: string;
+      /**
+       * To Model Id
+       * Format: uuid
+       */
+      to_model_id: string;
+      /** To Model Name */
+      to_model_name: string;
+      /** Migrated Count */
+      migrated_count: number;
+      /** Status */
+      status: string;
+      /**
+       * Initiated By Id
+       * Format: uuid
+       */
+      initiated_by_id: string;
+      /** Initiated By Name */
+      initiated_by_name: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /** Duration */
+      duration?: number | null;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /**
+     * ModelMigrationRequest
+     * @description Request to migrate usage from one model to another.
+     */
+    ModelMigrationRequest: {
+      /**
+       * To Model Id
+       * Format: uuid
+       */
+      to_model_id: string;
+      /** Entity Types */
+      entity_types?: string[] | null;
+      /**
+       * Confirm Migration
+       * @default false
+       */
+      confirm_migration?: boolean;
     };
     /**
      * ModelOrg
@@ -3319,6 +3550,94 @@ export interface components {
        * @description Number of requests made with this model
        */
       request_count: number;
+    };
+    /**
+     * ModelUsageDetail
+     * @description Detailed information about a specific entity using a completion model.
+     */
+    ModelUsageDetail: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /** Entity Type */
+      entity_type: string;
+      /** Space Id */
+      space_id?: string | null;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Id */
+      owner_id?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Last Used */
+      last_used?: string | null;
+      /** Usage Count */
+      usage_count?: number | null;
+    };
+    /**
+     * ModelUsageStatistics
+     * @description Pre-aggregated usage statistics for a completion model.
+     */
+    ModelUsageStatistics: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /** Total Usage */
+      total_usage: number;
+      /** Assistants Count */
+      assistants_count: number;
+      /** Apps Count */
+      apps_count: number;
+      /** Services Count */
+      services_count: number;
+      /** Questions Count */
+      questions_count: number;
+      /** Assistant Templates Count */
+      assistant_templates_count: number;
+      /** App Templates Count */
+      app_templates_count: number;
+      /** Spaces Count */
+      spaces_count: number;
+      /**
+       * Last Updated
+       * Format: date-time
+       */
+      last_updated: string;
+    };
+    /**
+     * ModelUsageSummary
+     * @description Summary of usage for a single model.
+     */
+    ModelUsageSummary: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /** Model Name */
+      model_name: string;
+      /** Model Nickname */
+      model_nickname: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Total Usage */
+      total_usage: number;
+      /**
+       * Last Updated
+       * Format: date-time
+       */
+      last_updated: string;
     };
     /**
      * ModelsPresentation
@@ -3523,6 +3842,22 @@ export interface components {
        * @description Number of items returned in the response
        */
       count: number;
+    };
+    /**
+     * PaginatedResponse
+     * @description Generic paginated response with cursor-based pagination.
+     */
+    PaginatedResponse: {
+      /** Items */
+      items: components["schemas"]["ModelUsageDetail"][];
+      /** Total */
+      total: number;
+      /** Has More */
+      has_more: boolean;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Prev Cursor */
+      prev_cursor?: string | null;
     };
     /** PaginatedResponse[AllowedOriginInDB] */
     PaginatedResponse_AllowedOriginInDB_: {
@@ -4823,7 +5158,8 @@ export interface components {
       | "crawl_all_websites"
       | "run_app"
       | "pull_confluence_content"
-      | "pull_sharepoint_content";
+      | "pull_sharepoint_content"
+      | "update_model_usage_stats";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -5006,6 +5342,74 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+    };
+    /**
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
+     */
+    TokenEstimateBreakdown: {
+      /**
+       * Prompt
+       * @description Tokens used by assistant prompt
+       */
+      prompt: number;
+      /**
+       * Text
+       * @description Tokens used by user input text
+       */
+      text: number;
+      /**
+       * Files
+       * @description Total tokens used by all files
+       */
+      files: number;
+      /**
+       * File Details
+       * @description Per-file token counts
+       */
+      file_details?: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * TokenEstimateRequest
+     * @description Request payload for estimating tokens.
+     */
+    TokenEstimateRequest: {
+      /**
+       * Text
+       * @description User input text to evaluate
+       * @default
+       */
+      text?: string;
+      /**
+       * File Ids
+       * @description List of file IDs to include in the estimate
+       */
+      file_ids?: string[];
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -7491,6 +7895,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -7789,6 +8195,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -8070,6 +8478,52 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Estimate token usage for text and files
+   * @description Estimate token usage for the given text and files for this assistant.
+   *
+   * The Space Actor + FileService stack already enforces tenant and ownership
+   * boundaries; this endpoint adds lightweight guardrails to keep the operation
+   * responsive while supporting large-context models.
+   */
+  estimate_tokens_api_v1_assistants__id__token_estimate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TokenEstimateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -8419,6 +8873,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                 };
               },
@@ -8461,6 +8917,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -9920,6 +10378,234 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Usage
+   * @description Get usage statistics for a specific model (pre-aggregated for performance)
+   */
+  get_model_usage_api_v1_completion_models__model_id__usage_get: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelUsageStatistics"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Usage Details
+   * @description Get detailed list of entities using this model with cursor pagination
+   */
+  get_model_usage_details_api_v1_completion_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by entity type */
+        entity_type?: string | null;
+        /** @description Cursor for pagination */
+        cursor?: string | null;
+        /** @description Number of results per page */
+        limit?: number;
+      };
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Model Usage
+   * @description Migrate all usage from one model to another with safety checks
+   */
+  migrate_model_usage_api_v1_completion_models__model_id__migrate_post: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get All Models Usage Summary
+   * @description Get usage summary for all models (optimized with pre-aggregation)
+   */
+  get_all_models_usage_summary_api_v1_completion_models_usage_summary_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelUsageSummary"][];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Migration History
+   * @description Get migration history for a specific model (from or to this model)
+   */
+  get_model_migration_history_api_v1_completion_models__model_id__migration_history_get: {
+    parameters: {
+      query?: {
+        /** @description Number of results per page */
+        limit?: number;
+        /** @description Offset for pagination */
+        offset?: number;
+      };
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get All Migration History
+   * @description Get all migration history for the tenant
+   */
+  get_all_migration_history_api_v1_completion_models_migration_history_get: {
+    parameters: {
+      query?: {
+        /** @description Number of results per page */
+        limit?: number;
+        /** @description Offset for pagination */
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Migration History By Id
+   * @description Get a specific migration history record by ID
+   */
+  get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get: {
+    parameters: {
+      path: {
+        migration_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"];
         };
       };
       /** @description Not Found */
@@ -12483,6 +13169,195 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Recalculate Tenant Usage Statistics
+   * @description Recalculate usage statistics for a specific tenant.
+   *
+   * This endpoint is intended for tenant-specific administrative operations,
+   * such as fixing usage statistics for a particular tenant.
+   */
+  recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Recalculate All Tenants Usage Statistics
+   * @description Recalculate usage statistics for all active tenants.
+   *
+   * This endpoint is intended for system-wide administrative operations,
+   * such as bulk recalculation of usage statistics across all tenants.
+   */
+  recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Completion Model For Tenant
+   * @description Migrate completion model usage for a specific tenant.
+   *
+   * This endpoint allows system administrators to migrate all usage from one
+   * completion model to another for a specific tenant. This is useful for:
+   * - Migrating tenants away from deprecated models
+   * - Consolidating model usage
+   * - Fixing model configurations for specific tenants
+   *
+   * Args:
+   *     tenant_id: UUID of the tenant to migrate
+   *     model_id: UUID of the source model to migrate from
+   *     migration_request: Details of the migration (target model, entity types, etc.)
+   */
+  migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Completion Model For All Tenants
+   * @description Migrate completion model usage for all active tenants.
+   *
+   * This endpoint allows system administrators to migrate all usage from one
+   * completion model to another across all active tenants. This is useful for:
+   * - Deprecating models system-wide
+   * - Migrating to newer model versions
+   * - Consolidating model usage across the entire system
+   *
+   * Args:
+   *     model_id: UUID of the source model to migrate from
+   *     migration_request: Details of the migration (target model, entity types, etc.)
+   */
+  migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

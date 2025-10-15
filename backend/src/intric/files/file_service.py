@@ -19,13 +19,17 @@ class FileService:
     async def save_file(self, upload_file: UploadFile):
         file = await self.protocol.to_domain(upload_file)
 
-        return await self.repo.add(
+        saved_file = await self.repo.add(
             FileCreate(
                 **file.model_dump(),
                 user_id=self.user.id,
                 tenant_id=self.user.tenant_id,
             )
         )
+
+        # Don't calculate token count here - we don't know which model will be used
+        # Token counting will happen when the file is used in an assistant context
+        return saved_file
 
     async def save_image_from_bytes(
         self,
@@ -68,6 +72,15 @@ class FileService:
         return await self.repo.get_list_by_id_and_user(
             ids=file_ids,
             user_id=self.user.id,
+            include_transcription=include_transcription,
+        )
+
+    async def get_files_for_token_estimate(
+        self, file_ids: list[UUID], include_transcription: bool = True
+    ):
+        return await self.repo.get_list_by_id_and_tenant(
+            ids=file_ids,
+            tenant_id=self.user.tenant_id,
             include_transcription=include_transcription,
         )
 
