@@ -737,7 +737,7 @@
   "toggle_sidebar": "Växla sidofält",
   "token_summary": "Token-sammanfattning (Senaste 30 dagarna)",
   "tokens": "Tokens",
-  "tokens_from_conversation_history": "{tokens} tokens från konversationshistorik",
+  "tokens_from_conversation_history": "{tokens} tokens från assistentens prompt och konversationshistorik",
   "tokens_from_new_message": "{tokens} tokens från nytt meddelande & filer",
   "tomorrow": "Imorgon",
   "tooltip_cancel": "Ignorera ändringar och stäng",

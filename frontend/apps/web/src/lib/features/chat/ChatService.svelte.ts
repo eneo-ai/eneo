@@ -31,6 +31,9 @@ export class ChatService {
   // Track total tokens used in the current conversation
   historyTokens = $state<number>(0);
 
+  // Track assistant prompt tokens separately so we only count them once
+  promptTokens = $state<number>(0);
+
   // Track tokens for the message being composed
   newPromptTokens = $state<number>(0);
 
@@ -111,6 +114,7 @@ export class ChatService {
     // Reset token counters for new conversation
     this.historyTokens = 0;
     this.newPromptTokens = 0;
+    this.promptTokens = 0;
   }
 
   async loadConversations(args?: { limit?: number; reset?: boolean }) {
@@ -192,6 +196,7 @@ export class ChatService {
       this.reloadHistory();
       // Also reset new prompt tokens when partner changes
       this.newPromptTokens = 0;
+      this.promptTokens = 0;
     }
   }
 
@@ -355,17 +360,16 @@ export class ChatService {
         });
 
         if (response) {
-          // Calculate total tokens from breakdown
-          // The response has: breakdown.prompt + breakdown.text + breakdown.files
           const breakdown = response.breakdown || {};
-          const totalTokens = (breakdown.prompt || 0) + (breakdown.text || 0) + (breakdown.files || 0);
+          const promptTokens = breakdown.prompt ?? this.promptTokens;
+          const historyTokens = (breakdown.text || 0) + (breakdown.files || 0);
 
-          const oldTokens = this.historyTokens;
-          this.historyTokens = totalTokens;
+          this.promptTokens = promptTokens;
+          this.historyTokens = historyTokens;
 
           console.log(
-            `[ChatService] Token usage: ${totalTokens.toLocaleString()} tokens ` +
-            `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${breakdown.prompt || 0})`
+            `[ChatService] Token usage: ${(promptTokens + historyTokens).toLocaleString()} tokens ` +
+            `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${promptTokens})`
           );
         }
       } catch (error) {
@@ -515,8 +519,12 @@ export class ChatService {
           // Update cached file tokens total
           this.#fileTokensCache = breakdown.files || 0;
 
-          // Calculate total tokens from breakdown - this is the accurate count
-          const totalNewTokens = (breakdown.prompt || 0) + (breakdown.text || 0) + (breakdown.files || 0);
+          // Persist prompt tokens separately so we only count them once
+          const promptTokens = breakdown.prompt ?? this.promptTokens;
+          this.promptTokens = promptTokens;
+
+          // Calculate total tokens from breakdown without the assistant prompt
+          const totalNewTokens = (breakdown.text || 0) + (breakdown.files || 0);
 
           // Update the total with accurate API result
           this.newPromptTokens = totalNewTokens;

@@ -754,7 +754,7 @@
   "toggle_sidebar": "Toggle sidebar",
   "token_summary": "Token summary (Last 30 days)",
   "tokens": "Tokens",
-  "tokens_from_conversation_history": "{tokens} tokens from conversation history",
+  "tokens_from_conversation_history": "{tokens} tokens from assistant prompt and conversation history",
   "tokens_from_new_message": "{tokens} tokens from new message & files",
   "tomorrow": "Tomorrow",
   "tooltip_cancel": "Discard changes and close",

@@ -6,17 +6,25 @@
   interface Props {
     tokens: number; // Tokens for the NEW prompt (text + files)
     limit: number;
-    historyTokens?: number; // Tokens for the conversation HISTORY
+    historyTokens?: number; // Tokens for the conversation HISTORY (excludes assistant prompt)
+    promptTokens?: number; // Assistant prompt tokens counted once
     isApproximate?: boolean;
   }
 
-  const { tokens = 0, limit = 128000, historyTokens = 0, isApproximate = false }: Props = $props();
+  const {
+    tokens = 0,
+    limit = 128000,
+    historyTokens = 0,
+    promptTokens = 0,
+    isApproximate = false
+  }: Props = $props();
 
   // --- Calculations ---
-  // Use tokens directly in calculations for proper reactivity
-  const grandTotalTokens = $derived(historyTokens + tokens);
+  // Combine prompt tokens with history so the assistant prompt is only counted once
+  const combinedHistoryTokens = $derived(historyTokens + promptTokens);
+  const grandTotalTokens = $derived(combinedHistoryTokens + tokens);
 
-  const historyPercentage = $derived(limit > 0 ? (historyTokens / limit) * 100 : 0);
+  const historyPercentage = $derived(limit > 0 ? (combinedHistoryTokens / limit) * 100 : 0);
   const newPercentage = $derived(limit > 0 ? (tokens / limit) * 100 : 0);
   const totalPercentage = $derived(historyPercentage + newPercentage);
 
@@ -46,7 +54,7 @@
 
   // --- Formatting ---
   const formattedGrandTotal = $derived(grandTotalTokens.toLocaleString());
-  const formattedHistoryTokens = $derived(historyTokens.toLocaleString());
+  const formattedHistoryTokens = $derived(combinedHistoryTokens.toLocaleString());
   const formattedNewTokens = $derived(tokens.toLocaleString());
   const formattedLimit = $derived(limit.toLocaleString());
   const formattedOverflow = $derived(overflowTokens.toLocaleString());
@@ -56,7 +64,7 @@
   <!-- Stacked progress bar -->
   <div class="relative mb-1 h-1.5 w-full overflow-hidden rounded-full bg-tertiary">
     <!-- History segment (left) -->
-    {#if historyTokens > 0}
+    {#if combinedHistoryTokens > 0}
       <Tooltip
         text={m.tokens_from_conversation_history({ tokens: formattedHistoryTokens })}
         placement="top"
@@ -87,7 +95,7 @@
           style="left: {historyDisplayPercentage}%; width: {newDisplayPercentage}%"
         >
           <!-- Vertical separator line between segments -->
-          {#if historyTokens > 0 && historyDisplayPercentage < 100}
+          {#if combinedHistoryTokens > 0 && historyDisplayPercentage < 100}
             <div class="absolute left-0 top-0 h-full w-px bg-primary/30"></div>
           {/if}
         </Button>
@@ -104,17 +112,17 @@
   </div>
 
   <!-- Text display -->
-  <div class="flex items-center justify-between text-xs text-secondary">
-    <div class="flex items-center gap-1.5">
-      {#if isApproximate && !isOverflow}
-        <span class="text-tertiary">≈</span>
-      {/if}
-      <span>{formattedGrandTotal} / {formattedLimit} {m.tokens().toLowerCase()}</span>
+    <div class="flex items-center justify-between text-xs text-secondary">
+      <div class="flex items-center gap-1.5">
+        {#if isApproximate && !isOverflow}
+          <span class="text-tertiary">≈</span>
+        {/if}
+        <span>{formattedGrandTotal} / {formattedLimit} {m.tokens().toLowerCase()}</span>
 
-      <!-- Legend indicators for segments -->
-      {#if historyTokens > 0 || tokens > 0}
-        <div class="flex items-center gap-2 ml-2">
-          {#if historyTokens > 0}
+        <!-- Legend indicators for segments -->
+        {#if combinedHistoryTokens > 0 || tokens > 0}
+          <div class="flex items-center gap-2 ml-2">
+          {#if combinedHistoryTokens > 0}
             <div class="flex items-center gap-1">
               <div class="w-2 h-2 rounded-full {historySegmentColorClass}"></div>
               <span class="text-[10px] text-tertiary">{m.history_label()}</span>

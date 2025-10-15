@@ -75,6 +75,15 @@ class FileService:
             include_transcription=include_transcription,
         )
 
+    async def get_files_for_token_estimate(
+        self, file_ids: list[UUID], include_transcription: bool = True
+    ):
+        return await self.repo.get_list_by_id_and_tenant(
+            ids=file_ids,
+            tenant_id=self.user.tenant_id,
+            include_transcription=include_transcription,
+        )
+
     async def get_files(self):
         return await self.repo.get_list_by_user(user_id=self.user.id)
 
