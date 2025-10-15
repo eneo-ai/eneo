@@ -131,6 +131,7 @@
 
 	// --- Token Calculation and Coloring Logic ---
 	const historyTokens = $derived(chat.historyTokens);
+	const promptTokens = $derived(chat.promptTokens);
 	const newTokens = $derived(chat.newPromptTokens);
 	const modelInfo = $derived(chat.partner?.model_info || null);
 	const tokenLimit = $derived(modelInfo?.token_limit || 0);
@@ -149,13 +150,13 @@
 
 	const tokenUsagePercentage = $derived(() => {
 		if (!tokenLimit) return 0;
-		return ((newTokens + historyTokens) / tokenLimit) * 100;
+		return ((newTokens + historyTokens + promptTokens) / tokenLimit) * 100;
 	});
 
 	const tokenUsageColorClass = $derived(() => {
 		if (!tokenLimit) return 'text-tertiary';
 		const percentage = tokenUsagePercentage();
-		const totalTokens = newTokens + historyTokens;
+		const totalTokens = newTokens + historyTokens + promptTokens;
 
 		// If no tokens at all, keep it grey
 		if (totalTokens === 0) return 'text-tertiary';
@@ -197,7 +198,7 @@
 			transition:slide={{ duration: 350, easing: quintOut, axis: 'y' }}
 		>
 			<div class="px-2 pt-1 pr-11 pb-2">
-				<TokenUsageBar tokens={newTokens} limit={tokenLimit} {historyTokens} {isApproximate} />
+			<TokenUsageBar tokens={newTokens} limit={tokenLimit} {historyTokens} {promptTokens} {isApproximate} />
 			</div>
 		</div>
 	{/if}

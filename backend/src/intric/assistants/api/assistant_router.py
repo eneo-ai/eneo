@@ -446,15 +446,19 @@ async def estimate_tokens(
     file_ids = payload.file_ids or []
 
     prompt_tokens = 0
-    if assistant.prompt and assistant.prompt.prompt:
-        prompt_tokens = count_assistant_prompt_tokens(assistant.prompt.prompt, model_name)
+    if assistant.prompt:
+        prompt_text = getattr(assistant.prompt, "prompt", None) or getattr(
+            assistant.prompt, "text", None
+        )
+        if prompt_text:
+            prompt_tokens = count_assistant_prompt_tokens(prompt_text, model_name)
 
     text_tokens = count_tokens(text, model_name) if text else 0
 
     file_tokens = 0
     file_token_details: dict[str, int] = {}
     if file_ids:
-        files = await file_service.get_files_by_ids(file_ids)
+        files = await file_service.get_files_for_token_estimate(file_ids)
         accessible_ids = {file.id for file in files}
         missing_ids = [str(file_id) for file_id in file_ids if file_id not in accessible_ids]
         if missing_ids:
