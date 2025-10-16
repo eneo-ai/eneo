@@ -1,3 +1,4 @@
+import redis.asyncio as aioredis
 from dependency_injector import containers, providers
 from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
@@ -249,11 +250,36 @@ from intric.websites.infrastructure.update_website_size_service import (
 )
 from intric.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from intric.worker.task_manager import TaskManager
+from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 from intric.workflows.step_repo import StepRepository
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
 _logger = get_logger(__name__)
+
+
+def _create_redis_client() -> aioredis.Redis:
+    settings = get_settings()
+    url = f"redis://{settings.redis_host}:{settings.redis_port}"
+    kwargs: dict[str, object] = {
+        "decode_responses": False,
+    }
+
+    # Support optional redis_db attribute on settings (used in tests)
+    redis_db = getattr(settings, "redis_db", None)
+    if redis_db is not None:
+        kwargs["db"] = redis_db
+
+    return aioredis.Redis.from_url(url, **kwargs)
+
+
+def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimiter:
+    settings = get_settings()
+    return TenantConcurrencyLimiter(
+        redis=redis_client,
+        max_concurrent=settings.tenant_worker_concurrency_limit,
+        ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
+    )
 
 
 class Container(containers.DeclarativeContainer):
@@ -278,6 +304,11 @@ class Container(containers.DeclarativeContainer):
     encryption_service: providers.Singleton[EncryptionService] = providers.Singleton(
         EncryptionService,
         encryption_key=_settings.encryption_key,
+    )
+
+    redis_client = providers.Singleton(_create_redis_client)
+    tenant_concurrency_limiter = providers.Factory(
+        _build_tenant_limiter, redis_client=redis_client
     )
 
     # Factories

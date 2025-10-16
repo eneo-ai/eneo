@@ -12,19 +12,22 @@
   interface Props {
     onTenantSelect: (slug: string) => void;
     baseUrl: string;
+    tenants?: TenantInfo[];
   }
 
-  let { onTenantSelect, baseUrl }: Props = $props();
+  const props = $props<Props>();
+  let { onTenantSelect, baseUrl } = props;
 
-  let tenants = $state<TenantInfo[]>([]);
-  let loading = $state(true);
+  let providedTenants = $derived(props.tenants ?? []);
+  let tenantList = $state<TenantInfo[]>(providedTenants);
+  let loading = $state(providedTenants.length === 0);
   let error = $state("");
   let searchQuery = $state("");
 
   let filteredTenants = $derived(
     searchQuery.trim() === ""
-      ? tenants
-      : tenants.filter((t) =>
+      ? tenantList
+      : tenantList.filter((t) =>
           [t.display_name, t.name, t.slug]
             .join(" ")
             .toLowerCase()
@@ -32,38 +35,52 @@
         )
   );
 
-  onMount(async () => {
-    try {
-      // Dynamic import to avoid SSR issues
-      const { intric } = await import("$lib/api/client");
-
-      // Fetch tenants from backend
-      const data = await intric.auth.listTenants();
-      tenants = data.tenants || [];
-
-      // Check for last-used tenant in localStorage
-      const lastTenant = localStorage.getItem("eneo:last-tenant");
-      if (lastTenant) {
-        // Validate slug format
-        if (/^[a-z0-9-]+$/.test(lastTenant) && lastTenant.length <= 63) {
-          // Check if slug exists in tenant list
-          if (tenants.some((t) => t.slug === lastTenant)) {
-            // Auto-select last tenant
-            onTenantSelect(lastTenant);
-            return;
-          }
-        }
-        // Clear invalid cached slug
-        localStorage.removeItem("eneo:last-tenant");
-      }
-
+  $effect(() => {
+    tenantList = providedTenants;
+    if (providedTenants.length > 0) {
       loading = false;
+    }
+  });
+
+  onMount(async () => {
+    if (tenantList.length > 0) {
+      loading = false;
+      autoSelectLastTenant();
+      return;
+    }
+
+    try {
+      const { intric } = await import("$lib/api/client");
+      const data = await intric.auth.listTenants();
+      tenantList = data.tenants || [];
+      loading = false;
+      autoSelectLastTenant();
     } catch (err) {
       console.error("Failed to load tenants:", err);
       error = m.failed_to_load_organizations();
       loading = false;
     }
   });
+
+  function autoSelectLastTenant() {
+    if (tenantList.length === 0) {
+      return;
+    }
+
+    const lastTenant = localStorage.getItem("eneo:last-tenant");
+    if (!lastTenant) {
+      return;
+    }
+
+    if (/^[a-z0-9-]+$/.test(lastTenant) && lastTenant.length <= 63) {
+      if (tenantList.some((t) => t.slug === lastTenant)) {
+        onTenantSelect(lastTenant);
+        return;
+      }
+    }
+
+    localStorage.removeItem("eneo:last-tenant");
+  }
 
   function handleTenantClick(slug: string) {
     // Validate slug format
@@ -108,7 +125,7 @@
       </Button>
     </div>
   </div>
-{:else if tenants.length === 0}
+{:else if tenantList.length === 0}
   <div class="flex min-h-[400px] items-center justify-center">
     <div class="max-w-md text-center">
       <p class="text-dimmer">{m.no_organizations_available()}</p>

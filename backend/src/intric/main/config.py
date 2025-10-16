@@ -47,10 +47,11 @@ def validate_public_origin(origin: str | None) -> str | None:
         raise ValueError("public_origin cannot be an empty string")
     parsed = urlparse(origin)
 
-    # Validate HTTPS scheme
-    if parsed.scheme != "https":
+    # Validate HTTPS scheme (allow http://localhost for development)
+    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
         raise ValueError(
-            f"public_origin must use https://, got: {origin}"
+            f"public_origin must use https:// (or http://localhost for development), got: {origin}"
         )
 
     # Validate hostname exists
@@ -71,9 +72,15 @@ def validate_public_origin(origin: str | None) -> str | None:
 
     # Normalize: lowercase hostname, preserve non-default port
     host = parsed.hostname.lower()
-    port = f":{parsed.port}" if parsed.port and parsed.port != 443 else ""
 
-    return f"https://{host}{port}"
+    # Preserve scheme for localhost (http allowed), otherwise use https
+    scheme = parsed.scheme if is_localhost else "https"
+
+    # Preserve non-default port (443 for https, 80 for http)
+    default_port = 443 if scheme == "https" else 80
+    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
+
+    return f"{scheme}://{host}{port}"
 
 
 def _set_app_version():
@@ -123,8 +130,19 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
 
+    # Background worker configuration
+    worker_max_jobs: int = 20
+    tenant_worker_concurrency_limit: int = 4
+    tenant_worker_semaphore_ttl_seconds: int = 3600
+    tenant_worker_retry_delay_seconds: int = 30
+
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
+
+    # OIDC redirect safety controls
+    oidc_state_ttl_seconds: int = 600
+    oidc_redirect_grace_period_seconds: int = 900
+    strict_oidc_redirect_validation: bool = True
 
     # Generic OIDC config (renamed from MOBILITYGUARD_*)
     oidc_discovery_endpoint: Optional[str] = None
@@ -243,6 +261,64 @@ class Settings(BaseSettings):
                 )
 
         return values
+
+    @model_validator(mode="after")
+    def validate_worker_settings(self):
+        """Ensure worker-related configuration values are sane."""
+        if self.worker_max_jobs <= 0:
+            logging.error(
+                "ENEO_WORKER_MAX_JOBS must be greater than zero. Current value: %s",
+                self.worker_max_jobs,
+            )
+            sys.exit(1)
+
+        if self.tenant_worker_concurrency_limit < 0:
+            logging.error(
+                "TENANT_WORKER_CONCURRENCY_LIMIT cannot be negative. Current value: %s",
+                self.tenant_worker_concurrency_limit,
+            )
+            sys.exit(1)
+
+        if self.tenant_worker_semaphore_ttl_seconds <= 0:
+            logging.error(
+                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS must be greater than zero. Current value: %s",
+                self.tenant_worker_semaphore_ttl_seconds,
+            )
+            sys.exit(1)
+
+        if self.tenant_worker_retry_delay_seconds < 0:
+            logging.error(
+                "TENANT_WORKER_RETRY_DELAY_SECONDS cannot be negative. Current value: %s",
+                self.tenant_worker_retry_delay_seconds,
+            )
+            sys.exit(1)
+
+        if self.oidc_state_ttl_seconds <= 0:
+            logging.error(
+                "OIDC_STATE_TTL_SECONDS must be greater than zero. Current value: %s",
+                self.oidc_state_ttl_seconds,
+            )
+            sys.exit(1)
+
+        if self.oidc_redirect_grace_period_seconds < 0:
+            logging.error(
+                "OIDC_REDIRECT_GRACE_PERIOD_SECONDS cannot be negative. Current value: %s",
+                self.oidc_redirect_grace_period_seconds,
+            )
+            sys.exit(1)
+
+        if (
+            self.oidc_redirect_grace_period_seconds
+            and self.oidc_redirect_grace_period_seconds > self.oidc_state_ttl_seconds
+        ):
+            logging.warning(
+                "OIDC_REDIRECT_GRACE_PERIOD_SECONDS (%s) exceeds state TTL (%s). "
+                "Grace period will be capped to TTL to avoid accepting expired state.",
+                self.oidc_redirect_grace_period_seconds,
+                self.oidc_state_ttl_seconds,
+            )
+
+        return self
 
     @model_validator(mode="after")
     def validate_public_origin_format(self):
