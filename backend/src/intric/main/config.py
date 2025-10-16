@@ -258,33 +258,6 @@ class Settings(BaseSettings):
                 sys.exit(1)
         return self
 
-    @model_validator(mode="after")
-    def validate_jwt_secret_strength(self):
-        """
-        Warn about weak JWT secret in production.
-
-        JWT secret is used for signing OIDC state tokens and user authentication tokens.
-        Weak secrets enable token forgery and session hijacking.
-        """
-        if not self.dev and not self.testing:
-            secret = (self.jwt_secret or "").strip()
-            if len(secret) < 32:
-                logging.warning(
-                    "\n" + "="*70 + "\n"
-                    "⚠️  WARNING: JWT_SECRET is too weak for production\n"
-                    "="*70 + "\n"
-                    f"Current length: {len(secret)} characters (minimum 32 required)\n"
-                    "Security risk: Weak secrets enable token forgery and session hijacking\n"
-                    "\n"
-                    "Generate a strong secret:\n"
-                    "  python -c 'import secrets; print(secrets.token_hex(32))'\n"
-                    "\n"
-                    "Add to your .env file:\n"
-                    "  JWT_SECRET=<generated_value>\n"
-                    + "="*70
-                )
-
-        return self
     @computed_field
     @property
     def sync_database_url(self) -> str:
