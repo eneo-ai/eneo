@@ -337,8 +337,8 @@ class Container(containers.DeclarativeContainer):
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
     confluence_token_mapper = providers.Factory(OauthTokenMapper)
 
-    # HTTP auth encryption service (singleton for shared encryption key)
-    http_auth_encryption = providers.Singleton(HttpAuthEncryptionService)
+    # HTTP auth encryption service
+    http_auth_encryption_service = providers.Factory(HttpAuthEncryptionService)
 
     # Repositories
     user_repo = providers.Factory(UsersRepository, session=session)
@@ -441,7 +441,7 @@ class Container(containers.DeclarativeContainer):
         completion_model_repo=completion_model_repo2,
         transcription_model_repo=transcription_model_repo,
         embedding_model_repo=embedding_model_repo2,
-        http_auth_encryption=http_auth_encryption,
+        http_auth_encryption=http_auth_encryption_service,
     )
     app_template_repo = providers.Factory(
         AppTemplateRepository, factory=app_template_factory, session=session

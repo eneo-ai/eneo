@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     sharepoint_client_id: Optional[str] = None
     sharepoint_client_secret: Optional[str] = None
 
+    # Generic encryption key for sensitive data (HTTP auth, API keys, etc.)
+    # Required for encrypting HTTP auth credentials, API keys, etc.
+    encryption_key: str
+
     @computed_field
     @property
     def sync_database_url(self) -> str:

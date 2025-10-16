@@ -25,20 +25,6 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
-    # Check encryption key for HTTP auth
-    import os
-    from intric.main.logging import get_logger
-    logger = get_logger(__name__)
-
-    encryption_key = os.environ.get("WEBSITE_AUTH_ENCRYPTION_KEY")
-    if not encryption_key:
-        logger.warning(
-            "WEBSITE_AUTH_ENCRYPTION_KEY not set. HTTP Basic Auth will not work. "
-            "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
-        )
-    elif encryption_key == "LOCAL_DEV_KEY_CHANGE_IN_PRODUCTION_Wz8x9K2mP5nQ7rT4vY6uI3oA1sD0fG=":
-        logger.warning("Using default dev encryption key. Generate a new key for production!")
-
     aiohttp_client.start()
     sessionmanager.init(settings.database_url)
     await job_manager.init()

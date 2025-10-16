@@ -3,12 +3,11 @@
 Why Infrastructure Layer:
 - Encryption is a technical concern, not business logic
 - Uses external library (cryptography)
-- Configuration-dependent (encryption key from environment)
+- Configuration-dependent (encryption key from settings)
 - Domain layer stays pure and testable
 """
 
 import base64
-import os
 from cryptography.fernet import Fernet
 
 from intric.websites.domain.http_auth_credentials import HttpAuthCredentials
@@ -19,32 +18,36 @@ class HttpAuthEncryptionService:
 
     Security Design:
     - Uses Fernet (symmetric encryption - AES 128 CBC + HMAC)
-    - Key stored in environment variable (WEBSITE_AUTH_ENCRYPTION_KEY)
+    - Key provided via settings (encryption_key)
     - Credentials encrypted at rest in database
     - Decryption only happens when needed for crawling
     """
 
     def __init__(self):
-        self._fernet = self._initialize_fernet()
+        """Initialize encryption service.
 
-    def _initialize_fernet(self) -> Fernet:
-        """Initialize Fernet cipher with encryption key from environment.
+        Gets encryption key from settings (required).
 
         Raises:
-            RuntimeError: If encryption key not found or invalid
+            RuntimeError: If encryption key is invalid
         """
-        encryption_key = os.environ.get("WEBSITE_AUTH_ENCRYPTION_KEY")
+        from intric.main.config import get_settings
+        encryption_key = get_settings().encryption_key
+        self._fernet = self._initialize_fernet(encryption_key)
 
-        if not encryption_key:
-            raise RuntimeError(
-                "WEBSITE_AUTH_ENCRYPTION_KEY not set. "
-                "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
-            )
+    def _initialize_fernet(self, encryption_key: str) -> Fernet:
+        """Initialize Fernet cipher with encryption key.
 
+        Args:
+            encryption_key: Fernet encryption key string
+
+        Raises:
+            RuntimeError: If encryption key is invalid
+        """
         try:
             return Fernet(encryption_key.encode())
         except Exception as e:
-            raise RuntimeError(f"Invalid WEBSITE_AUTH_ENCRYPTION_KEY: {str(e)}")
+            raise RuntimeError(f"Invalid encryption_key: {str(e)}")
 
     def encrypt_password(self, password: str) -> str:
         """Encrypt password for storage.

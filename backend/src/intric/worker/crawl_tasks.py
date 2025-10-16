@@ -231,7 +231,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         if has_auth_in_db and website.http_auth is None:
             logger.error(
                 "Cannot crawl website: HTTP auth decryption failed. "
-                "Check WEBSITE_AUTH_ENCRYPTION_KEY is correct.",
+                "Check encryption_key setting is correct.",
                 extra={
                     "website_id": str(params.website_id),
                     "tenant_id": str(website.tenant_id),
@@ -239,7 +239,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
             raise Exception(
                 f"HTTP auth decryption failed for website {params.website_id}. "
-                "Check WEBSITE_AUTH_ENCRYPTION_KEY configuration."
+                "Check encryption_key configuration."
             )
 
         # Fetch existing titles for stale detection and file hashes for skip optimization
