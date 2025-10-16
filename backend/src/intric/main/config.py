@@ -261,24 +261,28 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_jwt_secret_strength(self):
         """
-        Enforce strong JWT secret in production.
+        Warn about weak JWT secret in production.
 
         JWT secret is used for signing OIDC state tokens and user authentication tokens.
         Weak secrets enable token forgery and session hijacking.
-
-        Minimum 32 characters (~256 bits) required for production security.
         """
         if not self.dev and not self.testing:
             secret = (self.jwt_secret or "").strip()
             if len(secret) < 32:
-                logging.error(
-                    "JWT_SECRET too weak for production\n"
-                    "Minimum 32 characters required for security.\n"
-                    "Current length: %d characters\n"
-                    "Generate strong secret: python -c 'import secrets; print(secrets.token_hex(32))'",
-                    len(secret)
+                logging.warning(
+                    "\n" + "="*70 + "\n"
+                    "⚠️  WARNING: JWT_SECRET is too weak for production\n"
+                    "="*70 + "\n"
+                    f"Current length: {len(secret)} characters (minimum 32 required)\n"
+                    "Security risk: Weak secrets enable token forgery and session hijacking\n"
+                    "\n"
+                    "Generate a strong secret:\n"
+                    "  python -c 'import secrets; print(secrets.token_hex(32))'\n"
+                    "\n"
+                    "Add to your .env file:\n"
+                    "  JWT_SECRET=<generated_value>\n"
+                    + "="*70
                 )
-                sys.exit(1)
 
         return self
     @computed_field
