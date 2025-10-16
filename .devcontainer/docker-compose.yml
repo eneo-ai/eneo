@@ -16,10 +16,8 @@ services:
       - ../:/workspace
       # Mount Docker socket for testcontainers support
       - /var/run/docker.sock:/var/run/docker.sock
-    # Allow access to Docker socket
-    user: vscode
-    group_add:
-      - docker
+    # Docker group is created dynamically in post-create.sh with the correct GID
+    # This ensures it works on any system regardless of the host's docker GID
 
   db:
     image: pgvector/pgvector:pg13

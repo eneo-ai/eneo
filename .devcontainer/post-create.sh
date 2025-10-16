@@ -5,6 +5,18 @@
 
 set -euf -o pipefail
 
+# Create docker group for testcontainers support (Docker-in-Docker)
+# Extract the GID from the docker socket which is mounted from the host
+# This works on any system because it uses the actual docker GID from the socket
+if [ -e /var/run/docker.sock ]; then
+    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+    if ! grep -q "^docker:" /etc/group; then
+        sudo groupadd -g "$DOCKER_GID" docker || true
+    fi
+    sudo usermod -aG docker vscode
+    echo "✓ Docker group created with GID $DOCKER_GID for testcontainers support"
+fi
+
 # Install system dependencies
 sudo apt-get update
 sudo apt-get install -y libmagic1 ffmpeg
