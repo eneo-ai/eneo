@@ -11,47 +11,72 @@
   import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
 
+  type TenantInfo = {
+    slug: string;
+    name: string;
+    display_name: string;
+  };
+
   const { data } = $props();
 
   let loginFailed = $state(false);
   let isAwaitingLoginResponse = $state(false);
   let showTenantSelector = $state(false);
   let federationError = $state<string | null>(null);
+  let preloadedTenants = $state<TenantInfo[]>([]);
 
   let message = $derived(page.url.searchParams.get("message") ?? null);
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
+  let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.tenantFederationEnabled));
+
+  // Check if user explicitly wants to see login form (e.g., after logout)
+  const hasQueryParams = $derived(
+    message !== null ||
+    showUsernameAndPassword !== null ||
+    page.url.searchParams.has("tenant")
+  );
 
   // We don't redirect on the server so we can render a loader/spinner during the redirection period
-  if (data.zitadelLink && browser) {
+  if (data.zitadelLink && browser && !hasQueryParams) {
     window.location.href = data.zitadelLink;
+  }
+
+  // Single-tenant OIDC: redirect to IdP immediately (unless user wants to see login form)
+  if (data.singleTenantOidcLink && browser && !hasQueryParams) {
+    window.location.href = data.singleTenantOidcLink;
   }
 
   // Check for tenant-based federation on mount
   onMount(async () => {
     if (!browser) return;
 
+    if (!tenantFederationEnabled) {
+      return;
+    }
+
+    if (showUsernameAndPassword) {
+      return;
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const tenant = urlParams.get("tenant");
 
-    // If tenant parameter exists, initiate federated auth
     if (tenant && /^[a-z0-9-]+$/.test(tenant)) {
       try {
-        // Dynamic import to avoid SSR issues
         const { intric } = await import("$lib/api/client");
-
         const redirectUri = `${window.location.origin}/auth/callback`;
         const response = await intric.auth.initiateAuth({ tenant, redirectUri });
-
-        // Redirect to IdP
         window.location.href = response.authorization_url;
+        return;
       } catch (err) {
         console.error("Failed to initiate federation auth:", err);
         federationError = m.failed_to_start_authentication();
         showTenantSelector = false;
       }
-    } else if (!data.zitadelLink && !data.mobilityguardLink) {
-      // No existing auth methods - show tenant selector
-      showTenantSelector = true;
+    }
+
+    if (!data.zitadelLink && !data.mobilityguardLink) {
+      await loadTenantsAndMaybeShow();
     }
   });
 
@@ -72,13 +97,38 @@
       federationError = m.failed_to_start_authentication();
     }
   }
+
+  async function loadTenantsAndMaybeShow() {
+    try {
+      const { intric } = await import("$lib/api/client");
+      const response = await intric.auth.listTenants();
+      const tenants = response.tenants ?? [];
+      preloadedTenants = tenants;
+
+      if (tenants.length === 0) {
+        showTenantSelector = false;
+        return;
+      }
+
+      if (tenants.length === 1) {
+        await handleTenantSelect(tenants[0].slug);
+        return;
+      }
+
+      showTenantSelector = true;
+    } catch (err) {
+      console.error("Failed to load tenants:", err);
+      federationError = m.failed_to_load_organizations();
+      showTenantSelector = false;
+    }
+  }
 </script>
 
 <svelte:head>
   <title>Eneo.ai – {m.login()}</title>
 </svelte:head>
 
-{#if data.zitadelLink}
+{#if (data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams}
   <LoadingScreen />
 {:else if showTenantSelector}
   <!-- Tenant Selector for Federation -->
@@ -98,7 +148,11 @@
         </div>
       {/if}
 
-      <TenantSelector onTenantSelect={handleTenantSelect} baseUrl={window.location.origin} />
+      <TenantSelector
+        onTenantSelect={handleTenantSelect}
+        baseUrl={window.location.origin}
+        tenants={preloadedTenants}
+      />
     </div>
   </div>
 {:else}
@@ -199,7 +253,7 @@
           </div>
         {/if}
 
-        {#if showUsernameAndPassword || !data.mobilityguardLink}
+        {#if showUsernameAndPassword || (!data.mobilityguardLink && !data.singleTenantOidcLink)}
           <Input.Text
             label={m.email()}
             value=""
@@ -229,17 +283,19 @@
               {m.login()}
             {/if}
           </Button>
-        {:else}
+        {:else if data.singleTenantOidcLink}
+          <Button variant="primary" href={data.singleTenantOidcLink}>{m.login()}</Button>
+        {:else if data.mobilityguardLink}
           <Button variant="primary" href={data.mobilityguardLink}>{m.login()}</Button>
         {/if}
       </form>
     </div>
     <div class="absolute bottom-10 mt-12 flex justify-center">
-      {#if showUsernameAndPassword && data.mobilityguardLink}
+      {#if showUsernameAndPassword && (data.mobilityguardLink || data.singleTenantOidcLink)}
         <Button variant="outlined" class="text-secondary" href="/login?"
           >{m.hide_login_fields()}</Button
         >
-      {:else if data.mobilityguardLink}
+      {:else if data.mobilityguardLink || data.singleTenantOidcLink}
         <Button
           variant="outlined"
           class="text-secondary"

@@ -35,3 +35,4 @@ specs/
 # Claude Code configuration
 .devcontainer/claude-config/
 .devcontainer/
+.code/

@@ -9,13 +9,42 @@ Tests tenant-specific credential resolution with strict fallback logic:
 """
 
 import logging
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from intric.main.config import Settings
 from intric.settings.credential_resolver import CredentialResolver
+from intric.settings.encryption_service import EncryptionService
 from intric.tenants.tenant import TenantInDB
+
+FERNET_TEST_KEY = "Goxa5kHpfhYh2lLBVmOAXoJ1i8LojRxurx8Wc1SUgL0="
+
+
+def make_settings(**overrides):
+    base = SimpleNamespace(
+        tenant_credentials_enabled=False,
+        federation_per_tenant_enabled=False,
+        public_origin="https://global.example.com",
+        openai_api_key=None,
+        anthropic_api_key=None,
+        azure_api_key=None,
+        berget_api_key=None,
+        mistral_api_key=None,
+        ovhcloud_api_key=None,
+        vllm_api_key=None,
+        oidc_discovery_endpoint=None,
+        oidc_client_secret=None,
+        oidc_client_id=None,
+        oidc_tenant_id=None,
+        oidc_state_ttl_seconds=600,
+        oidc_redirect_grace_period_seconds=900,
+        strict_oidc_redirect_validation=True,
+    )
+    for key, value in overrides.items():
+        setattr(base, key, value)
+    return base
 
 
 @pytest.fixture
@@ -647,3 +676,99 @@ def test_get_redirect_uri_no_config_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="No public origin configured"):
         resolver.get_redirect_uri()
+
+
+def test_strict_mode_blocks_cross_provider_access():
+    """Tenant cannot use other provider credentials when strict mode enabled."""
+    tenant_a = TenantInDB(
+        id=uuid4(),
+        name="Tenant A",
+        quota_limit=1024**3,
+        api_credentials={
+            "openai": {"api_key": "tenant-a-openai"},
+        },
+    )
+
+    settings = make_settings(tenant_credentials_enabled=True)
+    resolver_a = CredentialResolver(tenant=tenant_a, settings=settings)
+
+    assert resolver_a.get_api_key("openai") == "tenant-a-openai"
+
+    with pytest.raises(ValueError, match="No API key configured for provider 'anthropic'"):
+        resolver_a.get_api_key("anthropic")
+
+
+def test_no_global_fallback_in_strict_mode():
+    """Global env vars are ignored when tenant credentials are required."""
+    settings = make_settings(
+        tenant_credentials_enabled=True,
+        openai_api_key="sk-global-should-not-be-used",
+    )
+
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant",
+        quota_limit=1024**3,
+        api_credentials={},
+    )
+
+    resolver = CredentialResolver(tenant=tenant, settings=settings)
+
+    with pytest.raises(ValueError, match="each tenant must configure their own credentials"):
+        resolver.get_api_key("openai")
+
+
+def test_plaintext_federation_secret_rejected_when_encryption_active():
+    """Federation config must use encrypted client_secret when encryption is enabled."""
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant",
+        quota_limit=1024**3,
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "plaintext-secret",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://tenant.example.com",
+        },
+    )
+
+    settings = make_settings(federation_per_tenant_enabled=True)
+    encryption = EncryptionService(FERNET_TEST_KEY)
+    resolver = CredentialResolver(
+        tenant=tenant,
+        settings=settings,
+        encryption_service=encryption,
+    )
+
+    with pytest.raises(ValueError, match="not encrypted"):
+        resolver.get_federation_config()
+
+
+def test_encrypted_federation_secret_decrypted_successfully():
+    """Encrypted federation secrets are decrypted transparently."""
+    encryption = EncryptionService(FERNET_TEST_KEY)
+    encrypted_secret = encryption.encrypt("super-secret")
+
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant",
+        quota_limit=1024**3,
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": encrypted_secret,
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://tenant.example.com",
+        },
+    )
+
+    settings = make_settings(federation_per_tenant_enabled=True)
+    resolver = CredentialResolver(
+        tenant=tenant,
+        settings=settings,
+        encryption_service=encryption,
+    )
+
+    config = resolver.get_federation_config()
+    assert config["client_secret"] == "super-secret"

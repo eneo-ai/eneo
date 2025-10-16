@@ -56,7 +56,7 @@ class CredentialResolver:
                     )
 
                 # Decrypt if needed
-                if self.encryption and api_key:
+                if self.encryption and self.encryption.is_active() and api_key:
                     try:
                         api_key = self.encryption.decrypt(api_key)
                     except ValueError as e:
@@ -187,7 +187,7 @@ class CredentialResolver:
                     value = tenant_cred.get(field)
                     if value not in (None, ""):
                         # Decrypt if requested
-                        if decrypt and self.encryption:
+                        if decrypt and self.encryption and self.encryption.is_active():
                             try:
                                 value = self.encryption.decrypt(value)
                             except ValueError:
@@ -282,20 +282,42 @@ class CredentialResolver:
             config = self.tenant.federation_config.copy()
 
             # Decrypt client_secret if present
-            if self.encryption and config.get("client_secret"):
-                try:
-                    config["client_secret"] = self.encryption.decrypt(config["client_secret"])
-                except ValueError as e:
+            if (
+                self.encryption
+                and self.encryption.is_active()
+                and config.get("client_secret")
+            ):
+                raw_secret = config["client_secret"]
+
+                if not self.encryption.is_encrypted(raw_secret):
                     logger.error(
-                        f"Failed to decrypt federation client_secret: {e}",
+                        "Federation client_secret missing encryption envelope",
                         extra={
                             "tenant_id": str(self.tenant.id),
                             "tenant_name": self.tenant.name,
+                            "provider": config.get("provider"),
                         },
                     )
                     raise ValueError(
-                        "Failed to decrypt federation config. "
-                        "Encryption key may be incorrect or data corrupted."
+                        f"Federation client_secret for tenant '{self.tenant.name}' is not encrypted. "
+                        "Delete the credential and upload a new value after confirming ENCRYPTION_KEY is configured."
+                    )
+
+                try:
+                    config["client_secret"] = self.encryption.decrypt(raw_secret)
+                except ValueError as e:
+                    logger.error(
+                        "Failed to decrypt federation client_secret",
+                        extra={
+                            "tenant_id": str(self.tenant.id),
+                            "tenant_name": self.tenant.name,
+                            "provider": config.get("provider"),
+                            "error": str(e),
+                        },
+                    )
+                    raise ValueError(
+                        "Failed to decrypt federation config. Encryption key may be incorrect or data corrupted. "
+                        "Rotate the tenant credential by removing and re-adding it with the active encryption key."
                     )
 
             logger.info(
@@ -456,8 +478,9 @@ class CredentialResolver:
                 )
 
         # Origin should already be validated and normalized by Settings/Tenant validators
-        # But double-check HTTPS as defense in depth
-        if not origin.startswith("https://"):
+        # But double-check HTTPS as defense in depth (allow http://localhost for development)
+        is_localhost = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
+        if not origin.startswith("https://") and not is_localhost:
             logger.error(
                 f"Public origin must be HTTPS: {origin}",
                 extra={
@@ -466,7 +489,7 @@ class CredentialResolver:
                 },
             )
             raise ValueError(
-                f"Public origin must be an https:// URL for security. Got: {origin}"
+                f"Public origin must be an https:// URL for security (or http://localhost for development). Got: {origin}"
             )
 
         # Normalize: strip trailing slash (defense in depth)

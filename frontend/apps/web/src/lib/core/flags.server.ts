@@ -133,11 +133,21 @@ export function getFeatureFlags() {
     isConfigured(env.ZITADEL_INSTANCE_URL) && isConfigured(env.ZITADEL_PROJECT_CLIENT_ID);
   const forceLegacyAuth = getFlagFromEnv("FORCE_LEGACY_AUTH", false);
   const useNewAuth = zitadelConfigured && !forceLegacyAuth;
+  const tenantFederationEnabled = getFlagFromEnv("FEDERATION_PER_TENANT_ENABLED", false);
+
+  // Single-tenant OIDC: OIDC configured but federation per tenant is disabled
+  const singleTenantOidcConfigured =
+    !tenantFederationEnabled &&
+    isConfigured(env.OIDC_DISCOVERY_ENDPOINT) &&
+    isConfigured(env.OIDC_CLIENT_ID) &&
+    isConfigured(env.OIDC_CLIENT_SECRET);
 
   return Object.freeze({
     newAuth: useNewAuth,
     showTemplates,
     showWebSearch,
-    showHelpCenter
+    showHelpCenter,
+    tenantFederationEnabled,
+    singleTenantOidcConfigured
   });
 }
