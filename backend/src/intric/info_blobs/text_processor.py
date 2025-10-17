@@ -34,6 +34,7 @@ class TextProcessor:
         mimetype: str | None = None,
         group_id: UUID | None = None,
         website_id: UUID | None = None,
+        content_hash: bytes | None = None,
     ):
         text = self.extractor.extract(filepath, mimetype)
 
@@ -43,6 +44,7 @@ class TextProcessor:
             embedding_model=embedding_model,
             group_id=group_id,
             website_id=website_id,
+            content_hash=content_hash,  # Pass hash for files too
         )
 
     async def process_text(
@@ -54,6 +56,7 @@ class TextProcessor:
         group_id: UUID | None = None,
         website_id: UUID | None = None,
         url: str | None = None,
+        content_hash: bytes | None = None,
     ):
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -63,10 +66,15 @@ class TextProcessor:
             url=url,
             website_id=website_id,
             tenant_id=self.user.tenant_id,
+            content_hash=content_hash,  # Used by files for hash checking
         )
 
-        info_blob = await self.info_blob_service.add_info_blob_without_validation(info_blob_add)
+        info_blob = await self.info_blob_service.add_info_blob_without_validation(
+            info_blob_add
+        )
         await self.datastore.add(info_blob=info_blob, embedding_model=embedding_model)
-        info_blob_updated = await self.info_blob_service.update_info_blob_size(info_blob.id)
+        info_blob_updated = await self.info_blob_service.update_info_blob_size(
+            info_blob.id
+        )
 
         return info_blob_updated

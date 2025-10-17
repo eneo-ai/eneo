@@ -33,6 +33,7 @@ env:
   JWT_SECRET: test_secret
   JWT_TOKEN_PREFIX: Bearer
   URL_SIGNING_KEY: test_key
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
   # API keys for external services (placeholder values for import-time initialization)
   OPENAI_API_KEY: test-api-key
 

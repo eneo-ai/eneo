@@ -7,3 +7,4 @@ export { default as Files } from "./Files.svelte";
 export { default as Number } from "./Number.svelte";
 export { default as Slider } from "./Slider.svelte";
 export { default as DateRange } from "./DateRange.svelte";
+export { default as Checkbox } from "./Checkbox.svelte";

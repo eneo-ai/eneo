@@ -624,6 +624,55 @@ export interface paths {
     /** Update Completion Model */
     post: operations["update_completion_model_api_v1_completion_models__id___post"];
   };
+  "/api/v1/completion-models/{model_id}/usage": {
+    /**
+     * Get Model Usage
+     * @description Get usage statistics for a specific model (pre-aggregated for performance)
+     */
+    get: operations["get_model_usage_api_v1_completion_models__model_id__usage_get"];
+  };
+  "/api/v1/completion-models/{model_id}/usage/details": {
+    /**
+     * Get Model Usage Details
+     * @description Get detailed list of entities using this model with cursor pagination
+     */
+    get: operations["get_model_usage_details_api_v1_completion_models__model_id__usage_details_get"];
+  };
+  "/api/v1/completion-models/{model_id}/migrate": {
+    /**
+     * Migrate Model Usage
+     * @description Migrate all usage from one model to another with safety checks
+     */
+    post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
+  };
+  "/api/v1/completion-models/usage-summary": {
+    /**
+     * Get All Models Usage Summary
+     * @description Get usage summary for all models (optimized with pre-aggregation)
+     */
+    get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
+  };
+  "/api/v1/completion-models/{model_id}/migration-history": {
+    /**
+     * Get Model Migration History
+     * @description Get migration history for a specific model (from or to this model)
+     */
+    get: operations["get_model_migration_history_api_v1_completion_models__model_id__migration_history_get"];
+  };
+  "/api/v1/completion-models/migration-history": {
+    /**
+     * Get All Migration History
+     * @description Get all migration history for the tenant
+     */
+    get: operations["get_all_migration_history_api_v1_completion_models_migration_history_get"];
+  };
+  "/api/v1/completion-models/migration-history/{migration_id}": {
+    /**
+     * Get Migration History By Id
+     * @description Get a specific migration history record by ID
+     */
+    get: operations["get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get"];
+  };
   "/api/v1/embedding-models/": {
     /** Get Embedding Models */
     get: operations["get_embedding_models_api_v1_embedding_models__get"];
@@ -729,7 +778,29 @@ export interface paths {
     post: operations["create_space_groups_api_v1_spaces__id__knowledge_groups__post"];
   };
   "/api/v1/spaces/{id}/knowledge/websites/": {
-    /** Create Space Websites */
+    /**
+     * Create a website crawler
+     * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+     *
+     *     **Update Intervals:**
+     *     - `never` (default): Manual crawls only
+     *     - `daily`: Automatic recrawl every day at 3 AM Swedish time
+     *     - `every_other_day`: Recrawl every 2 days
+     *     - `weekly`: Recrawl every Friday
+     *
+     *     **Example Request Body:**
+     *     ```json
+     *     {
+     *       "name": "Company Documentation",
+     *       "url": "https://docs.example.com",
+     *       "crawl_type": "crawl",
+     *       "download_files": true,
+     *       "update_interval": "daily"
+     *     }
+     *     ```
+     *
+     *     The crawl will start immediately upon creation.
+     */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
   };
   "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/": {
@@ -770,6 +841,47 @@ export interface paths {
      */
     post: operations["create_website_api_v1_websites__post"];
   };
+  "/api/v1/websites/bulk/run/": {
+    /**
+     * Trigger bulk crawl
+     * @description Trigger crawls for multiple websites at once. Useful for:
+     *     - Batch recrawling selected websites
+     *     - Refreshing multiple knowledge sources simultaneously
+     *     - Recovering from failed crawls across multiple sites
+     *
+     *     **Features:**
+     *     - Maximum 50 websites per request (safety limit)
+     *     - Individual failures don't stop the batch
+     *     - Returns detailed status for each website
+     *
+     *     **Example Request:**
+     *     ```json
+     *     {
+     *       "website_ids": [
+     *         "123e4567-e89b-12d3-a456-426614174000",
+     *         "123e4567-e89b-12d3-a456-426614174001"
+     *       ]
+     *     }
+     *     ```
+     *
+     *     **Example Response:**
+     *     ```json
+     *     {
+     *       "total": 2,
+     *       "queued": 1,
+     *       "failed": 1,
+     *       "crawl_runs": [...],
+     *       "errors": [
+     *         {
+     *           "website_id": "123e4567-e89b-12d3-a456-426614174001",
+     *           "error": "Crawl already in progress for this website"
+     *         }
+     *       ]
+     *     }
+     *     ```
+     */
+    post: operations["bulk_run_crawl_api_v1_websites_bulk_run__post"];
+  };
   "/api/v1/websites/{id}/": {
     /** Get Website */
     get: operations["get_website_api_v1_websites__id___get"];
@@ -779,7 +891,23 @@ export interface paths {
     delete: operations["delete_website_api_v1_websites__id___delete"];
   };
   "/api/v1/websites/{id}/run/": {
-    /** Run Crawl */
+    /**
+     * Trigger a crawl
+     * @description Manually trigger a crawl for a specific website. This can be used to:
+     *     - Recrawl a website to update its content
+     *     - Force a crawl outside the automatic update schedule
+     *     - Retry a failed crawl
+     *
+     *     The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+     *
+     *     **Status Flow:**
+     *     1. `queued` - Crawl is waiting to start
+     *     2. `in progress` - Crawl is actively running
+     *     3. `complete` - Crawl finished successfully
+     *     4. `failed` - Crawl encountered an error
+     *
+     *     Returns the new crawl run with status information.
+     */
     post: operations["run_crawl_api_v1_websites__id__run__post"];
   };
   "/api/v1/websites/{id}/runs/": {
@@ -1072,6 +1200,61 @@ export interface paths {
   "/api/v1/sysadmin/allowed-origins/{id}/": {
     /** Delete Origin */
     delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/usage-stats/recalculate": {
+    /**
+     * Recalculate Tenant Usage Statistics
+     * @description Recalculate usage statistics for a specific tenant.
+     *
+     * This endpoint is intended for tenant-specific administrative operations,
+     * such as fixing usage statistics for a particular tenant.
+     */
+    post: operations["recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post"];
+  };
+  "/api/v1/sysadmin/system/usage-stats/recalculate-all": {
+    /**
+     * Recalculate All Tenants Usage Statistics
+     * @description Recalculate usage statistics for all active tenants.
+     *
+     * This endpoint is intended for system-wide administrative operations,
+     * such as bulk recalculation of usage statistics across all tenants.
+     */
+    post: operations["recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/completion-models/{model_id}/migrate": {
+    /**
+     * Migrate Completion Model For Tenant
+     * @description Migrate completion model usage for a specific tenant.
+     *
+     * This endpoint allows system administrators to migrate all usage from one
+     * completion model to another for a specific tenant. This is useful for:
+     * - Migrating tenants away from deprecated models
+     * - Consolidating model usage
+     * - Fixing model configurations for specific tenants
+     *
+     * Args:
+     *     tenant_id: UUID of the tenant to migrate
+     *     model_id: UUID of the source model to migrate from
+     *     migration_request: Details of the migration (target model, entity types, etc.)
+     */
+    post: operations["migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post"];
+  };
+  "/api/v1/sysadmin/system/completion-models/{model_id}/migrate-all-tenants": {
+    /**
+     * Migrate Completion Model For All Tenants
+     * @description Migrate completion model usage for all active tenants.
+     *
+     * This endpoint allows system administrators to migrate all usage from one
+     * completion model to another across all active tenants. This is useful for:
+     * - Deprecating models system-wide
+     * - Migrating to newer model versions
+     * - Consolidating model usage across the entire system
+     *
+     * Args:
+     *     model_id: UUID of the source model to migrate from
+     *     migration_request: Details of the migration (target model, entity types, etc.)
+     */
+    post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
   "/api/v1/modules/": {
     /** Get Modules */
@@ -1797,6 +1980,32 @@ export interface components {
        * Format: binary
        */
       file: string;
+    };
+    /**
+     * BulkCrawlRequest
+     * @description Request model for triggering crawls on multiple websites.
+     */
+    BulkCrawlRequest: {
+      /** Website Ids */
+      website_ids: string[];
+    };
+    /**
+     * BulkCrawlResponse
+     * @description Response model for bulk crawl operations.
+     */
+    BulkCrawlResponse: {
+      /** Total */
+      total: number;
+      /** Queued */
+      queued: number;
+      /** Failed */
+      failed: number;
+      /** Crawl Runs */
+      crawl_runs: components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"][];
+      /** Errors */
+      errors: {
+        [key: string]: string;
+      }[];
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -3224,6 +3433,44 @@ export interface components {
       questions: components["schemas"]["QuestionMetadata"][];
     };
     /**
+     * MigrationResult
+     * @description Result of a model migration operation.
+     */
+    MigrationResult: {
+      /** Success */
+      success: boolean;
+      /** Migrated Count */
+      migrated_count: number;
+      /** Failed Count */
+      failed_count: number;
+      /** Details */
+      details: {
+        [key: string]: number;
+      };
+      /** Duration */
+      duration: number;
+      /**
+       * Migration Id
+       * Format: uuid
+       */
+      migration_id: string;
+      /**
+       * Warnings
+       * @default []
+       */
+      warnings?: string[];
+      /**
+       * Auto Recalculated
+       * @default false
+       */
+      auto_recalculated?: boolean;
+      /**
+       * Requires Manual Recalculation
+       * @default false
+       */
+      requires_manual_recalculation?: boolean;
+    };
+    /**
      * ModelFamily
      * @enum {string}
      */
@@ -3261,6 +3508,68 @@ export interface components {
       frequency_penalty?: number | null;
       /** Top K */
       top_k?: number | null;
+    };
+    /**
+     * ModelMigrationHistory
+     * @description Historical record of a model migration.
+     */
+    ModelMigrationHistory: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * From Model Id
+       * Format: uuid
+       */
+      from_model_id: string;
+      /** From Model Name */
+      from_model_name: string;
+      /**
+       * To Model Id
+       * Format: uuid
+       */
+      to_model_id: string;
+      /** To Model Name */
+      to_model_name: string;
+      /** Migrated Count */
+      migrated_count: number;
+      /** Status */
+      status: string;
+      /**
+       * Initiated By Id
+       * Format: uuid
+       */
+      initiated_by_id: string;
+      /** Initiated By Name */
+      initiated_by_name: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /** Duration */
+      duration?: number | null;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /**
+     * ModelMigrationRequest
+     * @description Request to migrate usage from one model to another.
+     */
+    ModelMigrationRequest: {
+      /**
+       * To Model Id
+       * Format: uuid
+       */
+      to_model_id: string;
+      /** Entity Types */
+      entity_types?: string[] | null;
+      /**
+       * Confirm Migration
+       * @default false
+       */
+      confirm_migration?: boolean;
     };
     /**
      * ModelOrg
@@ -3319,6 +3628,94 @@ export interface components {
        * @description Number of requests made with this model
        */
       request_count: number;
+    };
+    /**
+     * ModelUsageDetail
+     * @description Detailed information about a specific entity using a completion model.
+     */
+    ModelUsageDetail: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /** Entity Type */
+      entity_type: string;
+      /** Space Id */
+      space_id?: string | null;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Id */
+      owner_id?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Last Used */
+      last_used?: string | null;
+      /** Usage Count */
+      usage_count?: number | null;
+    };
+    /**
+     * ModelUsageStatistics
+     * @description Pre-aggregated usage statistics for a completion model.
+     */
+    ModelUsageStatistics: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /** Total Usage */
+      total_usage: number;
+      /** Assistants Count */
+      assistants_count: number;
+      /** Apps Count */
+      apps_count: number;
+      /** Services Count */
+      services_count: number;
+      /** Questions Count */
+      questions_count: number;
+      /** Assistant Templates Count */
+      assistant_templates_count: number;
+      /** App Templates Count */
+      app_templates_count: number;
+      /** Spaces Count */
+      spaces_count: number;
+      /**
+       * Last Updated
+       * Format: date-time
+       */
+      last_updated: string;
+    };
+    /**
+     * ModelUsageSummary
+     * @description Summary of usage for a single model.
+     */
+    ModelUsageSummary: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /** Model Name */
+      model_name: string;
+      /** Model Nickname */
+      model_nickname: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Total Usage */
+      total_usage: number;
+      /**
+       * Last Updated
+       * Format: date-time
+       */
+      last_updated: string;
     };
     /**
      * ModelsPresentation
@@ -3523,6 +3920,22 @@ export interface components {
        * @description Number of items returned in the response
        */
       count: number;
+    };
+    /**
+     * PaginatedResponse
+     * @description Generic paginated response with cursor-based pagination.
+     */
+    PaginatedResponse: {
+      /** Items */
+      items: components["schemas"]["ModelUsageDetail"][];
+      /** Total */
+      total: number;
+      /** Has More */
+      has_more: boolean;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Prev Cursor */
+      prev_cursor?: string | null;
     };
     /** PaginatedResponse[AllowedOriginInDB] */
     PaginatedResponse_AllowedOriginInDB_: {
@@ -4823,7 +5236,8 @@ export interface components {
       | "crawl_all_websites"
       | "run_app"
       | "pull_confluence_content"
-      | "pull_sharepoint_content";
+      | "pull_sharepoint_content"
+      | "update_model_usage_stats";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -5174,9 +5588,12 @@ export interface components {
     };
     /**
      * UpdateInterval
+     * @description Defines how frequently a website should be crawled.
+     *
+     * Why: Provides flexible scheduling options for automated crawling.
      * @enum {string}
      */
-    UpdateInterval: "never" | "weekly";
+    UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Assistants */
@@ -5934,6 +6351,16 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model?: components["schemas"]["ModelId"] | null;
+      /**
+       * Http Auth Username
+       * @description Username for HTTP Basic Authentication (optional)
+       */
+      http_auth_username?: string | null;
+      /**
+       * Http Auth Password
+       * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
+       */
+      http_auth_password?: string | null;
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -5996,6 +6423,27 @@ export interface components {
         | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
+      /**
+       * Requires Http Auth
+       * @description Whether this website requires HTTP Basic Authentication. Credentials are never exposed via API.
+       */
+      requires_http_auth: boolean;
+      /**
+       * Consecutive Failures
+       * @description Number of consecutive crawl failures. Resets to 0 on successful crawl.
+       * @default 0
+       */
+      consecutive_failures?: number;
+      /**
+       * Next Retry At
+       * @description When to retry after failures (null = no backoff). Uses exponential backoff: 1h → 2h → 4h → 8h → 16h → 24h max.
+       */
+      next_retry_at?: string | null;
+      /**
+       * Is Auto Disabled
+       * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
+       */
+      is_auto_disabled: boolean;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -6024,6 +6472,18 @@ export interface components {
        * @default NOT_PROVIDED
        */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /**
+       * Http Auth Username
+       * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.
+       * @default NOT_PROVIDED
+       */
+      http_auth_username?: string | null;
+      /**
+       * Http Auth Password
+       * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
+       * @default NOT_PROVIDED
+       */
+      http_auth_password?: string | null;
     };
     /**
      * WizardType
@@ -9936,6 +10396,234 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Model Usage
+   * @description Get usage statistics for a specific model (pre-aggregated for performance)
+   */
+  get_model_usage_api_v1_completion_models__model_id__usage_get: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelUsageStatistics"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Usage Details
+   * @description Get detailed list of entities using this model with cursor pagination
+   */
+  get_model_usage_details_api_v1_completion_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by entity type */
+        entity_type?: string | null;
+        /** @description Cursor for pagination */
+        cursor?: string | null;
+        /** @description Number of results per page */
+        limit?: number;
+      };
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Model Usage
+   * @description Migrate all usage from one model to another with safety checks
+   */
+  migrate_model_usage_api_v1_completion_models__model_id__migrate_post: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get All Models Usage Summary
+   * @description Get usage summary for all models (optimized with pre-aggregation)
+   */
+  get_all_models_usage_summary_api_v1_completion_models_usage_summary_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelUsageSummary"][];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Migration History
+   * @description Get migration history for a specific model (from or to this model)
+   */
+  get_model_migration_history_api_v1_completion_models__model_id__migration_history_get: {
+    parameters: {
+      query?: {
+        /** @description Number of results per page */
+        limit?: number;
+        /** @description Offset for pagination */
+        offset?: number;
+      };
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get All Migration History
+   * @description Get all migration history for the tenant
+   */
+  get_all_migration_history_api_v1_completion_models_migration_history_get: {
+    parameters: {
+      query?: {
+        /** @description Number of results per page */
+        limit?: number;
+        /** @description Offset for pagination */
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Migration History By Id
+   * @description Get a specific migration history record by ID
+   */
+  get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get: {
+    parameters: {
+      path: {
+        migration_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Embedding Models */
   get_embedding_models_api_v1_embedding_models__get: {
     responses: {
@@ -10686,7 +11374,29 @@ export interface operations {
       };
     };
   };
-  /** Create Space Websites */
+  /**
+   * Create a website crawler
+   * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+   *
+   *     **Update Intervals:**
+   *     - `never` (default): Manual crawls only
+   *     - `daily`: Automatic recrawl every day at 3 AM Swedish time
+   *     - `every_other_day`: Recrawl every 2 days
+   *     - `weekly`: Recrawl every Friday
+   *
+   *     **Example Request Body:**
+   *     ```json
+   *     {
+   *       "name": "Company Documentation",
+   *       "url": "https://docs.example.com",
+   *       "crawl_type": "crawl",
+   *       "download_files": true,
+   *       "update_interval": "daily"
+   *     }
+   *     ```
+   *
+   *     The crawl will start immediately upon creation.
+   */
   create_space_websites_api_v1_spaces__id__knowledge_websites__post: {
     parameters: {
       path: {
@@ -10987,6 +11697,77 @@ export interface operations {
       };
     };
   };
+  /**
+   * Trigger bulk crawl
+   * @description Trigger crawls for multiple websites at once. Useful for:
+   *     - Batch recrawling selected websites
+   *     - Refreshing multiple knowledge sources simultaneously
+   *     - Recovering from failed crawls across multiple sites
+   *
+   *     **Features:**
+   *     - Maximum 50 websites per request (safety limit)
+   *     - Individual failures don't stop the batch
+   *     - Returns detailed status for each website
+   *
+   *     **Example Request:**
+   *     ```json
+   *     {
+   *       "website_ids": [
+   *         "123e4567-e89b-12d3-a456-426614174000",
+   *         "123e4567-e89b-12d3-a456-426614174001"
+   *       ]
+   *     }
+   *     ```
+   *
+   *     **Example Response:**
+   *     ```json
+   *     {
+   *       "total": 2,
+   *       "queued": 1,
+   *       "failed": 1,
+   *       "crawl_runs": [...],
+   *       "errors": [
+   *         {
+   *           "website_id": "123e4567-e89b-12d3-a456-426614174001",
+   *           "error": "Crawl already in progress for this website"
+   *         }
+   *       ]
+   *     }
+   *     ```
+   */
+  bulk_run_crawl_api_v1_websites_bulk_run__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BulkCrawlResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Website */
   get_website_api_v1_websites__id___get: {
     parameters: {
@@ -11074,7 +11855,23 @@ export interface operations {
       };
     };
   };
-  /** Run Crawl */
+  /**
+   * Trigger a crawl
+   * @description Manually trigger a crawl for a specific website. This can be used to:
+   *     - Recrawl a website to update its content
+   *     - Force a crawl outside the automatic update schedule
+   *     - Retry a failed crawl
+   *
+   *     The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+   *
+   *     **Status Flow:**
+   *     1. `queued` - Crawl is waiting to start
+   *     2. `in progress` - Crawl is actively running
+   *     3. `complete` - Crawl finished successfully
+   *     4. `failed` - Crawl encountered an error
+   *
+   *     Returns the new crawl run with status information.
+   */
   run_crawl_api_v1_websites__id__run__post: {
     parameters: {
       path: {
@@ -12483,6 +13280,195 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Recalculate Tenant Usage Statistics
+   * @description Recalculate usage statistics for a specific tenant.
+   *
+   * This endpoint is intended for tenant-specific administrative operations,
+   * such as fixing usage statistics for a particular tenant.
+   */
+  recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Recalculate All Tenants Usage Statistics
+   * @description Recalculate usage statistics for all active tenants.
+   *
+   * This endpoint is intended for system-wide administrative operations,
+   * such as bulk recalculation of usage statistics across all tenants.
+   */
+  recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Completion Model For Tenant
+   * @description Migrate completion model usage for a specific tenant.
+   *
+   * This endpoint allows system administrators to migrate all usage from one
+   * completion model to another for a specific tenant. This is useful for:
+   * - Migrating tenants away from deprecated models
+   * - Consolidating model usage
+   * - Fixing model configurations for specific tenants
+   *
+   * Args:
+   *     tenant_id: UUID of the tenant to migrate
+   *     model_id: UUID of the source model to migrate from
+   *     migration_request: Details of the migration (target model, entity types, etc.)
+   */
+  migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Completion Model For All Tenants
+   * @description Migrate completion model usage for all active tenants.
+   *
+   * This endpoint allows system administrators to migrate all usage from one
+   * completion model to another across all active tenants. This is useful for:
+   * - Deprecating models system-wide
+   * - Migrating to newer model versions
+   * - Consolidating model usage across the entire system
+   *
+   * Args:
+   *     model_id: UUID of the source model to migrate from
+   *     migration_request: Details of the migration (target model, entity types, etc.)
+   */
+  migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

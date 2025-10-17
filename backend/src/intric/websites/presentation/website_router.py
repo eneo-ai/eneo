@@ -11,6 +11,8 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses, to_paginated_response
 from intric.spaces.api.space_models import TransferRequest
 from intric.websites.presentation.website_models import (
+    BulkCrawlRequest,
+    BulkCrawlResponse,
     CrawlRunPublic,
     WebsiteCreateRequestDeprecated,
     WebsitePublic,
@@ -36,6 +38,81 @@ async def create_website(
     return HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
+@router.post(
+    "/bulk/run/",
+    response_model=BulkCrawlResponse,
+    responses=responses.get_responses([400, 403]),
+    summary="Trigger bulk crawl",
+    description="""
+    Trigger crawls for multiple websites at once. Useful for:
+    - Batch recrawling selected websites
+    - Refreshing multiple knowledge sources simultaneously
+    - Recovering from failed crawls across multiple sites
+
+    **Features:**
+    - Maximum 50 websites per request (safety limit)
+    - Individual failures don't stop the batch
+    - Returns detailed status for each website
+
+    **Example Request:**
+    ```json
+    {
+      "website_ids": [
+        "123e4567-e89b-12d3-a456-426614174000",
+        "123e4567-e89b-12d3-a456-426614174001"
+      ]
+    }
+    ```
+
+    **Example Response:**
+    ```json
+    {
+      "total": 2,
+      "queued": 1,
+      "failed": 1,
+      "crawl_runs": [...],
+      "errors": [
+        {
+          "website_id": "123e4567-e89b-12d3-a456-426614174001",
+          "error": "Crawl already in progress for this website"
+        }
+      ]
+    }
+    ```
+    """,
+)
+async def bulk_run_crawl(
+    request: BulkCrawlRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Trigger crawls for multiple websites in a single request."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"Bulk crawl request received: {len(request.website_ids)} websites")
+    logger.debug(f"Website IDs: {request.website_ids}")
+
+    service = container.website_crud_service()
+
+    try:
+        successful_runs, errors = await service.bulk_crawl_websites(request.website_ids)
+
+        logger.info(f"Bulk crawl completed: {len(successful_runs)} queued, {len(errors)} failed")
+        if errors:
+            logger.warning(f"Bulk crawl errors: {errors}")
+
+        return BulkCrawlResponse(
+            total=len(request.website_ids),
+            queued=len(successful_runs),
+            failed=len(errors),
+            crawl_runs=[CrawlRunPublic.from_domain(run) for run in successful_runs],
+            errors=errors,
+        )
+    except Exception as e:
+        logger.error(f"Bulk crawl endpoint error: {str(e)}", exc_info=True)
+        raise
+
+
 @router.get("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
 async def get_website(id: UUID, container: Container = Depends(get_container(with_user=True))):
     service = container.website_crud_service()
@@ -59,6 +136,8 @@ async def update_website(
         download_files=website_update.download_files,
         crawl_type=website_update.crawl_type,
         update_interval=website_update.update_interval,
+        http_auth_username=website_update.http_auth_username,
+        http_auth_password=website_update.http_auth_password,
     )
 
     return WebsitePublic.from_domain(website)
@@ -74,6 +153,23 @@ async def delete_website(id: UUID, container: Container = Depends(get_container(
     "/{id}/run/",
     response_model=CrawlRunPublic,
     responses=responses.get_responses([403, 404]),
+    summary="Trigger a crawl",
+    description="""
+    Manually trigger a crawl for a specific website. This can be used to:
+    - Recrawl a website to update its content
+    - Force a crawl outside the automatic update schedule
+    - Retry a failed crawl
+
+    The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+
+    **Status Flow:**
+    1. `queued` - Crawl is waiting to start
+    2. `in progress` - Crawl is actively running
+    3. `complete` - Crawl finished successfully
+    4. `failed` - Crawl encountered an error
+
+    Returns the new crawl run with status information.
+    """,
 )
 async def run_crawl(id: UUID, container: Container = Depends(get_container(with_user=True))):
     # MIT License
