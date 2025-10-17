@@ -1,0 +1,13 @@
+Test File from HTTP Auth Page
+==============================
+
+This is a sample text file for testing HTTP Basic Authentication and file downloads.
+
+Features tested:
+- HTTP Basic Authentication
+- File download
+- Protected endpoints
+
+If you can read this, the download was successful!
+
+Generated on: 2025-10-17

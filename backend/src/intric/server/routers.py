@@ -60,6 +60,7 @@ from intric.websites.presentation.website_router import router as website_router
 from intric.modules.module_router import router as module_router
 from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
+from intric.test_auth_page.router import router as test_auth_router
 
 router = APIRouter()
 
@@ -124,6 +125,7 @@ router.include_router(integration_auth_router, prefix="/integrations/auth", tags
 router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
 router.include_router(documentation_router, prefix="")
+router.include_router(test_auth_router)
 
 if get_settings().using_access_management:
     from intric.roles.roles_router import router as roles_router
