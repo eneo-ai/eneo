@@ -114,7 +114,7 @@ class FederationInfo(BaseModel):
 async def set_tenant_federation(
     tenant_id: UUID,
     request: SetFederationRequest,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ) -> SetFederationResponse:
     """
     Configure custom identity provider for tenant.
@@ -305,7 +305,7 @@ async def set_tenant_federation(
 )
 async def delete_tenant_federation(
     tenant_id: UUID,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ) -> DeleteFederationResponse:
     """Delete federation config for tenant (revert to global IdP)."""
     tenant_repo = container.tenant_repo()
@@ -338,7 +338,7 @@ async def delete_tenant_federation(
 )
 async def get_tenant_federation(
     tenant_id: UUID,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ) -> FederationInfo:
     """Get federation config for tenant (masked secrets)."""
     tenant_repo = container.tenant_repo()
@@ -380,7 +380,7 @@ async def get_tenant_federation(
 )
 async def test_tenant_federation(
     tenant_id: UUID,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container()),
 ):
     """
     Test federation config by fetching discovery endpoint.

@@ -74,7 +74,7 @@ class Worker:
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
-        self.job_timeout = 60 * 60 * 24  # 24 hours
+        self.job_timeout = settings.crawl_max_length + 60 * 60  # crawl window + 1h buffer
         self.max_jobs = settings.worker_max_jobs
         self.expires_extra_ms = 604800000  # 1 week
 

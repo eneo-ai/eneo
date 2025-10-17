@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -8,11 +9,36 @@
   // If there was an error during server-side processing, redirect to login
   onMount(() => {
     if (data.error) {
-      console.error("Authentication callback error:", data.error, data.details);
+      console.error("Authentication callback error:", data.error, {
+        detailCode: data.detailCode,
+        rawDetail: data.rawDetail,
+        correlationId: data.correlationId
+      });
 
       // Redirect to login with error message
-      const message = data.error;
-      setTimeout(() => goto(`/login?message=${message}`), 3000);
+      const params = new URLSearchParams();
+      params.set("message", data.error);
+
+      if (data.detailCode) {
+        params.set("detailCode", data.detailCode);
+      }
+
+      if (data.correlationId) {
+        params.set("correlation", data.correlationId);
+      }
+
+      if (data.rawDetail) {
+        params.set("rawDetail", data.rawDetail);
+      }
+
+      if (browser) {
+        const rememberedTenant = sessionStorage.getItem("eneo-last-tenant-slug");
+        if (rememberedTenant) {
+          params.set("tenant", rememberedTenant);
+        }
+      }
+
+      setTimeout(() => goto(`/login?${params.toString()}`, { replaceState: true }), 1200);
     }
   });
 </script>
@@ -49,8 +75,8 @@
       <h2 class="text-default mb-2 text-xl font-semibold">
         {m.authentication_failed()}
       </h2>
-      {#if data.details}
-        <p class="text-default mb-4">{data.details}</p>
+      {#if data.rawDetail}
+        <p class="text-default mb-4">{data.rawDetail}</p>
       {/if}
       <p class="text-dimmer text-sm">
         {m.redirecting_to_authentication()}

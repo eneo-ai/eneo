@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     # Background worker configuration
     worker_max_jobs: int = 20
     tenant_worker_concurrency_limit: int = 4
-    tenant_worker_semaphore_ttl_seconds: int = 3600
+    tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
     tenant_worker_retry_delay_seconds: int = 30
 
     # Federation per tenant feature flag
@@ -283,6 +283,15 @@ class Settings(BaseSettings):
             logging.error(
                 "TENANT_WORKER_SEMAPHORE_TTL_SECONDS must be greater than zero. Current value: %s",
                 self.tenant_worker_semaphore_ttl_seconds,
+            )
+            sys.exit(1)
+
+        if self.tenant_worker_semaphore_ttl_seconds < self.crawl_max_length:
+            logging.error(
+                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS (%s) is shorter than CRAWL_MAX_LENGTH (%s)."
+                " Increase the TTL to cover the longest crawl duration to avoid leaking slots.",
+                self.tenant_worker_semaphore_ttl_seconds,
+                self.crawl_max_length,
             )
             sys.exit(1)
 

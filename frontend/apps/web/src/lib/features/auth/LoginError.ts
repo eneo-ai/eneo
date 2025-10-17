@@ -8,7 +8,10 @@ export const LoginErrorCode = {
   USER_INACTIVE: "Your account is inactive. Please contact your administrator.",
   TENANT_SUSPENDED: "Your organization's access is suspended. Please contact your administrator.",
   NETWORK_ERROR: "Network error during authentication. Please check your connection and try again.",
-  SERVER_ERROR: "Authentication service is temporarily unavailable. Please try again later."
+  SERVER_ERROR: "Authentication service is temporarily unavailable. Please try again later.",
+  FORBIDDEN: "Access denied for this organization.",
+  UNAUTHORIZED: "Authentication could not be verified.",
+  CALLBACK_FAILED: "Authentication callback failed. Please try again."
 } as const;
 
 export const providers = ["zitadel", "mobilityguard", "oidc"] as const;
@@ -16,15 +19,23 @@ export const providers = ["zitadel", "mobilityguard", "oidc"] as const;
 export class LoginError extends Error {
   code: keyof typeof LoginErrorCode;
   provider: (typeof providers)[number];
+  correlationId?: string;
+  statusCode?: number;
+  rawDetail?: string;
+
   constructor(
     provider: (typeof providers)[number],
     code: keyof typeof LoginErrorCode,
-    message: string = ""
+    message: string = "",
+    metadata?: { correlationId?: string; statusCode?: number; rawDetail?: string }
   ) {
     super(LoginErrorCode[code] + message);
     this.name = "LoginError";
     this.provider = provider;
     this.code = code;
+    this.correlationId = metadata?.correlationId;
+    this.statusCode = metadata?.statusCode;
+    this.rawDetail = metadata?.rawDetail;
   }
 
   getErrorShortCode() {
@@ -35,6 +46,6 @@ export class LoginError extends Error {
     const splitIdx = code.indexOf("_");
     const provider = code.substring(0, 1).toUpperCase() + code.substring(1, splitIdx);
     const id = code.substring(splitIdx + 1).toUpperCase() as keyof typeof LoginErrorCode;
-    return `${provider}: ${LoginErrorCode[id]}`;
+    return `${provider}: ${LoginErrorCode[id] || "undefined"}`;
   }
 }

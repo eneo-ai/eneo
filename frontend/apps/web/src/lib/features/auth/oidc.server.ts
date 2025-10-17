@@ -5,6 +5,7 @@
 
 import { env } from "$env/dynamic/private";
 import { setFrontendAuthCookie } from "./auth.server";
+import { LoginError } from "./LoginError";
 
 export async function loginWithOidc(code: string, state: string): Promise<boolean> {
   if (!env.INTRIC_BACKEND_URL) {
@@ -41,7 +42,10 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
         errorDetails = responseText;
       }
 
-      const correlationId = response.headers.get("X-Correlation-ID");
+      const correlationId = response.headers.get("X-Correlation-ID") || undefined;
+      const rawDetail = typeof errorDetails === 'object' && errorDetails?.detail
+        ? errorDetails.detail
+        : undefined;
 
       console.error("[OIDC] Backend callback failed", {
         status: response.status,
@@ -50,34 +54,64 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
         correlationId
       });
 
-      // Log detailed error scenarios with correlation ID for backend log correlation
+      // Map status codes to specific error codes and throw LoginError
       if (response.status === 400) {
         console.error(
           `[OIDC] Invalid or expired state - user took too long to authenticate. ` +
           `Backend correlation_id: ${correlationId || "N/A"}`
         );
+        throw new LoginError("oidc", "DECODE_ERROR", "", {
+          correlationId,
+          statusCode: response.status,
+          rawDetail
+        });
       } else if (response.status === 401) {
         console.error(
           `[OIDC] Token validation failed - IdP rejected authentication. ` +
           `Backend correlation_id: ${correlationId || "N/A"}`
         );
+        throw new LoginError("oidc", "UNAUTHORIZED", "", {
+          correlationId,
+          statusCode: response.status,
+          rawDetail
+        });
       } else if (response.status === 403) {
         console.error(
           `[OIDC] Access forbidden - domain not allowed or user not found. ` +
           `Backend correlation_id: ${correlationId || "N/A"}`
         );
+        throw new LoginError("oidc", "FORBIDDEN", "", {
+          correlationId,
+          statusCode: response.status,
+          rawDetail
+        });
       } else if (response.status === 404) {
         console.error(
           `[OIDC] User or tenant not found. ` +
           `Backend correlation_id: ${correlationId || "N/A"}`
         );
+        throw new LoginError("oidc", "NO_TOKEN", "", {
+          correlationId,
+          statusCode: response.status,
+          rawDetail
+        });
       } else if (response.status === 500) {
         console.error(
           `[OIDC] Server configuration error - check backend logs for correlation_id: ${correlationId || "N/A"}`
         );
+        throw new LoginError("oidc", "SERVER_ERROR", "", {
+          correlationId,
+          statusCode: response.status,
+          rawDetail
+        });
       }
 
-      return false;
+      // Fallback for unknown status codes
+      throw new LoginError("oidc", "CALLBACK_FAILED", "", {
+        correlationId,
+        statusCode: response.status,
+        rawDetail
+      });
     }
 
     console.debug("[OIDC] Backend callback successful");
@@ -96,6 +130,11 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
     console.debug("[OIDC] Login complete, auth cookie set");
     return true;
   } catch (error) {
+    // Re-throw LoginError so it propagates to the callback handler with metadata
+    if (error instanceof LoginError) {
+      throw error;
+    }
+
     console.error("[OIDC] Unexpected error during callback", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
