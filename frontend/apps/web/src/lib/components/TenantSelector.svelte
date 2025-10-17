@@ -15,12 +15,11 @@
     tenants?: TenantInfo[];
   }
 
-  const props = $props<Props>();
-  let { onTenantSelect, baseUrl } = props;
+  const props: Props = $props();
 
-  let providedTenants = $derived(props.tenants ?? []);
-  let tenantList = $state<TenantInfo[]>(providedTenants);
-  let loading = $state(providedTenants.length === 0);
+  // Initialize state with neutral defaults
+  let tenantList = $state<TenantInfo[]>([]);
+  let loading = $state(true);
   let error = $state("");
   let searchQuery = $state("");
 
@@ -35,9 +34,11 @@
         )
   );
 
+  // Sync internal state from props reactively
   $effect(() => {
-    tenantList = providedTenants;
+    const providedTenants = props.tenants ?? [];
     if (providedTenants.length > 0) {
+      tenantList = providedTenants;
       loading = false;
     }
   });
@@ -74,7 +75,7 @@
 
     if (/^[a-z0-9-]+$/.test(lastTenant) && lastTenant.length <= 63) {
       if (tenantList.some((t) => t.slug === lastTenant)) {
-        onTenantSelect(lastTenant);
+        props.onTenantSelect(lastTenant);
         return;
       }
     }
@@ -93,7 +94,7 @@
     localStorage.setItem("eneo:last-tenant", slug);
 
     // Notify parent
-    onTenantSelect(slug);
+    props.onTenantSelect(slug);
   }
 </script>
 

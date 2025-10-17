@@ -35,14 +35,30 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      const correlationId = response.headers.get("x-correlation-id") ?? null;
+
       console.error("[Federation Callback] Backend auth failed", {
         status: response.status,
-        error: errorData
+        error: errorData,
+        correlationId
       });
 
+      let errorCode = "oidc_callback_failed";
+      let detailCode: string | null = null;
+
+      if (response.status === 403) {
+        errorCode = "oidc_forbidden";
+        detailCode = "access_denied";
+      } else if (response.status === 401) {
+        errorCode = "oidc_unauthorized";
+        detailCode = "unauthorized";
+      }
+
       return {
-        error: "authentication_failed",
-        details: errorData.detail || "Failed to authenticate with identity provider"
+        error: errorCode,
+        detailCode,
+        correlationId,
+        rawDetail: errorData.detail || null
       };
     }
 

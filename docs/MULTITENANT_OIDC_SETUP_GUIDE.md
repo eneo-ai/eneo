@@ -1,6 +1,6 @@
 # Multi-Tenant OIDC Setup Guide
 
-**Last Updated**: 2025-10-15
+**Last Updated**: 2025-10-16
 **Target Audience**: System Administrators
 **Prerequisites**: SUPER_API_KEY access, FEDERATION_PER_TENANT_ENABLED=true
 
@@ -9,7 +9,7 @@
 ## Overview
 
 This guide shows how to configure multiple tenants with different OIDC identity providers in Eneo. Each tenant can have:
-- **Their own IdP** (Azure AD, Okta, Keycloak, OneGate, etc.)
+- **Their own IdP** (Azure AD, Okta, Auth0, Keycloak, MobilityGuard/OneGate, etc.)
 - **Different public origins** (proxy URLs or direct URLs)
 - **Email domain restrictions** (only allow specific domains per tenant)
 
@@ -45,13 +45,32 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
+### 2. Optional: OIDC Safety Controls
+
+**Backend `.env`** (optional tuning):
+```bash
+# [OPTIONAL] OIDC state JWT lifetime (default: 600 = 10 minutes)
+# Limits time window for CSRF attacks
+OIDC_STATE_TTL_SECONDS=600
+
+# [OPTIONAL] Grace period for redirect URI changes (default: 600 = 10 minutes)
+# Allows auth to complete if admin changes PUBLIC_ORIGIN during user login
+OIDC_REDIRECT_GRACE_PERIOD_SECONDS=600
+
+# [OPTIONAL] Strict redirect URI validation (default: true)
+# Set to false ONLY if experiencing IdP-specific redirect issues
+STRICT_OIDC_REDIRECT_VALIDATION=true
+```
+
 ---
 
 ## Configuration Examples
 
-### Example 1: Sundsvall (OneGate Proxy)
+### Example 1: Sundsvall (MobilityGuard/OneGate Proxy)
 
 **Real Production Setup**
+
+> **Note**: MobilityGuard and OneGate are the same platform. Use `"provider": "mobilityguard"` for both.
 
 #### Step 1: Configure Federation for Sundsvall
 
@@ -73,8 +92,9 @@ Content-Type: application/json
 
 **Key Points**:
 - `canonical_public_origin` = **externally-reachable URL** (the m00-https-* proxy URL)
-- `discovery_endpoint` = OneGate's OIDC discovery endpoint
+- `discovery_endpoint` = MobilityGuard/OneGate OIDC discovery endpoint
 - `allowed_domains` = Only allow @sundsvall.se emails
+- MobilityGuard is OneGate's OIDC-compliant authentication platform
 
 #### Step 2: Register in OneGate
 
@@ -176,6 +196,60 @@ Content-Type: application/json
 
 ---
 
+### Example 4: TenantD (Auth0)
+
+**Scenario**: Malmö municipality with Auth0 as identity provider
+
+#### Step 1: Configure Federation for TenantD
+
+```bash
+PUT /api/v1/sysadmin/tenants/{tenantD-id}/federation
+Authorization: Bearer {SUPER_API_KEY}
+Content-Type: application/json
+
+{
+  "provider": "auth0",
+  "canonical_public_origin": "https://malmo.eneo.se",
+  "discovery_endpoint": "https://{your-auth0-domain}.auth0.com/.well-known/openid-configuration",
+  "client_id": "{auth0-client-id}",
+  "client_secret": "{auth0-client-secret}",
+  "allowed_domains": ["malmo.se"],
+  "scopes": ["openid", "email", "profile"]
+}
+```
+
+**Key Points**:
+- Replace `{your-auth0-domain}` with your Auth0 tenant domain (e.g., `malmo-eneo.eu.auth0.com`)
+- Auth0 discovery endpoint format: `https://{domain}.auth0.com/.well-known/openid-configuration`
+- Auth0 automatically handles user management and MFA if configured
+
+#### Step 2: Register in Auth0
+
+**Application Settings**:
+1. Auth0 Dashboard → Applications → Create Application
+2. Select "Regular Web Application"
+3. Name: "Eneo - Malmö"
+4. Settings tab:
+   - Allowed Callback URLs: `https://malmo.eneo.se/login/callback`
+   - Allowed Logout URLs: `https://malmo.eneo.se/login`
+   - Allowed Web Origins: `https://malmo.eneo.se`
+5. Copy Domain, Client ID, and Client Secret
+6. Save Changes
+
+#### Step 3: Test
+
+```bash
+# Get authorization URL
+curl "https://malmo.eneo.se/auth/initiate?tenant=malmo"
+
+# Expected response includes Auth0 authorization URL
+{
+  "authorization_url": "https://malmo-eneo.eu.auth0.com/authorize?..."
+}
+```
+
+---
+
 ## API Endpoints Reference
 
 ### System Admin Endpoints (Requires SUPER_API_KEY)
@@ -190,7 +264,7 @@ Authorization: Bearer {SUPER_API_KEY}
 **Request Body**:
 ```json
 {
-  "provider": "entra_id|okta|mobilityguard|generic_oidc",
+  "provider": "entra_id|okta|auth0|mobilityguard|generic_oidc",
   "canonical_public_origin": "https://tenant.example.com",
   "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
   "client_id": "{client-id}",
@@ -341,7 +415,7 @@ Content-Type: application/json
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `provider` | IdP provider name | `"entra_id"`, `"okta"`, `"mobilityguard"` |
+| `provider` | IdP provider name | `"entra_id"`, `"okta"`, `"auth0"`, `"mobilityguard"`, `"generic_oidc"` |
 | `canonical_public_origin` | Externally-reachable URL | `"https://eneo.example.com"` |
 | `client_id` | OAuth client ID from IdP | `"abc123..."` |
 | `client_secret` | OAuth client secret from IdP | `"secret123..."` |
@@ -372,9 +446,17 @@ curl "https://your-domain.com/auth/tenants" | jq
 # 2. Get authorization URL
 curl "https://your-domain.com/auth/initiate?tenant=sundsvall" | jq
 
-# 3. Check logs for errors
+# 3. Check logs for errors (correlation_id included in all error responses)
 docker logs eneo-backend | grep "correlation_id"
+
+# 4. Test with correlation_id header tracking
+curl -v "https://your-domain.com/auth/callback" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "test", "state": "test"}' \
+  2>&1 | grep -i "x-correlation-id"
 ```
+
+**All error responses now include `X-Correlation-ID` header for debugging.**
 
 ### Common Issues
 
@@ -406,6 +488,16 @@ PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 {"allowed_domains": ["example.com", "other-domain.com"]}
 ```
 
+#### Issue: Logout redirect loop (auto-login after logout)
+**Cause**: Single-tenant OIDC auto-redirects to IdP, ignoring logout message
+**Symptoms**: After logout at `/login?message=logout`, user is immediately redirected back to IdP and logged in again
+**Fix**: This was fixed in the latest version. Frontend now checks for query parameters before auto-redirecting. Update to latest version if experiencing this issue.
+
+#### Issue: Loading spinner shown after logout
+**Cause**: Login page shows loading screen instead of login button when query params present
+**Symptoms**: Users see a spinning loader at `/login?message=logout` instead of the login form
+**Fix**: This was fixed in the latest version. Update to latest if experiencing this issue.
+
 ---
 
 ## Security Considerations
@@ -427,7 +519,8 @@ PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 
 ### 4. HTTPS Enforcement
 - `canonical_public_origin` **must be HTTPS** in production
-- Validation happens at startup (application fails if HTTP)
+- Exception: `http://localhost` and `http://127.0.0.1` allowed for development
+- Validation happens at startup (application fails if HTTP in production)
 
 ---
 
@@ -526,26 +619,69 @@ Request additional scopes from IdP:
 }
 ```
 
+### Tenant-Specific LLM Credentials
+
+**Strict Mode vs Single-Tenant Mode**
+
+When `TENANT_CREDENTIALS_ENABLED=true`, each tenant must configure their own LLM API keys:
+
+**Strict Mode (TENANT_CREDENTIALS_ENABLED=true)**:
+- Tenant has configured key → tenant key is used
+- Tenant has NO key → **ERROR** (no fallback to global)
+- Tenant key is INVALID → **ERROR** (no fallback to global)
+- Prevents billing confusion where tenant thinks they use their own key but actually use global
+
+**Single-Tenant Mode (TENANT_CREDENTIALS_ENABLED=false)**:
+- Tenant has configured key → tenant key is used
+- Tenant has NO key → global key is used (fallback)
+- Tenant key is INVALID → ERROR (no fallback to global)
+
+**Configuration**:
+```bash
+# Backend .env
+TENANT_CREDENTIALS_ENABLED=true
+ENCRYPTION_KEY=<fernet-key>
+
+# Configure tenant-specific OpenAI key
+PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/openai
+Authorization: Bearer {SUPER_API_KEY}
+{
+  "api_key": "sk-proj-tenant-specific-key"
+}
+
+# Configure tenant-specific Anthropic key
+PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/anthropic
+{
+  "api_key": "sk-ant-api03-tenant-specific-key"
+}
+```
+
+**Supported Providers**: `openai`, `anthropic`, `azure`, `berget`, `mistral`, `ovhcloud`, `vllm`
+
 ---
 
 ## Summary
 
 **Key Takeaways**:
-1. Each tenant can have **different IdPs** (Azure AD, Okta, OneGate, etc.)
+1. Each tenant can have **different IdPs** (Azure AD, Okta, Auth0, MobilityGuard/OneGate, etc.)
 2. Use `canonical_public_origin` to specify **externally-reachable URL** (proxy or direct)
 3. Register redirect URI in IdP: `{canonical_public_origin}/login/callback`
 4. Use `allowed_domains` to restrict access by email domain
-5. All secrets are **encrypted at rest** with Fernet
-6. **HTTPS enforced** in production
-7. Correlation IDs enable **end-to-end request tracing**
+5. All secrets are **encrypted at rest** with Fernet encryption
+6. **HTTPS enforced** in production (localhost exception for development)
+7. **Correlation IDs** included in all error responses for debugging
+8. **Strict mode** (`TENANT_CREDENTIALS_ENABLED=true`) prevents credential fallback to global keys
+9. **Grace period** for PUBLIC_ORIGIN changes allows auth to complete during updates
 
 **Next Steps**:
 1. Enable `FEDERATION_PER_TENANT_ENABLED=true`
-2. Generate `ENCRYPTION_KEY` and strong `JWT_SECRET`
-3. Configure federation for each tenant via API
-4. Register redirect URIs in each IdP
-5. Test authentication flow
-6. Monitor logs with correlation IDs
+2. Generate `ENCRYPTION_KEY` and strong `JWT_SECRET` (32+ characters)
+3. (Optional) Configure OIDC safety controls (state TTL, grace period)
+4. (Optional) Enable strict mode with `TENANT_CREDENTIALS_ENABLED=true`
+5. Configure federation for each tenant via API
+6. Register redirect URIs in each IdP
+7. Test authentication flow (check correlation_id in logs)
+8. Monitor logs with correlation IDs for debugging
 
 ---
 

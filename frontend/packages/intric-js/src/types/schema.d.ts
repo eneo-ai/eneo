@@ -13806,10 +13806,6 @@ export interface operations {
    */
   get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get: {
     parameters: {
-      query?: {
-        with_user?: boolean;
-        with_user_from_assistant_api_key?: boolean;
-      };
       path: {
         tenant_id: string;
       };
@@ -13835,10 +13831,6 @@ export interface operations {
    */
   set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
     parameters: {
-      query?: {
-        with_user?: boolean;
-        with_user_from_assistant_api_key?: boolean;
-      };
       path: {
         tenant_id: string;
       };
@@ -13869,10 +13861,6 @@ export interface operations {
    */
   delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
     parameters: {
-      query?: {
-        with_user?: boolean;
-        with_user_from_assistant_api_key?: boolean;
-      };
       path: {
         tenant_id: string;
       };
@@ -13898,10 +13886,6 @@ export interface operations {
    */
   test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
     parameters: {
-      query?: {
-        with_user?: boolean;
-        with_user_from_assistant_api_key?: boolean;
-      };
       path: {
         tenant_id: string;
       };

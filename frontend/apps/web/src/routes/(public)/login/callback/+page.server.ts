@@ -78,6 +78,8 @@ export const load = async (event) => {
     redirectUrl
   });
 
+  let loginError: LoginError | null = null;
+
   try {
     if (decodedState?.loginMethod === "mobilityguard") {
       const startTime = Date.now();
@@ -116,10 +118,12 @@ export const load = async (event) => {
       errorType: e instanceof LoginError ? "LoginError" : "UnknownError",
       error: e instanceof Error ? e.message : String(e),
       stack: e instanceof Error ? e.stack : undefined,
-      loginMethod
+      loginMethod,
+      correlationId: e instanceof LoginError ? e.correlationId : undefined
     });
 
     if (e instanceof LoginError) {
+      loginError = e;
       errorInfo = e.getErrorShortCode();
       errorDetails = e.message;
     } else if (e instanceof Error) {
@@ -140,13 +144,46 @@ export const load = async (event) => {
     redirect(302, `/${redirectUrl.slice(1)}`);
   }
 
-  console.error("[OIDC Callback] Login failed, redirecting to error page", {
+  console.error("[OIDC Callback] Login failed, redirecting to login page", {
     loginMethod: decodedState?.loginMethod || "oidc",
     errorInfo,
-    errorDetails
+    errorDetails,
+    correlationId: loginError?.correlationId
   });
 
-  // Determine error message prefix based on login method
+  // For OIDC errors with LoginError, redirect to /login with structured params
+  if (loginError && loginError.provider === "oidc") {
+    const params = new URLSearchParams();
+
+    // Map error code to frontend error code
+    if (loginError.code === "FORBIDDEN") {
+      params.set("message", "oidc_forbidden");
+      params.set("detailCode", "access_denied");
+    } else if (loginError.code === "UNAUTHORIZED") {
+      params.set("message", "oidc_unauthorized");
+      params.set("detailCode", "unauthorized");
+    } else {
+      params.set("message", "oidc_callback_failed");
+    }
+
+    if (loginError.correlationId) {
+      params.set("correlation", loginError.correlationId);
+    }
+
+    if (loginError.rawDetail) {
+      params.set("rawDetail", loginError.rawDetail);
+    }
+
+    // Try to get tenant from cookies (session storage)
+    const tenantSlug = event.cookies.get("eneo-last-tenant-slug");
+    if (tenantSlug) {
+      params.set("tenant", tenantSlug);
+    }
+
+    redirect(302, `/login?${params.toString()}`);
+  }
+
+  // Fallback to old /login/failed for non-OIDC errors
   const loginMethod = decodedState?.loginMethod || "oidc";
   const failedUrl =
     `/login/failed?message=${loginMethod}_login_error&info=${errorInfo}` +
