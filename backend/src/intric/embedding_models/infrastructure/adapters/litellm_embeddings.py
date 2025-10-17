@@ -88,7 +88,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 params.update(self.api_config)
                 logger.info(f"[LiteLLM] {self.litellm_model}: Adding provider config for embeddings: {list(self.api_config.keys())}")
 
-            logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: {params}")
+            logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts")
 
             # Call LiteLLM API to get the embeddings
             response = await litellm.aembedding(**params)
