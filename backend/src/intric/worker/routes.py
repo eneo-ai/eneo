@@ -42,7 +42,7 @@ async def update_model_usage_stats(job_id: str, params: dict, container: Contain
     """
     return await update_model_usage_stats_task(job_id=job_id, params=params, container=container)
 
-@worker.function()
+@worker.function(with_user=False)
 async def recalculate_tenant_usage_stats_job(job_id: str, params: dict, container: Container):
     """Worker function for recalculating usage statistics for a specific tenant.
     

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
-import pyjwt
+import jwt
 import pytest
 from fastapi import HTTPException
 
@@ -127,6 +127,17 @@ class AuthServiceStub:
         return "access-token"
 
 
+class AuthServiceInvalidEmailStub:
+    def __init__(self, email: str):
+        self._email = email
+
+    def get_payload_from_openid_jwt(self, **kwargs):  # noqa: ARG002
+        return {"email": self._email}
+
+    def create_access_token_for_user(self, user: UserInDB):  # noqa: ARG002
+        return "access-token"
+
+
 class MockContainer:
     def __init__(self, *, tenant_repo, user_repo, auth_service, redis_client, encryption_service):
         self._tenant_repo = tenant_repo
@@ -205,6 +216,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
             "provider": "entra",
             "client_id": "client",
             "client_secret": "secret",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
             "authorization_endpoint": "https://idp.example.com/authorize",
             "token_endpoint": "https://idp.example.com/token",
             "jwks_uri": "https://idp.example.com/jwks",
@@ -221,7 +233,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         username="Tester",
         email="user@Example.COM",
         salt="salt",
-        password="hashed",
+        password="hashed123",
         used_tokens=0,
         tenant_id=tenant_id,
         tenant=tenant,
@@ -252,7 +264,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         "config_version": old_version,
     }
 
-    signed_state = pyjwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -285,3 +297,93 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 
     assert result == {"access_token": "access-token"}
     assert redis_client._store == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_email", ["@example.com", "user@@example.com"])
+async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email):
+    dummy_settings = DummySettings()
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    redis_client = FakeRedis()
+    tenant_id = uuid4()
+    slug = "tenant-invalid-email"
+
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Tenant Invalid",
+        display_name="Tenant Invalid",
+        slug=slug,
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "canonical_public_origin": "https://tenant.invalid",
+            "redirect_path": "/login/callback",
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    user = UserInDB(
+        id=uuid4(),
+        username="Tester",
+        email="backup@example.com",
+        salt="salt",
+        password="hashed123",
+        used_tokens=0,
+        tenant_id=tenant_id,
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(user),
+        auth_service=AuthServiceInvalidEmailStub(bad_email),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+
+    issue_time = int(time.time())
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "frontend_state": "",
+        "nonce": "nonce",
+        "redirect_uri": "https://tenant.invalid/login/callback",
+        "correlation_id": "corr-invalid",
+        "exp": issue_time + 600,
+        "iat": issue_time,
+        "config_version": datetime.now(timezone.utc).isoformat(),
+    }
+
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
+    monkeypatch.setattr(
+        federation_router,
+        "aiohttp_client",
+        lambda: FakeAioHttpClient(fake_response),
+    )
+    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
+
+    callback = CallbackRequest(code="auth-code", state=signed_state)
+
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.auth_callback(callback, container=container)
+
+    assert exc.value.status_code == 401
+    assert "invalid" in exc.value.detail.lower()

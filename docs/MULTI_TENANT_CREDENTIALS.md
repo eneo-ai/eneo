@@ -92,6 +92,10 @@ Example response:
 | `anthropic` | `api_key`                                         | Claude models                      |
 | `azure`     | `api_key`, `endpoint`, `api_version`, `deployment_name` | Azure OpenAI with regional residency |
 | `vllm`      | `api_key`, `endpoint`                             | Self-hosted / regional vLLM        |
+
+> ⚠️ **Strict mode:** when `TENANT_CREDENTIALS_ENABLED=true`, both `api_key` and `endpoint`
+> must be provided for VLLM. The API now returns HTTP 400 if either value is missing so
+> misconfigured tenants never fall back to the shared global cluster by accident.
 | `berget`    | `api_key`                                         | Swedish-hosted embeddings          |
 | `mistral`   | `api_key`                                         | Mistral hosted models              |
 | `ovhcloud`  | `api_key`                                         | EU-hosted models                   |
@@ -105,6 +109,8 @@ Example response:
 - Audit logs record which admin set or removed credentials.
 - Pair with federation config when tenants want full isolation (see [Federation Per Tenant](./FEDERATION_PER_TENANT.md)).
 - Combine with the OIDC debug toggle to troubleshoot tenant-specific LLM onboarding issues quickly.
+- If a tenant follows the checklist and still receives a 400 for VLLM, double-check that the
+  endpoint URL is reachable from the backend and that it matches the per-tenant DNS you expect.
 
 ---
 

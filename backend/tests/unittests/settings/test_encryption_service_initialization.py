@@ -29,6 +29,7 @@ from unittest.mock import patch
 import pytest
 
 from intric.main.container.container import Container
+from intric.settings.encryption_service import EncryptionService
 
 
 class TestEncryptionServiceInitialization:
@@ -68,6 +69,20 @@ class TestEncryptionServiceInitialization:
             encrypted = encryption_service.encrypt(test_secret)
             decrypted = encryption_service.decrypt(encrypted)
             assert decrypted == test_secret
+
+    def test_decrypt_rejects_plaintext_when_encryption_enabled(self):
+        """Plaintext credentials should not be accepted once encryption is active."""
+        test_key = "FNVdDyfq0lBPAvjz_WS-9PB2UQzkbqCnwuA4KU9UbPU="
+        service = EncryptionService(test_key)
+
+        with pytest.raises(ValueError, match="Credential is stored in plaintext"):
+            service.decrypt("sk-legacy-plaintext")
+
+    def test_decrypt_allows_plaintext_when_disabled(self):
+        """Plaintext passthrough remains available when encryption is disabled."""
+        service = EncryptionService(None)
+
+        assert service.decrypt("sk-legacy-plaintext") == "sk-legacy-plaintext"
 
     def test_encryption_service_inactive_when_key_not_set(self):
         """Test EncryptionService is inactive when ENCRYPTION_KEY is not set."""

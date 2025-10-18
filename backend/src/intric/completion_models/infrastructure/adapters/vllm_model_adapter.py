@@ -29,15 +29,58 @@ class VLMMModelAdapter(OpenAIModelAdapter):
         self.model = model
         settings = get_settings()
 
-        # VLLM is self-hosted, so credentials always come from global settings
-        # (no tenant-specific API keys for self-hosted infrastructure)
-        vllm_api_key = settings.vllm_api_key
-        vllm_model_url = settings.vllm_model_url
+        api_key: Optional[str] = None
+        tenant_endpoint: Optional[str] = None
 
-        self.client = AsyncOpenAI(
-            api_key="EMPTY", base_url=model.base_url or vllm_model_url
-        )
-        self.extra_headers = {"X-API-Key": vllm_api_key}
+        if credential_resolver is not None:
+            try:
+                api_key = credential_resolver.get_api_key("vllm")
+            except ValueError as _exc:
+                # In strict tenant mode we must surface the error immediately
+                if settings.tenant_credentials_enabled and credential_resolver.tenant:
+                    raise
+                # Otherwise fall back to global credentials
+
+            try:
+                tenant_endpoint = credential_resolver.get_credential_field(
+                    provider="vllm",
+                    field="endpoint",
+                    fallback=None,
+                )
+            except ValueError as _exc:
+                if settings.tenant_credentials_enabled and credential_resolver.tenant:
+                    raise
+
+        if (
+            tenant_endpoint is None
+            and settings.tenant_credentials_enabled
+            and credential_resolver.tenant
+        ):
+            # In strict multi-tenant mode we require both api_key and endpoint so that
+            # traffic never leaks onto the shared VLLM infrastructure.
+            raise ValueError(
+                "No VLLM endpoint configured for tenant. Configure via "
+                "PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/vllm."
+            )
+
+        if api_key is None:
+            api_key = settings.vllm_api_key
+
+        base_url_candidates = [tenant_endpoint, model.base_url, settings.vllm_model_url]
+        base_url = next((url for url in base_url_candidates if url), None)
+
+        if not api_key:
+            raise ValueError(
+                "No VLLM API key configured. Provide VLLM_API_KEY or tenant credential."
+            )
+
+        if not base_url:
+            raise ValueError(
+                "No VLLM endpoint configured. Provide VLLM_MODEL_URL, model.base_url, or tenant credential endpoint."
+            )
+
+        self.client = AsyncOpenAI(api_key="EMPTY", base_url=base_url)
+        self.extra_headers = {"X-API-Key": api_key}
 
     def get_token_limit_of_model(self):
         return self.model.token_limit

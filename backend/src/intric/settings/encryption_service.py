@@ -90,7 +90,16 @@ class EncryptionService:
 
         # Detect encrypted format
         if not ciphertext.startswith("enc:"):
-            # Legacy plaintext - pass through for migration compatibility
+            if self._fernet:
+                logger.error(
+                    "Refusing to decrypt plaintext credential while encryption is active"
+                )
+                raise ValueError(
+                    "Credential is stored in plaintext but encryption is enabled. "
+                    "Data may be corrupted or tampered."
+                )
+
+            # Legacy plaintext - pass through for migration compatibility when encryption disabled
             logger.info("Decrypting legacy plaintext credential")
             return ciphertext
 

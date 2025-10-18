@@ -142,33 +142,65 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
     )
     
     tenant_repo = container.tenant_repo()
-    
-    # Get the specific tenant and verify it exists and is active
-    async with container.session().begin():
-        tenant = await tenant_repo.get(tenant_id)
-        if not tenant:
-            logger.error(
-                f"Tenant {tenant_id} not found",
-                extra={"tenant_id": str(tenant_id)}
-            )
-            return False
-            
-        # Import TenantState to check for active status
-        from intric.tenants.tenant import TenantState
-        if tenant.state != TenantState.ACTIVE:
-            logger.warning(
-                f"Tenant {tenant_id} is not active (state: {tenant.state}), skipping usage stats recalculation",
-                extra={"tenant_id": str(tenant_id), "tenant_state": tenant.state}
-            )
-            return False
-    
+
+    tenant = await tenant_repo.get(tenant_id)
+    if not tenant:
+        logger.error(
+            f"Tenant {tenant_id} not found",
+            extra={"tenant_id": str(tenant_id)}
+        )
+        return False
+
+    from intric.tenants.tenant import TenantState
+    if tenant.state != TenantState.ACTIVE:
+        logger.warning(
+            f"Tenant {tenant_id} is not active (state: {tenant.state}), skipping usage stats recalculation",
+            extra={"tenant_id": str(tenant_id), "tenant_state": tenant.state}
+        )
+        return False
+
+    # Ensure we have a user context for downstream services
+    user_repo = container.user_repo()
+    session = container.session()
+
+    from sqlalchemy import select
+    from intric.database.tables.users_table import Users
+    result = await session.execute(
+        select(Users).where(Users.tenant_id == tenant_id).limit(1)
+    )
+    user_row = result.scalar_one_or_none()
+
+    if not user_row:
+        logger.error(
+            f"No users found for tenant {tenant_id}, cannot queue usage stats recalculation",
+            extra={"tenant_id": str(tenant_id)}
+        )
+        return False
+
+    user = await user_repo.get_user_by_id(user_row.id)
+
+    if not user or user.tenant_id != tenant_id:
+        logger.error(
+            "Resolved user does not belong to target tenant",
+            extra={
+                "tenant_id": str(tenant_id),
+                "resolved_user_id": str(user_row.id),
+                "resolved_user_tenant_id": str(user.tenant_id) if user else None,
+            },
+        )
+        return False
+
+    from dependency_injector import providers
+    container.user.override(providers.Object(user))
+    container.tenant.override(providers.Object(tenant))
+
     # Get job service for queuing tasks
     job_service = container.job_service()
     
     try:
         # Create task parameters
         task_params = UpdateUsageStatsTaskParams(
-            user_id=UUID("00000000-0000-0000-0000-000000000000"),  # System user for cron jobs
+            user_id=user.id,
             tenant_id=tenant_id,
             full_recalc=True
         )
