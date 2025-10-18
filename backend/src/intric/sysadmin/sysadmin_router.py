@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
@@ -24,6 +26,7 @@ from intric.allowed_origins.allowed_origin_models import (
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
+from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
 from intric.server import protocol
 from intric.server.dependencies.container import get_container, get_container_for_sysadmin
 from intric.server.dependencies.get_repository import get_repository
@@ -40,6 +43,41 @@ from intric.completion_models.presentation.completion_model_models import (
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(auth.authenticate_super_api_key)])
+
+
+class OIDCDebugToggleRequest(BaseModel):
+    enabled: bool = Field(..., description="Enable or disable OIDC debug logging")
+    duration_minutes: int | None = Field(
+        30,
+        ge=1,
+        le=120,
+        description="Duration in minutes before the toggle auto-expires (max 120)",
+    )
+    reason: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional note for audit trail",
+    )
+
+
+class OIDCDebugToggleResponse(BaseModel):
+    enabled: bool
+    enabled_at: datetime | None
+    enabled_by: str | None
+    expires_at: datetime | None
+    reason: str | None
+    backend: str
+
+    @classmethod
+    def from_flag(cls, flag: DebugFlag, *, backend: str) -> "OIDCDebugToggleResponse":
+        return cls(
+            enabled=flag.enabled,
+            enabled_at=flag.enabled_at,
+            enabled_by=flag.enabled_by,
+            expires_at=flag.expires_at,
+            reason=flag.reason,
+            backend=backend,
+        )
 
 
 @router.post(
@@ -189,6 +227,86 @@ async def crawl_all_weekly_websites(
     sysadmin_service = container.sysadmin_service()
 
     return await sysadmin_service.run_crawl_on_weekly_websites()
+
+
+def _mask_actor_label() -> str:
+    return "super_api_key"
+
+
+def _get_storage_backend(redis_client) -> str:
+    return "redis" if redis_client is not None else "file"
+
+
+@router.post(
+    "/observability/oidc-debug/",
+    response_model=OIDCDebugToggleResponse,
+    summary="Enable or disable OIDC debug logging",
+    description=(
+        "Turns verbose OIDC diagnostics on or off for a limited window. "
+        "Requires super API key."
+    ),
+    responses={
+        200: {"description": "Debug flag state updated."},
+        401: {"description": "Missing or invalid super API key."},
+    },
+)
+async def toggle_oidc_debug(
+    payload: OIDCDebugToggleRequest,
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    try:
+        redis_client = container.redis_client()
+    except Exception:  # pragma: no cover - defensive fallback
+        redis_client = None
+
+    duration = timedelta(minutes=payload.duration_minutes or 30)
+    flag = await set_debug_flag(
+        redis_client,
+        enabled=payload.enabled,
+        enabled_by=_mask_actor_label(),
+        duration=duration,
+        reason=payload.reason,
+    )
+
+    logger.warning(
+        "OIDC debug flag updated",
+        extra={
+            "enabled": flag.enabled,
+            "expires_at": flag.expires_at.isoformat() if flag.expires_at else None,
+            "backend": _get_storage_backend(redis_client),
+            "reason": flag.reason,
+        },
+    )
+
+    return OIDCDebugToggleResponse.from_flag(
+        flag,
+        backend=_get_storage_backend(redis_client),
+    )
+
+
+@router.get(
+    "/observability/oidc-debug/",
+    response_model=OIDCDebugToggleResponse,
+    summary="Get current OIDC debug toggle status",
+    description="Returns whether OIDC debug logging is currently enabled and when it expires.",
+    responses={
+        200: {"description": "Current state of the OIDC debug toggle."},
+        401: {"description": "Missing or invalid super API key."},
+    },
+)
+async def get_oidc_debug_status(
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    try:
+        redis_client = container.redis_client()
+    except Exception:  # pragma: no cover - defensive fallback
+        redis_client = None
+
+    flag = await get_debug_flag(redis_client)
+    return OIDCDebugToggleResponse.from_flag(
+        flag,
+        backend=_get_storage_backend(redis_client),
+    )
 
 
 @router.get(

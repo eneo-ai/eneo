@@ -39,7 +39,6 @@ def check_feature_enabled(
 
 router = APIRouter(
     prefix="/tenants",
-    tags=["tenant-credentials"],
     dependencies=[
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),

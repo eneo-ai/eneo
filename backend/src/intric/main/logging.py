@@ -1,7 +1,80 @@
+import json
 import logging
+import os
 import sys
+from datetime import datetime, timezone
+from typing import Any
 
 from intric.main.config import get_loglevel
+from intric.main.request_context import get_request_context
+
+
+JSON_LOGS_ENABLED = os.getenv("JSON_LOGS", "true").lower() in {"1", "true", "yes", "on"}
+
+
+class ContextJSONFormatter(logging.Formatter):
+    """Serialize log records with request context into JSON."""
+
+    RESERVED_ATTRS = {
+        "name",
+        "msg",
+        "args",
+        "levelname",
+        "levelno",
+        "pathname",
+        "filename",
+        "module",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "created",
+        "msecs",
+        "relativeCreated",
+        "thread",
+        "threadName",
+        "processName",
+        "process",
+        "message",
+    }
+
+    DEFAULT_KEYS = ("correlation_id", "tenant_slug", "user_email", "error_code", "status_code")
+
+    def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - formatting logic
+        log: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc)
+            .isoformat(timespec="milliseconds"),
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+
+        # Attach request context values (correlation, tenant, etc.)
+        for key, value in get_request_context().items():
+            if value is not None and key not in log:
+                log[key] = value
+
+        # Include extra attributes passed via logger(..., extra={})
+        for key, value in record.__dict__.items():
+            if key in self.RESERVED_ATTRS or key.startswith("_"):
+                continue
+            if value is None:
+                continue
+            log.setdefault(key, value)
+
+        # Ensure important keys exist even if None
+        for key in self.DEFAULT_KEYS:
+            if key not in log and getattr(record, key, None) is not None:
+                log[key] = getattr(record, key)
+
+        if record.exc_info:
+            log["exception"] = self.formatException(record.exc_info)
+
+        if record.stack_info:
+            log["stack"] = record.stack_info
+
+        return json.dumps(log, default=str)
 
 # Disable loggers from other packages if loglevel is INFO or above
 for _logger in logging.root.manager.loggerDict:
@@ -42,7 +115,11 @@ class SimpleLogger(logging.Logger):
         files=None,
     ):
         logging.Logger.__init__(self, name, level)
-        formatter_obj = logging.Formatter(fmt_string)
+        formatter_obj: logging.Formatter
+        if JSON_LOGS_ENABLED:
+            formatter_obj = ContextJSONFormatter()
+        else:
+            formatter_obj = logging.Formatter(fmt_string)
 
         if files is None:
             files = []

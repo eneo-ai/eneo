@@ -11,6 +11,7 @@ from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan
 from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
+from intric.server.middleware.request_context import RequestContextMiddleware
 from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
 
@@ -21,6 +22,8 @@ def get_application():
     app = FastAPI(
         lifespan=lifespan,
     )
+
+    app.add_middleware(RequestContextMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
