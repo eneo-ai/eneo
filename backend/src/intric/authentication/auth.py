@@ -1,4 +1,5 @@
-from fastapi import Header
+from fastapi import Request, Security
+from fastapi.security import APIKeyHeader
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
 from intric.main.config import get_settings
@@ -6,7 +7,25 @@ from intric.main.config import get_settings
 logger = get_logger(__name__)
 
 
-def authenticate_super_api_key(api_key_header: str | None = Header(None, alias="X-API-Key")):
+SUPER_API_KEY_SCHEME = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _resolve_api_key(request: Request, provided: str | None) -> str | None:
+    """Resolve API key from provided security scheme or configured header name."""
+    if provided:
+        return provided
+
+    header_name = get_settings().api_key_header_name
+    if header_name and header_name.lower() != "x-api-key":
+        return request.headers.get(header_name)
+
+    return provided
+
+
+def authenticate_super_api_key(
+    request: Request,
+    api_key_header: str | None = Security(SUPER_API_KEY_SCHEME),
+):
     """
     Authenticate using super admin API key.
 
@@ -16,13 +35,18 @@ def authenticate_super_api_key(api_key_header: str | None = Header(None, alias="
     """
     super_api_key = get_settings().intric_super_api_key
 
-    if api_key_header and super_api_key == api_key_header:
-        return api_key_header
+    resolved_key = _resolve_api_key(request, api_key_header)
+
+    if resolved_key and super_api_key == resolved_key:
+        return resolved_key
     else:
         raise AuthenticationException("Unauthorized")
 
 
-def authenticate_super_duper_api_key(api_key_header: str | None = Header(None, alias="X-API-Key")):
+def authenticate_super_duper_api_key(
+    request: Request,
+    api_key_header: str | None = Security(SUPER_API_KEY_SCHEME),
+):
     """
     Authenticate using super duper admin API key.
 
@@ -32,7 +56,9 @@ def authenticate_super_duper_api_key(api_key_header: str | None = Header(None, a
     """
     super_duper_api_key = get_settings().intric_super_duper_api_key
 
-    if api_key_header and super_duper_api_key == api_key_header:
-        return api_key_header
+    resolved_key = _resolve_api_key(request, api_key_header)
+
+    if resolved_key and super_duper_api_key == resolved_key:
+        return resolved_key
     else:
         raise AuthenticationException("Unauthorized")
