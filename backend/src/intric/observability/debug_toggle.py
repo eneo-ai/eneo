@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import redis.asyncio as aioredis
+
+from intric.main.config import get_loglevel
 
 
 FLAG_KEY = "observability:oidc_debug"
@@ -35,6 +38,11 @@ class DebugFlag:
 _cache = DebugFlag()
 _last_refresh = datetime.min.replace(tzinfo=timezone.utc)
 _lock = asyncio.Lock()
+_base_log_level = get_loglevel()
+_OIDC_LOGGER_ATTRS = (
+    ("intric.authentication.federation_router", "logger"),
+    ("intric.authentication.auth_service", "logger"),
+)
 
 
 def _now() -> datetime:
@@ -181,6 +189,25 @@ def _update_cache(flag: DebugFlag) -> None:
     global _cache, _last_refresh
     _cache = flag
     _last_refresh = _now()
+    _apply_logger_override(flag.enabled and not flag.is_expired(_now()))
+
+
+def _apply_logger_override(enabled: bool) -> None:
+    target_level = logging.DEBUG if enabled else _base_log_level
+
+    for module_path, attr_name in _OIDC_LOGGER_ATTRS:
+        try:
+            module = __import__(module_path, fromlist=[attr_name])
+        except ImportError:
+            continue
+
+        logger = getattr(module, attr_name, None)
+        if not isinstance(logger, logging.Logger):
+            continue
+
+        logger.setLevel(target_level)
+        for handler in getattr(logger, "handlers", []):
+            handler.setLevel(target_level)
 
 
 async def get_debug_flag(redis_client: Optional[aioredis.Redis]) -> DebugFlag:

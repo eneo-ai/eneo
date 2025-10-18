@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
@@ -42,7 +42,7 @@ from intric.completion_models.presentation.completion_model_models import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Depends(auth.authenticate_super_api_key)])
+router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
 
 
 class OIDCDebugToggleRequest(BaseModel):
