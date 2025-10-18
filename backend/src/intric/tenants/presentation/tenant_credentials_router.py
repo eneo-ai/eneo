@@ -242,6 +242,7 @@ async def set_tenant_credential(
         HTTPException 400: Invalid request (e.g., missing Azure fields)
     """
     tenant_repo = container.tenant_repo()
+    settings = get_settings()
 
     # Validate tenant exists
     tenant = await tenant_repo.get(tenant_id)
@@ -259,16 +260,22 @@ async def set_tenant_credential(
                 detail="Azure provider requires: api_key, endpoint, api_version, deployment_name",
             )
 
+    if provider == "vllm" and settings.tenant_credentials_enabled:
+        if not request.endpoint:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="VLLM provider requires both api_key and endpoint when tenant credentials are enabled",
+            )
+
     # Build credential dict
     credential: dict[str, Any] = {"api_key": request.api_key}
-    if provider == "azure":
-        credential.update(
-            {
-                "endpoint": request.endpoint,
-                "api_version": request.api_version,
-                "deployment_name": request.deployment_name,
-            }
-        )
+
+    if request.endpoint:
+        credential["endpoint"] = request.endpoint
+    if request.api_version:
+        credential["api_version"] = request.api_version
+    if request.deployment_name:
+        credential["deployment_name"] = request.deployment_name
 
     # Update credential
     await tenant_repo.update_api_credential(

@@ -1,7 +1,9 @@
 """
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
+import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -29,6 +31,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
+
+from cryptography.fernet import Fernet
 
 from init_db import add_tenant_user
 from intric.database.database import sessionmanager
@@ -102,6 +106,8 @@ def test_settings(
         redis_host = redis_container.get_container_host_ip()
         redis_port = int(redis_container.get_exposed_port(6379))
 
+    encryption_key = Fernet.generate_key().decode()
+
     # Create test settings
     settings = Settings(
         # PostgreSQL settings
@@ -138,6 +144,7 @@ def test_settings(
 
         # Security
         url_signing_key="test_url_signing_key",
+        intric_super_api_key="test-super-admin-key-for-integration-tests",
 
         # Encryption (required for HTTP auth and sensitive data)
         encryption_key="yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
@@ -147,6 +154,8 @@ def test_settings(
         using_iam=False,
         using_image_generation=False,
         using_crawl=False,
+        tenant_credentials_enabled=True,  # Enable tenant-specific credentials for tests
+        federation_per_tenant_enabled=True,
 
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,
@@ -154,9 +163,29 @@ def test_settings(
         # Development
         testing=True,
         dev=True,
+
+        # Encryption
+        encryption_key=encryption_key,
     )
 
     return settings
+
+
+@pytest.fixture
+async def redis_client(test_settings: Settings):
+    """Provide Redis client for integration tests."""
+    import redis.asyncio as aioredis
+
+    redis = aioredis.from_url(
+        f"redis://{test_settings.redis_host}:{test_settings.redis_port}",
+        encoding="utf-8",
+        decode_responses=False,
+    )
+
+    try:
+        yield redis
+    finally:
+        await redis.aclose()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -459,3 +488,280 @@ async def admin_user_api_key(admin_user, db_container):
             delete_old=True
         )
     return api_key
+
+
+# Additional fixtures for tenant credentials E2E tests
+
+@pytest.fixture
+async def async_session(setup_database):
+    """
+    Provide async database session for tests.
+    """
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            yield session
+
+
+@pytest.fixture
+async def test_tenant(db_container):
+    """
+    Get the default test tenant.
+    """
+    async with db_container() as container:
+        tenant_repo = container.tenant_repo()
+        tenants = await tenant_repo.get_all_tenants()
+        if not tenants:
+            raise ValueError("No test tenant found in database")
+        return tenants[0]
+
+
+@pytest.fixture
+async def super_admin_token(test_settings):
+    """
+    Get the super admin API key for sysadmin endpoints.
+
+    Sysadmin endpoints use authenticate_super_api_key which checks against
+    settings.intric_super_api_key.
+    """
+    return test_settings.intric_super_api_key
+
+
+@pytest.fixture
+def encryption_service(test_settings):
+    """Provide EncryptionService configured with the test encryption key."""
+    from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
+
+    service = EncryptionService(test_settings.encryption_key)
+    Container.encryption_service.override(providers.Object(service))
+    try:
+        yield service
+    finally:
+        Container.encryption_service.reset_last_overriding()
+
+
+@pytest.fixture
+def patch_auth_service_jwt(monkeypatch, test_settings):
+    """Ensure AuthService uses the runtime test settings for JWT operations."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt as jwt_lib
+
+    from intric.authentication.auth_models import JWTCreds, JWTMeta, JWTPayload
+    from intric.authentication.auth_service import AuthService
+    from intric.users.user import UserInDB
+
+    original_get_jwt_payload = AuthService.get_jwt_payload
+
+    def patched_create_token(
+        self,
+        user: UserInDB,
+        secret_key: str | None = None,
+        audience: str | None = None,
+        expires_in: int | None = None,
+    ) -> str:
+        secret = secret_key or test_settings.jwt_secret
+        aud = audience or test_settings.jwt_audience
+        expiry_minutes = expires_in or test_settings.jwt_expiry_time
+
+        jwt_meta = JWTMeta(
+            iss=test_settings.jwt_issuer,
+            aud=aud,
+            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
+            exp=datetime.timestamp(
+                datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
+            ),
+        )
+        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        payload = JWTPayload(**jwt_meta.model_dump(), **jwt_creds.model_dump())
+
+        return jwt_lib.encode(
+            payload.model_dump(), secret, algorithm=test_settings.jwt_algorithm
+        )
+
+    def patched_get_jwt_payload(
+        self,
+        token: str,
+        key: str,
+        aud: str | None = None,
+        algs: list[str] | None = None,
+    ):
+        return original_get_jwt_payload(
+            self,
+            token,
+            key,
+            aud=aud or test_settings.jwt_audience,
+            algs=algs or [test_settings.jwt_algorithm],
+        )
+
+    monkeypatch.setattr(AuthService, "create_access_token_for_user", patched_create_token)
+    monkeypatch.setattr(AuthService, "get_jwt_payload", patched_get_jwt_payload)
+
+
+@pytest.fixture
+def jwks_mock(monkeypatch):
+    """Stub out PyJWKClient so tests never fetch real JWKS documents."""
+    import jwt as jwt_lib
+
+    def _configure(signing_keys: dict[str, str] | None = None, default_key: str = "test-signing-key"):
+        keys = signing_keys or {}
+
+        class _Key:
+            def __init__(self, key: str):
+                self.key = key
+
+        class _FakePyJWKClient:
+            def __init__(self, jwks_uri: str):  # noqa: D401 - signature matches real class
+                self.jwks_uri = jwks_uri
+
+            def get_signing_key_from_jwt(self, token: str):
+                return _Key(keys.get(token, default_key))
+
+        monkeypatch.setattr(jwt_lib, "PyJWKClient", _FakePyJWKClient)
+
+        return _FakePyJWKClient
+
+    return _configure
+
+
+@pytest.fixture
+def oidc_mock(monkeypatch):
+    """Provide a configurable fake aiohttp client for OIDC discovery/token calls."""
+
+    def _install(
+        *,
+        discovery: dict[str, tuple[dict, int] | dict] | None = None,
+        tokens: dict[tuple[str, str | None], tuple[dict, int] | dict] | None = None,
+    ) -> Callable[[], dict[str, list[tuple[str, str]]]]:
+        discovery_map: dict[str, tuple[dict, int]] = {}
+        for url, payload in (discovery or {}).items():
+            if isinstance(payload, tuple):
+                discovery_map[url] = payload
+            else:
+                discovery_map[url] = (payload, 200)
+
+        token_map: dict[tuple[str, str | None], tuple[dict, int]] = {}
+        for key, payload in (tokens or {}).items():
+            if isinstance(payload, tuple):
+                token_map[key] = payload
+            else:
+                token_map[key] = (payload, 200)
+        request_log: list[tuple[str, str]] = []
+
+        class _FakeResponse:
+            def __init__(self, payload: dict, status: int = 200):
+                self._payload = payload
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def json(self):
+                return self._payload
+
+            async def text(self):
+                return json.dumps(self._payload)
+
+        class _FakeClient:
+            def get(self, url: str):
+                request_log.append(("GET", url))
+                if url not in discovery_map:
+                    raise AssertionError(f"Unmocked discovery URL: {url}")
+                payload, status = discovery_map[url]
+                return _FakeResponse(payload, status)
+
+            def post(self, url: str, data=None):
+                request_log.append(("POST", url))
+                code = None
+                if isinstance(data, dict):
+                    code = data.get("code") or data.get("authorization_code")
+                key = (url, code)
+                if key not in token_map:
+                    raise AssertionError(f"Unmocked token request: {url} code={code}")
+                payload, status = token_map[key]
+                return _FakeResponse(payload, status)
+
+        fake_client = _FakeClient()
+
+        def _client_factory():
+            return fake_client
+
+        import intric.main.aiohttp_client as aiohttp_client_module
+
+        monkeypatch.setattr(aiohttp_client_module, "aiohttp_client", _client_factory)
+        monkeypatch.setattr(
+            "intric.authentication.federation_router.aiohttp_client",
+            _client_factory,
+        )
+        monkeypatch.setattr(
+            "intric.users.user_router.aiohttp_client",
+            _client_factory,
+            raising=False,
+        )
+
+        def _summary() -> dict[str, list[tuple[str, str]]]:
+            return {"requests": request_log}
+
+        return _summary
+
+    return _install
+
+
+@pytest.fixture
+def mock_transcription_models(monkeypatch):
+    """Stub transcription model enablement to avoid external dependencies."""
+    from uuid import uuid4
+
+    from intric.transcription_models.infrastructure import enable_transcription_models_service
+
+    async def mock_get_model_id_by_name(self, model_name: str):
+        return uuid4()
+
+    async def mock_enable_transcription_model(
+        self,
+        transcription_model_id,
+        tenant_id,
+        is_org_enabled: bool = True,
+        is_org_default: bool = False,
+    ):
+        return None
+
+    monkeypatch.setattr(
+        enable_transcription_models_service.TranscriptionModelEnableService,
+        "get_model_id_by_name",
+        mock_get_model_id_by_name,
+    )
+    monkeypatch.setattr(
+        enable_transcription_models_service.TranscriptionModelEnableService,
+        "enable_transcription_model",
+        mock_enable_transcription_model,
+    )
+
+
+@pytest.fixture
+async def debug_auth_config(test_settings):
+    """
+    Debug fixture to print auth configuration at runtime.
+
+    This helps diagnose authentication issues by showing:
+    - What values test_settings has
+    - What values get_settings() returns at runtime
+    - Whether Settings singleton is working correctly
+    - What the actual API key header name is
+    """
+    from intric.main.config import get_settings
+    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
+
+    runtime_settings = get_settings()
+
+    print("\n=== AUTH DEBUG ===")
+    print(f"Test settings intric_super_api_key: {test_settings.intric_super_api_key}")
+    print(f"Runtime settings intric_super_api_key: {runtime_settings.intric_super_api_key}")
+    print(f"Test settings api_key_header_name: {test_settings.api_key_header_name}")
+    print(f"Runtime settings api_key_header_name: {runtime_settings.api_key_header_name}")
+    print(f"API_KEY_HEADER name: {API_KEY_HEADER.model.name}")
+    print(f"Settings object IDs match: {id(test_settings) == id(runtime_settings)}")
+    print("=================\n")

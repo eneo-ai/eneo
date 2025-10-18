@@ -435,7 +435,7 @@ async def initiate_auth(
         "config_version": tenant_config_version,
         "iat": state_payload["iat"],
     }
-    state_cache_key = f"oidc:state:{signed_state}"
+    state_cache_key = f"oidc:state:{state_payload['nonce']}"
 
     redis_client = None
     try:
@@ -600,9 +600,9 @@ async def auth_callback(
         HTTPException 403: Email domain not allowed for tenant or user not found
     """
     settings = get_settings()
-    state_cache_key = f"oidc:state:{callback.state}"
     redis_client = None
     cached_state: dict | None = None
+    state_cache_key: str | None = None
 
     try:
         redis_client = container.redis_client()
@@ -636,6 +636,19 @@ async def auth_callback(
             detail="Invalid state parameter",
         )
 
+    state_nonce = state_payload.get("nonce")
+    if not state_nonce:
+        logger.error(
+            "State token missing nonce claim",
+            extra={"correlation_id": state_payload.get("correlation_id")},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid state parameter",
+        )
+
+    state_cache_key = f"oidc:state:{state_nonce}"
+
     tenant_id = UUID(state_payload["tenant_id"])
     tenant_slug = state_payload["tenant_slug"]
     redirect_uri = state_payload["redirect_uri"]
@@ -650,7 +663,7 @@ async def auth_callback(
         tenant_slug=tenant_slug,
     )
 
-    if redis_client:
+    if redis_client and state_cache_key:
         try:
             cached_raw = await redis_client.get(state_cache_key)
             if cached_raw:
@@ -690,10 +703,92 @@ async def auth_callback(
     try:
         async with _cleanup_state_cache(
             redis_client,
-            state_cache_key,
+            state_cache_key or "",
             tenant_id=tenant_id,
             correlation_id=correlation_id,
         ):
+            if redis_client and state_cache_key:
+                if not cached_state:
+                    logger.error(
+                        "OIDC state not found in cache during callback",
+                        extra={
+                            "tenant_slug": tenant_slug,
+                            "state_key": state_cache_key,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.state_cache_missing",
+                        tenant_slug=tenant_slug,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "Authorization session is invalid or has expired. "
+                            "Please restart the sign-in flow."
+                        ),
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
+                expected_tenant_id = cached_state.get("tenant_id")
+                if expected_tenant_id and expected_tenant_id != str(tenant_id):
+                    logger.error(
+                        "OIDC state tenant mismatch detected",
+                        extra={
+                            "expected_tenant_id": expected_tenant_id,
+                            "supplied_tenant_id": str(tenant_id),
+                            "tenant_slug": tenant_slug,
+                            "state_key": state_cache_key,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.state_tampered",
+                        reason="tenant_id_mismatch",
+                        expected_tenant_id=expected_tenant_id,
+                        supplied_tenant_id=str(tenant_id),
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "Authorization state mismatch detected. "
+                            "Please restart the sign-in flow."
+                        ),
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
+                expected_tenant_slug = (cached_state.get("tenant_slug") or "").lower()
+                if expected_tenant_slug and expected_tenant_slug != (tenant_slug or "").lower():
+                    logger.error(
+                        "OIDC state tenant slug mismatch detected",
+                        extra={
+                            "expected_tenant_slug": expected_tenant_slug,
+                            "supplied_tenant_slug": tenant_slug,
+                            "state_key": state_cache_key,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.state_tampered",
+                        reason="tenant_slug_mismatch",
+                        expected_tenant_slug=expected_tenant_slug,
+                        supplied_tenant_slug=tenant_slug,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "Authorization state mismatch detected. "
+                            "Please restart the sign-in flow."
+                        ),
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
             # Get tenant and federation config
             tenant_repo = container.tenant_repo()
             tenant_obj = await tenant_repo.get(tenant_id)
@@ -1104,10 +1199,40 @@ async def auth_callback(
                 email_claim=email_claim,
             )
 
+            # Validate email format before domain checks (defensive against bad IdP data)
+            _local_part, separator, domain_part = email.partition("@")
+            if (
+                separator == ""
+                or not domain_part
+                or not _local_part
+                or "@" in domain_part
+            ):
+                logger.error(
+                    "Email claim invalid format",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "tenant_slug": tenant_slug,
+                        "email": email,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="callback.email_invalid_format",
+                    tenant_slug=tenant_slug,
+                    email=email,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Email claim from identity provider is invalid. Contact your administrator.",
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+
             # CRITICAL: Email domain validation
             allowed_domains = federation_config.get("allowed_domains", [])
             if allowed_domains:
-                email_domain_raw = email.split("@")[1]
+                email_domain_raw = domain_part
                 email_domain = email_domain_raw.lower()
                 try:
                     email_domain = email_domain.encode("idna").decode("ascii")
