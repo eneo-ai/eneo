@@ -354,6 +354,28 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🔑 Authentication & Authorization Issues
 
+### OIDC login fails for a specific tenant
+
+**Symptoms**
+- Frontend displays `LoginError` along with a `correlationId`
+- Backend logs only show a 4xx/5xx status without context
+
+**Resolution**
+1. Enable the OIDC debug toggle temporarily:
+   ```bash
+   curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
+     -H "X-API-Key: {SUPER_API_KEY}" \
+     -H "Content-Type: application/json" \
+     -d '{"enabled": true, "duration_minutes": 10, "reason": "tenant-login-incident"}'
+   ```
+2. Ask the tenant to retry or reproduce the login. Copy the `correlationId` surfaced in the UI.
+3. Filter server logs for that ID:
+   ```bash
+   journalctl -u backend.service -o cat | jq 'select(.correlation_id=="<ID>")'
+   ```
+4. Match the `[OIDC DEBUG] …` breadcrumb with the table in the [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#32-trace-the-correlation-id) to pinpoint the exact misconfiguration (domain, user, tenant mismatch, etc.).
+5. Update the tenant federation config or user data, then disable the toggle with a second POST (`{"enabled": false, ...}`).
+
 ### JWT Token Problems
 
 <details>

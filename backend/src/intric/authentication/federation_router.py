@@ -16,6 +16,9 @@ from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
+from intric.main.request_context import set_request_context
+from intric.observability.debug_toggle import is_debug_enabled
+from intric.observability.redaction import sanitize_payload
 from intric.server.dependencies.container import get_container
 from intric.settings.credential_resolver import CredentialResolver
 from intric.tenants.tenant import TenantState
@@ -48,6 +51,32 @@ async def _cleanup_state_cache(
                         "correlation_id": correlation_id,
                     },
                 )
+
+
+async def _log_oidc_debug(
+    *,
+    redis_client,
+    correlation_id: str | None,
+    event: str,
+    **payload,
+) -> None:
+    if not correlation_id:
+        correlation_id = "unknown"
+
+    if not await is_debug_enabled(redis_client):
+        return
+
+    sanitized = sanitize_payload(payload)
+    set_request_context(correlation_id=correlation_id)
+
+    logger.debug(
+        f"[OIDC DEBUG] {event}",
+        extra={
+            "event": event,
+            "correlation_id": correlation_id,
+            **sanitized,
+        },
+    )
 
 
 async def fetch_discovery(discovery_url: str) -> dict:
@@ -329,6 +358,8 @@ async def initiate_auth(
             detail=f"Tenant '{tenant}' is not active. Contact your administrator.",
         )
 
+    set_request_context(tenant_slug=tenant_obj.slug or tenant_obj.name)
+
     # Resolve federation config (tenant-specific or global)
     # Create CredentialResolver with tenant, settings, and encryption_service
     encryption_service = container.encryption_service()
@@ -375,6 +406,7 @@ async def initiate_auth(
     # Generate server-signed state (includes tenant context for callback validation)
     # State format: JWT with expiry (10 minutes)
     correlation_id = secrets.token_hex(8)  # Generate correlation ID for request tracing
+    set_request_context(correlation_id=correlation_id)
 
     effective_updated_at = tenant_obj.updated_at or tenant_obj.created_at
     tenant_config_version = (
@@ -418,6 +450,13 @@ async def initiate_auth(
                 settings.oidc_state_ttl_seconds,
                 json.dumps(state_cache_payload, separators=(",", ":")),
             )
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="initiate.state_cached",
+                tenant_slug=tenant_obj.slug or tenant_obj.name,
+                ttl=settings.oidc_state_ttl_seconds,
+            )
         except Exception as exc:  # pragma: no cover - best effort cache
             logger.warning(
                 "Failed to persist OIDC state in Redis",
@@ -427,6 +466,20 @@ async def initiate_auth(
                     "error": str(exc),
                 },
             )
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="initiate.state_cache_failed",
+                tenant_slug=tenant_obj.slug or tenant_obj.name,
+                error=str(exc),
+            )
+    else:
+        await _log_oidc_debug(
+            redis_client=redis_client,
+            correlation_id=correlation_id,
+            event="initiate.state_cache_skipped",
+            tenant_slug=tenant_obj.slug or tenant_obj.name,
+        )
 
     # Resolve authorization endpoint
     authorization_endpoint = federation_config.get("authorization_endpoint")
@@ -476,6 +529,15 @@ async def initiate_auth(
         "state": signed_state,
     }
     authorization_url = f"{authorization_endpoint}?{urlencode(params)}"
+
+    await _log_oidc_debug(
+        redis_client=redis_client,
+        correlation_id=correlation_id,
+        event="initiate.authorization_ready",
+        tenant_slug=tenant_obj.slug or tenant_obj.name,
+        authorization_endpoint=authorization_endpoint,
+        redirect_uri=redirect_uri,
+    )
 
     logger.info(
         f"Authentication initiated for tenant {tenant_obj.name}",
@@ -579,12 +641,26 @@ async def auth_callback(
     redirect_uri = state_payload["redirect_uri"]
     # Extract correlation ID from state (flows from initiate endpoint)
     correlation_id = state_payload.get("correlation_id", secrets.token_hex(8))
+    set_request_context(correlation_id=correlation_id, tenant_slug=tenant_slug)
+
+    await _log_oidc_debug(
+        redis_client=redis_client,
+        correlation_id=correlation_id,
+        event="callback.state_decoded",
+        tenant_slug=tenant_slug,
+    )
 
     if redis_client:
         try:
             cached_raw = await redis_client.get(state_cache_key)
             if cached_raw:
                 cached_state = json.loads(cached_raw)
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.state_cache_hit" if cached_state else "callback.state_cache_miss",
+                tenant_slug=tenant_slug,
+            )
         except Exception as exc:  # pragma: no cover - best effort cache fetch
             logger.warning(
                 "Failed to retrieve cached OIDC state",
@@ -595,6 +671,20 @@ async def auth_callback(
                     "correlation_id": correlation_id,
                 },
             )
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.state_cache_error",
+                tenant_slug=tenant_slug,
+                error=str(exc),
+            )
+    else:
+        await _log_oidc_debug(
+            redis_client=redis_client,
+            correlation_id=correlation_id,
+            event="callback.state_cache_unavailable",
+            tenant_slug=tenant_slug,
+        )
 
     # Global exception handler to ensure correlation_id is always included in responses
     try:
@@ -621,7 +711,23 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
+            set_request_context(tenant_slug=tenant_obj.slug or tenant_slug)
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.tenant_loaded",
+                tenant_id=str(tenant_id),
+                tenant_slug=tenant_obj.slug or tenant_slug,
+            )
+
             if tenant_obj.state != TenantState.ACTIVE:
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="callback.tenant_inactive",
+                    tenant_slug=tenant_slug,
+                    state=str(tenant_obj.state),
+                )
                 logger.error(
                     "Inactive tenant attempted callback",
                     extra={
@@ -989,6 +1095,15 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
+            set_request_context(user_email=email)
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.email_extracted",
+                email=email,
+                email_claim=email_claim,
+            )
+
             # CRITICAL: Email domain validation
             allowed_domains = federation_config.get("allowed_domains", [])
             if allowed_domains:
@@ -1019,6 +1134,14 @@ async def auth_callback(
                             "correlation_id": correlation_id,
                         },
                     )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.domain_rejected",
+                        tenant_slug=tenant_slug,
+                        email=email,
+                        email_domain=email_domain,
+                    )
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=(
@@ -1026,6 +1149,15 @@ async def auth_callback(
                             "Contact your administrator to add your domain."
                         ),
                         headers={"X-Correlation-ID": correlation_id},
+                    )
+                else:
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.domain_allowed",
+                        tenant_slug=tenant_slug,
+                        email=email,
+                        email_domain=email_domain,
                     )
 
             # Lookup existing user (NO user creation - users must already exist)
@@ -1041,6 +1173,13 @@ async def auth_callback(
                         "email": email,
                         "correlation_id": correlation_id,
                     },
+                )
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="callback.user_missing",
+                    tenant_slug=tenant_slug,
+                    email=email,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -1058,6 +1197,14 @@ async def auth_callback(
                         "email": email,
                         "correlation_id": correlation_id,
                     },
+                )
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="callback.user_tenant_mismatch",
+                    tenant_slug=tenant_slug,
+                    email=email,
+                    user_tenant_id=str(user.tenant_id),
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -1079,6 +1226,15 @@ async def auth_callback(
                 },
             )
 
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.success",
+                tenant_slug=tenant_slug,
+                email=email,
+                user_id=str(user.id),
+            )
+
             return {"access_token": access_token_response}
     except HTTPException:
         # Re-raise HTTPException with correlation_id already set
@@ -1093,6 +1249,13 @@ async def auth_callback(
                 "error_type": type(e).__name__,
                 "correlation_id": correlation_id,
             },
+        )
+        await _log_oidc_debug(
+            redis_client=redis_client,
+            correlation_id=correlation_id,
+            event="callback.unexpected_error",
+            error=str(e),
+            error_type=type(e).__name__,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

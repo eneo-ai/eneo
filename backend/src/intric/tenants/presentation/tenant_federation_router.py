@@ -27,7 +27,6 @@ def check_feature_enabled(settings: Settings = Depends(get_settings)) -> None:
 
 router = APIRouter(
     prefix="/tenants",
-    tags=["tenant-federation"],
     dependencies=[
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),
