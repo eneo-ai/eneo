@@ -1229,6 +1229,8 @@
   "no_organizations_available": "No organizations available",
   "redirecting_to_authentication": "Redirecting to authentication...",
   "completing_authentication": "Completing authentication...",
+  "loading_error_details": "Loading error details...",
+  "connection_slow_warning": "This is taking longer than expected. Please check your internet connection.",
   "invalid_organization_identifier": "Invalid organization identifier",
   "failed_to_start_authentication": "Failed to start authentication. Please try again.",
   "search_organizations": "Search organizations",

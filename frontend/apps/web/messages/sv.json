@@ -1263,6 +1263,8 @@
   "no_organizations_available": "Inga organisationer tillgängliga",
   "redirecting_to_authentication": "Omdirigerar till autentisering...",
   "completing_authentication": "Slutför autentisering...",
+  "loading_error_details": "Laddar felmeddelandet...",
+  "connection_slow_warning": "Detta tar längre tid än förväntat. Kontrollera din internetanslutning.",
   "invalid_organization_identifier": "Ogiltig organisationsidentifierare",
   "failed_to_start_authentication": "Misslyckades med att starta autentisering. Försök igen.",
   "search_organizations": "Sök organisationer",

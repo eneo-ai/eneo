@@ -1110,6 +1110,18 @@ export interface paths {
     /** Crawl All Weekly Websites */
     post: operations["crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post"];
   };
+  "/api/v1/sysadmin/observability/oidc-debug/": {
+    /**
+     * Get current OIDC debug toggle status
+     * @description Returns whether OIDC debug logging is currently enabled and when it expires.
+     */
+    get: operations["get_oidc_debug_status_api_v1_sysadmin_observability_oidc_debug__get"];
+    /**
+     * Enable or disable OIDC debug logging
+     * @description Turns verbose OIDC diagnostics on or off for a limited window. Requires super API key.
+     */
+    post: operations["toggle_oidc_debug_api_v1_sysadmin_observability_oidc_debug__post"];
+  };
   "/api/v1/sysadmin/embedding-models/": {
     /** Get Embedding Models */
     get: operations["get_embedding_models_api_v1_sysadmin_embedding_models__get"];
@@ -3897,6 +3909,40 @@ export interface components {
      * @enum {string}
      */
     Modules: "eu_hosting" | "intric-applications" | "SWE Models";
+    /** OIDCDebugToggleRequest */
+    OIDCDebugToggleRequest: {
+      /**
+       * Enabled
+       * @description Enable or disable OIDC debug logging
+       */
+      enabled: boolean;
+      /**
+       * Duration Minutes
+       * @description Duration in minutes before the toggle auto-expires (max 120)
+       * @default 30
+       */
+      duration_minutes?: number | null;
+      /**
+       * Reason
+       * @description Optional note for audit trail
+       */
+      reason?: string | null;
+    };
+    /** OIDCDebugToggleResponse */
+    OIDCDebugToggleResponse: {
+      /** Enabled */
+      enabled: boolean;
+      /** Enabled At */
+      enabled_at: string | null;
+      /** Enabled By */
+      enabled_by: string | null;
+      /** Expires At */
+      expires_at: string | null;
+      /** Reason */
+      reason: string | null;
+      /** Backend */
+      backend: string;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -13359,6 +13405,53 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Get current OIDC debug toggle status
+   * @description Returns whether OIDC debug logging is currently enabled and when it expires.
+   */
+  get_oidc_debug_status_api_v1_sysadmin_observability_oidc_debug__get: {
+    responses: {
+      /** @description Current state of the OIDC debug toggle. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OIDCDebugToggleResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key. */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Enable or disable OIDC debug logging
+   * @description Turns verbose OIDC diagnostics on or off for a limited window. Requires super API key.
+   */
+  toggle_oidc_debug_api_v1_sysadmin_observability_oidc_debug__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OIDCDebugToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Debug flag state updated. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OIDCDebugToggleResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

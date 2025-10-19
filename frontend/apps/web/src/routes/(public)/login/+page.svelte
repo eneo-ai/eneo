@@ -64,9 +64,33 @@
   let showTenantSelector = $state(false);
   let federationError = $state<string | null>(null);
   let preloadedTenants = $state<TenantInfo[]>([]);
+  let isInitializing = $state(true);
+  let showSlowLoadingWarning = $state(false);
+  let loadingTimeoutId: number | null = null;
 
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
   let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.tenantFederationEnabled));
+
+  // Determine which loading message to display
+  let loadingMessage = $derived.by(() => {
+    // Check for OIDC error directly from URL (don't wait for $effect to set oidcErrorCode)
+    const urlMessage = page.url.searchParams.get("message");
+    const hasOidcErrorInUrl = urlMessage && OIDC_ERROR_CODES.has(urlMessage);
+
+    if (hasOidcErrorInUrl && isInitializing) {
+      return m.loading_error_details();
+    }
+    if (isAwaitingLoginResponse) {
+      return m.redirecting_to_authentication();
+    }
+    if (isInitializing && tenantFederationEnabled) {
+      return m.loading_organizations();
+    }
+    if ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams) {
+      return m.redirecting_to_authentication();
+    }
+    return undefined;
+  });
 
   // Check if user explicitly wants to see login form (e.g., after logout)
   const hasQueryParams = $derived(
@@ -76,6 +100,36 @@
       activeTenantSlug !== null
   );
 
+  // Monitor loading state and show warning if taking too long
+  $effect(() => {
+    if (!browser) return;
+
+    const isLoading = isInitializing || isAwaitingLoginResponse;
+
+    if (isLoading) {
+      // Start timeout to show slow loading warning after 10 seconds
+      if (loadingTimeoutId === null) {
+        loadingTimeoutId = window.setTimeout(() => {
+          showSlowLoadingWarning = true;
+        }, 10000);
+      }
+    } else {
+      // Clear timeout and hide warning when loading completes
+      if (loadingTimeoutId !== null) {
+        clearTimeout(loadingTimeoutId);
+        loadingTimeoutId = null;
+      }
+      showSlowLoadingWarning = false;
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (loadingTimeoutId !== null) {
+        clearTimeout(loadingTimeoutId);
+      }
+    };
+  });
+
   // Handle automatic redirects reactively
   $effect(() => {
     if (!browser) return;
@@ -83,12 +137,14 @@
 
     // We don't redirect on the server so we can render a loader/spinner during the redirection period
     if (data.zitadelLink && !hasQueryParams) {
+      isInitializing = true; // Keep showing loader during redirect
       window.location.href = data.zitadelLink;
       return;
     }
 
     // Single-tenant OIDC: redirect to IdP immediately (unless user wants to see login form)
     if (data.singleTenantOidcLink && !hasQueryParams) {
+      isInitializing = true; // Keep showing loader during redirect
       window.location.href = data.singleTenantOidcLink;
     }
   });
@@ -107,10 +163,12 @@
     }
 
     if (!tenantFederationEnabled) {
+      isInitializing = false;
       return;
     }
 
     if (showUsernameAndPassword) {
+      isInitializing = false;
       return;
     }
 
@@ -125,12 +183,14 @@
     // This prevents infinite loops when login fails
     if (hasOidcError) {
       console.debug("[Login Page] OIDC error detected in URL, skipping auto-login");
+      isInitializing = false;
       return;
     }
 
     if (tenant && /^[a-z0-9-]+$/.test(tenant)) {
       const success = await beginTenantLogin(tenant);
       if (success) {
+        // Keep isInitializing=true to show loader until redirect completes
         return;
       }
     }
@@ -138,6 +198,9 @@
     if (!data.zitadelLink && !data.mobilityguardLink) {
       await loadTenantsAndMaybeShow();
     }
+
+    // Done initializing
+    isInitializing = false;
   });
 
   function rememberTenant(slug: string) {
@@ -291,8 +354,23 @@
   <title>Eneo.ai – {m.login()}</title>
 </svelte:head>
 
-{#if (data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams}
-  <LoadingScreen />
+{#if isInitializing || isAwaitingLoginResponse || ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams)}
+  <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
+    <div class="flex flex-col items-center gap-6">
+      <LoadingScreen message={loadingMessage} />
+      {#if showSlowLoadingWarning}
+        <div class="bg-warning-dimmer text-warning-default max-w-md rounded-lg p-4 shadow-lg" role="alert">
+          <p class="mb-2">{m.connection_slow_warning()}</p>
+          <Button
+            variant="outlined"
+            on:click={() => window.location.reload()}
+            class="w-full justify-center">
+            {m.retry()}
+          </Button>
+        </div>
+      {/if}
+    </div>
+  </div>
 {:else if showTenantSelector}
   <!-- Tenant Selector for Federation -->
   <div class="relative flex min-h-[100vh] w-[100vw] items-center justify-center py-8">
