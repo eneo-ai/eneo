@@ -101,6 +101,39 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🚀 Installation & Setup Issues
 
+### SSR login immediately returns HTTP 401 after deployment
+
+This usually means the backend could not seed the `allowed_origins` table with
+your public URL.
+
+1. **Check backend logs** – look for messages such as
+   `Allowed-origins seeding skipped` or
+   `Allowed origin '<url>' already registered`.
+   These indicate whether `PUBLIC_ORIGIN` was read from the environment.
+
+2. **Verify environment configuration** – ensure `PUBLIC_ORIGIN` (or its
+   fallback `ORIGIN` / `INTRIC_BACKEND_URL`) is set in the backend `.env` file
+   to the externally reachable URL (the one your users see in their browser).
+
+3. **Inspect the allowlist manually**:
+
+   ```bash
+   docker compose exec db \
+     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+     -c 'SELECT url, tenant_id FROM allowed_origins;'
+   ```
+
+4. **Backfill manually (optional)** – if the table is empty, insert the URL
+   explicitly (idempotent):
+
+   ```sql
+   INSERT INTO allowed_origins (url, tenant_id)
+   VALUES ('https://your-domain.com', '<tenant-uuid>')
+   ON CONFLICT (url) DO NOTHING;
+   ```
+
+   Replace `<tenant-uuid>` with the ID from `SELECT id FROM tenants;`.
+
 ### DevContainer Problems
 
 <details>
