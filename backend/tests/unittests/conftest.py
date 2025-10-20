@@ -1,6 +1,10 @@
+import os
 import uuid
 
 import pytest
+
+# Set required environment variables before any imports that might load settings
+os.environ.setdefault("ENCRYPTION_KEY", "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=")
 
 from intric.ai_models.completion_models.completion_model import (
     ModelHostingLocation,

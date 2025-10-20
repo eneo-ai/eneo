@@ -4,22 +4,28 @@
   import { IconDocument } from "@intric/icons/document";
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
-  import { m } from "$lib/paraglide/messages";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;
 
   const intric = getIntric();
 
+  // Use a separate state variable for the loaded text to avoid prop mutation
+  let loadedBlobText: string | undefined = blob.text;
   let loadingBlob = false;
+  let loadError = false;
+  
   async function loadBlob() {
-    if (!blob.text) {
+    if (!loadedBlobText) {
       loadingBlob = true;
+      loadError = false;
       try {
-        blob = await intric.infoBlobs.get(blob);
+        const loadedBlob = await intric.infoBlobs.get(blob);
+        loadedBlobText = loadedBlob.text;
       } catch (e) {
-        alert(m.error_retrieving_reference_see_console());
-        console.error(e);
+        loadError = true;
+        console.error("Error retrieving blob content:", e);
+        alert("Error retrieving reference, see console for details.");
       }
       loadingBlob = false;
     }
@@ -30,8 +36,8 @@
 
   async function downloadText() {
     await loadBlob();
-    if (blob.text && browser) {
-      const file = new Blob([blob.text], { type: "application/octet-stream;charset=utf-8" });
+    if (loadedBlobText && browser) {
+      const file = new Blob([loadedBlobText], { type: "application/octet-stream;charset=utf-8" });
       const filename = blob.metadata.title
         ? `${blob.metadata.title}${blob.metadata.title.endsWith(".txt") ? "" : ".txt"}`
         : "Download.txt";
@@ -52,13 +58,14 @@
     }
   }
 
-  let copyButtonText = m.copy_to_clipboard();
-  function copyText() {
-    if (blob.text && browser) {
-      navigator.clipboard.writeText(blob.text);
-      copyButtonText = m.copied();
+  let copyButtonText = "Copy to clipboard";
+  async function copyText() {
+    await loadBlob();
+    if (loadedBlobText && browser) {
+      navigator.clipboard.writeText(loadedBlobText);
+      copyButtonText = "Copied!";
       setTimeout(() => {
-        copyButtonText = m.copy_to_clipboard();
+        copyButtonText = "Copy to clipboard";
       }, 2000);
     }
   }
@@ -94,20 +101,22 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{blob.metadata.title}</Dialog.Title>
-    <Dialog.Description hidden>{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description>
+    <Dialog.Description hidden>File contents of {blob.metadata.title}</Dialog.Description>
 
     <Dialog.Section scrollable>
       <div class="p-4">
         {#if loadingBlob}
-          <pre>{m.loading()}</pre>
+          <pre>Loading...</pre>
+        {:else if loadError}
+          <pre>Error loading content. Please try again.</pre>
         {:else}
-          <Markdown source={blob.text ?? ""}></Markdown>
+          <Markdown source={loadedBlobText ?? ""}></Markdown>
         {/if}
       </div>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      {#if blob.text}
+      {#if loadedBlobText}
         <Button variant="simple" on:click={downloadText} padding="icon-leading">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -123,7 +132,7 @@
               d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
             />
           </svg>
-          {m.download_extracted_text()}
+          Download extracted text
         </Button>
 
         <Button variant="simple" padding="icon-leading" on:click={copyText}>
@@ -145,7 +154,7 @@
         >
         <div class="flex-grow"></div>
       {/if}
-      <Button variant="primary" is={close}>{m.done()}</Button>
+      <Button variant="primary" is={close}>Done</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

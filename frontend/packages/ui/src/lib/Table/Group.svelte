@@ -64,11 +64,16 @@
         groupHeader: {
           false: ["border-dimmer"],
           true: ["border-default", "pl-2.5", "py-3.5"]
+        },
+        columnType: {
+          select: "w-[1%]",
+          default: null
         }
       },
       defaultVariants: {
         groupHeader: false,
-        primary: false
+        primary: false,
+        columnType: "default"
       }
     }
   );
@@ -100,7 +105,13 @@
               {#each row.cells as cell (cell.id)}
                 {#if cell.id !== "table-card-key"}
                   <Subscribe attrs={cell.attrs()} let:attrs>
-                    <td {...attrs} class={tableCell({ primary: cell.id === "table-primary-key" })}>
+                    <td
+                      {...attrs}
+                      class={tableCell({
+                        primary: cell.id === "table-primary-key",
+                        columnType: cell.id === "select" ? "select" : "default"
+                      })}
+                    >
                       {#if cell.id === "table-action-key"}
                         <div class="flex items-center justify-end">
                           <Render of={cell.render()} />

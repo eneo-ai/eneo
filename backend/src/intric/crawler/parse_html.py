@@ -16,6 +16,17 @@ class CrawledPage:
 
 
 def parse_response(response: Response):
+    # Handle JSON responses (e.g., API endpoints)
+    content_type = response.headers.get(b"Content-Type", b"").decode("utf-8").lower()
+    if "application/json" in content_type:
+        # For JSON responses, use the body as-is with URL as title
+        return CrawledPage(
+            url=response.url,
+            title=response.url,
+            content=response.text
+        )
+
+    # Handle HTML responses
     soup = BeautifulSoup(response.body, "lxml")
 
     # Replace relative links with absolute

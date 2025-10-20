@@ -188,6 +188,7 @@ main() {
         -e JWT_SECRET=dummy \
         -e JWT_TOKEN_PREFIX=dummy \
         -e URL_SIGNING_KEY=dummy \
+        -e ENCRYPTION_KEY=yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs= \
         -e NUM_WORKERS=1 \
         "$BACKEND_IMAGE" > /dev/null
 
