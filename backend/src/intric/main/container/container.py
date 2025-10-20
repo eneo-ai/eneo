@@ -607,10 +607,6 @@ class Container(containers.DeclarativeContainer):
         task_service=task_service,
     )
 
-    quota_service = providers.Factory(
-        QuotaService, user=user, info_blob_repo=info_blob_repo
-    )
-
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
         user=user,
