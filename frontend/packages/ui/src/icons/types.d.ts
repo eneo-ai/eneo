@@ -33,6 +33,9 @@ declare module "@intric/icons/at-symbol" {
 declare module "@intric/icons/attachment" {
   export { Icon as IconAttachment } from "@intric/icons/*";
 }
+declare module "@intric/icons/building-2" {
+  export { Icon as IconBuilding2 } from "@intric/icons/*";
+}
 declare module "@intric/icons/bulb" {
   export { Icon as IconBulb } from "@intric/icons/*";
 }

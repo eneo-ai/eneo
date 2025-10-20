@@ -779,7 +779,29 @@ export interface paths {
     post: operations["create_space_groups_api_v1_spaces__id__knowledge_groups__post"];
   };
   "/api/v1/spaces/{id}/knowledge/websites/": {
-    /** Create Space Websites */
+    /**
+     * Create a website crawler
+     * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+     *
+     *     **Update Intervals:**
+     *     - `never` (default): Manual crawls only
+     *     - `daily`: Automatic recrawl every day at 3 AM Swedish time
+     *     - `every_other_day`: Recrawl every 2 days
+     *     - `weekly`: Recrawl every Friday
+     *
+     *     **Example Request Body:**
+     *     ```json
+     *     {
+     *       "name": "Company Documentation",
+     *       "url": "https://docs.example.com",
+     *       "crawl_type": "crawl",
+     *       "download_files": true,
+     *       "update_interval": "daily"
+     *     }
+     *     ```
+     *
+     *     The crawl will start immediately upon creation.
+     */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
   };
   "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/": {
@@ -820,6 +842,47 @@ export interface paths {
      */
     post: operations["create_website_api_v1_websites__post"];
   };
+  "/api/v1/websites/bulk/run/": {
+    /**
+     * Trigger bulk crawl
+     * @description Trigger crawls for multiple websites at once. Useful for:
+     *     - Batch recrawling selected websites
+     *     - Refreshing multiple knowledge sources simultaneously
+     *     - Recovering from failed crawls across multiple sites
+     *
+     *     **Features:**
+     *     - Maximum 50 websites per request (safety limit)
+     *     - Individual failures don't stop the batch
+     *     - Returns detailed status for each website
+     *
+     *     **Example Request:**
+     *     ```json
+     *     {
+     *       "website_ids": [
+     *         "123e4567-e89b-12d3-a456-426614174000",
+     *         "123e4567-e89b-12d3-a456-426614174001"
+     *       ]
+     *     }
+     *     ```
+     *
+     *     **Example Response:**
+     *     ```json
+     *     {
+     *       "total": 2,
+     *       "queued": 1,
+     *       "failed": 1,
+     *       "crawl_runs": [...],
+     *       "errors": [
+     *         {
+     *           "website_id": "123e4567-e89b-12d3-a456-426614174001",
+     *           "error": "Crawl already in progress for this website"
+     *         }
+     *       ]
+     *     }
+     *     ```
+     */
+    post: operations["bulk_run_crawl_api_v1_websites_bulk_run__post"];
+  };
   "/api/v1/websites/{id}/": {
     /** Get Website */
     get: operations["get_website_api_v1_websites__id___get"];
@@ -829,7 +892,23 @@ export interface paths {
     delete: operations["delete_website_api_v1_websites__id___delete"];
   };
   "/api/v1/websites/{id}/run/": {
-    /** Run Crawl */
+    /**
+     * Trigger a crawl
+     * @description Manually trigger a crawl for a specific website. This can be used to:
+     *     - Recrawl a website to update its content
+     *     - Force a crawl outside the automatic update schedule
+     *     - Retry a failed crawl
+     *
+     *     The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+     *
+     *     **Status Flow:**
+     *     1. `queued` - Crawl is waiting to start
+     *     2. `in progress` - Crawl is actively running
+     *     3. `complete` - Crawl finished successfully
+     *     4. `failed` - Crawl encountered an error
+     *
+     *     Returns the new crawl run with status information.
+     */
     post: operations["run_crawl_api_v1_websites__id__run__post"];
   };
   "/api/v1/websites/{id}/runs/": {
@@ -1991,6 +2070,32 @@ export interface components {
        * Format: binary
        */
       file: string;
+    };
+    /**
+     * BulkCrawlRequest
+     * @description Request model for triggering crawls on multiple websites.
+     */
+    BulkCrawlRequest: {
+      /** Website Ids */
+      website_ids: string[];
+    };
+    /**
+     * BulkCrawlResponse
+     * @description Response model for bulk crawl operations.
+     */
+    BulkCrawlResponse: {
+      /** Total */
+      total: number;
+      /** Queued */
+      queued: number;
+      /** Failed */
+      failed: number;
+      /** Crawl Runs */
+      crawl_runs: components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"][];
+      /** Errors */
+      errors: {
+        [key: string]: string;
+      }[];
     };
     /**
      * CallbackRequest
@@ -6009,9 +6114,12 @@ export interface components {
     };
     /**
      * UpdateInterval
+     * @description Defines how frequently a website should be crawled.
+     *
+     * Why: Provides flexible scheduling options for automated crawling.
      * @enum {string}
      */
-    UpdateInterval: "never" | "weekly";
+    UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Assistants */
@@ -6769,6 +6877,16 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model?: components["schemas"]["ModelId"] | null;
+      /**
+       * Http Auth Username
+       * @description Username for HTTP Basic Authentication (optional)
+       */
+      http_auth_username?: string | null;
+      /**
+       * Http Auth Password
+       * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
+       */
+      http_auth_password?: string | null;
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -6831,6 +6949,27 @@ export interface components {
         | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
+      /**
+       * Requires Http Auth
+       * @description Whether this website requires HTTP Basic Authentication. Credentials are never exposed via API.
+       */
+      requires_http_auth: boolean;
+      /**
+       * Consecutive Failures
+       * @description Number of consecutive crawl failures. Resets to 0 on successful crawl.
+       * @default 0
+       */
+      consecutive_failures?: number;
+      /**
+       * Next Retry At
+       * @description When to retry after failures (null = no backoff). Uses exponential backoff: 1h → 2h → 4h → 8h → 16h → 24h max.
+       */
+      next_retry_at?: string | null;
+      /**
+       * Is Auto Disabled
+       * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
+       */
+      is_auto_disabled: boolean;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -6859,6 +6998,18 @@ export interface components {
        * @default NOT_PROVIDED
        */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /**
+       * Http Auth Username
+       * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.
+       * @default NOT_PROVIDED
+       */
+      http_auth_username?: string | null;
+      /**
+       * Http Auth Password
+       * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
+       * @default NOT_PROVIDED
+       */
+      http_auth_password?: string | null;
     };
     /**
      * WizardType
@@ -11761,7 +11912,29 @@ export interface operations {
       };
     };
   };
-  /** Create Space Websites */
+  /**
+   * Create a website crawler
+   * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+   *
+   *     **Update Intervals:**
+   *     - `never` (default): Manual crawls only
+   *     - `daily`: Automatic recrawl every day at 3 AM Swedish time
+   *     - `every_other_day`: Recrawl every 2 days
+   *     - `weekly`: Recrawl every Friday
+   *
+   *     **Example Request Body:**
+   *     ```json
+   *     {
+   *       "name": "Company Documentation",
+   *       "url": "https://docs.example.com",
+   *       "crawl_type": "crawl",
+   *       "download_files": true,
+   *       "update_interval": "daily"
+   *     }
+   *     ```
+   *
+   *     The crawl will start immediately upon creation.
+   */
   create_space_websites_api_v1_spaces__id__knowledge_websites__post: {
     parameters: {
       path: {
@@ -12062,6 +12235,77 @@ export interface operations {
       };
     };
   };
+  /**
+   * Trigger bulk crawl
+   * @description Trigger crawls for multiple websites at once. Useful for:
+   *     - Batch recrawling selected websites
+   *     - Refreshing multiple knowledge sources simultaneously
+   *     - Recovering from failed crawls across multiple sites
+   *
+   *     **Features:**
+   *     - Maximum 50 websites per request (safety limit)
+   *     - Individual failures don't stop the batch
+   *     - Returns detailed status for each website
+   *
+   *     **Example Request:**
+   *     ```json
+   *     {
+   *       "website_ids": [
+   *         "123e4567-e89b-12d3-a456-426614174000",
+   *         "123e4567-e89b-12d3-a456-426614174001"
+   *       ]
+   *     }
+   *     ```
+   *
+   *     **Example Response:**
+   *     ```json
+   *     {
+   *       "total": 2,
+   *       "queued": 1,
+   *       "failed": 1,
+   *       "crawl_runs": [...],
+   *       "errors": [
+   *         {
+   *           "website_id": "123e4567-e89b-12d3-a456-426614174001",
+   *           "error": "Crawl already in progress for this website"
+   *         }
+   *       ]
+   *     }
+   *     ```
+   */
+  bulk_run_crawl_api_v1_websites_bulk_run__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BulkCrawlResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Website */
   get_website_api_v1_websites__id___get: {
     parameters: {
@@ -12149,7 +12393,23 @@ export interface operations {
       };
     };
   };
-  /** Run Crawl */
+  /**
+   * Trigger a crawl
+   * @description Manually trigger a crawl for a specific website. This can be used to:
+   *     - Recrawl a website to update its content
+   *     - Force a crawl outside the automatic update schedule
+   *     - Retry a failed crawl
+   *
+   *     The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+   *
+   *     **Status Flow:**
+   *     1. `queued` - Crawl is waiting to start
+   *     2. `in progress` - Crawl is actively running
+   *     3. `complete` - Crawl finished successfully
+   *     4. `failed` - Crawl encountered an error
+   *
+   *     Returns the new crawl run with status information.
+   */
   run_crawl_api_v1_websites__id__run__post: {
     parameters: {
       path: {
