@@ -114,7 +114,7 @@
 
       <JobManagerDropdown></JobManagerDropdown>
       <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu></ProfileMenu>
+      <ProfileMenu tenantFederationEnabled={data.featureFlags?.tenantFederationEnabled ?? false}></ProfileMenu>
     </nav>
   </header>
 

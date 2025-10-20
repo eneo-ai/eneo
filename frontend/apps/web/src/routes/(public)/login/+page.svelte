@@ -5,6 +5,7 @@
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
+  import { fade } from "svelte/transition";
   import { LoadingScreen } from "$lib/components/layout";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
@@ -67,6 +68,7 @@
   let isInitializing = $state(true);
   let showSlowLoadingWarning = $state(false);
   let loadingTimeoutId: number | null = null;
+  let isSubmittingUPLogin = $state(false);
 
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
   let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.tenantFederationEnabled));
@@ -77,13 +79,17 @@
     const urlMessage = page.url.searchParams.get("message");
     const hasOidcErrorInUrl = urlMessage && OIDC_ERROR_CODES.has(urlMessage);
 
+    if (isSubmittingUPLogin) {
+      return m.logging_in();
+    }
     if (hasOidcErrorInUrl && isInitializing) {
       return m.loading_error_details();
     }
-    if (isAwaitingLoginResponse) {
+    // Hide loading message during tenant login flow (activeTenantSlug means we're in tenant flow)
+    if (isAwaitingLoginResponse && !activeTenantSlug) {
       return m.redirecting_to_authentication();
     }
-    if (isInitializing && tenantFederationEnabled) {
+    if (isInitializing && tenantFederationEnabled && !activeTenantSlug) {
       return m.loading_organizations();
     }
     if ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams) {
@@ -160,6 +166,13 @@
       if (remembered) {
         activeTenantSlug = remembered;
       }
+    }
+
+    // EARLY EXIT: If we have an activeTenantSlug and NOT showing tenant selector,
+    // user is already on the login form - skip initialization to prevent flash
+    if (activeTenantSlug && !showTenantSelector) {
+      isInitializing = false;
+      return;
     }
 
     if (!tenantFederationEnabled) {
@@ -242,6 +255,7 @@
       const redirectUri = `${window.location.origin}/auth/callback`;
       const response = await intric.auth.initiateAuth({ tenant: slug, redirectUri });
 
+      // Allow natural browser history navigation - back button returns to tenant selector
       window.location.href = response.authorization_url;
       return true;
     } catch (err) {
@@ -354,10 +368,13 @@
   <title>Eneo.ai – {m.login()}</title>
 </svelte:head>
 
-{#if isInitializing || isAwaitingLoginResponse || ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams)}
-  <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
+{#if isInitializing || isAwaitingLoginResponse || isSubmittingUPLogin || ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams)}
+  <div
+    class="relative flex h-[100vh] w-[100vw] items-center justify-center"
+    transition:fade={{ duration: 200 }}>
     <div class="flex flex-col items-center gap-6">
       <LoadingScreen message={loadingMessage} />
+
       {#if showSlowLoadingWarning}
         <div class="bg-warning-dimmer text-warning-default max-w-md rounded-lg p-4 shadow-lg" role="alert">
           <p class="mb-2">{m.connection_slow_warning()}</p>
@@ -373,7 +390,9 @@
   </div>
 {:else if showTenantSelector}
   <!-- Tenant Selector for Federation -->
-  <div class="relative flex min-h-[100vh] w-[100vw] items-center justify-center py-8">
+  <div
+    class="relative flex h-[100vh] w-[100vw] items-center justify-center py-8"
+    transition:fade={{ duration: 200 }}>
     <div class="w-full max-w-6xl">
       <h1 class="mb-8 flex justify-center">
         <IntricWordMark class="text-brand-intric h-16 w-24" />
@@ -397,12 +416,26 @@
     </div>
   </div>
 {:else}
-  <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
+  <div
+    class="relative flex h-[100vh] w-[100vw] items-center justify-center"
+    transition:fade={{ duration: 200 }}>
     <div class="box w-[400px] justify-center">
       <h1 class="flex justify-center">
         <IntricWordMark class="text-brand-intric h-16 w-24" />
         <span class="sr-only">{m.app_name()}</span>
       </h1>
+
+      <!-- Return to tenant selector button (visible on login form) -->
+      {#if tenantFederationEnabled && activeTenantSlug}
+        <div class="mb-6 mt-2">
+          <Button
+            variant="simple"
+            on:click={chooseAnotherTenant}
+            class="text-dimmer hover:text-default transition-colors duration-150 p-0 -ml-1">
+            ← {m.oidc_choose_another_org()}
+          </Button>
+        </div>
+      {/if}
 
       {#if oidcErrorCode}
         <!-- Error Box Container with WCAG AA-compliant colors -->
@@ -590,13 +623,14 @@
           class="border-default bg-primary flex flex-col gap-3 p-4"
           action="?/login"
           use:enhance={() => {
-            isAwaitingLoginResponse = true;
+            isSubmittingUPLogin = true;
+            loginFailed = false;
 
             return async ({ result }) => {
               if (result.type === "redirect") {
-                goto(result.location);
+                await goto(result.location);
               } else {
-                isAwaitingLoginResponse = false;
+                isSubmittingUPLogin = false;
                 message = null;
                 loginFailed = true;
               }
@@ -634,8 +668,8 @@
               placeholder={m.password()}
             ></Input.Text>
 
-            <Button type="submit" disabled={isAwaitingLoginResponse} variant="primary">
-              {#if isAwaitingLoginResponse}
+            <Button type="submit" disabled={isSubmittingUPLogin} variant="primary">
+              {#if isSubmittingUPLogin}
                 {m.logging_in()}
               {:else}
                 {m.login()}
@@ -673,5 +707,12 @@
   form {
     box-shadow: 0px 8px 20px 4px rgba(0, 0, 0, 0.1);
     border: 0.5px solid rgba(54, 54, 54, 0.3);
+  }
+
+  /* Respect reduced motion user preferences */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition-duration: 0ms !important;
+    }
   }
 </style>
