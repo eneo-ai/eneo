@@ -14,6 +14,12 @@ services:
       - REDIS_HOST=redis
     volumes:
       - ../:/workspace
+      # Mount Docker socket for testcontainers support
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Allow access to Docker socket
+    user: vscode
+    group_add:
+      - docker
 
   db:
     image: pgvector/pgvector:pg13

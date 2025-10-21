@@ -11,20 +11,21 @@ class QuotaService:
     def _size_of_text(self, text: str):
         return len(text.encode("utf-8"))
 
-    async def add_text(self, text_to_add: str):
-        size_of_text = self._size_of_text(text_to_add)
+    async def ensure_capacity(self, size_in_bytes: int):
+        tenant_limit = self.user.tenant.quota_limit
+        if tenant_limit is not None:
+            tenant_usage = await self.info_blob_repo.get_total_size_of_tenant(
+                self.user.tenant.id
+            )
+            if tenant_usage + size_in_bytes > tenant_limit:
+                raise QuotaExceededException("Tenant quota limit exceeded.")
 
-        tenant_usage = await self.info_blob_repo.get_total_size_of_tenant(
-            self.user.tenant.id
-        )
-
-        if tenant_usage + size_of_text > self.user.tenant.quota_limit:
-            raise QuotaExceededException("Tenant quota limit exceeded.")
-
-        # Only check quota if a limit is set
         if self.user.quota_limit is not None:
             user_usage = await self.info_blob_repo.get_total_size_of_user(self.user.id)
-            if user_usage + size_of_text > self.user.quota_limit:
+            if user_usage + size_in_bytes > self.user.quota_limit:
                 raise QuotaExceededException("User quota limit exceeded.")
 
+    async def add_text(self, text_to_add: str):
+        size_of_text = self._size_of_text(text_to_add)
+        await self.ensure_capacity(size_of_text)
         return size_of_text

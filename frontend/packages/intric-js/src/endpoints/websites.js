@@ -172,6 +172,23 @@ export function initWebsites(client) {
         });
         return res;
       }
+    },
+
+    /**
+     * Trigger crawls for multiple websites at once (bulk operation).
+     * Maximum 50 websites per request.
+     * @param {{website_ids: string[]}} params List of website IDs to crawl
+     * @returns {Promise<{total: number, queued: number, failed: number, crawl_runs: CrawlRun[], errors: Array<{website_id: string, error: string}>}>}
+     * @throws {IntricError}
+     * */
+    bulkRun: async (params) => {
+      const res = await client.fetch("/api/v1/websites/bulk/run/", {
+        method: "post",
+        requestBody: {
+          "application/json": params
+        }
+      });
+      return res;
     }
   };
 }

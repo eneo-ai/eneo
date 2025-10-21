@@ -10,15 +10,102 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
+  # Minimal settings to satisfy Settings validation (overridden by test fixtures)
+  POSTGRES_USER: placeholder
+  POSTGRES_HOST: placeholder
+  POSTGRES_PASSWORD: placeholder
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: placeholder
+  REDIS_HOST: placeholder
+  REDIS_PORT: 6379
+  UPLOAD_FILE_TO_SESSION_MAX_SIZE: 10485760
+  UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: 10485760
+  UPLOAD_MAX_FILE_SIZE: 10485760
+  TRANSCRIPTION_MAX_FILE_SIZE: 10485760
+  MAX_IN_QUESTION: 1
+  API_PREFIX: /api/v1
+  API_KEY_LENGTH: 64
+  API_KEY_HEADER_NAME: X-API-Key
+  JWT_AUDIENCE: test
+  JWT_ISSUER: test
+  JWT_EXPIRY_TIME: 3600
+  JWT_ALGORITHM: HS256
+  JWT_SECRET: test_secret
+  JWT_TOKEN_PREFIX: Bearer
+  URL_SIGNING_KEY: test_key
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
+  # API keys for external services (placeholder values for import-time initialization)
+  OPENAI_API_KEY: test-api-key
 
 jobs:
-  build-test:
+  unit-tests:
     runs-on: ubuntu-latest
-    name: Test Docker builds
+    name: Run unit tests
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies with cache
+        working-directory: ./backend
+        run: poetry install --no-interaction
+
+      - name: Run unit tests
+        working-directory: ./backend
+        run: |
+          poetry run pytest -v -m "not integration" tests/
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    name: Run integration tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies with cache
+        working-directory: ./backend
+        run: poetry install --no-interaction
+
+      - name: Run integration tests
+        working-directory: ./backend
+        run: |
+          poetry run pytest -v -m integration tests/integration/
+        env:
+          # Testcontainers configuration
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
+  build-test:
+    runs-on: ubuntu-latest
+    name: Test Docker builds
+    needs: [unit-tests, integration-tests]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Test build backend
         uses: docker/build-push-action@v5
         with:
@@ -26,7 +113,7 @@ jobs:
           file: ./backend/Dockerfile
           push: false
           tags: test-build
-      
+
       - name: Test build frontend
         uses: docker/build-push-action@v5
         with:

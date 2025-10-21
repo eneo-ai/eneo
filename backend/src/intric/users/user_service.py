@@ -6,7 +6,7 @@ import jwt
 from intric.authentication.auth_models import AccessToken
 from intric.authentication.auth_service import AuthService
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.exceptions import (
     AuthenticationException,
     BadRequestException,
@@ -105,9 +105,9 @@ class UserService:
             "Starting OIDC user service login (MobilityGuard)",
             extra={
                 "correlation_id": correlation_id,
-                "client_id": SETTINGS.mobilityguard_client_id,
+                "client_id": get_settings().mobilityguard_client_id,
                 "signing_algos": signing_algos,
-                "has_tenant_id": bool(SETTINGS.mobilityguard_tenant_id),
+                "has_tenant_id": bool(get_settings().mobilityguard_tenant_id),
             }
         )
 
@@ -117,7 +117,7 @@ class UserService:
                 access_token=access_token,
                 key=key.key,
                 signing_algos=signing_algos,
-                client_id=SETTINGS.mobilityguard_client_id,
+                client_id=get_settings().mobilityguard_client_id,
                 options={"verify_iat": False},
                 correlation_id=correlation_id,
             )
@@ -146,7 +146,7 @@ class UserService:
                 extra={
                     "correlation_id": correlation_id,
                     "error": str(e),
-                    "expected_audience": SETTINGS.mobilityguard_client_id,
+                    "expected_audience": get_settings().mobilityguard_client_id,
                 }
             )
             raise AuthenticationException("Invalid token audience")
@@ -167,7 +167,7 @@ class UserService:
                     "correlation_id": correlation_id,
                     "error_type": type(e).__name__,
                     "error": str(e),
-                    "client_id": SETTINGS.mobilityguard_client_id,
+                    "client_id": get_settings().mobilityguard_client_id,
                 }
             )
             raise AuthenticationException("Failed to validate token")
@@ -193,7 +193,7 @@ class UserService:
             # If a the user does not exist in our database, create it
 
             # Check if tenant ID is configured
-            if not SETTINGS.mobilityguard_tenant_id:
+            if not get_settings().mobilityguard_tenant_id:
                 logger.error(
                     "Cannot create new user: OIDC tenant ID not configured (MOBILITYGUARD_TENANT_ID)",
                     extra={
@@ -209,7 +209,7 @@ class UserService:
 
             try:
                 # Will only work on one tenant in the instance for now
-                tenant_id = UUID(SETTINGS.mobilityguard_tenant_id)
+                tenant_id = UUID(get_settings().mobilityguard_tenant_id)
 
                 logger.info(
                     f"Creating user with tenant ID: {tenant_id}",
@@ -218,7 +218,7 @@ class UserService:
 
             except ValueError as e:
                 logger.error(
-                    f"Invalid MOBILITYGUARD_TENANT_ID format: {SETTINGS.mobilityguard_tenant_id}",
+                    f"Invalid MOBILITYGUARD_TENANT_ID format: {get_settings().mobilityguard_tenant_id}",
                     extra={
                         "correlation_id": correlation_id,
                         "error": str(e),
@@ -370,7 +370,7 @@ class UserService:
         return user_in_db, access_token, api_key
 
     async def _get_user_from_token(self, token: str):
-        username = self.auth_service.get_username_from_token(token, SETTINGS.jwt_secret)
+        username = self.auth_service.get_username_from_token(token, get_settings().jwt_secret)
         return await self.repo.get_user_by_username(username)
 
     async def _get_user_from_api_key(self, api_key: str):

@@ -97,12 +97,28 @@ class Settings(BaseSettings):
     testing: bool = False
     dev: bool = False
 
-    # Crawl
-    crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max
-    closespider_itemcount: int = 20000
-    obey_robots: bool = True
-    autothrottle_enabled: bool = True
-    using_crawl: bool = True
+    # Crawl - Scrapy crawler settings
+    crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
+    closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    obey_robots: bool = True  # Respect robots.txt rules
+    autothrottle_enabled: bool = True  # Enable automatic request throttling
+    using_crawl: bool = True  # Enable/disable crawling feature globally
+
+    # Worker configuration
+    worker_max_concurrent_jobs: int = (
+        20  # Maximum number of concurrent jobs the worker can process
+    )
+
+    # Crawl retry configuration
+    crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
+    crawl_page_retry_delay: float = (
+        1.0  # Initial retry delay in seconds (exponential backoff)
+    )
+
+    # Migration
+    migration_auto_recalc_threshold: int = (
+        30  # Auto-recalculate usage stats for migrations <= this threshold
+    )
 
     # integration callback
     oauth_callback_url: Optional[str] = None
@@ -114,6 +130,10 @@ class Settings(BaseSettings):
     # Sharepoint
     sharepoint_client_id: Optional[str] = None
     sharepoint_client_secret: Optional[str] = None
+
+    # Generic encryption key for sensitive data (HTTP auth, API keys, etc.)
+    # Required for encrypting HTTP auth credentials, API keys, etc.
+    encryption_key: str
 
     @computed_field
     @property
@@ -134,11 +154,46 @@ class Settings(BaseSettings):
         )
 
 
-SETTINGS = Settings()
+_settings: Optional[Settings] = None
 
 
-def get_settings():
-    return SETTINGS
+def get_settings() -> Settings:
+    """Get settings singleton, creating it if needed.
+
+    Returns:
+        Settings: The application settings instance.
+    """
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def set_settings(settings: Settings) -> None:
+    """Override settings (primarily for testing).
+
+    Args:
+        settings: The Settings instance to use.
+    """
+    global _settings
+    _settings = settings
+
+
+def reset_settings() -> None:
+    """Reset settings to None (for test cleanup)."""
+    global _settings
+    _settings = None
+
+
+def __getattr__(name: str):
+    """Support backward compatibility for SETTINGS access.
+
+    This allows existing code using `from intric.main.config import SETTINGS`
+    to continue working during migration to get_settings().
+    """
+    if name == "SETTINGS":
+        return get_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_loglevel():

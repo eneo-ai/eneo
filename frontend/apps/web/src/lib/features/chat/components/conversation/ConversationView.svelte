@@ -95,7 +95,7 @@
           class="flex flex-col items-center justify-center gap-4 *:m-0 [&_p]:text-center"
           source={"description" in chat.partner && chat.partner.description
             ? chat.partner.description
-            : ` Hi, I'm _${chat.partner.name}_!\nAsk me anything to get started.`}
+            : m.assistant_placeholder({ name: chat.partner?.name ?? "" })}
         ></Markdown>
       </div>
     </div>

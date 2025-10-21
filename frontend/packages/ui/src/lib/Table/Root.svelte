@@ -72,13 +72,14 @@
 
   const tableHeader = cva("h-14 border-b border-default px-2 text-left font-medium", {
     variants: {
-      action: {
-        true: "w-[1%]",
-        false: "w-[10%]"
+      columnType: {
+        action: "w-[1%]",
+        select: "w-[1%]",
+        default: "w-[10%]"
       }
     },
     defaultVariants: {
-      action: false
+      columnType: "default"
     }
   });
 </script>
@@ -136,7 +137,13 @@
                       <Subscribe attrs={cell.attrs()} let:attrs>
                         <th
                           {...attrs}
-                          class={tableHeader({ action: cell.id === "table-action-key" })}
+                          class={tableHeader({
+                            columnType: cell.id === "table-action-key"
+                              ? "action"
+                              : cell.id === "select"
+                                ? "select"
+                                : "default"
+                          })}
                         >
                           <SortButton
                             props={cell.props()}

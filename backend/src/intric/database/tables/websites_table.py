@@ -1,7 +1,8 @@
 from typing import Optional
 from uuid import UUID
+from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select
+from sqlalchemy import BigInteger, ForeignKey, and_, select, TIMESTAMP, String
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import EmbeddingModels
@@ -22,8 +23,12 @@ class CrawlRuns(BasePublic):
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
-    website_id: Mapped[UUID] = mapped_column(ForeignKey("websites.id", ondelete="CASCADE"))
-    job_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Jobs.id, ondelete="SET NULL"))
+    website_id: Mapped[UUID] = mapped_column(
+        ForeignKey("websites.id", ondelete="CASCADE")
+    )
+    job_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Jobs.id, ondelete="SET NULL")
+    )
 
     # Relationships
     job: Mapped[Jobs] = relationship()
@@ -36,6 +41,32 @@ class Websites(BasePublic):
     crawl_type: Mapped[CrawlType] = mapped_column()
     update_interval: Mapped[str] = mapped_column()
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_crawled_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # HTTP Basic Auth fields (all nullable - feature is optional)
+    http_auth_username: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True, comment="HTTP Basic Auth username"
+    )
+    encrypted_auth_password: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True, comment="Fernet-encrypted password (base64 encoded)"
+    )
+    http_auth_domain: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True, comment="Domain for auth (from URL netloc)"
+    )
+
+    # Circuit breaker fields for failure handling
+    consecutive_failures: Mapped[int] = mapped_column(
+        default=0,
+        server_default="0",
+        comment="Number of consecutive crawl failures for exponential backoff",
+    )
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Timestamp when website should be retried after failures",
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
@@ -44,7 +75,9 @@ class Websites(BasePublic):
     group_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CollectionsTable.id, ondelete="SET NULL")
     )
-    space_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
+    space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE")
+    )
 
     # Relationships
     group: Mapped[CollectionsTable] = relationship()
@@ -63,7 +96,9 @@ class Websites(BasePublic):
 
         latest_crawl_relationship = relationship(
             CrawlRuns,
-            primaryjoin=and_(CrawlRuns.id == most_recent_crawl, CrawlRuns.website_id == cls.id),
+            primaryjoin=and_(
+                CrawlRuns.id == most_recent_crawl, CrawlRuns.website_id == cls.id
+            ),
             uselist=False,
             viewonly=True,
         )

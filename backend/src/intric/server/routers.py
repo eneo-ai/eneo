@@ -31,7 +31,7 @@ from intric.integration.presentation.integration_router import (
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -125,7 +125,7 @@ router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
 router.include_router(documentation_router, prefix="")
 
-if SETTINGS.using_access_management:
+if get_settings().using_access_management:
     from intric.roles.roles_router import router as roles_router
 
     router.include_router(roles_router, prefix="/roles", tags=["roles"])

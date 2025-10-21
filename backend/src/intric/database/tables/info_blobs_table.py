@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import EmbeddingModels
@@ -18,9 +18,15 @@ class InfoBlobs(BasePublic):
     title: Mapped[Optional[str]] = mapped_column()
     url: Mapped[Optional[str]] = mapped_column()
     size: Mapped[int] = mapped_column()
+    content_hash: Mapped[Optional[bytes]] = mapped_column(
+        LargeBinary(length=32),
+        comment="SHA-256 hash of normalized content for change detection",
+    )
 
     # Foreign keys
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"), index=True)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), index=True
+    )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     group_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CollectionsTable.id, ondelete="CASCADE"), index=True
