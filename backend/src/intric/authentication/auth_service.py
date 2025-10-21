@@ -192,10 +192,8 @@ class AuthService:
         correlation_id = correlation_id or "no-correlation-id"
 
         jwt_options = dict(options or {})
-        leeway_applied = False
-        if OIDC_CLOCK_LEEWAY_SECONDS:
-            jwt_options.setdefault("leeway", OIDC_CLOCK_LEEWAY_SECONDS)
-            leeway_applied = True
+        clock_leeway = OIDC_CLOCK_LEEWAY_SECONDS or 0
+        leeway_applied = clock_leeway > 0
 
         logger.debug(
             "OIDC: Starting JWT validation",
@@ -237,6 +235,7 @@ class AuthService:
                 algorithms=signing_algos,
                 audience=client_id,
                 options=jwt_options or None,
+                leeway=clock_leeway,
             )
 
             payload = jwt_decoded["payload"]
@@ -276,12 +275,34 @@ class AuthService:
             )
             raise
         except jwt.ImmatureSignatureError as e:
+            drift_seconds = None
+            iat_claim = None
+            if id_token:
+                try:
+                    unverified_claims = jwt.decode(
+                        id_token,
+                        options={
+                            "verify_signature": False,
+                            "verify_exp": False,
+                            "verify_aud": False,
+                        },
+                        algorithms=signing_algos,
+                    )
+                    iat_claim = unverified_claims.get("iat")
+                    if isinstance(iat_claim, (int, float)):
+                        drift_seconds = iat_claim - datetime.now(timezone.utc).timestamp()
+                except Exception:
+                    # Best-effort diagnostics only
+                    pass
+
             logger.error(
                 "JWT not yet valid",
                 extra={
                     "correlation_id": correlation_id,
                     "server_time": datetime.now(timezone.utc).isoformat(),
-                    "leeway_seconds": OIDC_CLOCK_LEEWAY_SECONDS if leeway_applied else 0,
+                    "leeway_seconds": clock_leeway if leeway_applied else 0,
+                    "iat_claim": iat_claim,
+                    "iat_drift_seconds": drift_seconds,
                     "error": str(e),
                 },
             )
