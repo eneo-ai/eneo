@@ -450,7 +450,7 @@ class UserService:
         """
         correlation_id = correlation_id or "no-correlation-id"
 
-        logger.info(
+        logger.debug(
             "Checking user and tenant state",
             extra={
                 "correlation_id": correlation_id,
@@ -493,7 +493,7 @@ class UserService:
             )
             raise TenantSuspendedException()
 
-        logger.info(
+        logger.debug(
             "User and tenant state check passed",
             extra={
                 "correlation_id": correlation_id,

@@ -29,6 +29,7 @@ async def process_page_with_retry(
     website,
     max_retries: int | None = None,
     retry_delay: float | None = None,
+    tenant_slug: str | None = None,
 ) -> tuple[bool, str | None]:
     """Process a single page with retry logic.
 
@@ -77,7 +78,9 @@ async def process_page_with_retry(
                     extra={
                         "website_id": str(params.website_id),
                         "tenant_id": str(website.tenant_id),
+                        "tenant_slug": tenant_slug,
                         "page_url": page.url,
+                        "embedding_model": getattr(website.embedding_model, "name", None),
                         "attempt": attempt + 1,
                         "max_retries": max_retries,
                     },
@@ -91,7 +94,9 @@ async def process_page_with_retry(
                     extra={
                         "website_id": str(params.website_id),
                         "tenant_id": str(website.tenant_id),
+                        "tenant_slug": tenant_slug,
                         "page_url": page.url,
+                        "embedding_model": getattr(website.embedding_model, "name", None),
                         "attempts": max_retries,
                     },
                 )
@@ -139,6 +144,7 @@ async def queue_website_crawls(container: Container):
                     extra={
                         "website_id": str(website.id),
                         "tenant_id": str(website.tenant_id),
+                        "tenant_slug": user.tenant.slug if getattr(user, "tenant", None) else None,
                         "space_id": str(website.space_id),
                         "user_id": str(website.user_id),
                     },
@@ -319,6 +325,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         session=session,
                         params=params,
                         website=website,
+                        tenant_slug=tenant.slug if tenant else None,
                     )
 
                     if success:
@@ -330,7 +337,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             extra={
                                 "website_id": str(params.website_id),
                                 "tenant_id": str(website.tenant_id),
+                                "tenant_slug": tenant.slug if tenant else None,
                                 "page_url": page.url,
+                                "embedding_model": getattr(website.embedding_model, "name", None),
                             },
                         )
                 timings["process_pages"] = time.time() - process_start
@@ -389,7 +398,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             extra={
                                 "website_id": str(params.website_id),
                                 "tenant_id": str(website.tenant_id),
+                                "tenant_slug": tenant_slug,
                                 "filename": filename,
+                                "embedding_model": getattr(website.embedding_model, "name", None),
                             },
                         )
                         num_failed_files += 1

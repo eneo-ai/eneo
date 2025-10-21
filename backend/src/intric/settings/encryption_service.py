@@ -32,7 +32,7 @@ class EncryptionService:
         if encryption_key:
             try:
                 self._fernet = Fernet(encryption_key.encode())
-                logger.info("Encryption service initialized")
+                logger.debug("Encryption service initialized")
             except Exception as e:
                 logger.error(f"Invalid encryption key: {e}")
                 raise ValueError(f"ENCRYPTION_KEY must be valid Fernet key: {e}")
