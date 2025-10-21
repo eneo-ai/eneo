@@ -398,7 +398,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             extra={
                                 "website_id": str(params.website_id),
                                 "tenant_id": str(website.tenant_id),
-                                "tenant_slug": tenant_slug,
+                                "tenant_slug": tenant.slug if tenant else None,
                                 "filename": filename,
                                 "embedding_model": getattr(website.embedding_model, "name", None),
                             },

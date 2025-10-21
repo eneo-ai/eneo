@@ -13,7 +13,7 @@ from tenacity import (
 )
 
 from intric.files.audio import AudioFile
-from intric.main.config import SETTINGS, get_settings
+from intric.main.config import SETTINGS
 from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 from intric.transcription_models.domain import TranscriptionModel
