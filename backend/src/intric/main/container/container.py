@@ -297,13 +297,22 @@ class Container(containers.DeclarativeContainer):
     # Encryption service (singleton - shared across all repositories)
     # NOTE: Must use get_settings() directly because config provider is never populated
     # The config.settings provider chain is never initialized, so we use get_settings() module singleton
-    _settings = get_settings()
-    _logger.info(
-        f"Container: Initializing EncryptionService with encryption_key={'present' if _settings.encryption_key else 'MISSING'}"
-    )
+    def _build_encryption_service() -> EncryptionService:
+        settings = get_settings()
+        key = settings.encryption_key
+        if settings.testing:
+            key = None
+        _logger.info(
+            "Container: Initializing EncryptionService",
+            extra={
+                "encryption_key_present": bool(key),
+                "testing_mode": settings.testing,
+            },
+        )
+        return EncryptionService(key)
+
     encryption_service: providers.Singleton[EncryptionService] = providers.Singleton(
-        EncryptionService,
-        encryption_key=_settings.encryption_key,
+        _build_encryption_service
     )
 
     redis_client = providers.Singleton(_create_redis_client)

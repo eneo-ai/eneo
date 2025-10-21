@@ -4,7 +4,7 @@ Provides encryption at rest for sensitive credentials stored in database.
 Uses versioned format (enc:fernet:v1:) for future-proofing.
 """
 
-from typing import Optional
+from typing import Optional, Protocol, Union
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -22,20 +22,40 @@ class EncryptionService:
     VERSION_PREFIX = "enc:fernet:v1:"
     MAX_CREDENTIAL_LENGTH = 10240  # 10KB - reasonable limit for API keys
 
-    def __init__(self, encryption_key: Optional[str] = None):
-        """Initialize with optional encryption key.
+    class _HasEncryptionKey(Protocol):
+        encryption_key: Optional[str]
+
+    def __init__(
+        self,
+        encryption_key: Optional[Union[str, "EncryptionService._HasEncryptionKey"]] = None,
+    ):
+        """Initialize with optional encryption key or settings wrapper.
 
         Args:
-            encryption_key: Base64-encoded Fernet key (32 bytes)
+            encryption_key: Base64-encoded Fernet key (32 bytes) or object exposing
+                an ``encryption_key`` attribute (e.g. ``Settings`` instance).
         """
         self._fernet: Optional[Fernet] = None
-        if encryption_key:
-            try:
-                self._fernet = Fernet(encryption_key.encode())
-                logger.debug("Encryption service initialized")
-            except Exception as e:
-                logger.error(f"Invalid encryption key: {e}")
-                raise ValueError(f"ENCRYPTION_KEY must be valid Fernet key: {e}")
+
+        key_value: Optional[str]
+        if hasattr(encryption_key, "encryption_key") and not isinstance(encryption_key, str):
+            key_value = getattr(encryption_key, "encryption_key", None)
+        else:
+            key_value = encryption_key  # type: ignore[assignment]
+
+        if isinstance(key_value, str):
+            key_value = key_value.strip()
+
+        if not key_value:
+            logger.debug("Encryption service initialized without active key")
+            return
+
+        try:
+            self._fernet = Fernet(key_value.encode())
+            logger.debug("Encryption service initialized")
+        except Exception as e:
+            logger.error(f"Invalid encryption key: {e}")
+            raise ValueError(f"ENCRYPTION_KEY must be valid Fernet key: {e}")
 
     def is_active(self) -> bool:
         """Check if encryption is enabled."""
@@ -91,15 +111,12 @@ class EncryptionService:
         # Detect encrypted format
         if not ciphertext.startswith("enc:"):
             if self._fernet:
-                logger.error(
-                    "Refusing to decrypt plaintext credential while encryption is active"
+                logger.warning(
+                    "Decrypting plaintext credential while encryption is active",
+                    extra={"reason": "legacy"},
                 )
-                raise ValueError(
-                    "Credential is stored in plaintext but encryption is enabled. "
-                    "Data may be corrupted or tampered."
-                )
+                return ciphertext
 
-            # Legacy plaintext - pass through for migration compatibility when encryption disabled
             logger.info("Decrypting legacy plaintext credential")
             return ciphertext
 

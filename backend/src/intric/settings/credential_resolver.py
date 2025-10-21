@@ -1,3 +1,4 @@
+import os
 from typing import TYPE_CHECKING, Optional
 from intric.main.config import Settings, get_settings
 from intric.tenants.tenant import TenantInDB
@@ -11,10 +12,18 @@ logger = get_logger(__name__)
 
 class CredentialResolver:
     """
-    Strict credential resolution (no silent fallback):
+    Credential resolution with strict multi-tenant enforcement:
+
+    When TENANT_CREDENTIALS_ENABLED=true (multi-tenant mode):
     1. Tenant has credential for provider? → Use it exclusively
-    2. No tenant credential? → Use global env var
-    3. Neither exists? → Raise ValueError
+    2. No tenant credential? → ERROR (no fallback to global)
+
+    When TENANT_CREDENTIALS_ENABLED=false (single-tenant mode):
+    1. Tenant has credential for provider? → Use it exclusively
+    2. No tenant credential? → Fallback to global env var
+    3. Neither exists? → ERROR
+
+    This prevents security/billing issues where tenants silently use shared credentials.
     """
 
     def __init__(
@@ -26,6 +35,7 @@ class CredentialResolver:
         self.tenant = tenant
         self.settings = settings or get_settings()
         self.encryption = encryption_service
+        self._source_cache: dict[str, str] = {}
 
     def get_api_key(self, provider: str) -> str:
         """Get API key with decryption support and strict resolution."""
@@ -72,6 +82,7 @@ class CredentialResolver:
                             f"Encryption key may be incorrect or data corrupted."
                         )
 
+                self._source_cache[provider_lower] = "tenant"
                 logger.info(
                     "Credential resolved successfully",
                     extra={
@@ -115,8 +126,16 @@ class CredentialResolver:
             "vllm": self.settings.vllm_api_key,
         }
 
-        global_key = env_map.get(provider_lower)
+        def _resolve_global_env_var(name: str) -> Optional[str]:
+            value = env_map.get(name)
+            if value:
+                return value
+            env_name = f"{name.upper()}_API_KEY"
+            return os.getenv(env_name)
+
+        global_key = _resolve_global_env_var(provider_lower)
         if global_key:
+            self._source_cache[provider_lower] = "global"
             logger.info(
                 "Credential resolved successfully",
                 extra={
@@ -131,7 +150,9 @@ class CredentialResolver:
             )
             return global_key
 
-        # No credential available anywhere
+        # No credential available anywhere (single-tenant mode only at this point)
+        self._source_cache[provider_lower] = "missing"
+
         logger.error(
             f"No credential configured for provider {provider}",
             extra={
@@ -141,8 +162,13 @@ class CredentialResolver:
         )
         raise ValueError(
             f"No API key configured for provider '{provider}'. "
-            f"Please set the global environment variable for {provider.upper()} API key."
+            "Please set the global environment variable or contact your system administrator."
         )
+
+    def uses_global_credentials(self, provider: str) -> bool:
+        """Return True if the last resolved credential came from the global fallback."""
+        provider_lower = provider.lower()
+        return self._source_cache.get(provider_lower) == "global"
 
     def get_credential_field(
         self,
@@ -395,7 +421,7 @@ class CredentialResolver:
 
         The canonical_public_origin can be ANY externally-reachable URL:
         - Proxy URL: https://m00-https-eneo-test.login.sundsvall.se
-        - Clean URL: https://stockholm.eneo.se
+        - Clean URL: https://sundsvall.eneo.se
         - Whatever works for that tenant's network topology!
 
         Returns:

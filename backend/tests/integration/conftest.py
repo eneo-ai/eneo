@@ -19,6 +19,57 @@ if not os.getenv("DOCKER_HOST"):
     elif os.path.exists("/.dockerenv"):
         os.environ["DOCKER_HOST"] = "tcp://host.docker.internal:2375"
 
+# CRITICAL: Set placeholder environment variables for init_db.py Settings instantiation
+# init_db.py instantiates Settings() at module import time, so these must be set first
+# These placeholders will be overridden by test_settings fixture
+# Values copied from .github/workflows/pr_build_test.yml
+if not os.getenv("POSTGRES_USER"):
+    os.environ["POSTGRES_USER"] = "placeholder"
+if not os.getenv("POSTGRES_HOST"):
+    os.environ["POSTGRES_HOST"] = "placeholder"
+if not os.getenv("POSTGRES_PASSWORD"):
+    os.environ["POSTGRES_PASSWORD"] = "placeholder"
+if not os.getenv("POSTGRES_PORT"):
+    os.environ["POSTGRES_PORT"] = "5432"
+if not os.getenv("POSTGRES_DB"):
+    os.environ["POSTGRES_DB"] = "placeholder"
+if not os.getenv("REDIS_HOST"):
+    os.environ["REDIS_HOST"] = "placeholder"
+if not os.getenv("REDIS_PORT"):
+    os.environ["REDIS_PORT"] = "6379"
+if not os.getenv("UPLOAD_FILE_TO_SESSION_MAX_SIZE"):
+    os.environ["UPLOAD_FILE_TO_SESSION_MAX_SIZE"] = "10485760"
+if not os.getenv("UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"):
+    os.environ["UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"] = "10485760"
+if not os.getenv("UPLOAD_MAX_FILE_SIZE"):
+    os.environ["UPLOAD_MAX_FILE_SIZE"] = "10485760"
+if not os.getenv("TRANSCRIPTION_MAX_FILE_SIZE"):
+    os.environ["TRANSCRIPTION_MAX_FILE_SIZE"] = "10485760"
+if not os.getenv("MAX_IN_QUESTION"):
+    os.environ["MAX_IN_QUESTION"] = "1"
+if not os.getenv("API_PREFIX"):
+    os.environ["API_PREFIX"] = "/api/v1"
+if not os.getenv("API_KEY_LENGTH"):
+    os.environ["API_KEY_LENGTH"] = "64"
+if not os.getenv("API_KEY_HEADER_NAME"):
+    os.environ["API_KEY_HEADER_NAME"] = "X-API-Key"
+if not os.getenv("JWT_AUDIENCE"):
+    os.environ["JWT_AUDIENCE"] = "test"
+if not os.getenv("JWT_ISSUER"):
+    os.environ["JWT_ISSUER"] = "test"
+if not os.getenv("JWT_EXPIRY_TIME"):
+    os.environ["JWT_EXPIRY_TIME"] = "3600"
+if not os.getenv("JWT_ALGORITHM"):
+    os.environ["JWT_ALGORITHM"] = "HS256"
+if not os.getenv("JWT_SECRET"):
+    os.environ["JWT_SECRET"] = "test_secret"
+if not os.getenv("JWT_TOKEN_PREFIX"):
+    os.environ["JWT_TOKEN_PREFIX"] = "Bearer"
+if not os.getenv("URL_SIGNING_KEY"):
+    os.environ["URL_SIGNING_KEY"] = "test_key"
+if not os.getenv("ENCRYPTION_KEY"):
+    os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
+
 import contextlib
 from typing import AsyncGenerator, Generator
 
@@ -182,7 +233,37 @@ async def redis_client(test_settings: Settings):
     try:
         yield redis
     finally:
-        await redis.aclose()
+        try:
+            # Explicitly close client and connection pool
+            await redis.aclose(close_connection_pool=True)
+        except Exception:
+            # Don't fail tests during cleanup
+            pass
+
+
+@pytest.fixture(autouse=True)
+async def _force_gc_before_loop_closes():
+    """Force garbage collection while event loop is alive.
+
+    This prevents "Event loop is closed" errors from Redis connections
+    that get garbage collected after the event loop shuts down.
+
+    The Container creates singleton Redis clients via DI that outlive individual tests.
+    By forcing GC before the loop closes, we ensure __del__ methods run while
+    the loop can still process connection cleanup.
+
+    This is a pragmatic solution that doesn't interfere with test behavior or DI lifecycle.
+    """
+    yield
+
+    import asyncio
+    import gc
+
+    # Give pending callbacks a chance to run
+    await asyncio.sleep(0)
+
+    # Force garbage collection while loop is alive
+    gc.collect()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -524,8 +605,66 @@ async def super_admin_token(test_settings):
 
 
 @pytest.fixture
+def legacy_credentials_mode(test_settings):
+    """Temporarily disable strict tenant credentials mode for backward compatibility tests.
+
+    This fixture allows specific tests to verify that tenants without custom credentials
+    can fall back to global environment variables (legacy behavior).
+
+    Unlike the broken approach of reloading modules (which breaks DI and auth),
+    this uses the proper set_settings() API to override the global settings singleton.
+
+    When applied to a test, it:
+    1. Creates a copy of test_settings with tenant_credentials_enabled=False
+    2. Overrides global settings using set_settings()
+    3. Rebuilds encryption service to match new settings
+    4. Automatically restores original settings and encryption service after the test
+
+    Usage:
+        def test_backward_compatibility(legacy_credentials_mode, ...):
+            # Test runs with strict mode disabled
+            pass
+    """
+    from intric.main.config import set_settings, get_settings
+    from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
+    from dependency_injector import providers
+
+    # Save original settings
+    original_settings = get_settings()
+
+    # Create modified settings with strict mode disabled
+    legacy_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": False}
+    )
+
+    # Override global settings (this is what the app uses)
+    set_settings(legacy_settings)
+
+    # Reset and rebuild encryption service to match new settings
+    # (Container's encryption service uses get_settings() which now returns legacy_settings)
+    Container.encryption_service.reset_last_overriding()
+    service = EncryptionService(legacy_settings.encryption_key)
+    Container.encryption_service.override(providers.Object(service))
+
+    yield
+
+    # Restore original settings
+    set_settings(original_settings)
+
+    # Restore original encryption service
+    Container.encryption_service.reset_last_overriding()
+    original_service = EncryptionService(original_settings.encryption_key)
+    Container.encryption_service.override(providers.Object(original_service))
+
+
+@pytest.fixture(autouse=True)
 def encryption_service(test_settings):
-    """Provide EncryptionService configured with the test encryption key."""
+    """Provide EncryptionService configured with the test encryption key.
+
+    Auto-used for all integration tests to ensure encryption is enabled,
+    overriding the Container's default behavior of disabling encryption in testing mode.
+    """
     from intric.main.container.container import Container
     from intric.settings.encryption_service import EncryptionService
 
@@ -597,7 +736,11 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
 
 @pytest.fixture
 def jwks_mock(monkeypatch):
-    """Stub out PyJWKClient so tests never fetch real JWKS documents."""
+    """Stub out PyJWKClient so tests never fetch real JWKS documents.
+
+    Patches both jwt.PyJWKClient and the federation_router's JWKClient alias
+    to ensure the mock is used even though the module has already imported and bound the name.
+    """
     import jwt as jwt_lib
 
     def _configure(signing_keys: dict[str, str] | None = None, default_key: str = "test-signing-key"):
@@ -614,7 +757,16 @@ def jwks_mock(monkeypatch):
             def get_signing_key_from_jwt(self, token: str):
                 return _Key(keys.get(token, default_key))
 
+        # Patch the jwt module's PyJWKClient
         monkeypatch.setattr(jwt_lib, "PyJWKClient", _FakePyJWKClient)
+
+        # CRITICAL: Also patch the federation_router's module-level JWKClient alias
+        # The router does: from jwt import PyJWKClient as _PyJWKClient; JWKClient = _PyJWKClient
+        # Since it's already bound at import time, we must patch the alias directly
+        monkeypatch.setattr(
+            "intric.authentication.federation_router.JWKClient",
+            _FakePyJWKClient,
+        )
 
         return _FakePyJWKClient
 
@@ -663,14 +815,16 @@ def oidc_mock(monkeypatch):
                 return json.dumps(self._payload)
 
         class _FakeClient:
-            def get(self, url: str):
+            def get(self, url: str, **kwargs):
+                """Accept headers, params, timeout, and other kwargs for compatibility."""
                 request_log.append(("GET", url))
                 if url not in discovery_map:
                     raise AssertionError(f"Unmocked discovery URL: {url}")
                 payload, status = discovery_map[url]
                 return _FakeResponse(payload, status)
 
-            def post(self, url: str, data=None):
+            def post(self, url: str, data=None, **kwargs):
+                """Accept headers, timeout, auth, and other kwargs for compatibility."""
                 request_log.append(("POST", url))
                 code = None
                 if isinstance(data, dict):
@@ -705,6 +859,43 @@ def oidc_mock(monkeypatch):
         return _summary
 
     return _install
+
+
+@pytest.fixture
+async def tenant_user_token(test_tenant, test_settings):
+    """Create a JWT token for a regular (non-admin) tenant user.
+
+    This token represents a normal user within the tenant,
+    NOT a system administrator. Used to test authorization boundaries.
+
+    Creates the JWT directly using jwt.encode() with test_settings values,
+    matching the pattern used in patch_auth_service_jwt fixture.
+    """
+    import jwt
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+
+    # Create JWT payload matching app's expectations
+    payload = {
+        "sub": f"user@{test_tenant.slug}.test",  # Email as subject
+        "username": "testuser",  # Username for regular user
+        "iss": test_settings.jwt_issuer,
+        "aud": test_settings.jwt_audience,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=30)).timestamp()),
+        "tenant_id": str(test_tenant.id),
+        "email": f"user@{test_tenant.slug}.test",
+    }
+
+    # Encode using test JWT secret (HS256)
+    token = jwt.encode(
+        payload,
+        test_settings.jwt_secret,
+        algorithm=test_settings.jwt_algorithm
+    )
+
+    return token
 
 
 @pytest.fixture

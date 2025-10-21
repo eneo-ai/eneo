@@ -17,6 +17,7 @@ from intric.database.tables.tenant_table import Tenants
 from intric.main import exceptions
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
+from intric.tenants.masking import mask_api_key
 from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdate
 
 if TYPE_CHECKING:
@@ -156,6 +157,8 @@ class TenantRepository:
 
         # Encrypt api_key if encryption is active
         credential_to_store = credential.copy()  # Don't mutate the input
+        set_at = datetime.now(timezone.utc).isoformat()
+        credential_to_store["set_at"] = set_at
         if (
             self.encryption
             and self.encryption.is_active()
@@ -263,10 +266,7 @@ class TenantRepository:
                     # This handles legacy plaintext credentials gracefully
 
             # Mask the key - show last 4 chars or "***" for short keys
-            if len(api_key) > 4:
-                masked[provider] = f"...{api_key[-4:]}"
-            else:
-                masked[provider] = "***"
+            masked[provider] = mask_api_key(api_key)
 
         return masked
 
@@ -333,14 +333,12 @@ class TenantRepository:
                     pass
 
             # Mask the key - show last 4 chars or "***" for short keys
-            if len(api_key) > 4:
-                masked_key = f"...{api_key[-4:]}"
-            else:
-                masked_key = "***"
+            masked_key = mask_api_key(api_key)
 
             metadata[provider] = {
                 "masked_key": masked_key,
                 "encryption_status": encryption_status,
+                "set_at": cred.get("set_at") if isinstance(cred, dict) else None,
             }
 
         return metadata

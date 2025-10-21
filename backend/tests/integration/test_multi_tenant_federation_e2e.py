@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import jwt
 import pytest
 from httpx import AsyncClient
 import sqlalchemy as sa
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from intric.authentication.auth_service import AuthService
 from intric.tenants.tenant_repo import TenantRepository
@@ -114,6 +117,24 @@ async def _callback(client: AsyncClient, *, code: str, state: str):
         "/api/v1/auth/callback",
         json={"code": code, "state": state},
     )
+
+
+def _generate_rs256_keypair() -> tuple[str, str]:
+    """Generate an RSA keypair for RS256 signing within tests."""
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+    return private_pem, public_pem
 
 
 @pytest.mark.integration
@@ -344,6 +365,186 @@ async def test_federation_callback_rejects_tampered_state(
 
     tampered = await _callback(client, code="code-legit", state=tampered_state)
     assert tampered.status_code in {400, 404}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federation_callback_accepts_future_iat_within_leeway(
+    client: AsyncClient,
+    super_admin_token: str,
+    patch_auth_service_jwt,
+    oidc_mock,
+    jwks_mock,
+    mock_transcription_models,
+):
+    slug = f"federation-iat-leeway-ok-{uuid4().hex[:6]}"
+    tenant = await _create_tenant(client, super_admin_token, slug)
+
+    discovery_endpoint = f"https://idp.{slug}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug}.local/authorize"
+    token_endpoint = f"https://idp.{slug}.local/token"
+    jwks_uri = f"https://idp.{slug}.local/jwks"
+    issuer = f"https://idp.{slug}.local"
+    client_id = f"client-{slug}"
+
+    private_key, public_key = _generate_rs256_keypair()
+    jwks_mock(default_key=public_key)
+
+    allowed_email = f"owner@{slug}.gov"
+
+    now = datetime.now(timezone.utc)
+
+    def _build_future_token(skew_seconds: int) -> str:
+        payload = {
+            "iss": issuer,
+            "aud": client_id,
+            "sub": f"user-{slug}",
+            "email": allowed_email,
+            "iat": int((now + timedelta(seconds=skew_seconds)).timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+        }
+        return jwt.encode(payload, private_key, algorithm="RS256")
+
+    within_leeway_token = _build_future_token(skew_seconds=90)
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": issuer,
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={
+            (token_endpoint, "code-leeway-ok"): {
+                "id_token": within_leeway_token,
+                "access_token": "access-token-leeway-ok",
+            }
+        },
+    )
+
+    await _configure_federation(
+        client,
+        super_admin_token,
+        tenant["id"],
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin=f"https://{slug}.eneo.test",
+        redirect_path="/auth/callback",
+        allowed_domains=[f"{slug}.gov"],
+        client_id=client_id,
+    )
+
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant["id"],
+        allowed_email,
+        password="ValidPassw0rd!",
+    )
+
+    state_payload = await _initiate(client, tenant["slug"])
+    response = await _callback(
+        client,
+        code="code-leeway-ok",
+        state=state_payload["state"],
+    )
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federation_callback_rejects_future_iat_beyond_leeway(
+    client: AsyncClient,
+    super_admin_token: str,
+    patch_auth_service_jwt,
+    oidc_mock,
+    jwks_mock,
+    mock_transcription_models,
+):
+    slug = f"federation-iat-leeway-fail-{uuid4().hex[:6]}"
+    tenant = await _create_tenant(client, super_admin_token, slug)
+
+    discovery_endpoint = f"https://idp.{slug}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug}.local/authorize"
+    token_endpoint = f"https://idp.{slug}.local/token"
+    jwks_uri = f"https://idp.{slug}.local/jwks"
+    issuer = f"https://idp.{slug}.local"
+    client_id = f"client-{slug}"
+
+    private_key, public_key = _generate_rs256_keypair()
+    jwks_mock(default_key=public_key)
+
+    allowed_email = f"owner@{slug}.gov"
+
+    now = datetime.now(timezone.utc)
+
+    def _build_future_token(skew_seconds: int) -> str:
+        payload = {
+            "iss": issuer,
+            "aud": client_id,
+            "sub": f"user-{slug}",
+            "email": allowed_email,
+            "iat": int((now + timedelta(seconds=skew_seconds)).timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+        }
+        return jwt.encode(payload, private_key, algorithm="RS256")
+
+    beyond_leeway_token = _build_future_token(skew_seconds=300)
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": issuer,
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={
+            (token_endpoint, "code-leeway-fail"): {
+                "id_token": beyond_leeway_token,
+                "access_token": "access-token-leeway-fail",
+            }
+        },
+    )
+
+    await _configure_federation(
+        client,
+        super_admin_token,
+        tenant["id"],
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin=f"https://{slug}.eneo.test",
+        redirect_path="/auth/callback",
+        allowed_domains=[f"{slug}.gov"],
+        client_id=client_id,
+    )
+
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant["id"],
+        allowed_email,
+        password="ValidPassw0rd!",
+    )
+
+    state_payload = await _initiate(client, tenant["slug"])
+    response = await _callback(
+        client,
+        code="code-leeway-fail",
+        state=state_payload["state"],
+    )
+
+    assert response.status_code == 500, response.text
+    detail = response.json().get("detail", "")
+    assert "unexpected" in detail.lower()
 
 
 @pytest.mark.integration

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from intric.authentication import auth
-from intric.main.config import Settings, get_settings
+from intric.main.config import Settings, get_settings, validate_public_origin
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
@@ -55,6 +55,19 @@ class SetFederationRequest(BaseModel):
         description="Email domains allowed for this tenant (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
+    canonical_public_origin: str | None = Field(
+        None,
+        description=(
+            "Canonical public origin for this tenant (e.g., https://tenant.eneo.se). "
+            "Required for multi-tenant federation to construct redirect_uri"
+        ),
+        examples=["https://stockholm.eneo.se"],
+    )
+    redirect_path: str | None = Field(
+        None,
+        description="Optional custom redirect path starting with /",
+        examples=["/auth/callback"],
+    )
 
     @field_validator("client_secret")
     @classmethod
@@ -73,6 +86,23 @@ class SetFederationRequest(BaseModel):
             if not re.match(domain_pattern, domain.lower()):
                 raise ValueError(f"Invalid domain format: {domain}")
         return [d.lower() for d in v]
+
+    @field_validator("canonical_public_origin")
+    @classmethod
+    def validate_canonical_public_origin(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_public_origin(value)
+
+    @field_validator("redirect_path")
+    @classmethod
+    def validate_redirect_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value.startswith("/"):
+            raise ValueError("redirect_path must start with /")
+        return value
 
 
 class SetFederationResponse(BaseModel):
@@ -281,6 +311,12 @@ async def set_tenant_federation(
         },
         "encrypted_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    if request.canonical_public_origin:
+        federation_config["canonical_public_origin"] = request.canonical_public_origin
+
+    if request.redirect_path:
+        federation_config["redirect_path"] = request.redirect_path
 
     # Save to database
     await tenant_repo.update_federation_config(

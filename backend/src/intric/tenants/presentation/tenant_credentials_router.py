@@ -5,7 +5,7 @@ This module provides endpoints for system administrators to manage
 tenant-specific LLM provider API credentials.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from intric.authentication import auth
 from intric.main.config import Settings, get_settings
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.tenants.masking import mask_api_key
 
 
 def check_feature_enabled(
@@ -111,6 +112,7 @@ class SetCredentialResponse(BaseModel):
     provider: str
     masked_key: str
     message: str
+    set_at: datetime
 
 
 class DeleteCredentialResponse(BaseModel):
@@ -256,7 +258,7 @@ async def set_tenant_credential(
     if provider == "azure":
         if not all([request.endpoint, request.api_version, request.deployment_name]):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Azure provider requires: api_key, endpoint, api_version, deployment_name",
             )
 
@@ -277,19 +279,45 @@ async def set_tenant_credential(
     if request.deployment_name:
         credential["deployment_name"] = request.deployment_name
 
-    # Update credential
-    await tenant_repo.update_api_credential(
-        tenant_id=tenant_id, provider=provider, credential=credential
+    # Update credential and retrieve latest tenant snapshot
+    updated_tenant = await tenant_repo.update_api_credential(
+        tenant_id=tenant_id,
+        provider=provider,
+        credential=credential,
     )
 
-    # Mask key (show last 4 characters)
-    masked_key = f"...{request.api_key[-4:]}" if len(request.api_key) > 4 else "***"
+    provider_key = provider.lower()
+    stored_credential = (
+        updated_tenant.api_credentials.get(provider_key, {})
+        if updated_tenant and updated_tenant.api_credentials
+        else {}
+    )
+
+    timestamp_raw = (
+        stored_credential.get("set_at")
+        if isinstance(stored_credential, dict)
+        else None
+    )
+
+    try:
+        set_at = (
+            datetime.fromisoformat(timestamp_raw)
+            if timestamp_raw
+            else datetime.now(timezone.utc)
+        )
+        if set_at.tzinfo is None:
+            set_at = set_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        set_at = datetime.now(timezone.utc)
+
+    masked_key = mask_api_key(request.api_key)
 
     return SetCredentialResponse(
         tenant_id=tenant_id,
         provider=provider,
         masked_key=masked_key,
         message=f"API credential for {provider} set successfully",
+        set_at=set_at,
     )
 
 
@@ -386,26 +414,29 @@ async def list_tenant_credentials(
 
     # Build credential info list
     credentials: list[CredentialInfo] = []
+    tenant_credentials = tenant.api_credentials or {}
+
     for provider, metadata in credentials_metadata.items():
+        credential_data = tenant_credentials.get(provider, {})
         config: dict[str, Any] = {}
-        configured_at: datetime = tenant.updated_at  # Default to tenant updated_at
+        configured_at: datetime = tenant.updated_at
 
-        # Extract provider-specific config (non-sensitive fields only)
-        if tenant.api_credentials and provider in tenant.api_credentials:
-            credential_data = tenant.api_credentials[provider]
-            if isinstance(credential_data, dict):
-                # Build non-sensitive config (exclude api_key and encrypted_at)
-                # For Azure: includes endpoint, api_version, deployment_name
-                # For other providers: empty dict
-                config = {k: v for k, v in credential_data.items() if k not in ("api_key", "encrypted_at")}
+        if isinstance(credential_data, dict):
+            config = {
+                k: v
+                for k, v in credential_data.items()
+                if k not in {"api_key", "encrypted_at", "set_at"}
+            }
 
-                # Use per-credential encrypted_at if available, otherwise fall back to tenant.updated_at
-                if "encrypted_at" in credential_data:
-                    try:
-                        configured_at = datetime.fromisoformat(credential_data["encrypted_at"])
-                    except (ValueError, TypeError):
-                        # Invalid timestamp format - keep tenant.updated_at as fallback
-                        pass
+            timestamp_candidate = metadata.get("set_at") or credential_data.get("set_at")
+            if not timestamp_candidate:
+                timestamp_candidate = credential_data.get("encrypted_at")
+
+            if isinstance(timestamp_candidate, str):
+                try:
+                    configured_at = datetime.fromisoformat(timestamp_candidate)
+                except ValueError:
+                    configured_at = tenant.updated_at
 
         credentials.append(
             CredentialInfo(

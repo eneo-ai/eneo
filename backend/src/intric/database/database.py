@@ -8,10 +8,30 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.inspection import inspect
 
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+class SafeAsyncSession(AsyncSession):
+    """AsyncSession subclass that tolerates refresh() on non-ORM objects."""
+
+    async def refresh(self, instance, attribute_names=None, with_for_update=None):  # type: ignore[override]
+        state = inspect(instance, raiseerr=False)
+        if state is None:
+            logger.debug(
+                "SafeAsyncSession.refresh skipped unmapped instance",
+                extra={"instance_type": type(instance).__name__},
+            )
+            return None
+
+        return await super().refresh(
+            instance,
+            attribute_names=attribute_names,
+            with_for_update=with_for_update,
+        )
 
 
 class DatabaseSessionManager:
@@ -27,7 +47,10 @@ class DatabaseSessionManager:
 
         self._engine = create_async_engine(host, pool_size=20, max_overflow=10)
         self._sessionmaker = async_sessionmaker(
-            autocommit=False, bind=self._engine, autobegin=False
+            autocommit=False,
+            bind=self._engine,
+            autobegin=False,
+            class_=SafeAsyncSession,
         )
         logger.debug(f"Database connected to {host}")
 

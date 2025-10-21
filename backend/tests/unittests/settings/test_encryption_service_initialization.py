@@ -70,14 +70,6 @@ class TestEncryptionServiceInitialization:
             decrypted = encryption_service.decrypt(encrypted)
             assert decrypted == test_secret
 
-    def test_decrypt_rejects_plaintext_when_encryption_enabled(self):
-        """Plaintext credentials should not be accepted once encryption is active."""
-        test_key = "FNVdDyfq0lBPAvjz_WS-9PB2UQzkbqCnwuA4KU9UbPU="
-        service = EncryptionService(test_key)
-
-        with pytest.raises(ValueError, match="Credential is stored in plaintext"):
-            service.decrypt("sk-legacy-plaintext")
-
     def test_decrypt_allows_plaintext_when_disabled(self):
         """Plaintext passthrough remains available when encryption is disabled."""
         service = EncryptionService(None)

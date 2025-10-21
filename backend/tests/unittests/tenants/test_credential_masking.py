@@ -1,31 +1,18 @@
 """Unit tests for API key masking utility functions.
 
 Tests the masking logic for displaying API credentials safely in the UI:
-- Long keys (>4 chars) show last 4 characters with "..." prefix
+- Long keys (>4 chars) show masked suffix with "..." prefix
 - Short keys (≤4 chars) show "***" for complete masking
 - Empty credentials dict returns empty dict
 - Multiple providers all masked independently
 
-This module tests the masking behavior independently of the repository layer,
-focusing on the pure function logic used by get_api_credentials_masked.
+This module tests the masking behavior by exercising the shared masking utility
+used by the tenant repository and API responses.
 """
 
 import pytest
 
-
-def mask_api_key(api_key: str) -> str:
-    """Mask an API key for safe display.
-
-    Args:
-        api_key: The API key to mask
-
-    Returns:
-        Masked key - "...XXXX" for keys >4 chars, "***" for keys ≤4 chars
-    """
-    if len(api_key) > 4:
-        return f"...{api_key[-4:]}"
-    else:
-        return "***"
+from intric.tenants.masking import mask_api_key
 
 
 def mask_credentials(credentials: dict) -> dict[str, str]:
@@ -60,8 +47,8 @@ def test_mask_long_api_key():
     the last 4 characters for identification while maintaining security.
     """
     # Test various long keys
-    assert mask_api_key("sk-test-key-123456789") == "...6789"
-    assert mask_api_key("sk-anthropic-key-abcdef") == "...cdef"
+    assert mask_api_key("sk-test-key-123456789") == "sk-...6789"
+    assert mask_api_key("sk-anthropic-key-abcdef") == "sk-...cdef"
     assert mask_api_key("azure-key-1234567890") == "...7890"
     assert mask_api_key("12345") == "...2345"  # Exactly 5 chars (boundary)
 
@@ -99,7 +86,7 @@ def test_mask_single_credential():
 
     masked = mask_credentials(credentials)
 
-    assert masked == {"openai": "...3456"}
+    assert masked == {"openai": "sk-...3456"}
 
 
 def test_mask_multiple_providers():
@@ -119,8 +106,8 @@ def test_mask_multiple_providers():
     masked = mask_credentials(credentials)
 
     assert masked == {
-        "openai": "...3456",
-        "anthropic": "...cdef",
+        "openai": "sk-...3456",
+        "anthropic": "sk-...cdef",
         "azure": "***",
         "berget": "***",
         "mistral": "...7890",
@@ -164,8 +151,8 @@ def test_mask_credentials_legacy_string_format():
     masked = mask_credentials(credentials)
 
     assert masked == {
-        "openai": "...3456",  # String format handled
-        "anthropic": "...cdef",  # Dict format handled
+        "openai": "sk-...3456",  # String format handled
+        "anthropic": "sk-...cdef",  # Dict format handled
     }
 
 
@@ -190,7 +177,7 @@ def test_mask_credentials_mixed_lengths():
         "provider4": "***",  # 4 chars = short
         "provider5": "...bcde",  # 5 chars = long
         "provider6": "...cdef",
-        "provider7": "...6789",
+        "provider7": "sk-...6789",
     }
 
 
@@ -211,9 +198,9 @@ def test_mask_credentials_preserves_provider_names():
     assert "OpenAI" in masked
     assert "ANTHROPIC" in masked
     assert "MixedCase" in masked
-    assert masked["OpenAI"] == "...3456"
-    assert masked["ANTHROPIC"] == "...cdef"
-    assert masked["MixedCase"] == "...z789"
+    assert masked["OpenAI"] == "sk-...3456"
+    assert masked["ANTHROPIC"] == "sk-...cdef"
+    assert masked["MixedCase"] == "sk-...z789"
 
 
 def test_mask_credentials_handles_none_api_key():
@@ -238,7 +225,7 @@ def test_mask_credentials_handles_none_api_key():
     "api_key,expected",
     [
         ("sk-proj-1234567890abcdef", "...cdef"),  # OpenAI project key
-        ("sk-ant-1234567890abcdef", "...cdef"),  # Anthropic key
+        ("sk-ant-1234567890abcdef", "sk-...cdef"),  # Anthropic key
         ("azure_key_1234567890", "...7890"),  # Azure key format
         ("berget_key_xyz", "...xyz"),  # Berget key
         ("mistral_key_abc", "...abc"),  # Mistral key
@@ -277,8 +264,8 @@ def test_mask_credentials_real_world_example():
     masked = mask_credentials(credentials)
 
     # Verify all providers masked with last 4 chars
-    assert masked["openai"] == "...jijk"
-    assert masked["anthropic"] == "...cdef"
+    assert masked["openai"] == "...hijk"
+    assert masked["anthropic"] == "sk-...cdef"
     assert masked["azure"] == "...cdef"
     assert masked["berget"] == "...z123"
     assert masked["mistral"] == "...f789"

@@ -11,6 +11,7 @@ from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
 from intric.main.aiohttp_client import aiohttp_client
@@ -30,6 +31,9 @@ router = APIRouter(
     prefix="/auth",
     tags=["authentication"],
 )
+
+JWKClient = _PyJWKClient
+PyJWKClient = JWKClient  # Backwards compatibility alias for tests/monkeypatching
 
 
 @contextlib.asynccontextmanager
@@ -1184,9 +1188,6 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
-            # Validate ID token using existing auth_service method
-            from jwt import PyJWKClient
-
             auth_service = container.auth_service()
 
             # Get signing key from JWKS
@@ -1200,7 +1201,7 @@ async def auth_callback(
             )
 
             try:
-                jwk_client = PyJWKClient(jwks_uri)
+                jwk_client = JWKClient(jwks_uri)
                 signing_key = jwk_client.get_signing_key_from_jwt(
                     id_token
                 ).key  # Extract raw key from PyJWK wrapper
