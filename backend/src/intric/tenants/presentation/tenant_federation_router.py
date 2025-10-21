@@ -201,6 +201,15 @@ async def set_tenant_federation(
     token_endpoint = discovery.get("token_endpoint")
     userinfo_endpoint = discovery.get("userinfo_endpoint")
     jwks_uri = discovery.get("jwks_uri")
+    token_auth_methods_supported_raw = discovery.get(
+        "token_endpoint_auth_methods_supported", []
+    )
+    if isinstance(token_auth_methods_supported_raw, list):
+        token_auth_methods_supported = token_auth_methods_supported_raw
+    elif token_auth_methods_supported_raw:
+        token_auth_methods_supported = [token_auth_methods_supported_raw]
+    else:
+        token_auth_methods_supported = []
 
     if not all([issuer, authorization_endpoint, token_endpoint, jwks_uri]):
         # Log full discovery response for debugging missing fields
@@ -231,7 +240,20 @@ async def set_tenant_federation(
             "authorization_endpoint": authorization_endpoint,
             "token_endpoint": token_endpoint,
             "jwks_uri": jwks_uri,
+            "token_endpoint_auth_methods_supported": token_auth_methods_supported,
         },
+    )
+
+    def _select_token_auth_method(methods: list[str]) -> str:
+        normalized = [str(m).lower() for m in methods if m]
+        if "client_secret_post" in normalized:
+            return "client_secret_post"
+        if "client_secret_basic" in normalized:
+            return "client_secret_basic"
+        return normalized[0] if normalized else "client_secret_post"
+
+    token_endpoint_auth_method = _select_token_auth_method(
+        token_auth_methods_supported
     )
 
     # Encrypt client_secret
@@ -250,6 +272,8 @@ async def set_tenant_federation(
         "client_secret": encrypted_secret,
         "scopes": ["openid", "email", "profile"],
         "allowed_domains": request.allowed_domains,
+        "token_endpoint_auth_method": token_endpoint_auth_method,
+        "token_endpoint_auth_methods_supported": token_auth_methods_supported,
         "claims_mapping": {
             "email": "email",
             "username": "sub",

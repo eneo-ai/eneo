@@ -1,5 +1,6 @@
 """Public OIDC authentication endpoints for tenant-based federation."""
 
+import base64
 import contextlib
 import json
 import secrets
@@ -1022,7 +1023,53 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
-            # Exchange code for tokens
+            # Determine token endpoint auth method
+            def _select_auth_method(methods: list[str] | None) -> str | None:
+                if not methods:
+                    return None
+                if not isinstance(methods, list):
+                    methods = [methods]
+                normalized = [str(m).lower() for m in methods if m]
+                if "client_secret_post" in normalized:
+                    return "client_secret_post"
+                if "client_secret_basic" in normalized:
+                    return "client_secret_basic"
+                return normalized[0]
+
+            token_auth_method = federation_config.get("token_endpoint_auth_method")
+            supported_methods = federation_config.get(
+                "token_endpoint_auth_methods_supported"
+            )
+
+            if not token_auth_method:
+                token_auth_method = _select_auth_method(supported_methods)
+
+            if not token_auth_method and federation_config.get("discovery_endpoint"):
+                try:
+                    discovery = await fetch_discovery(
+                        federation_config["discovery_endpoint"]
+                    )
+                    supported_methods = discovery.get(
+                        "token_endpoint_auth_methods_supported"
+                    ) or []
+                    token_auth_method = _select_auth_method(supported_methods)
+                except HTTPException:
+                    # Discovery failure handled earlier when resolving endpoints; fall back
+                    token_auth_method = None
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.warning(
+                        "Failed to determine token endpoint auth method from discovery",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "token_endpoint": token_endpoint,
+                            "error": str(exc),
+                            "correlation_id": correlation_id,
+                        },
+                    )
+
+            if not token_auth_method:
+                token_auth_method = "client_secret_post"
+
             token_data = {
                 "grant_type": "authorization_code",
                 "code": callback.code,
@@ -1030,8 +1077,40 @@ async def auth_callback(
                 "client_id": federation_config["client_id"],
                 "client_secret": federation_config["client_secret"],
             }
+            headers: dict[str, str] = {}
 
-            async with aiohttp_client().post(token_endpoint, data=token_data) as resp:
+            if token_auth_method == "client_secret_basic":
+                credentials = (
+                    f"{federation_config['client_id']}:{federation_config['client_secret']}"
+                )
+                basic_token = base64.b64encode(credentials.encode()).decode()
+                headers["Authorization"] = f"Basic {basic_token}"
+                token_data.pop("client_secret", None)
+                token_data.pop("client_id", None)
+            elif token_auth_method != "client_secret_post":
+                logger.warning(
+                    "Unsupported token endpoint auth method; defaulting to client_secret_post",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "requested_method": token_auth_method,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                token_auth_method = "client_secret_post"
+
+            logger.debug(
+                "Exchanging authorization code for tokens",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "token_endpoint": token_endpoint,
+                    "auth_method": token_auth_method,
+                    "correlation_id": correlation_id,
+                },
+            )
+
+            async with aiohttp_client().post(
+                token_endpoint, data=token_data, headers=headers or None
+            ) as resp:
                 if resp.status != 200:
                     # Capture IdP error response for debugging
                     try:
@@ -1046,6 +1125,7 @@ async def auth_callback(
                             "http_status": resp.status,
                             "token_endpoint": token_endpoint,
                             "error_response": error_body,  # IdP's actual error message
+                            "auth_method": token_auth_method,
                             "correlation_id": correlation_id,
                         },
                     )
