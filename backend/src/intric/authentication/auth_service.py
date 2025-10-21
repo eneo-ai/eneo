@@ -277,6 +277,9 @@ class AuthService:
         except jwt.ImmatureSignatureError as e:
             drift_seconds = None
             iat_claim = None
+            iat_iso = None
+            server_dt = datetime.now(timezone.utc)
+            server_time_iso = server_dt.isoformat()
             if id_token:
                 try:
                     unverified_claims = jwt.decode(
@@ -290,7 +293,8 @@ class AuthService:
                     )
                     iat_claim = unverified_claims.get("iat")
                     if isinstance(iat_claim, (int, float)):
-                        drift_seconds = iat_claim - datetime.now(timezone.utc).timestamp()
+                        drift_seconds = iat_claim - server_dt.timestamp()
+                        iat_iso = datetime.fromtimestamp(iat_claim, tz=timezone.utc).isoformat()
                 except Exception:
                     # Best-effort diagnostics only
                     pass
@@ -299,9 +303,11 @@ class AuthService:
                 "JWT not yet valid",
                 extra={
                     "correlation_id": correlation_id,
-                    "server_time": datetime.now(timezone.utc).isoformat(),
+                    "server_time": server_time_iso,
+                    "server_timezone": "UTC",
                     "leeway_seconds": clock_leeway if leeway_applied else 0,
                     "iat_claim": iat_claim,
+                    "iat_claim_iso": iat_iso,
                     "iat_drift_seconds": drift_seconds,
                     "error": str(e),
                 },
