@@ -146,9 +146,6 @@ def test_settings(
         url_signing_key="test_url_signing_key",
         intric_super_api_key="test-super-admin-key-for-integration-tests",
 
-        # Encryption (required for HTTP auth and sensitive data)
-        encryption_key="yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
-
         # Feature flags
         using_access_management=False,
         using_iam=False,
