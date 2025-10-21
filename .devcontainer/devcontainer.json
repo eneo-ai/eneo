@@ -1,59 +1,47 @@
+// Copyright (c) 2024 Sundsvalls Kommun
+//
+// Licensed under the MIT License.
+
 {
-    "name": "Eneo Devcontainer",
-    "dockerComposeFile": "docker-compose.yml",
-    "service": "eneo",
-    "workspaceFolder": "/workspace",
-    "forwardPorts": [
-        3000,
-        8123
-    ],
-    "features": {
-        "ghcr.io/devcontainers/features/node:1": {
-            "version": "20",
-            "packageManager": "pnpm"
-        }
-    },
-    "mounts": [
-        "source=${localWorkspaceFolder}/.devcontainer/claude-config,target=/home/vscode/.claude,type=bind,consistency=cached"
-    ],
-    "postCreateCommand": "bash .devcontainer/post-create.sh && bash .devcontainer/install-claude.sh",
-    "postStartCommand": "bash .devcontainer/post-start.sh",
-    "customizations": {
-        "vscode": {
-            "extensions": [
-                "charliermarsh.ruff",
-                "svelte.svelte-vscode",
-                "bradlc.vscode-tailwindcss",
-                "usernamehw.commands",
-                "fabiospampinato.vscode-terminals"
-            ],
-            "settings": {
-                "python.defaultInterpreterPath": "/workspace/backend/.venv/bin/python",
-                "python.pythonPath": "/workspace/backend/.venv/bin/python",
-                "python.terminal.activateEnvironment": true,
-                "[python]": {
-                    "editor.defaultFormatter": "charliermarsh.ruff"
-                },
-                "commands.commands": {
-                    "Start Claude Code": {
-                        "command": "workbench.action.terminal.sendSequence",
-                        "args": {
-                            "text": "claude\u000D"
-                        },
-                        "statusBar": {
-                            "alignment": "right",
-                            "text": "$(terminal) Claude",
-                            "tooltip": "Start Claude Code in Terminal",
-                            "priority": 100,
-                            "color": "#FF6B35"
-                        }
-                    }
-                }
-            }
-        }
-    },
-    "remoteEnv": {
-        "VIRTUAL_ENV": "/workspace/backend/.venv",
-        "PATH": "/workspace/backend/.venv/bin:${containerEnv:PATH}"
-    }
+	"name": "Eneo Devcontainer",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "eneo",
+	"workspaceFolder": "/workspace",
+	"forwardPorts": [
+		3000, // Frontend
+		8123
+	],
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "20",
+			"packageManager": "pnpm"
+		},
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"version": "latest",
+			"moby": false
+		}
+	},
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	"postStartCommand": "bash .devcontainer/post-start.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"charliermarsh.ruff",
+				"svelte.svelte-vscode",
+				"bradlc.vscode-tailwindcss"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/workspace/backend/.venv/bin/python",
+				"python.pythonPath": "/workspace/backend/.venv/bin/python",
+				"python.terminal.activateEnvironment": true,
+				"[python]": {
+					"editor.defaultFormatter": "charliermarsh.ruff"
+				}
+			}
+		}
+	},
+	"remoteEnv": {
+		"VIRTUAL_ENV": "/workspace/backend/.venv",
+		"PATH": "/workspace/backend/.venv/bin:${containerEnv:PATH}"
+	}
 }
