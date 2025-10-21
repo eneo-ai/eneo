@@ -28,6 +28,7 @@ JWT_ALGORITHM = get_settings().jwt_algorithm
 JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
 JWT_SECRET = get_settings().jwt_secret
+OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
 
 class AuthService:
@@ -190,14 +191,21 @@ class AuthService:
     ):
         correlation_id = correlation_id or "no-correlation-id"
 
+        jwt_options = dict(options or {})
+        leeway_applied = False
+        if OIDC_CLOCK_LEEWAY_SECONDS:
+            jwt_options.setdefault("leeway", OIDC_CLOCK_LEEWAY_SECONDS)
+            leeway_applied = True
+
         logger.debug(
             "OIDC: Starting JWT validation",
             extra={
                 "correlation_id": correlation_id,
                 "client_id": client_id,
                 "signing_algos": signing_algos,
-                "options": options,
+                "options": jwt_options or None,
                 "id_token_length": len(id_token) if id_token else 0,
+                "leeway_seconds": OIDC_CLOCK_LEEWAY_SECONDS if leeway_applied else 0,
             },
         )
 
@@ -228,7 +236,7 @@ class AuthService:
                 key=key,
                 algorithms=signing_algos,
                 audience=client_id,
-                options=options,
+                options=jwt_options or None,
             )
 
             payload = jwt_decoded["payload"]
@@ -263,6 +271,17 @@ class AuthService:
                 extra={
                     "correlation_id": correlation_id,
                     "expected_audience": client_id,
+                    "error": str(e),
+                },
+            )
+            raise
+        except jwt.ImmatureSignatureError as e:
+            logger.error(
+                "JWT not yet valid",
+                extra={
+                    "correlation_id": correlation_id,
+                    "server_time": datetime.now(timezone.utc).isoformat(),
+                    "leeway_seconds": OIDC_CLOCK_LEEWAY_SECONDS if leeway_applied else 0,
                     "error": str(e),
                 },
             )

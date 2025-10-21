@@ -143,6 +143,7 @@ class Settings(BaseSettings):
     oidc_state_ttl_seconds: int = 600
     oidc_redirect_grace_period_seconds: int = 900
     strict_oidc_redirect_validation: bool = True
+    oidc_clock_leeway_seconds: int = 120
 
     # Generic OIDC config (renamed from MOBILITYGUARD_*)
     oidc_discovery_endpoint: Optional[str] = None
@@ -313,6 +314,13 @@ class Settings(BaseSettings):
             logging.error(
                 "OIDC_REDIRECT_GRACE_PERIOD_SECONDS cannot be negative. Current value: %s",
                 self.oidc_redirect_grace_period_seconds,
+            )
+            sys.exit(1)
+
+        if self.oidc_clock_leeway_seconds < 0:
+            logging.error(
+                "OIDC_CLOCK_LEEWAY_SECONDS cannot be negative. Current value: %s",
+                self.oidc_clock_leeway_seconds,
             )
             sys.exit(1)
 
