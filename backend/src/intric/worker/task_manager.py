@@ -82,9 +82,12 @@ class TaskManager:
 
         try:
             yield
-        except Exception:
+        except Exception as exc:
             logger.exception("Error on worker:")
-            await self.fail_job()
+            message = str(exc).strip()
+            # Avoid storing excessively long error messages on the job record
+            truncated_message = message[:512] if message else None
+            await self.fail_job(truncated_message)
             self.success = False
         else:
             await self.complete_job()
@@ -105,6 +108,6 @@ class TaskManager:
         await self._publish_status(status=Status.COMPLETE)
         await self.job_service.complete_job(self.job_id, self.result_location)
 
-    async def fail_job(self):
+    async def fail_job(self, message: str | None = None):
         await self._publish_status(status=Status.FAILED)
-        await self.job_service.fail_job(self.job_id)
+        await self.job_service.fail_job(self.job_id, message)
