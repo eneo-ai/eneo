@@ -168,9 +168,12 @@
       }
     }
 
-    // EARLY EXIT: If we have an activeTenantSlug and NOT showing tenant selector,
-    // user is already on the login form - skip initialization to prevent flash
-    if (activeTenantSlug && !showTenantSelector) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const explicitTenantParam = urlParams.get("tenant");
+
+    // EARLY EXIT: Only skip initialization when we're already on the username/password form
+    // without an explicit tenant slug in the URL (prevents flashing when user opted out of SSO)
+    if (activeTenantSlug && !showTenantSelector && !explicitTenantParam) {
       isInitializing = false;
       return;
     }
@@ -185,8 +188,7 @@
       return;
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const tenant = urlParams.get("tenant") ?? activeTenantSlug;
+    const tenant = explicitTenantParam ?? activeTenantSlug;
 
     // Check URL params directly to avoid race condition with $effect
     const urlErrorMessage = urlParams.get("message");
