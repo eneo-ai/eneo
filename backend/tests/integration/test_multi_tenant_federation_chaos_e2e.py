@@ -78,11 +78,11 @@ async def _configure_federation(
     discovery_endpoint: str,
     allowed_domains: list[str],
     client_id: str,
+    canonical_public_origin: str,
     # These params kept for test compatibility but not sent to API
     authorization_endpoint: str = None,
     token_endpoint: str = None,
     jwks_uri: str = None,
-    canonical_origin: str = None,
     redirect_path: str = None,
 ) -> None:
     """Helper to configure tenant federation via API.
@@ -96,6 +96,7 @@ async def _configure_federation(
         "client_secret": "super-secret",
         "discovery_endpoint": discovery_endpoint,
         "allowed_domains": allowed_domains,
+        "canonical_public_origin": canonical_public_origin,
     }
     response = await client.put(
         f"/api/v1/sysadmin/tenants/{tenant_id}/federation",
@@ -223,7 +224,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
             authorization_endpoint=authorization_endpoint,
             token_endpoint=token_endpoint,
             jwks_uri=jwks_uri,
-            canonical_origin=f"https://{slug}.eneo.test",
+            canonical_public_origin=f"https://{slug}.eneo.test",
             redirect_path="/auth/callback",
             allowed_domains=[f"{slug}.gov"],
             client_id=f"client-{slug}",
@@ -338,7 +339,7 @@ async def test_federation_grace_period_allows_recent_config_change(
             authorization_endpoint=authorization_endpoint,
             token_endpoint=token_endpoint,
             jwks_uri=jwks_uri,
-            canonical_origin=f"https://{slug}.eneo.test",
+            canonical_public_origin=f"https://{slug}.eneo.test",
             redirect_path="/auth/callback",
             allowed_domains=[f"{slug}.gov"],
             client_id=f"client-{slug}",
@@ -417,7 +418,7 @@ async def test_concurrent_federation_config_updates_last_write_wins(
         authorization_endpoint=authorization_endpoint,
         token_endpoint=token_endpoint,
         jwks_uri=jwks_uri,
-        canonical_origin=f"https://{slug}.eneo.test",
+        canonical_public_origin=f"https://{slug}.eneo.test",
         redirect_path="/auth/callback",
         allowed_domains=[f"{slug}.gov"],
         client_id=f"client-{slug}",
@@ -436,6 +437,7 @@ async def test_concurrent_federation_config_updates_last_write_wins(
             authorization_endpoint=authorization_endpoint,
             token_endpoint=token_endpoint,
             jwks_uri=jwks_uri,
+            canonical_public_origin=f"https://{slug}.eneo.test",
             allowed_domains=[f"update{index}.{slug}.gov"],  # Unique domain per update
             client_id=f"client-{slug}-{index}",  # Unique client ID per update
         )
@@ -542,7 +544,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
         authorization_endpoint=authorization_endpoint,
         token_endpoint=token_endpoint,
         jwks_uri=jwks_uri,
-        canonical_origin=f"https://{slug}.eneo.test",
+        canonical_public_origin=f"https://{slug}.eneo.test",
         redirect_path="/auth/callback",
         allowed_domains=[f"{slug}.gov"],
         client_id=f"client-{slug}",
@@ -647,7 +649,7 @@ async def test_state_token_tampering_rejected(
         authorization_endpoint=authorization_endpoint,
         token_endpoint=token_endpoint,
         jwks_uri=jwks_uri,
-        canonical_origin=f"https://{slug_a}.eneo.test",
+        canonical_public_origin=f"https://{slug_a}.eneo.test",
         redirect_path="/auth/callback",
         allowed_domains=[f"{slug_a}.gov"],
         client_id=f"client-{slug_a}",
@@ -758,7 +760,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
             authorization_endpoint=authorization_endpoint,
             token_endpoint=token_endpoint,
             jwks_uri=jwks_uri,
-            canonical_origin=f"https://{slug}.eneo.test",
+            canonical_public_origin=f"https://{slug}.eneo.test",
             redirect_path="/auth/callback",
             allowed_domains=[f"{slug}.gov"],
             client_id=f"client-{slug}",

@@ -60,6 +60,7 @@ async def _configure_federation(
     discovery_endpoint: str,
     allowed_domain: str,
     client_id: str,
+    canonical_public_origin: str,
 ):
     payload = {
         "provider": "entra",
@@ -67,6 +68,7 @@ async def _configure_federation(
         "client_id": client_id,
         "client_secret": "super-secret",
         "allowed_domains": [allowed_domain],
+        "canonical_public_origin": canonical_public_origin,
     }
     response = await client.put(
         f"/api/v1/sysadmin/tenants/{tenant_id}/federation",
@@ -195,6 +197,7 @@ async def test_multi_tenant_oidc_login_isolated(
         discovery_endpoint=discovery_a_url,
         allowed_domain=f"{slug_a}.example.com",
         client_id=f"client-{slug_a}",
+        canonical_public_origin=f"https://{slug_a}.eneo.test",
     )
     await _configure_federation(
         client,
@@ -203,6 +206,7 @@ async def test_multi_tenant_oidc_login_isolated(
         discovery_endpoint=discovery_b_url,
         allowed_domain=f"{slug_b}.example.com",
         client_id=f"client-{slug_b}",
+        canonical_public_origin=f"https://{slug_b}.eneo.test",
     )
 
     initiate_a = await _initiate_oidc(client, tenant_a["slug"])
