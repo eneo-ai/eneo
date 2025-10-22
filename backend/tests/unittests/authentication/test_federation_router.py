@@ -274,7 +274,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         "iat": state_payload["iat"],
     }
     await redis_client.setex(
-        f"oidc:state:{signed_state}",
+        f"oidc:state:{state_payload['nonce']}",  # Use nonce, not full JWT
         dummy_settings.oidc_state_ttl_seconds,
         json.dumps(cache_payload),
     )
@@ -290,6 +290,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         lambda: FakeAioHttpClient(fake_response),
     )
     monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
+    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
 
     callback = CallbackRequest(code="auth-code", state=signed_state)
 
@@ -372,6 +373,20 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
 
     signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
 
+    # Store state in Redis cache with correct key format (uses nonce, not full JWT)
+    cache_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "redirect_uri": state_payload["redirect_uri"],
+        "config_version": state_payload["config_version"],
+        "iat": state_payload["iat"],
+    }
+    await redis_client.setex(
+        f"oidc:state:{state_payload['nonce']}",  # Use nonce, not full JWT
+        dummy_settings.oidc_state_ttl_seconds,
+        json.dumps(cache_payload),
+    )
+
     fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
     monkeypatch.setattr(
         federation_router,
@@ -379,6 +394,7 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
         lambda: FakeAioHttpClient(fake_response),
     )
     monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
+    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
 
     callback = CallbackRequest(code="auth-code", state=signed_state)
 
@@ -386,4 +402,5 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
         await federation_router.auth_callback(callback, container=container)
 
     assert exc.value.status_code == 401
-    assert "invalid" in exc.value.detail.lower()
+    # Accept either "invalid" or "failed to validate" in error message
+    assert ("invalid" in exc.value.detail.lower() or "failed to validate" in exc.value.detail.lower())

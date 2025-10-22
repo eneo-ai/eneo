@@ -36,3 +36,4 @@ specs/
 .devcontainer/claude-config/
 .devcontainer/
 .code/
+.mcp.json

@@ -427,13 +427,14 @@ async def test_credential_re_encryption_with_new_key(
     new_api_credentials = tenant.api_credentials.copy()
     new_api_credentials["openai"]["api_key"] = new_ciphertext
 
-    async with async_session.begin():
-        stmt = (
-            sa.update(Tenants)
-            .where(Tenants.id == tenant_id)
-            .values(api_credentials=new_api_credentials)
-        )
-        await async_session.execute(stmt)
+    # Execute update (use flush to make changes visible in same transaction)
+    stmt = (
+        sa.update(Tenants)
+        .where(Tenants.id == tenant_id)
+        .values(api_credentials=new_api_credentials)
+    )
+    await async_session.execute(stmt)
+    await async_session.flush()  # Flush changes without committing transaction
 
     # Step 5: Verify decryption works with NEW key
     tenant_refreshed = await repo.get(tenant_id)
@@ -509,13 +510,14 @@ async def test_encryption_service_detects_corrupted_ciphertext(
 
         corrupted_credentials = {"openai": {"api_key": corrupted_value}}
 
-        async with async_session.begin():
-            stmt = (
-                sa.update(Tenants)
-                .where(Tenants.id == tenant_id)
-                .values(api_credentials=corrupted_credentials)
-            )
-            await async_session.execute(stmt)
+        # Execute update (use flush to make changes visible in same transaction)
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(api_credentials=corrupted_credentials)
+        )
+        await async_session.execute(stmt)
+        await async_session.flush()  # Flush changes without committing transaction
 
         # Refresh and attempt decryption
         tenant_corrupted = await repo.get(tenant_id)

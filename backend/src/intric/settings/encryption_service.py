@@ -103,7 +103,7 @@ class EncryptionService:
             Decrypted plaintext API key
 
         Raises:
-            ValueError: If decryption fails or version unsupported
+            ValueError: If decryption fails, version unsupported, or plaintext when encryption is required
         """
         if not ciphertext:
             raise ValueError("Cannot decrypt empty string")
@@ -111,11 +111,12 @@ class EncryptionService:
         # Detect encrypted format
         if not ciphertext.startswith("enc:"):
             if self._fernet:
-                logger.warning(
-                    "Decrypting plaintext credential while encryption is active",
-                    extra={"reason": "legacy"},
+                # Security: Reject plaintext credentials when encryption is active
+                # This prevents corrupted/tampered credentials from bypassing encryption
+                raise ValueError(
+                    "Plaintext credential rejected: encryption is enabled. "
+                    "All credentials must be encrypted with proper 'enc:' prefix."
                 )
-                return ciphertext
 
             logger.info("Decrypting legacy plaintext credential")
             return ciphertext

@@ -35,19 +35,25 @@ class AzureOpenAIModelAdapter(OpenAIModelAdapter):
                 # Get API key (required)
                 api_key = credential_resolver.get_api_key("azure")
 
-                # Get endpoint - tenant-specific or global
+                # Get endpoint (required for Azure)
                 azure_endpoint = credential_resolver.get_credential_field(
-                    "azure", "endpoint", settings.azure_endpoint
+                    "azure", "endpoint", settings.azure_endpoint, required=True
                 )
 
-                # Get API version - tenant-specific or global
+                # Get API version - required in strict mode, can fallback in single-tenant
                 api_version = credential_resolver.get_credential_field(
-                    "azure", "api_version", settings.azure_api_version
+                    "azure",
+                    "api_version",
+                    settings.azure_api_version,
+                    required=(
+                        credential_resolver.tenant is not None and
+                        credential_resolver.settings.tenant_credentials_enabled
+                    ),
                 )
 
-                # Get deployment_name - tenant-specific or model default
+                # Get deployment_name (optional - can use model default)
                 deployment_name = credential_resolver.get_credential_field(
-                    "azure", "deployment_name", model.deployment_name
+                    "azure", "deployment_name", model.deployment_name, required=False
                 )
                 self._deployment_name = deployment_name or model.deployment_name
 

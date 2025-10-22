@@ -214,13 +214,14 @@ async def test_vllm_strict_mode_rejects_missing_endpoint(
             headers={"X-API-Key": super_admin_token},
         )
 
-        # Should reject with 400
-        assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
+        # Should reject with 422 (Unprocessable Entity - validation error)
+        assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
 
         error_detail = response.json()["detail"]
-        # Error should mention both required fields
-        assert "endpoint" in error_detail.lower(), f"Error should mention endpoint: {error_detail}"
-        assert "vllm" in error_detail.lower() or "both" in error_detail.lower()
+        # Error detail is structured response with message and errors list
+        error_message = str(error_detail.get("message", "")) + " " + " ".join(error_detail.get("errors", []))
+        assert "endpoint" in error_message.lower(), f"Error should mention endpoint: {error_detail}"
+        assert "vllm" in error_message.lower(), f"Error should mention vllm: {error_detail}"
 
         # Verify credential was NOT stored
         list_response = await client.get(
@@ -509,10 +510,12 @@ async def test_azure_provider_requires_all_fields_in_strict_mode(
     )
 
     # Verify API rejects incomplete configuration
-    assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
+    assert response.status_code == 422, f"Expected 422 (Validation Error), got {response.status_code}: {response.text}"
     error_detail = response.json()["detail"]
-    assert "deployment_name" in error_detail, f"Error should mention missing 'deployment_name': {error_detail}"
-    assert "Azure provider requires" in error_detail, f"Error should list Azure requirements: {error_detail}"
+    # Error detail is structured response - convert to string for checking
+    error_str = str(error_detail)
+    assert "deployment_name" in error_str, f"Error should mention missing 'deployment_name': {error_detail}"
+    assert "azure" in error_str.lower(), f"Error should mention Azure: {error_detail}"
 
     # Now verify that with ALL required fields, it succeeds
     complete_response = await client.put(

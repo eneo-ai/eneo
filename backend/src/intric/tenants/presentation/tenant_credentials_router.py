@@ -19,6 +19,51 @@ from intric.server.dependencies.container import get_container
 from intric.tenants.masking import mask_api_key
 
 
+# Provider-specific required fields for strict mode validation
+PROVIDER_REQUIRED_FIELDS = {
+    "openai": {"api_key"},
+    "anthropic": {"api_key"},
+    "azure": {"api_key", "endpoint", "api_version", "deployment_name"},
+    "berget": {"api_key"},
+    "mistral": {"api_key"},
+    "ovhcloud": {"api_key"},
+    "vllm": {"api_key", "endpoint"},
+}
+
+
+def validate_provider_credentials(
+    provider: str, request_data: "SetCredentialRequest", strict_mode: bool
+) -> list[str]:
+    """
+    Validate credentials against provider-specific requirements.
+
+    Args:
+        provider: LLM provider name
+        request_data: Credential request with fields
+        strict_mode: Whether tenant_credentials_enabled (strict mode)
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    errors = []
+    provider_lower = provider.lower()
+
+    # Get required fields for this provider
+    required_fields = PROVIDER_REQUIRED_FIELDS.get(provider_lower, {"api_key"})
+
+    # Check each required field
+    for field in required_fields:
+        value = getattr(request_data, field, None)
+        if not value or (isinstance(value, str) and not value.strip()):
+            errors.append(f"Field '{field}' is required for provider '{provider}'")
+
+    # Additional validation: api_key minimum length
+    if request_data.api_key and len(request_data.api_key.strip()) < 8:
+        errors.append("API key must be at least 8 characters long")
+
+    return errors
+
+
 def check_feature_enabled(
     settings: Settings = Depends(get_settings),
 ) -> None:
@@ -54,8 +99,10 @@ class SetCredentialRequest(BaseModel):
     """
     Request model for setting tenant API credentials.
 
-    For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name)
-    are required. For other providers, only api_key is required.
+    Provider-specific field requirements:
+    - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+    - vLLM: api_key + endpoint (required)
+    - Azure: api_key + endpoint + api_version (required)
 
     Example for OpenAI:
         {
@@ -66,11 +113,10 @@ class SetCredentialRequest(BaseModel):
         {
             "api_key": "abc123...",
             "endpoint": "https://my-resource.openai.azure.com",
-            "api_version": "2024-02-15-preview",
-            "deployment_name": "gpt-4"
+            "api_version": "2024-02-15-preview"
         }
 
-    Example for VLLM:
+    Example for vLLM:
         {
             "api_key": "vllm-secret-key",
             "endpoint": "http://tenant-vllm:8000"
@@ -99,12 +145,17 @@ class SetCredentialResponse(BaseModel):
     """
     Response model for setting tenant API credentials.
 
+    Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+    and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+    not returned for security.
+
     Example:
         {
             "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
             "provider": "openai",
             "masked_key": "...xyz9",
-            "message": "API credential for openai set successfully"
+            "message": "API credential for openai set successfully",
+            "set_at": "2025-10-22T10:00:00+00:00"
         }
     """
 
@@ -218,8 +269,9 @@ class ListCredentialsResponse(BaseModel):
     status_code=status.HTTP_200_OK,
     summary="Set tenant API credential",
     description="Set or update API credentials for a specific LLM provider for a tenant. "
-    "System admin only. For Azure provider, all four fields (api_key, endpoint, "
-    "api_version, deployment_name) are required.",
+    "System admin only. Provider-specific fields are validated: "
+    "OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; "
+    "Azure requires api_key, endpoint, and api_version.",
 )
 async def set_tenant_credential(
     tenant_id: UUID,
@@ -230,10 +282,15 @@ async def set_tenant_credential(
     """
     Set or update tenant API credentials for a specific provider.
 
+    Validates provider-specific field requirements:
+    - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key (required)
+    - vLLM: api_key + endpoint (both required when credentials enabled)
+    - Azure: api_key + endpoint + api_version (all required)
+
     Args:
         tenant_id: UUID of the tenant
-        provider: LLM provider name (openai, anthropic, azure, berget, mistral, ovhcloud)
-        request: Credential data including api_key and optional Azure fields
+        provider: LLM provider name (openai, anthropic, azure, berget, mistral, ovhcloud, vllm)
+        request: Credential data including required fields per provider
         container: Dependency injection container
 
     Returns:
@@ -241,7 +298,7 @@ async def set_tenant_credential(
 
     Raises:
         HTTPException 404: Tenant not found
-        HTTPException 400: Invalid request (e.g., missing Azure fields)
+        HTTPException 422: Validation error with field-level error messages
     """
     tenant_repo = container.tenant_repo()
     settings = get_settings()
@@ -254,20 +311,29 @@ async def set_tenant_credential(
             detail=f"Tenant {tenant_id} not found",
         )
 
-    # Azure-specific validation
-    if provider == "azure":
-        if not all([request.endpoint, request.api_version, request.deployment_name]):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Azure provider requires: api_key, endpoint, api_version, deployment_name",
-            )
+    # Provider-specific field validation
+    validation_errors = validate_provider_credentials(
+        provider, request, settings.tenant_credentials_enabled
+    )
 
-    if provider == "vllm" and settings.tenant_credentials_enabled:
-        if not request.endpoint:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="VLLM provider requires both api_key and endpoint when tenant credentials are enabled",
-            )
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "credential_validation_failed",
+                "message": f"Credential validation failed for provider '{provider}'",
+                "errors": validation_errors,
+                "provider_requirements": {
+                    "openai": ["api_key"],
+                    "anthropic": ["api_key"],
+                    "azure": ["api_key", "endpoint", "api_version"],
+                    "berget": ["api_key"],
+                    "mistral": ["api_key"],
+                    "ovhcloud": ["api_key"],
+                    "vllm": ["api_key", "endpoint"],
+                },
+            },
+        )
 
     # Build credential dict
     credential: dict[str, Any] = {"api_key": request.api_key}

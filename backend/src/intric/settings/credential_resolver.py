@@ -176,30 +176,56 @@ class CredentialResolver:
         field: str,
         fallback: Optional[str] = None,
         decrypt: bool = False,
+        required: bool = False,
     ) -> Optional[str]:
         """
         Get any field from tenant credentials with strict mode support.
 
-        IMPORTANT: Same strict logic as get_api_key():
-        - If tenant HAS credential for provider → use exclusively (no fallback even if field missing)
-        - If tenant has NO credential AND TENANT_CREDENTIALS_ENABLED=true → NO fallback (strict mode)
-        - If tenant has NO credential AND TENANT_CREDENTIALS_ENABLED=false → use fallback (single-tenant)
+        Distinguishes between required and optional credential fields to support
+        provider-specific configurations. Critically, in strict mode (multi-tenant),
+        NEVER falls back to global settings - this preserves tenant isolation.
+
+        Resolution logic:
+        1. If tenant HAS credential for provider:
+           - If field exists: decrypt (if needed) and return it
+           - If field missing and required=True: raise ValueError (strict enforcement)
+           - If field missing and required=False:
+             * Strict mode (tenant_credentials_enabled=true): return None (NO fallback)
+             * Single-tenant mode: return fallback (allow global defaults)
+        2. If tenant has NO credential:
+           - If TENANT_CREDENTIALS_ENABLED=true: return None (strict mode, no fallback)
+           - If TENANT_CREDENTIALS_ENABLED=false: return fallback (single-tenant mode)
 
         Args:
             provider: Provider name (azure, vllm, openai, etc.)
             field: Field name (api_key, endpoint, api_version, deployment_name, etc.)
-            fallback: Global setting to use in single-tenant mode only
-            decrypt: Whether to decrypt value (True for api_key fields)
+            fallback: Default value to use if field is missing (None for truly optional)
+            decrypt: Whether to decrypt value (True for sensitive fields like api_key)
+            required: Whether this field is required for the provider. If False, allows
+                     missing fields even in strict mode (for provider-specific optional fields).
+                     Examples:
+                     - OpenAI endpoint: required=False (endpoint not needed)
+                     - vLLM endpoint: required=True (endpoint always needed)
+                     - Azure api_version: required=False (can fallback to global)
 
         Returns:
-            Field value from tenant credential, or fallback (single-tenant only), or None
+            Field value from tenant credential, or fallback, or None
 
         Examples:
-            # Get tenant-specific or global VLLM endpoint (single-tenant fallback)
-            endpoint = resolver.get_credential_field("vllm", "endpoint", settings.vllm_model_url)
+            # OpenAI endpoint (optional) - returns None without error
+            endpoint = resolver.get_credential_field(
+                "openai", "endpoint", fallback=None, required=False
+            )
 
-            # Get tenant-specific or global API key (with decryption)
-            api_key = resolver.get_credential_field("azure", "api_key", settings.azure_api_key, decrypt=True)
+            # vLLM endpoint (required) - raises error if tenant has key but missing endpoint
+            endpoint = resolver.get_credential_field(
+                "vllm", "endpoint", fallback=settings.vllm_model_url, required=True
+            )
+
+            # Azure api_version (optional with fallback)
+            api_version = resolver.get_credential_field(
+                "azure", "api_version", fallback=settings.azure_api_version, required=False
+            )
         """
         provider_lower = provider.lower()
 
@@ -242,20 +268,51 @@ class CredentialResolver:
                         )
                         return value
 
-                # Tenant has credential but required field missing → block fallback
-                logger.error(
-                    f"Missing required field '{field}' for provider {provider}",
-                    extra={
-                        "tenant_id": str(self.tenant.id),
-                        "tenant_name": self.tenant.name,
-                        "provider": provider,
-                        "field": field,
-                    },
-                )
-                raise ValueError(
-                    f"Tenant credential for provider '{provider}' is missing required field '{field}'. "
-                    f"Please configure the credential via PUT /api/v1/sysadmin/tenants/{self.tenant.id}/credentials/{provider}."
-                )
+                # Field is missing from tenant credentials
+                if required:
+                    # Required field missing → raise error (strict enforcement)
+                    logger.error(
+                        f"Missing required field '{field}' for provider {provider}",
+                        extra={
+                            "tenant_id": str(self.tenant.id),
+                            "tenant_name": self.tenant.name,
+                            "provider": provider,
+                            "field": field,
+                        },
+                    )
+                    raise ValueError(
+                        f"Tenant credential for provider '{provider}' is missing required field '{field}'. "
+                        f"Please configure the credential via PUT /api/v1/sysadmin/tenants/{self.tenant.id}/credentials/{provider}."
+                    )
+                else:
+                    # Optional field missing
+                    if self.settings.tenant_credentials_enabled and self.tenant:
+                        # STRICT MODE (multi-tenant): NEVER fallback to global settings
+                        # Return None to signal field is not configured for this tenant
+                        logger.info(
+                            f"Strict mode: Optional field '{field}' missing for provider {provider}; no fallback used",
+                            extra={
+                                "tenant_id": str(self.tenant.id),
+                                "tenant_name": self.tenant.name,
+                                "provider": provider,
+                                "field": field,
+                                "mode": "strict",
+                            },
+                        )
+                        return None
+
+                    # SINGLE-TENANT MODE: allow fallback to global settings
+                    logger.info(
+                        f"Single-tenant mode: Optional field '{field}' missing for provider {provider}, using provided fallback",
+                        extra={
+                            "provider": provider,
+                            "field": field,
+                            "fallback_used": fallback is not None,
+                            "source": "fallback",
+                            "mode": "single-tenant",
+                        },
+                    )
+                    return fallback
 
         # Strict mode: When tenant credentials enabled, no fallback to global
         # This prevents tenants from silently using shared infrastructure when they expect their own

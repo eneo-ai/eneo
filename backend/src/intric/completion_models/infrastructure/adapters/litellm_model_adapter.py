@@ -244,7 +244,8 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             endpoint = self.credential_resolver.get_credential_field(
                 provider=provider,
                 field="endpoint",
-                fallback=endpoint_fallback
+                fallback=endpoint_fallback,
+                required=(provider in {"vllm", "azure"})  # endpoint is required for vLLM and Azure
             )
 
             if endpoint:
@@ -366,7 +367,8 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             endpoint = self.credential_resolver.get_credential_field(
                 provider=provider,
                 field="endpoint",
-                fallback=endpoint_fallback
+                fallback=endpoint_fallback,
+                required=(provider in {"vllm", "azure"})  # endpoint is required for vLLM and Azure
             )
 
             if endpoint:

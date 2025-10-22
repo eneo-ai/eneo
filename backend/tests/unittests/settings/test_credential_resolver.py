@@ -272,7 +272,7 @@ def test_missing_required_field_for_tenant_raises():
 
     match_text = "missing required field 'endpoint'"
     with pytest.raises(ValueError, match=match_text):
-        resolver.get_credential_field("vllm", "endpoint", fallback="http://fallback")
+        resolver.get_credential_field("vllm", "endpoint", fallback="http://fallback", required=True)
 
 
 def test_missing_field_in_single_tenant_mode_uses_fallback():

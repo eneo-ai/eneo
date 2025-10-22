@@ -151,7 +151,8 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 endpoint = self.credential_resolver.get_credential_field(
                     provider=provider,
                     field="endpoint",
-                    fallback=endpoint_fallback
+                    fallback=endpoint_fallback,
+                    required=(provider in {"vllm", "azure"})  # endpoint is required for vLLM and Azure
                 )
 
                 if endpoint:
@@ -160,8 +161,16 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
                 # Inject api_version for Azure embeddings
                 if provider == "azure":
+                    # In strict mode, each tenant must configure their own api_version
+                    # In single-tenant mode, can fallback to global default
                     api_version = self.credential_resolver.get_credential_field(
-                        "azure", "api_version", settings.azure_api_version
+                        "azure",
+                        "api_version",
+                        settings.azure_api_version,
+                        required=(
+                            self.credential_resolver.tenant is not None and
+                            self.credential_resolver.settings.tenant_credentials_enabled
+                        ),
                     )
                     if api_version:
                         params["api_version"] = api_version

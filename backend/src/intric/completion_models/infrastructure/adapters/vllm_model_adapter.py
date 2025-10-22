@@ -42,19 +42,21 @@ class VLMMModelAdapter(OpenAIModelAdapter):
                 # Otherwise fall back to global credentials
 
             try:
+                # vLLM endpoint is required for multi-tenant deployments
                 tenant_endpoint = credential_resolver.get_credential_field(
                     provider="vllm",
                     field="endpoint",
                     fallback=None,
+                    required=True,
                 )
             except ValueError as _exc:
-                if settings.tenant_credentials_enabled and credential_resolver.tenant:
+                if settings.tenant_credentials_enabled and credential_resolver and credential_resolver.tenant:
                     raise
 
         if (
             tenant_endpoint is None
             and settings.tenant_credentials_enabled
-            and credential_resolver.tenant
+            and credential_resolver and credential_resolver.tenant
         ):
             # In strict multi-tenant mode we require both api_key and endpoint so that
             # traffic never leaks onto the shared VLLM infrastructure.

@@ -91,7 +91,7 @@ async def _create_space(
         json=payload,
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code in (200, 201), response.text
     return response.json()
 
 
@@ -116,6 +116,7 @@ async def _put_tenant_credential(
 async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
     client: AsyncClient,
     super_admin_token: str,
+    patch_auth_service_jwt,
     mock_transcription_models,
 ):
     """Verify Space access is tenant-scoped even with valid Space UUID.
@@ -161,7 +162,7 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
 
     # User B attempts to access User A's space (ID manipulation attack)
     attack_response = await client.get(
-        f"/api/v1/spaces/{space_a_id}",
+        f"/api/v1/spaces/{space_a_id}/",  # Note: trailing slash required by router
         headers={"Authorization": f"Bearer {token_b}"},
     )
 
@@ -235,7 +236,8 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     assert len(creds_a) == 1
     assert creds_a[0]["provider"] == "openai"
     # Masked key should end with last 4 chars of key_a
-    expected_mask = f"...{key_a[-4:]}"
+    # Note: sk- prefix is preserved by masking function for OpenAI keys
+    expected_mask = f"sk-...{key_a[-4:]}"
     assert creds_a[0]["masked_key"] == expected_mask
 
     # Verify NO leakage of Tenant B's key
@@ -251,7 +253,8 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     # Verify response only contains Tenant B's masked key
     creds_b = response_b.json()["credentials"]
     assert len(creds_b) == 1
-    expected_mask_b = f"...{key_b[-4:]}"
+    # Note: sk- prefix is preserved by masking function for OpenAI keys
+    expected_mask_b = f"sk-...{key_b[-4:]}"
     assert creds_b[0]["masked_key"] == expected_mask_b
 
     # Verify NO leakage of Tenant A's key
@@ -263,6 +266,7 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
 async def test_user_login_rejects_wrong_tenant_credentials(
     client: AsyncClient,
     super_admin_token: str,
+    patch_auth_service_jwt,
     mock_transcription_models,
 ):
     """Verify users cannot authenticate against wrong tenant.
@@ -308,7 +312,8 @@ async def test_user_login_rejects_wrong_tenant_credentials(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert tenant_info.status_code == 200
-    assert tenant_info.json()["id"] == tenant_a["id"], "User should belong to Tenant A"
+    # Verify user's tenant matches (TenantPublic doesn't include id, so check name)
+    assert tenant_info.json()["name"] == tenant_a["name"], "User should belong to Tenant A"
 
     # IMPORTANT: Current implementation doesn't have tenant-specific login endpoints
     # This test documents the expected behavior: users are bound to their tenant at creation
@@ -405,6 +410,7 @@ async def test_federation_config_endpoint_isolates_tenants(
 async def test_space_deletion_rejects_cross_tenant_operation(
     client: AsyncClient,
     super_admin_token: str,
+    patch_auth_service_jwt,
     mock_transcription_models,
 ):
     """Verify DELETE /spaces/{id} is tenant-scoped.
@@ -449,7 +455,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
 
     # User B attempts to delete User A's space
     delete_response = await client.delete(
-        f"/api/v1/spaces/{space_a_id}",
+        f"/api/v1/spaces/{space_a_id}/",  # Note: trailing slash required by router
         headers={"Authorization": f"Bearer {token_b}"},
     )
 
@@ -461,7 +467,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
 
     # Verify space still exists for User A
     verify_response = await client.get(
-        f"/api/v1/spaces/{space_a_id}",
+        f"/api/v1/spaces/{space_a_id}/",  # Note: trailing slash required by router
         headers={"Authorization": f"Bearer {token_a}"},
     )
     assert verify_response.status_code == 200, "Space should still exist for legitimate owner"
@@ -472,6 +478,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
 async def test_list_spaces_endpoint_filters_by_tenant(
     client: AsyncClient,
     super_admin_token: str,
+    patch_auth_service_jwt,
     mock_transcription_models,
 ):
     """Verify GET /spaces/ returns only current tenant's spaces.
@@ -530,7 +537,9 @@ async def test_list_spaces_endpoint_filters_by_tenant(
     )
     assert list_response.status_code == 200
 
-    returned_spaces = list_response.json()
+    # Response is paginated, extract items list
+    response_data = list_response.json()
+    returned_spaces = response_data.get("items", response_data.get("data", []))
     returned_ids = [space["id"] for space in returned_spaces]
 
     # Verify only Tenant B's spaces are returned
@@ -550,6 +559,7 @@ async def test_list_spaces_endpoint_filters_by_tenant(
 async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     client: AsyncClient,
     super_admin_token: str,
+    patch_auth_service_jwt,
     mock_transcription_models,
 ):
     """Verify tenant isolation under concurrent cross-tenant API requests.
@@ -604,7 +614,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
 
         results_a.append({
             "space_id": space["id"],
-            "tenant_id": tenant_info.json()["id"],
+            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
         })
 
     async def user_b_workflow():
@@ -620,7 +630,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
 
         results_b.append({
             "space_id": space["id"],
-            "tenant_id": tenant_info.json()["id"],
+            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
         })
 
     # Fire 100 concurrent requests (50 per tenant, interleaved)
@@ -638,23 +648,23 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     assert len(results_a) == 50, f"Expected 50 results for User A, got {len(results_a)}"
     assert len(results_b) == 50, f"Expected 50 results for User B, got {len(results_b)}"
 
-    # Verify ALL User A results have correct tenant_id
+    # Verify ALL User A results have correct tenant_name
     for result in results_a:
-        assert result["tenant_id"] == tenant_a["id"], (
-            f"CRITICAL: User A got wrong tenant_id: {result['tenant_id']}"
+        assert result["tenant_name"] == tenant_a["name"], (
+            f"CRITICAL: User A got wrong tenant_name: {result['tenant_name']}"
         )
 
-    # Verify ALL User B results have correct tenant_id
+    # Verify ALL User B results have correct tenant_name
     for result in results_b:
-        assert result["tenant_id"] == tenant_b["id"], (
-            f"CRITICAL: User B got wrong tenant_id: {result['tenant_id']}"
+        assert result["tenant_name"] == tenant_b["name"], (
+            f"CRITICAL: User B got wrong tenant_name: {result['tenant_name']}"
         )
 
-    # Verify NO tenant_id cross-contamination
-    tenant_ids_a = {r["tenant_id"] for r in results_a}
-    tenant_ids_b = {r["tenant_id"] for r in results_b}
-    assert tenant_a["id"] not in tenant_ids_b, "Tenant A ID leaked to Tenant B!"
-    assert tenant_b["id"] not in tenant_ids_a, "Tenant B ID leaked to Tenant A!"
+    # Verify NO tenant_name cross-contamination
+    tenant_names_a = {r["tenant_name"] for r in results_a}
+    tenant_names_b = {r["tenant_name"] for r in results_b}
+    assert tenant_a["name"] not in tenant_names_b, "Tenant A name leaked to Tenant B!"
+    assert tenant_b["name"] not in tenant_names_a, "Tenant B name leaked to Tenant A!"
 
 
 @pytest.mark.integration

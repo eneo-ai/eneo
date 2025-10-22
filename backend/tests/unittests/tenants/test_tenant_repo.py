@@ -64,6 +64,7 @@ async def sample_tenant(tenant_repo):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_update_api_credential_creates_new(tenant_repo, sample_tenant):
     """Creating new credential via JSONB set operation.
 
@@ -86,6 +87,7 @@ async def test_update_api_credential_creates_new(tenant_repo, sample_tenant):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_update_api_credential_overwrites_existing(tenant_repo, sample_tenant):
     """Updating existing credential via JSONB set operation.
 
@@ -111,6 +113,7 @@ async def test_update_api_credential_overwrites_existing(tenant_repo, sample_ten
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_update_api_credential_multiple_providers(tenant_repo, sample_tenant):
     """Adding multiple providers creates separate JSONB keys.
 
@@ -154,6 +157,7 @@ async def test_update_api_credential_multiple_providers(tenant_repo, sample_tena
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_update_api_credential_case_insensitive(tenant_repo, sample_tenant):
     """Provider names are normalized to lowercase.
 
@@ -172,6 +176,7 @@ async def test_update_api_credential_case_insensitive(tenant_repo, sample_tenant
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_delete_api_credential_removes_specific(tenant_repo, sample_tenant):
     """Delete removes specific provider credential.
 
@@ -200,6 +205,7 @@ async def test_delete_api_credential_removes_specific(tenant_repo, sample_tenant
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_delete_api_credential_leaves_others(tenant_repo, sample_tenant):
     """Deleting one provider leaves others intact.
 
@@ -238,6 +244,7 @@ async def test_delete_api_credential_leaves_others(tenant_repo, sample_tenant):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_delete_api_credential_nonexistent(tenant_repo, sample_tenant):
     """Deleting non-existent credential is idempotent.
 
@@ -263,6 +270,7 @@ async def test_delete_api_credential_nonexistent(tenant_repo, sample_tenant):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_delete_api_credential_case_insensitive(tenant_repo, sample_tenant):
     """Provider names are normalized to lowercase when deleting.
 
@@ -286,6 +294,7 @@ async def test_delete_api_credential_case_insensitive(tenant_repo, sample_tenant
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_get_api_credentials_masked_returns_last_4(tenant_repo, sample_tenant):
     """Returns last 4 chars with '...' prefix for keys >4 chars.
 
@@ -313,6 +322,7 @@ async def test_get_api_credentials_masked_returns_last_4(tenant_repo, sample_ten
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_get_api_credentials_masked_handles_short_keys(tenant_repo, sample_tenant):
     """Masking handles keys ≤4 chars with '***'.
 
@@ -346,6 +356,7 @@ async def test_get_api_credentials_masked_handles_short_keys(tenant_repo, sample
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_get_api_credentials_masked_empty_credentials(tenant_repo, sample_tenant):
     """Empty credentials dict returns empty dict.
 
@@ -360,6 +371,7 @@ async def test_get_api_credentials_masked_empty_credentials(tenant_repo, sample_
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_get_api_credentials_masked_multiple_providers(tenant_repo, sample_tenant):
     """Multiple providers all masked correctly.
 
@@ -399,6 +411,7 @@ async def test_get_api_credentials_masked_multiple_providers(tenant_repo, sample
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_get_api_credentials_masked_with_azure_extra_fields(
     tenant_repo, sample_tenant
 ):

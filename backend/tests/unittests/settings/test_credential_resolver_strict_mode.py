@@ -281,6 +281,7 @@ class TestCredentialResolverStrictMode:
                 provider="vllm",
                 field="endpoint",
                 fallback="http://global-vllm-endpoint:8000",
+                required=True  # vLLM endpoint is required in strict mode
             )
 
         # Verify error message is helpful

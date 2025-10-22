@@ -55,6 +55,7 @@ async def test_strict_mode_missing_endpoint_blocks_fallback(db_container):
                 provider="vllm",
                 field="endpoint",
                 fallback=strict_settings.vllm_model_url,
+                required=True  # vLLM endpoint is required in strict mode
             )
     finally:
         set_settings(base_settings)
