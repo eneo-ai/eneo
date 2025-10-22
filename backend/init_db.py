@@ -28,7 +28,7 @@ settings = Settings()
 # Alembic command
 def run_alembic_migrations():
     try:
-        subprocess.run(["poetry", "run", "alembic", "upgrade", "head"], check=True)
+        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
         print("Alembic migrations ran successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error running alembic migrations: {e}")
@@ -134,8 +134,8 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             # Add completion model if none exist
             if model is None:
                 add_model_query = sql.SQL(
-                    """INSERT INTO completion_models 
-                    (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning) 
+                    """INSERT INTO completion_models
+                    (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
                 )
                 cur.execute(
