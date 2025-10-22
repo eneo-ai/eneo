@@ -209,7 +209,7 @@ def test_settings(
         openapi_only_mode=False,
 
         # Development
-        testing=True,
+        testing=False,  # Integration tests have full isolation via testcontainers
         dev=True,
 
         # Encryption
