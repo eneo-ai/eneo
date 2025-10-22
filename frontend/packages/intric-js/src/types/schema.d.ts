@@ -1296,7 +1296,7 @@ export interface paths {
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     /**
      * Set tenant API credential
-     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name) are required.
+     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
      */
     put: operations["set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put"];
     /**
@@ -5339,8 +5339,10 @@ export interface components {
      * SetCredentialRequest
      * @description Request model for setting tenant API credentials.
      *
-     * For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name)
-     * are required. For other providers, only api_key is required.
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
      *
      * Example for OpenAI:
      *     {
@@ -5351,11 +5353,10 @@ export interface components {
      *     {
      *         "api_key": "abc123...",
      *         "endpoint": "https://my-resource.openai.azure.com",
-     *         "api_version": "2024-02-15-preview",
-     *         "deployment_name": "gpt-4"
+     *         "api_version": "2024-02-15-preview"
      *     }
      *
-     * Example for VLLM:
+     * Example for vLLM:
      *     {
      *         "api_key": "vllm-secret-key",
      *         "endpoint": "http://tenant-vllm:8000"
@@ -5387,12 +5388,17 @@ export interface components {
      * SetCredentialResponse
      * @description Response model for setting tenant API credentials.
      *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
      * Example:
      *     {
      *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
      *         "provider": "openai",
      *         "masked_key": "...xyz9",
-     *         "message": "API credential for openai set successfully"
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
      *     }
      */
     SetCredentialResponse: {
@@ -5407,6 +5413,11 @@ export interface components {
       masked_key: string;
       /** Message */
       message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
     };
     /**
      * SetFederationRequest
@@ -5438,6 +5449,16 @@ export interface components {
        * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
        */
       allowed_domains?: string[];
+      /**
+       * Canonical Public Origin
+       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required for multi-tenant federation to construct redirect_uri
+       */
+      canonical_public_origin?: string | null;
+      /**
+       * Redirect Path
+       * @description Optional custom redirect path starting with /
+       */
+      redirect_path?: string | null;
     };
     /**
      * SetFederationResponse
@@ -5911,6 +5932,68 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+    };
+    /**
+     * TenantWithMaskedCredentials
+     * @description TenantInDB with masked API credentials for safe API responses.
+     *
+     * This model is used when returning tenant data through API endpoints
+     * to prevent exposing full API keys. The api_credentials field is
+     * automatically masked to show only the last 4 characters of each key.
+     *
+     * Example:
+     *     Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
+     *     Masked: {"openai": "...xyz"}
+     */
+    TenantWithMaskedCredentials: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Privacy Policy */
+      privacy_policy?: string | null;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
+      /** Quota Limit */
+      quota_limit: number;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /** @default active */
+      state?: components["schemas"]["TenantState"];
+      /**
+       * Security Enabled
+       * @default false
+       */
+      security_enabled?: boolean;
+      /**
+       * Modules
+       * @default []
+       */
+      modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
+      /** Federation Config */
+      federation_config?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TokenEstimateBreakdown
@@ -14160,7 +14243,7 @@ export interface operations {
   };
   /**
    * Set tenant API credential
-   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name) are required.
+   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
    */
   set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put: {
     parameters: {
