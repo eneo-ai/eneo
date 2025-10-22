@@ -101,7 +101,7 @@
 
 <div class="flex items-center justify-between gap-4 {cls}">
   <span {...$label} use:label class=""
-    >{#if $$slots.default}<slot />{:else}{getUIMessage('ui_select_timeframe')}{/if}</span
+    >{#if $$slots.default}<slot />{:else}{getUIMessage("ui_select_timeframe")}{/if}</span
   >
   <div
     {...$field}
@@ -123,7 +123,12 @@
         </div>
       {/each}
     </div>
-    <Tooltip text={getUIMessage('ui_open_calendar')} asFragment let:trigger={tooltipTrigger} placement="top">
+    <Tooltip
+      text={getUIMessage("ui_open_calendar")}
+      asFragment
+      let:trigger={tooltipTrigger}
+      placement="top"
+    >
       <Button is={[$trigger, ...tooltipTrigger]} variant="primary" padding="icon">
         <IconCalendar />
       </Button>

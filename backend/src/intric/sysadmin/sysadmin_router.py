@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
+from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
@@ -24,11 +26,12 @@ from intric.allowed_origins.allowed_origin_models import (
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
+from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
 from intric.server import protocol
 from intric.server.dependencies.container import get_container, get_container_for_sysadmin
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdatePublic
+from intric.tenants.tenant import TenantBase, TenantUpdatePublic, TenantWithMaskedCredentials
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.authentication import auth
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
@@ -39,7 +42,42 @@ from intric.completion_models.presentation.completion_model_models import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Depends(auth.authenticate_super_api_key)])
+router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
+
+
+class OIDCDebugToggleRequest(BaseModel):
+    enabled: bool = Field(..., description="Enable or disable OIDC debug logging")
+    duration_minutes: int | None = Field(
+        30,
+        ge=1,
+        le=120,
+        description="Duration in minutes before the toggle auto-expires (max 120)",
+    )
+    reason: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional note for audit trail",
+    )
+
+
+class OIDCDebugToggleResponse(BaseModel):
+    enabled: bool
+    enabled_at: datetime | None
+    enabled_by: str | None
+    expires_at: datetime | None
+    reason: str | None
+    backend: str
+
+    @classmethod
+    def from_flag(cls, flag: DebugFlag, *, backend: str) -> "OIDCDebugToggleResponse":
+        return cls(
+            enabled=flag.enabled,
+            enabled_at=flag.enabled_at,
+            enabled_by=flag.enabled_by,
+            expires_at=flag.expires_at,
+            reason=flag.reason,
+            backend=backend,
+        )
 
 
 @router.post(
@@ -111,29 +149,45 @@ async def get_access_token(user_id: UUID, container: Container = Depends(get_con
     return auth_service.create_access_token_for_user(user)
 
 
-@router.get("/tenants/", response_model=PaginatedResponse[TenantInDB])
+@router.get("/tenants/", response_model=PaginatedResponse[TenantWithMaskedCredentials])
 async def get_tenants(domain: str | None = None, container: Container = Depends(get_container())):
+    """Get all tenants with masked API credentials.
+
+    Returns tenant information with API keys masked to show only last 4 characters.
+    This prevents exposing full API keys through the API endpoint.
+
+    Args:
+        domain: Optional domain filter
+        container: Dependency injection container
+
+    Returns:
+        Paginated list of tenants with masked credentials
+    """
     tenant_service = container.tenant_service()
 
     tenants = await tenant_service.get_all_tenants(domain)
 
-    return protocol.to_paginated_response(tenants)
+    # Mask API credentials before returning
+    masked_tenants = [TenantWithMaskedCredentials.from_tenant(t) for t in tenants]
+
+    return protocol.to_paginated_response(masked_tenants)
 
 
 @router.post(
     "/tenants/",
-    response_model=TenantInDB,
+    response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([400]),
 )
 async def create_tenant(tenant: TenantBase, container: Container = Depends(get_container())):
     tenant_service = container.tenant_service()
 
-    return await tenant_service.create_tenant(tenant)
+    created_tenant = await tenant_service.create_tenant(tenant)
+    return TenantWithMaskedCredentials.from_tenant(created_tenant)
 
 
 @router.post(
     "/tenants/{id}/",
-    response_model=TenantInDB,
+    response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([404]),
 )
 async def update_tenant(
@@ -143,18 +197,20 @@ async def update_tenant(
 ):
     tenant_service = container.tenant_service()
 
-    return await tenant_service.update_tenant(tenant, id)
+    updated_tenant = await tenant_service.update_tenant(tenant, id)
+    return TenantWithMaskedCredentials.from_tenant(updated_tenant)
 
 
 @router.delete(
     "/tenants/{id}/",
-    response_model=TenantInDB,
+    response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([404]),
 )
 async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_container())):
     tenant_service = container.tenant_service()
 
-    return await tenant_service.delete_tenant(id)
+    deleted_tenant = await tenant_service.delete_tenant(id)
+    return TenantWithMaskedCredentials.from_tenant(deleted_tenant)
 
 
 @router.get("/predefined-roles/")
@@ -171,6 +227,86 @@ async def crawl_all_weekly_websites(
     sysadmin_service = container.sysadmin_service()
 
     return await sysadmin_service.run_crawl_on_weekly_websites()
+
+
+def _mask_actor_label() -> str:
+    return "super_api_key"
+
+
+def _get_storage_backend(redis_client) -> str:
+    return "redis" if redis_client is not None else "file"
+
+
+@router.post(
+    "/observability/oidc-debug/",
+    response_model=OIDCDebugToggleResponse,
+    summary="Enable or disable OIDC debug logging",
+    description=(
+        "Turns verbose OIDC diagnostics on or off for a limited window. "
+        "Requires super API key."
+    ),
+    responses={
+        200: {"description": "Debug flag state updated."},
+        401: {"description": "Missing or invalid super API key."},
+    },
+)
+async def toggle_oidc_debug(
+    payload: OIDCDebugToggleRequest,
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    try:
+        redis_client = container.redis_client()
+    except Exception:  # pragma: no cover - defensive fallback
+        redis_client = None
+
+    duration = timedelta(minutes=payload.duration_minutes or 30)
+    flag = await set_debug_flag(
+        redis_client,
+        enabled=payload.enabled,
+        enabled_by=_mask_actor_label(),
+        duration=duration,
+        reason=payload.reason,
+    )
+
+    logger.warning(
+        "OIDC debug flag updated",
+        extra={
+            "enabled": flag.enabled,
+            "expires_at": flag.expires_at.isoformat() if flag.expires_at else None,
+            "backend": _get_storage_backend(redis_client),
+            "reason": flag.reason,
+        },
+    )
+
+    return OIDCDebugToggleResponse.from_flag(
+        flag,
+        backend=_get_storage_backend(redis_client),
+    )
+
+
+@router.get(
+    "/observability/oidc-debug/",
+    response_model=OIDCDebugToggleResponse,
+    summary="Get current OIDC debug toggle status",
+    description="Returns whether OIDC debug logging is currently enabled and when it expires.",
+    responses={
+        200: {"description": "Current state of the OIDC debug toggle."},
+        401: {"description": "Missing or invalid super API key."},
+    },
+)
+async def get_oidc_debug_status(
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    try:
+        redis_client = container.redis_client()
+    except Exception:  # pragma: no cover - defensive fallback
+        redis_client = None
+
+    flag = await get_debug_flag(redis_client)
+    return OIDCDebugToggleResponse.from_flag(
+        flag,
+        backend=_get_storage_backend(redis_client),
+    )
 
 
 @router.get(

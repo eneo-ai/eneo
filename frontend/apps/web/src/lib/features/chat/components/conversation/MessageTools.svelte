@@ -53,7 +53,8 @@
         <IconChevronRight
           class={referencesExpanded ? "rotate-90 transition-all" : "transition-all"}
         />
-        {message.references.length + message.web_search_references.length} {m.references()}
+        {message.references.length + message.web_search_references.length}
+        {m.references()}
       </Button>
     {/if}
   </div>

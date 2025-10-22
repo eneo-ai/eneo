@@ -56,10 +56,7 @@
   }
 </script>
 
-<Settings.Row
-  title={m.embedding_models()}
-  description={m.embedding_models_description()}
->
+<Settings.Row title={m.embedding_models()} description={m.embedding_models_description()}>
   <svelte:fragment slot="description">
     {#if $currentSpace.embedding_models.length === 0}
       <p
@@ -79,9 +76,7 @@
   {#each selectableModels as model (model.id)}
     {@const meetsClassification = model.meets_security_classification ?? true}
     <Tooltip
-      text={meetsClassification
-        ? undefined
-        : m.model_does_not_meet_security_classification()}
+      text={meetsClassification ? undefined : m.model_does_not_meet_security_classification()}
     >
       <div
         class="border-default hover:bg-hover-dimmer cursor-pointer border-b py-4 pr-4 pl-2"

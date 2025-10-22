@@ -11,7 +11,9 @@
 </script>
 
 <svelte:head>
-  <title>{m.app_name()} – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.services()}</title>
+  <title
+    >{m.app_name()} – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.services()}</title
+  >
 </svelte:head>
 
 <Page.Root>

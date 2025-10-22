@@ -53,7 +53,9 @@ function createTemplateController(data: TemplateControllerParams) {
         return `${m.create()} ${adapter.getResourceName().singular}`;
       }
 
-      return $currentStep === "start" ? m.next() : `${m.create()} ${adapter.getResourceName().singular}`;
+      return $currentStep === "start"
+        ? m.next()
+        : `${m.create()} ${adapter.getResourceName().singular}`;
     }
   );
 

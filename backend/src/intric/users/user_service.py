@@ -58,13 +58,18 @@ class UserService:
         self.info_blob_repo = info_blob_repo
 
     async def _validate_email(self, user: UserBase):
-        if await self.repo.get_user_by_email(email=user.email, with_deleted=True) is not None:
+        if (
+            await self.repo.get_user_by_email(email=user.email, with_deleted=True)
+            is not None
+        ):
             raise UniqueUserException("That email is already taken.")
 
     async def _validate_username(self, user: UserBase):
         if (
             user.username is not None
-            and await self.repo.get_user_by_username(username=user.username, with_deleted=True)
+            and await self.repo.get_user_by_username(
+                username=user.username, with_deleted=True
+            )
             is not None
         ):
             raise UniqueUserException("That username is already taken.")
@@ -76,7 +81,9 @@ class UserService:
             raise AuthenticationException("No such user")
 
         if user.password is None:
-            raise AuthenticationException("User has not enabled username and password login")
+            raise AuthenticationException(
+                "User has not enabled username and password login"
+            )
 
         if not self.auth_service.verify_password(password, user.password):
             raise AuthenticationException("Wrong password")
@@ -102,13 +109,13 @@ class UserService:
         correlation_id = correlation_id or "no-correlation-id"
 
         logger.debug(
-            "Starting OIDC user service login (MobilityGuard)",
+            "Starting OIDC user service login",
             extra={
                 "correlation_id": correlation_id,
-                "client_id": get_settings().mobilityguard_client_id,
+                "client_id": get_settings().oidc_client_id,
                 "signing_algos": signing_algos,
-                "has_tenant_id": bool(get_settings().mobilityguard_tenant_id),
-            }
+                "has_tenant_id": bool(get_settings().oidc_tenant_id),
+            },
         )
 
         try:
@@ -117,7 +124,7 @@ class UserService:
                 access_token=access_token,
                 key=key.key,
                 signing_algos=signing_algos,
-                client_id=get_settings().mobilityguard_client_id,
+                client_id=get_settings().oidc_client_id,
                 options={"verify_iat": False},
                 correlation_id=correlation_id,
             )
@@ -128,7 +135,7 @@ class UserService:
                     "correlation_id": correlation_id,
                     "username": username,
                     "email": email,
-                }
+                },
             )
 
         except jwt.ExpiredSignatureError as e:
@@ -137,7 +144,7 @@ class UserService:
                 extra={
                     "correlation_id": correlation_id,
                     "error": str(e),
-                }
+                },
             )
             raise AuthenticationException("Token has expired")
         except jwt.InvalidAudienceError as e:
@@ -146,8 +153,8 @@ class UserService:
                 extra={
                     "correlation_id": correlation_id,
                     "error": str(e),
-                    "expected_audience": get_settings().mobilityguard_client_id,
-                }
+                    "expected_audience": get_settings().oidc_client_id,
+                },
             )
             raise AuthenticationException("Invalid token audience")
         except jwt.InvalidTokenError as e:
@@ -157,7 +164,7 @@ class UserService:
                     "correlation_id": correlation_id,
                     "error_type": type(e).__name__,
                     "error": str(e),
-                }
+                },
             )
             raise AuthenticationException("Invalid token")
         except Exception as e:
@@ -167,15 +174,15 @@ class UserService:
                     "correlation_id": correlation_id,
                     "error_type": type(e).__name__,
                     "error": str(e),
-                    "client_id": get_settings().mobilityguard_client_id,
-                }
+                    "client_id": get_settings().oidc_client_id,
+                },
             )
             raise AuthenticationException("Failed to validate token")
 
         # Look up user in database
         logger.info(
             f"OIDC: Looking up user by email: {email}",
-            extra={"correlation_id": correlation_id}
+            extra={"correlation_id": correlation_id},
         )
 
         user_in_db = await self.repo.get_user_by_email(email)
@@ -187,44 +194,46 @@ class UserService:
                     "correlation_id": correlation_id,
                     "email": email,
                     "username": username,
-                }
+                },
             )
 
             # If a the user does not exist in our database, create it
 
             # Check if tenant ID is configured
-            if not get_settings().mobilityguard_tenant_id:
+            if not get_settings().oidc_tenant_id:
                 logger.error(
-                    "Cannot create new user: OIDC tenant ID not configured (MOBILITYGUARD_TENANT_ID)",
+                    "Cannot create new user: OIDC tenant ID not configured (OIDC_TENANT_ID or deprecated MOBILITYGUARD_TENANT_ID)",
                     extra={
                         "correlation_id": correlation_id,
                         "email": email,
                         "username": username,
-                    }
+                    },
                 )
                 raise AuthenticationException(
-                    "System configuration error: Cannot create new users via MobilityGuard. "
+                    "System configuration error: Cannot create new users via OIDC. "
                     "Please contact your administrator."
                 )
 
             try:
                 # Will only work on one tenant in the instance for now
-                tenant_id = UUID(get_settings().mobilityguard_tenant_id)
+                tenant_id = UUID(get_settings().oidc_tenant_id)
 
                 logger.info(
                     f"Creating user with tenant ID: {tenant_id}",
-                    extra={"correlation_id": correlation_id}
+                    extra={"correlation_id": correlation_id},
                 )
 
             except ValueError as e:
                 logger.error(
-                    f"Invalid MOBILITYGUARD_TENANT_ID format: {get_settings().mobilityguard_tenant_id}",
+                    f"Invalid OIDC_TENANT_ID format: {get_settings().oidc_tenant_id}",
                     extra={
                         "correlation_id": correlation_id,
                         "error": str(e),
-                    }
+                    },
                 )
-                raise AuthenticationException("System configuration error: Invalid tenant ID format")
+                raise AuthenticationException(
+                    "System configuration error: Invalid tenant ID format"
+                )
 
             # Verify tenant exists
             tenant = await self.tenant_repo.get(tenant_id)
@@ -234,9 +243,11 @@ class UserService:
                     extra={
                         "correlation_id": correlation_id,
                         "tenant_id": str(tenant_id),
-                    }
+                    },
                 )
-                raise AuthenticationException("System configuration error: Tenant does not exist")
+                raise AuthenticationException(
+                    "System configuration error: Tenant does not exist"
+                )
 
             # The hack continues
             user_role = await self.predefined_roles_repo.get_predefined_role_by_name(
@@ -246,9 +257,11 @@ class UserService:
             if user_role is None:
                 logger.error(
                     "Predefined USER role not found in database",
-                    extra={"correlation_id": correlation_id}
+                    extra={"correlation_id": correlation_id},
                 )
-                raise AuthenticationException("System configuration error: User role not found")
+                raise AuthenticationException(
+                    "System configuration error: User role not found"
+                )
 
             new_user = UserAdd(
                 email=email,
@@ -263,14 +276,14 @@ class UserService:
                 was_federated = True
 
                 logger.info(
-                    "Successfully created new user via OIDC federation (MobilityGuard)",
+                    "Successfully created new user via OIDC federation",
                     extra={
                         "correlation_id": correlation_id,
                         "user_id": str(user_in_db.id),
                         "email": email,
                         "username": username.lower(),
                         "tenant_id": str(tenant_id),
-                    }
+                    },
                 )
 
             except Exception as e:
@@ -282,7 +295,7 @@ class UserService:
                         "username": username,
                         "error_type": type(e).__name__,
                         "error": str(e),
-                    }
+                    },
                 )
                 raise AuthenticationException("Failed to create user account")
 
@@ -295,7 +308,7 @@ class UserService:
                     "email": user_in_db.email,
                     "tenant_id": str(user_in_db.tenant_id),
                     "user_state": user_in_db.state,
-                }
+                },
             )
 
             try:
@@ -308,7 +321,7 @@ class UserService:
                         "user_id": str(user_in_db.id),
                         "error_type": type(e).__name__,
                         "error": str(e),
-                    }
+                    },
                 )
                 raise
 
@@ -316,13 +329,13 @@ class UserService:
         access_token = self.auth_service.create_access_token_for_user(user=user_in_db)
 
         logger.info(
-            "OIDC login completed successfully (MobilityGuard)",
+            "OIDC login completed successfully",
             extra={
                 "correlation_id": correlation_id,
                 "user_id": str(user_in_db.id),
                 "email": user_in_db.email,
                 "was_federated": was_federated,
-            }
+            },
         )
 
         return (
@@ -343,7 +356,9 @@ class UserService:
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
         if new_user.password is not None:
-            salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(new_user.password)
+            salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
+                new_user.password
+            )
         else:
             salt = None
             hashed_pass = None
@@ -363,7 +378,9 @@ class UserService:
         api_key = await self.generate_api_key(user_id=user_in_db.id)
 
         access_token = AccessToken(
-            access_token=self.auth_service.create_access_token_for_user(user=user_in_db),
+            access_token=self.auth_service.create_access_token_for_user(
+                user=user_in_db
+            ),
             token_type="bearer",
         )
 
@@ -424,14 +441,16 @@ class UserService:
 
         return user_in_db
 
-    async def _check_user_and_tenant_state(self, user_in_db, correlation_id: str = None):
+    async def _check_user_and_tenant_state(
+        self, user_in_db, correlation_id: str = None
+    ):
         """
         Check if the user or their tenant has restrictions.
         Raises appropriate exceptions if user is inactive or tenant is suspended.
         """
         correlation_id = correlation_id or "no-correlation-id"
 
-        logger.info(
+        logger.debug(
             "Checking user and tenant state",
             extra={
                 "correlation_id": correlation_id,
@@ -439,9 +458,13 @@ class UserService:
                 "user_email": user_in_db.email,
                 "user_state": user_in_db.state,
                 "tenant_id": str(user_in_db.tenant_id),
-                "tenant_state": user_in_db.tenant.state if user_in_db.tenant else "No tenant",
-                "tenant_name": user_in_db.tenant.name if user_in_db.tenant else "No tenant",
-            }
+                "tenant_state": user_in_db.tenant.state
+                if user_in_db.tenant
+                else "No tenant",
+                "tenant_name": user_in_db.tenant.name
+                if user_in_db.tenant
+                else "No tenant",
+            },
         )
 
         if user_in_db.state == UserState.INACTIVE:
@@ -452,7 +475,7 @@ class UserService:
                     "user_id": str(user_in_db.id),
                     "user_email": user_in_db.email,
                     "user_state": user_in_db.state,
-                }
+                },
             )
             raise UserInactiveException()
 
@@ -466,16 +489,16 @@ class UserService:
                     "tenant_id": str(user_in_db.tenant_id),
                     "tenant_state": user_in_db.tenant.state,
                     "tenant_name": user_in_db.tenant.name,
-                }
+                },
             )
             raise TenantSuspendedException()
 
-        logger.info(
+        logger.debug(
             "User and tenant state check passed",
             extra={
                 "correlation_id": correlation_id,
                 "user_id": str(user_in_db.id),
-            }
+            },
         )
 
     async def authenticate_with_assistant_api_key(
@@ -536,7 +559,9 @@ class UserService:
         await self._validate_email(user_update_public)
         await self._validate_username(user_update_public)
 
-        user_update = UserUpdate(id=user_id, **user_update_public.model_dump(exclude_unset=True))
+        user_update = UserUpdate(
+            id=user_id, **user_update_public.model_dump(exclude_unset=True)
+        )
 
         if user_update_public.password is not None:
             salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
@@ -568,7 +593,9 @@ class UserService:
         if user is None:
             raise NotFoundException("No such user exists.")
 
-        user.quota_used = await self.info_blob_repo.get_total_size_of_user(user_id=user.id)
+        user.quota_used = await self.info_blob_repo.get_total_size_of_user(
+            user_id=user.id
+        )
         return user
 
     async def generate_api_key(self, user_id: UUID):

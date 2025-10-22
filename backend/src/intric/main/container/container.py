@@ -1,3 +1,4 @@
+import redis.asyncio as aioredis
 from dependency_injector import containers, providers
 from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
@@ -179,6 +180,7 @@ from intric.security_classifications.domain.repositories.security_classification
     SecurityClassificationRepoImpl,
 )
 from intric.services.service_repo import ServiceRepository
+from intric.settings.encryption_service import EncryptionService
 from intric.services.service_runner import ServiceRunner
 from intric.services.service_service import ServiceService
 from intric.sessions.session_service import SessionService
@@ -248,7 +250,36 @@ from intric.websites.infrastructure.update_website_size_service import (
 )
 from intric.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from intric.worker.task_manager import TaskManager
+from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 from intric.workflows.step_repo import StepRepository
+from intric.main.config import get_settings
+from intric.main.logging import get_logger
+
+_logger = get_logger(__name__)
+
+
+def _create_redis_client() -> aioredis.Redis:
+    settings = get_settings()
+    url = f"redis://{settings.redis_host}:{settings.redis_port}"
+    kwargs: dict[str, object] = {
+        "decode_responses": False,
+    }
+
+    # Support optional redis_db attribute on settings (used in tests)
+    redis_db = getattr(settings, "redis_db", None)
+    if redis_db is not None:
+        kwargs["db"] = redis_db
+
+    return aioredis.Redis.from_url(url, **kwargs)
+
+
+def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimiter:
+    settings = get_settings()
+    return TenantConcurrencyLimiter(
+        redis=redis_client,
+        max_concurrent=settings.tenant_worker_concurrency_limit,
+        ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
+    )
 
 
 class Container(containers.DeclarativeContainer):
@@ -262,6 +293,32 @@ class Container(containers.DeclarativeContainer):
     user = providers.Dependency(instance_of=UserInDB)
     tenant = providers.Dependency(instance_of=TenantInDB)
     aiohttp_client = providers.Object(aiohttp_client)
+
+    # Encryption service (singleton - shared across all repositories)
+    # NOTE: Must use get_settings() directly because config provider is never populated
+    # The config.settings provider chain is never initialized, so we use get_settings() module singleton
+    def _build_encryption_service() -> EncryptionService:
+        settings = get_settings()
+        key = settings.encryption_key
+        if settings.testing:
+            key = None
+        _logger.info(
+            "Container: Initializing EncryptionService",
+            extra={
+                "encryption_key_present": bool(key),
+                "testing_mode": settings.testing,
+            },
+        )
+        return EncryptionService(key)
+
+    encryption_service: providers.Singleton[EncryptionService] = providers.Singleton(
+        _build_encryption_service
+    )
+
+    redis_client = providers.Singleton(_create_redis_client)
+    tenant_concurrency_limiter = providers.Factory(
+        _build_tenant_limiter, redis_client=redis_client
+    )
 
     # Factories
     prompt_factory = providers.Factory(PromptFactory)
@@ -342,9 +399,10 @@ class Container(containers.DeclarativeContainer):
 
     # Repositories
     user_repo = providers.Factory(UsersRepository, session=session)
-    tenant_repo = providers.Factory(TenantRepository, session=session)
+    tenant_repo: providers.Factory[TenantRepository] = providers.Factory(
+        TenantRepository, session=session, encryption_service=encryption_service
+    )
     settings_repo = providers.Factory(SettingsRepository, session=session)
-    tenant_repo = providers.Factory(TenantRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
@@ -463,10 +521,18 @@ class Container(containers.DeclarativeContainer):
     completion_service = providers.Factory(
         CompletionService,
         context_builder=context_builder,
+        tenant=tenant,
+        config=config,
+        encryption_service=encryption_service,
     )
 
     # Datastore
-    create_embeddings_service = providers.Factory(CreateEmbeddingsService)
+    create_embeddings_service = providers.Factory(
+        CreateEmbeddingsService,
+        tenant=tenant,
+        config=config,
+        encryption_service=encryption_service,
+    )
     datastore = providers.Factory(
         Datastore,
         user=user,
@@ -912,6 +978,9 @@ class Container(containers.DeclarativeContainer):
     transcriber = providers.Factory(
         Transcriber,
         file_repo=file_repo,
+        tenant=tenant,
+        config=config,
+        encryption_service=encryption_service,
     )
     crawler = providers.Factory(Crawler)
 

@@ -41,7 +41,9 @@
   <Dialog.Content width="small">
     <Dialog.Title>{m.sync_website()}</Dialog.Title>
     <Dialog.Description>
-      {m.confirm_sync_website({ websiteName: website.name ? `${website.name} (${website.url})` : website.url })}
+      {m.confirm_sync_website({
+        websiteName: website.name ? `${website.name} (${website.url})` : website.url
+      })}
     </Dialog.Description>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>

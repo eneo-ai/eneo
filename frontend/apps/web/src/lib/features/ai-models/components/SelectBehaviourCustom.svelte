@@ -20,10 +20,10 @@
       class="hover:bg-hover-dimmer flex items-center gap-6 rounded-lg py-2 pr-2 pl-3"
       aria-labelledby="temperature_label"
     >
-      <Tooltip
-        text={m.temperature_tooltip()}
-      >
-        <p class="w-24" aria-label="Temperature setting" id="temperature_label">{m.temperature()}</p>
+      <Tooltip text={m.temperature_tooltip()}>
+        <p class="w-24" aria-label="Temperature setting" id="temperature_label">
+          {m.temperature()}
+        </p>
       </Tooltip>
       <Input.Slider bind:value={kwargs.temperature} max={2} min={0} step={0.01} />
       <Input.Number bind:value={kwargs.temperature} step={0.01} max={2} min={0} hiddenLabel={true}

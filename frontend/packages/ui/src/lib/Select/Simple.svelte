@@ -31,13 +31,14 @@
 
 <Root customStore={store} class={cls} {required} {fitViewport}>
   <Label><slot /></Label>
-  <Trigger placeholder={getUIMessage('ui_select_placeholder')}></Trigger>
+  <Trigger placeholder={getUIMessage("ui_select_placeholder")}></Trigger>
   <Options>
     {#each options as option (option.value)}
       <Item value={option.value} label={option.label}></Item>
     {/each}
     {#if !options.length}
-      <Item disabled label={getUIMessage('ui_no_available_items', { resourceName })} value={null}></Item>
+      <Item disabled label={getUIMessage("ui_no_available_items", { resourceName })} value={null}
+      ></Item>
     {/if}
   </Options>
 </Root>

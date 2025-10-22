@@ -63,65 +63,98 @@ async def login_with_mobilityguard(
     openid_connect_login: OpenIdConnectLogin,
     container: Container = Depends(get_container()),
 ):
-    """OpenID Connect Login with mobilityguard."""
+    """OpenID Connect Login (generic OIDC provider)."""
     correlation_id = str(uuid4())
     start_time = time.time()
 
     logger.debug(
-        "OIDC login initiated (MobilityGuard)",
+        "OIDC login initiated",
         extra={
             "correlation_id": correlation_id,
             "client_id": openid_connect_login.client_id,
             "redirect_uri": openid_connect_login.redirect_uri,
             "has_code": bool(openid_connect_login.code),
             "has_code_verifier": bool(openid_connect_login.code_verifier),
-        }
+        },
     )
 
     settings = config.get_settings()
 
+    # Compute redirect_uri server-side (ignore frontend-provided value)
+    encryption_service = container.encryption_service()
+    from intric.settings.credential_resolver import CredentialResolver
+    credential_resolver = CredentialResolver(
+        tenant=None,  # Single-tenant mode - no tenant context
+        settings=settings,
+        encryption_service=encryption_service,
+    )
+
+    try:
+        redirect_uri = credential_resolver.get_redirect_uri()
+    except ValueError as e:
+        logger.error(
+            "Failed to resolve redirect_uri",
+            extra={
+                "correlation_id": correlation_id,
+                "error": str(e),
+            },
+        )
+        raise HTTPException(
+            500,
+            "OIDC redirect_uri not configured. Set PUBLIC_ORIGIN environment variable.",
+        )
+
+    # Override frontend-provided redirect_uri with server-computed value (defense in depth)
+    if openid_connect_login.redirect_uri != redirect_uri:
+        logger.warning(
+            "Redirect URI mismatch - using server-configured value",
+            extra={
+                "correlation_id": correlation_id,
+                "frontend_provided": openid_connect_login.redirect_uri,
+                "server_computed": redirect_uri,
+            },
+        )
+        openid_connect_login.redirect_uri = redirect_uri
+
+    logger.info(
+        "OIDC login initiated (single-tenant)",
+        extra={
+            "correlation_id": correlation_id,
+            "redirect_uri": redirect_uri,
+            "source": "server-computed from PUBLIC_ORIGIN",
+        },
+    )
+
     # Check required configuration
-    if not settings.mobilityguard_discovery_endpoint:
+    if not settings.oidc_discovery_endpoint:
         logger.error(
             "OIDC discovery endpoint not configured",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "mobilityguard"
-            }
+            extra={"correlation_id": correlation_id, "provider": "oidc"},
         )
         raise HTTPException(500, "OIDC provider not properly configured")
 
-    if not settings.mobilityguard_client_secret:
+    if not settings.oidc_client_secret:
         logger.error(
             "OIDC client secret not configured",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "mobilityguard"
-            }
+            extra={"correlation_id": correlation_id, "provider": "oidc"},
         )
         raise HTTPException(500, "OIDC provider not properly configured")
 
-    if not settings.mobilityguard_tenant_id:
+    if not settings.oidc_tenant_id:
         logger.warning(
             "OIDC tenant ID not configured - new user creation will fail",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "mobilityguard"
-            }
+            extra={"correlation_id": correlation_id, "provider": "oidc"},
         )
 
     try:
         # Get the endpoints from discovery endpoint
         discovery_start = time.time()
         logger.debug(
-            f"Fetching OIDC discovery endpoint: {settings.mobilityguard_discovery_endpoint}",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "mobilityguard"
-            }
+            f"Fetching OIDC discovery endpoint: {settings.oidc_discovery_endpoint}",
+            extra={"correlation_id": correlation_id, "provider": "oidc"},
         )
 
-        async with aiohttp_client().get(settings.mobilityguard_discovery_endpoint) as resp:
+        async with aiohttp_client().get(settings.oidc_discovery_endpoint) as resp:
             discovery_time = time.time() - discovery_start
 
             if resp.status != 200:
@@ -130,11 +163,11 @@ async def login_with_mobilityguard(
                     f"OIDC discovery endpoint failed with status {resp.status}",
                     extra={
                         "correlation_id": correlation_id,
-                        "provider": "mobilityguard",
+                        "provider": "oidc",
                         "status": resp.status,
                         "response": response_text[:500],  # Truncate for logging
                         "duration_ms": discovery_time * 1000,
-                    }
+                    },
                 )
                 raise HTTPException(502, "Failed to fetch OIDC discovery endpoint")
 
@@ -143,13 +176,13 @@ async def login_with_mobilityguard(
                 "OIDC discovery endpoint fetched successfully",
                 extra={
                     "correlation_id": correlation_id,
-                    "provider": "mobilityguard",
+                    "provider": "oidc",
                     "duration_ms": discovery_time * 1000,
                     "token_endpoint": endpoints.get("token_endpoint"),
                     "jwks_uri": endpoints.get("jwks_uri"),
                     "userinfo_endpoint": endpoints.get("userinfo_endpoint"),
                     "authorization_endpoint": endpoints.get("authorization_endpoint"),
-                }
+                },
             )
 
     except aiohttp.ClientError as e:
@@ -157,10 +190,10 @@ async def login_with_mobilityguard(
             f"Network error fetching OIDC discovery endpoint: {str(e)}",
             extra={
                 "correlation_id": correlation_id,
-                "provider": "mobilityguard",
+                "provider": "oidc",
                 "error_type": type(e).__name__,
                 "error": str(e),
-            }
+            },
         )
         raise HTTPException(502, "Network error during OIDC authentication")
 
@@ -174,11 +207,11 @@ async def login_with_mobilityguard(
         f"OIDC token exchange at: {token_endpoint}",
         extra={
             "correlation_id": correlation_id,
-            "provider": "mobilityguard",
+            "provider": "oidc",
             "client_id": openid_connect_login.client_id,
             "grant_type": openid_connect_login.grant_type,
             "scope": openid_connect_login.scope,
-        }
+        },
     )
 
     try:
@@ -187,7 +220,7 @@ async def login_with_mobilityguard(
             data=openid_connect_login.model_dump(),
             auth=aiohttp.BasicAuth(
                 openid_connect_login.client_id,
-                settings.mobilityguard_client_secret,
+                settings.oidc_client_secret,
             ),
         ) as resp:
             token_exchange_time = time.time() - token_exchange_start
@@ -198,19 +231,23 @@ async def login_with_mobilityguard(
                     f"OIDC token exchange failed with status {resp.status}",
                     extra={
                         "correlation_id": correlation_id,
-                        "provider": "mobilityguard",
+                        "provider": "oidc",
                         "status": resp.status,
                         "response": response_text[:500],  # Truncate sensitive data
                         "duration_ms": token_exchange_time * 1000,
                         "client_id": openid_connect_login.client_id,
-                    }
+                    },
                 )
                 if resp.status == 401:
-                    raise HTTPException(401, "Invalid client credentials or authorization code")
+                    raise HTTPException(
+                        401, "Invalid client credentials or authorization code"
+                    )
                 elif resp.status == 400:
                     raise HTTPException(400, "Invalid token request - check parameters")
                 else:
-                    raise HTTPException(resp.status, f"OIDC token exchange failed: {resp.status}")
+                    raise HTTPException(
+                        resp.status, f"OIDC token exchange failed: {resp.status}"
+                    )
 
             try:
                 token_response = json.loads(response_text)
@@ -219,9 +256,9 @@ async def login_with_mobilityguard(
                     "OIDC token response is not valid JSON",
                     extra={
                         "correlation_id": correlation_id,
-                        "provider": "mobilityguard",
+                        "provider": "oidc",
                         "response": response_text[:500],
-                    }
+                    },
                 )
                 raise HTTPException(502, "Invalid OIDC token response format")
 
@@ -229,14 +266,14 @@ async def login_with_mobilityguard(
                 "OIDC token exchange successful",
                 extra={
                     "correlation_id": correlation_id,
-                    "provider": "mobilityguard",
+                    "provider": "oidc",
                     "duration_ms": token_exchange_time * 1000,
                     "has_id_token": "id_token" in token_response,
                     "has_access_token": "access_token" in token_response,
                     "has_refresh_token": "refresh_token" in token_response,
                     "token_type": token_response.get("token_type"),
                     "expires_in": token_response.get("expires_in"),
-                }
+                },
             )
 
     except aiohttp.ClientError as e:
@@ -244,10 +281,10 @@ async def login_with_mobilityguard(
             f"Network error during OIDC token exchange: {str(e)}",
             extra={
                 "correlation_id": correlation_id,
-                "provider": "mobilityguard",
+                "provider": "oidc",
                 "error_type": type(e).__name__,
                 "error": str(e),
-            }
+            },
         )
         raise HTTPException(502, "Network error during OIDC token exchange")
 
@@ -256,12 +293,14 @@ async def login_with_mobilityguard(
             "OIDC token response missing required fields",
             extra={
                 "correlation_id": correlation_id,
-                "provider": "mobilityguard",
+                "provider": "oidc",
                 "fields_received": list(token_response.keys()),
                 "fields_required": ["id_token", "access_token"],
-            }
+            },
         )
-        raise HTTPException(502, "Invalid OIDC token response - missing id_token or access_token")
+        raise HTTPException(
+            502, "Invalid OIDC token response - missing id_token or access_token"
+        )
 
     id_token = token_response["id_token"]
     access_token = token_response["access_token"]
@@ -269,8 +308,7 @@ async def login_with_mobilityguard(
     # Get the jwks
     jwks_start = time.time()
     logger.debug(
-        f"Fetching JWKS from: {jwks_endpoint}",
-        extra={"correlation_id": correlation_id}
+        f"Fetching JWKS from: {jwks_endpoint}", extra={"correlation_id": correlation_id}
     )
 
     try:
@@ -283,19 +321,21 @@ async def login_with_mobilityguard(
             extra={
                 "correlation_id": correlation_id,
                 "duration_ms": jwks_time * 1000,
-                "key_id": signing_key.key_id if hasattr(signing_key, 'key_id') else None,
-            }
+                "key_id": signing_key.key_id
+                if hasattr(signing_key, "key_id")
+                else None,
+            },
         )
     except Exception as e:
         logger.error(
             f"Failed to get signing key from OIDC JWKS: {str(e)}",
             extra={
                 "correlation_id": correlation_id,
-                "provider": "mobilityguard",
+                "provider": "oidc",
                 "error_type": type(e).__name__,
                 "error": str(e),
                 "jwks_uri": jwks_endpoint,
-            }
+            },
         )
         raise HTTPException(502, "Failed to verify OIDC token signature")
 
@@ -304,20 +344,22 @@ async def login_with_mobilityguard(
 
     try:
         service_start = time.time()
-        intric_token, was_federated, user_in_db = (
-            await user_service.login_with_mobilityguard(
-                id_token=id_token,
-                access_token=access_token,
-                key=signing_key,
-                signing_algos=signing_algos,
-                correlation_id=correlation_id,  # Pass correlation ID to service
-            )
+        (
+            intric_token,
+            was_federated,
+            user_in_db,
+        ) = await user_service.login_with_mobilityguard(
+            id_token=id_token,
+            access_token=access_token,
+            key=signing_key,
+            signing_algos=signing_algos,
+            correlation_id=correlation_id,  # Pass correlation ID to service
         )
         service_time = time.time() - service_start
 
         total_time = time.time() - start_time
         logger.info(
-            "OIDC login successful (MobilityGuard)",
+            "OIDC login successful",
             extra={
                 "correlation_id": correlation_id,
                 "was_federated": was_federated,
@@ -325,7 +367,7 @@ async def login_with_mobilityguard(
                 "user_email": user_in_db.email if user_in_db else None,
                 "service_duration_ms": service_time * 1000,
                 "total_duration_ms": total_time * 1000,
-            }
+            },
         )
 
     except Exception as e:
@@ -334,12 +376,12 @@ async def login_with_mobilityguard(
             f"OIDC user service login failed: {str(e)}",
             extra={
                 "correlation_id": correlation_id,
-                "provider": "mobilityguard",
+                "provider": "oidc",
                 "error_type": type(e).__name__,
                 "error": str(e),
                 "traceback": traceback.format_exc(),
                 "total_duration_ms": total_time * 1000,
-            }
+            },
         )
         raise HTTPException(401, "OIDC authentication failed")
 
