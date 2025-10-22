@@ -38,29 +38,3 @@
 | JWT_TOKEN_PREFIX                 | x        | In the header - eg `Bearer`                              |
 | URL_SIGNING_KEY                  | x        | Key for temporary file access URLs (use a strong random string) |
 | LOGLEVEL                         |          | one of ´INFO´, ´DEBUG´, ´WARNING´, ´ERROR´               |
-
-## Troubleshooting
-
-### SSR login returns HTTP 401 immediately after deployment
-
-- Check backend logs for messages such as `Allowed-origins seeding skipped` or
-  `Allowed origin '<url>' already registered`. These indicate whether the
-  automatic seeding detected `PUBLIC_ORIGIN` (or `ORIGIN` / `INTRIC_BACKEND_URL`).
-- Ensure the backend `.env` defines `PUBLIC_ORIGIN` (or one of the fallbacks).
-- You can inspect the allowlist directly:
-
-  ```bash
-  docker compose exec db \
-    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    -c 'SELECT url, tenant_id FROM allowed_origins;'
-  ```
-
-- If necessary, you can backfill manually (idempotent):
-
-  ```sql
-  INSERT INTO allowed_origins (url, tenant_id)
-  VALUES ('https://your-domain.com', '<tenant-uuid>')
-  ON CONFLICT (url) DO NOTHING;
-  ```
-
-  Substitute `<tenant-uuid>` with a row from `SELECT id FROM tenants;`.

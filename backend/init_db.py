@@ -1,4 +1,3 @@
-import logging
 import subprocess
 
 import bcrypt
@@ -24,121 +23,7 @@ class Settings(BaseSettings):
     default_user_email: Optional[str] = None
     default_user_password: Optional[str] = None
 
-    # Optional public origins (single-tenant deployments typically set PUBLIC_ORIGIN).
-    public_origin: Optional[str] = None
-    origin: Optional[str] = None  # legacy name used in some stacks
-    intric_backend_url: Optional[str] = None  # fallback if public origin not provided
-
 settings = Settings()
-
-
-def _resolve_seed_origin() -> Optional[str]:
-    """Pick the best available origin for allowed_origins seeding."""
-    candidates = [settings.public_origin, settings.origin, settings.intric_backend_url]
-
-    for candidate in candidates:
-        if not candidate:
-            continue
-
-        origin = candidate.strip()
-        if not origin:
-            continue
-
-        # Normalize to avoid duplicate rows caused by trailing slashes.
-        origin = origin.rstrip("/")
-
-        if not origin:
-            continue
-
-        if not origin.startswith("http://") and not origin.startswith("https://"):
-            logging.warning(
-                "Ignoring invalid allowed origin '%s'. Expected value starting with http:// or https://",
-                candidate,
-            )
-            continue
-
-        return origin
-
-    return None
-
-
-SEED_ORIGIN = _resolve_seed_origin()
-
-if SEED_ORIGIN is None:
-    logging.warning(
-        "Allowed-origins seeding skipped: PUBLIC_ORIGIN/ORIGIN/INTRIC_BACKEND_URL "
-        "not configured."
-    )
-else:
-    logging.info("Allowed-origins seeding enabled for '%s'.", SEED_ORIGIN)
-
-
-def seed_allowed_origin(conn, tenant_id, tenant_name):
-    """Ensure allowed_origins contains the resolved origin for the tenant."""
-
-    if SEED_ORIGIN is None:
-        return
-
-    cur = conn.cursor()
-
-    try:
-        cur.execute(
-            "SELECT tenant_id FROM allowed_origins WHERE url = %s",
-            (SEED_ORIGIN,),
-        )
-        existing = cur.fetchone()
-
-        if existing:
-            existing_tenant_id = existing[0]
-            if existing_tenant_id != tenant_id:
-                logging.info(
-                    (
-                        "Allowed origin '%s' already registered for tenant id %s; "
-                        "skipping seeding for tenant '%s'."
-                    ),
-                    SEED_ORIGIN,
-                    existing_tenant_id,
-                    tenant_name,
-                )
-            else:
-                logging.debug(
-                    "Allowed origin '%s' already present for tenant '%s'.",
-                    SEED_ORIGIN,
-                    tenant_name,
-                )
-            return
-
-        insert_query = sql.SQL(
-            """
-            INSERT INTO allowed_origins (url, tenant_id)
-            VALUES (%s, %s)
-            ON CONFLICT (url) DO NOTHING
-            """
-        )
-
-        cur.execute(insert_query, (SEED_ORIGIN, tenant_id))
-
-        if cur.rowcount > 0:
-            logging.info(
-                "Seeded allowed origin '%s' for tenant '%s'.",
-                SEED_ORIGIN,
-                tenant_name,
-            )
-        else:
-            logging.info(
-                "Allowed origin '%s' exists; no changes made.", SEED_ORIGIN
-            )
-    except Exception as exc:
-        # Let caller decide whether to roll back; provide actionable log first.
-        logging.error(
-            "Error inserting allowed origin '%s' for tenant '%s': %s",
-            SEED_ORIGIN,
-            tenant_name,
-            exc,
-        )
-        raise
-    finally:
-        cur.close()
 
 # Alembic command
 def run_alembic_migrations():
@@ -289,9 +174,6 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
                 VALUES (%s, %s, %s, %s)"""
             )
             cur.execute(enable_model_query, (model_id, tenant_id, True, True))
-
-        # Ensure the tenant's public origin is registered for CORS/SSR login.
-        seed_allowed_origin(conn, tenant_id, tenant_name)
 
         conn.commit()
         cur.close()
