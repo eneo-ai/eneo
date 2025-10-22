@@ -1,4 +1,3 @@
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
@@ -27,7 +26,7 @@ def run_migrations_online() -> None:
     """
 
     # handle testing config for migrations
-    if os.environ.get("TESTING"):
+    if get_settings().testing:
         print("Running migration for test_database")
         DB_URL = f"{get_settings().sync_database_url}_test"
     else:
