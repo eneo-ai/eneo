@@ -81,7 +81,7 @@ services:
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_worker
     restart: unless-stopped
-    command: ["uv", "run", "arq", "src.intric.worker.arq.WorkerSettings"]
+    command: ["arq", "src.intric.worker.arq.WorkerSettings"]
     env_file:
       - env_backend.env
     volumes:
