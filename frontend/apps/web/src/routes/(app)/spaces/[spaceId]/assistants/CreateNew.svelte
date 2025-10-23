@@ -101,7 +101,9 @@
       >
       <div class="flex-grow"></div>
       <Button is={close}>{m.cancel()}</Button>
-      <Button is={close} onclick={createNewGroupChat} variant="primary">{m.create_group_chat()}</Button>
+      <Button is={close} onclick={createNewGroupChat} variant="primary"
+        >{m.create_group_chat()}</Button
+      >
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

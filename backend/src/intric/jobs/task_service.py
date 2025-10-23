@@ -2,6 +2,7 @@ import asyncio
 from tempfile import SpooledTemporaryFile
 from uuid import UUID
 
+from intric.admin.quota_service import QuotaService
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_size_service import FileSizeService
 from intric.files.text import TextMimeTypes
@@ -21,10 +22,12 @@ class TaskService:
         user: UserInDB,
         file_size_service: FileSizeService,
         job_service: JobService,
+        quota_service: QuotaService,
     ):
         self.user = user
         self.file_size_service = file_size_service
         self.job_service = job_service
+        self.quota_service = quota_service
 
     @staticmethod
     def get_task_type(mimetype: str):
@@ -51,6 +54,13 @@ class TaskService:
         if await asyncio.to_thread(self.file_size_service.is_too_large, file, max_size):
             raise FileTooLargeException("File too large.")
 
+    async def ensure_quota(self, file: SpooledTemporaryFile, task: Task):
+        if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
+            return
+
+        file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
+        await self.quota_service.ensure_capacity(file_size)
+
     async def queue_upload_file(
         self,
         group_id: UUID,
@@ -62,6 +72,7 @@ class TaskService:
         task_type = self.get_task_type(mimetype)
 
         await self.validate_file_size(file, task_type)
+        await self.ensure_quota(file, task_type)
 
         filepath = await self.file_size_service.save_file_to_disk(file)
 

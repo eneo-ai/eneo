@@ -101,6 +101,39 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🚀 Installation & Setup Issues
 
+### SSR login immediately returns HTTP 401 after deployment
+
+This usually means the backend could not seed the `allowed_origins` table with
+your public URL.
+
+1. **Check backend logs** – look for messages such as
+   `Allowed-origins seeding skipped` or
+   `Allowed origin '<url>' already registered`.
+   These indicate whether `PUBLIC_ORIGIN` was read from the environment.
+
+2. **Verify environment configuration** – ensure `PUBLIC_ORIGIN` (or its
+   fallback `ORIGIN` / `INTRIC_BACKEND_URL`) is set in the backend `.env` file
+   to the externally reachable URL (the one your users see in their browser).
+
+3. **Inspect the allowlist manually**:
+
+   ```bash
+   docker compose exec db \
+     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+     -c 'SELECT url, tenant_id FROM allowed_origins;'
+   ```
+
+4. **Backfill manually (optional)** – if the table is empty, insert the URL
+   explicitly (idempotent):
+
+   ```sql
+   INSERT INTO allowed_origins (url, tenant_id)
+   VALUES ('https://your-domain.com', '<tenant-uuid>')
+   ON CONFLICT (url) DO NOTHING;
+   ```
+
+   Replace `<tenant-uuid>` with the ID from `SELECT id FROM tenants;`.
+
 ### DevContainer Problems
 
 <details>
@@ -271,7 +304,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 4. **Manual database initialization**:
    ```bash
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 5. **Verify environment variables**:
@@ -299,7 +332,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    docker compose down -v
    docker compose up -d db
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 2. **Check password in environment**:
@@ -354,6 +387,28 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🔑 Authentication & Authorization Issues
 
+### OIDC login fails for a specific tenant
+
+**Symptoms**
+- Frontend displays `LoginError` along with a `correlationId`
+- Backend logs only show a 4xx/5xx status without context
+
+**Resolution**
+1. Enable the OIDC debug toggle temporarily:
+   ```bash
+   curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
+     -H "X-API-Key: {SUPER_API_KEY}" \
+     -H "Content-Type: application/json" \
+     -d '{"enabled": true, "duration_minutes": 10, "reason": "tenant-login-incident"}'
+   ```
+2. Ask the tenant to retry or reproduce the login. Copy the `correlationId` surfaced in the UI.
+3. Filter server logs for that ID:
+   ```bash
+   journalctl -u backend.service -o cat | jq 'select(.correlation_id=="<ID>")'
+   ```
+4. Match the `[OIDC DEBUG] …` breadcrumb with the table in the [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#32-trace-the-correlation-id) to pinpoint the exact misconfiguration (domain, user, tenant mismatch, etc.).
+5. Update the tenant federation config or user data, then disable the toggle with a second POST (`{"enabled": false, ...}`).
+
 ### JWT Token Problems
 
 <details>
@@ -402,7 +457,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 1. **Verify default user creation**:
    ```bash
    cd backend
-   poetry run python init_db.py  # This creates default user
+   uv run python init_db.py  # This creates default user
    ```
 
 2. **Check default credentials**:
@@ -413,7 +468,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```bash
    docker compose exec db psql -U postgres -d eneo -c "DELETE FROM users WHERE email = 'user@example.com';"
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 4. **Create user manually**:
@@ -749,7 +804,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```python
    # In backend container
    cd backend
-   poetry run python -c "
+   uv run python -c "
    from src.intric.embedding_models.infrastructure.create_embeddings_service import create_embeddings
    print('Testing embeddings...')
    "
@@ -904,7 +959,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 1. **Verify development mode**:
    ```bash
    cd backend
-   poetry run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
+   uv run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 2. **Check file watching**:

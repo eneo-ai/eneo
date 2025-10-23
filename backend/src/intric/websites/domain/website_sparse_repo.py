@@ -1,3 +1,4 @@
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
@@ -14,10 +15,109 @@ class WebsiteSparseRepository:
         self.session = session
 
     async def get_weekly_websites(self) -> list[WebsiteSparse]:
+        """Get websites with weekly update intervals.
+
+        Why: Preserves existing API for backwards compatibility.
+        Deprecated: Use get_websites_with_intervals() with scheduler service instead.
+        """
         stmt = sa.select(WebsitesTable).where(
             WebsitesTable.update_interval == UpdateInterval.WEEKLY
         )
 
         websites_db = await self.session.scalars(stmt)
 
+        return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
+
+    async def get_websites_with_intervals(self) -> list[WebsiteSparse]:
+        """Get all websites that have active update intervals (not NEVER).
+
+        Why: Enables scheduler service to apply interval logic consistently.
+        Excludes NEVER websites to avoid unnecessary processing.
+
+        Returns:
+            List of websites with DAILY, EVERY_OTHER_DAY, or WEEKLY intervals
+        """
+        stmt = sa.select(WebsitesTable).where(
+            WebsitesTable.update_interval != UpdateInterval.NEVER
+        )
+
+        websites_db = await self.session.scalars(stmt)
+
+        return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
+
+    async def get_due_websites(self, today: date) -> list[WebsiteSparse]:
+        """Get websites that are due for crawling based on their update_interval.
+
+        Why: Push filtering to database for better performance with 1000+ websites.
+        Uses composite index on (update_interval, last_crawled_at) for efficiency.
+
+        Args:
+            today: Current date for schedule calculation
+
+        Returns:
+            List of websites due for crawling
+        """
+        # Calculate threshold timestamps with timezone awareness
+        # Why: Comparing against TIMESTAMP(timezone=True) column requires timezone-aware datetimes
+        one_day_ago = datetime.combine(
+            today, datetime.min.time(), tzinfo=timezone.utc
+        ) - timedelta(days=1)
+        two_days_ago = datetime.combine(
+            today, datetime.min.time(), tzinfo=timezone.utc
+        ) - timedelta(days=2)
+        seven_days_ago = datetime.combine(
+            today, datetime.min.time(), tzinfo=timezone.utc
+        ) - timedelta(days=7)
+
+        # DAILY: crawl if last_crawled_at is NULL or >= 1 day ago
+        cond_daily = sa.and_(
+            WebsitesTable.update_interval == UpdateInterval.DAILY,
+            sa.or_(
+                WebsitesTable.last_crawled_at.is_(None),
+                WebsitesTable.last_crawled_at <= one_day_ago,
+            ),
+        )
+
+        # EVERY_OTHER_DAY: crawl if NULL or >= 2 days ago
+        cond_every_other_day = sa.and_(
+            WebsitesTable.update_interval == UpdateInterval.EVERY_OTHER_DAY,
+            sa.or_(
+                WebsitesTable.last_crawled_at.is_(None),
+                WebsitesTable.last_crawled_at <= two_days_ago,
+            ),
+        )
+
+        # WEEKLY: only on Fridays AND >= 7 days ago (or never crawled)
+        is_friday = today.weekday() == 4  # 0=Monday, 4=Friday
+        if is_friday:
+            cond_weekly = sa.and_(
+                WebsitesTable.update_interval == UpdateInterval.WEEKLY,
+                sa.or_(
+                    WebsitesTable.last_crawled_at.is_(None),
+                    WebsitesTable.last_crawled_at <= seven_days_ago,
+                ),
+            )
+        else:
+            # Not Friday - no weekly websites are due
+            cond_weekly = sa.literal(False)
+
+        # Circuit breaker condition: Only crawl sites that are not in backoff period
+        # Why: Prevent wasted resources on persistently failing websites
+        # NULL = no failures, non-NULL = backoff until this time
+        # Use explicit UTC to match timezone-aware column and avoid DB timezone issues
+        now_utc = datetime.now(timezone.utc)
+        cond_circuit_breaker = sa.or_(
+            WebsitesTable.next_retry_at.is_(None),
+            WebsitesTable.next_retry_at <= now_utc,
+        )
+
+        # Combine all conditions with circuit breaker
+        stmt = sa.select(WebsitesTable).where(
+            sa.and_(
+                sa.or_(cond_daily, cond_every_other_day, cond_weekly),
+                cond_circuit_breaker,
+            )
+        )
+
+        websites_db = await self.session.scalars(stmt)
         return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]

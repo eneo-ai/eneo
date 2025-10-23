@@ -1,6 +1,10 @@
+import os
 import uuid
 
 import pytest
+
+# Set required environment variables before any imports that might load settings
+os.environ.setdefault("ENCRYPTION_KEY", "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=")
 
 from intric.ai_models.completion_models.completion_model import (
     ModelHostingLocation,
@@ -10,8 +14,16 @@ from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelFamily,
     EmbeddingModelLegacy,
 )
+from intric.main.config import reset_settings
 from intric.tenants.tenant import TenantInDB
 from intric.users.user import UserInDB
+
+
+@pytest.fixture(autouse=True)
+def reset_settings_after_test():
+    """Reset settings after each test to prevent state leakage."""
+    yield
+    reset_settings()
 
 
 @pytest.fixture

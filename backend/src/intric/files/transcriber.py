@@ -2,25 +2,38 @@
 
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from intric.files import audio
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import File
+from intric.main.config import SETTINGS, Settings
+from intric.settings.credential_resolver import CredentialResolver
 from intric.transcription_models.infrastructure.adapters.whisper import (
     OpenAISTTModelAdapter,
 )
 
 if TYPE_CHECKING:
     from intric.files.file_repo import FileRepository
+    from intric.settings.encryption_service import EncryptionService
+    from intric.tenants.tenant import TenantInDB
     from intric.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
 
 
 class Transcriber:
-    def __init__(self, file_repo: "FileRepository"):
+    def __init__(
+        self,
+        file_repo: "FileRepository",
+        tenant: Optional["TenantInDB"] = None,
+        config: Optional[Settings] = None,
+        encryption_service: Optional["EncryptionService"] = None,
+    ):
         self.file_repo = file_repo
+        self.tenant = tenant
+        self.config = config or SETTINGS
+        self.encryption_service = encryption_service
 
     async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
         if file.blob is None or not AudioMimeTypes.has_value(file.mimetype):
@@ -53,7 +66,18 @@ class Transcriber:
     async def transcribe_from_filepath(
         self, *, filepath: Path, transcription_model: "TranscriptionModel"
     ):
-        adapter = OpenAISTTModelAdapter(model=transcription_model)
+        # Create credential resolver with tenant context if tenant is available
+        credential_resolver = None
+        if self.tenant:
+            credential_resolver = CredentialResolver(
+                tenant=self.tenant,
+                settings=self.config,
+                encryption_service=self.encryption_service,
+            )
+
+        adapter = OpenAISTTModelAdapter(
+            model=transcription_model, credential_resolver=credential_resolver
+        )
 
         async with audio.to_wav(filepath) as wav_file:
             return await adapter.get_text_from_file(wav_file)

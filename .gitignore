@@ -26,4 +26,14 @@
 backend/openapi.json
 backend/.release-please-manifest.json
 
-.CLAUDE.md
+CLAUDE.md
+eneo-*.md
+.claude/
+.specify/
+specs/
+
+# Claude Code configuration
+.devcontainer/claude-config/
+.devcontainer/
+.code/
+.mcp.json

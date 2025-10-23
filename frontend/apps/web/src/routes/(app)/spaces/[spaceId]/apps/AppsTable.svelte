@@ -69,12 +69,12 @@
   }
 </script>
 
-<Table.Root 
-  {viewModel} 
-  resourceName={m.resource_apps()} 
-  displayAs="cards" 
-  gapX={1.5} 
-  gapY={1.5} 
+<Table.Root
+  {viewModel}
+  resourceName={m.resource_apps()}
+  displayAs="cards"
+  gapX={1.5}
+  gapY={1.5}
   layout="grid"
   emptyMessage={m.there_are_currently_no_apps_configured()}
 >

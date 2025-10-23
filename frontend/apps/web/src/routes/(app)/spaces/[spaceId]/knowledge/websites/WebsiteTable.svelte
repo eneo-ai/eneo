@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table, Input } from "@intric/ui";
   import WebsiteActions from "./WebsiteActions.svelte";
   import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
   import WebsiteSync from "./WebsiteSync.svelte";
+  import SelectionHeaderCheckbox from "./SelectionHeaderCheckbox.svelte";
+  import SelectionCellCheckbox from "./SelectionCellCheckbox.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived } from "svelte/store";
+  import { derived, writable } from "svelte/store";
   import type { WebsiteSparse } from "@intric/intric-js";
   import { IconWeb } from "@intric/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
@@ -16,6 +18,9 @@
   } = getSpacesManager();
 
   const websites = derived(currentSpace, ($currentSpace) => $currentSpace.knowledge.websites);
+
+  // Selection state for bulk operations
+  export let selectedWebsiteIds = writable<Set<string>>(new Set());
   const embeddingModels = derived(currentSpace, ($currentSpace) => {
     const modelsInSpace = $currentSpace.embedding_models.map((model) => model.id);
     const modelsInWebsites = $currentSpace.knowledge.websites.map((website) => {
@@ -35,9 +40,59 @@
     return [...$embeddingModels].findIndex((model) => model.inSpace === false) > -1;
   });
 
+  // Toggle individual website selection
+  function toggleSelection(websiteId: string) {
+    const current = $selectedWebsiteIds;
+    if (current.has(websiteId)) {
+      current.delete(websiteId);
+    } else {
+      current.add(websiteId);
+    }
+    $selectedWebsiteIds = new Set(current);
+  }
+
+  // Toggle all websites selection
+  function toggleSelectAll() {
+    if ($selectedWebsiteIds.size === $websites.length && $websites.length > 0) {
+      $selectedWebsiteIds = new Set();
+    } else {
+      $selectedWebsiteIds = new Set($websites.map(w => w.id));
+    }
+  }
+
+  // Selection state helpers
+  $: isAllSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size === $websites.length;
+  $: isSomeSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size < $websites.length;
+
   const table = Table.createWithStore(websites);
 
   const viewModel = table.createViewModel([
+    // Checkbox column (compact, left side)
+    table.column({
+      accessor: (item) => item,
+      id: "select",
+      header: () => {
+        return createRender(SelectionHeaderCheckbox, {
+          selectedWebsiteIds,
+          websites: $websites,
+          onToggleAll: toggleSelectAll
+        });
+      },
+      cell: (item) => {
+        return createRender(SelectionCellCheckbox, {
+          websiteId: item.value.id,
+          websiteName: formatWebsiteName(item.value),
+          selectedWebsiteIds,
+          onToggle: toggleSelection
+        });
+      },
+      plugins: {
+        sort: {
+          disable: true
+        }
+      }
+    }),
+
     table.column({
       accessor: (item) => item,
       header: m.website(),
@@ -126,7 +181,9 @@
   {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
     {#each $embeddingModels as embeddingModel (embeddingModel.id)}
       <Table.Group
-        title={embeddingModel.inSpace ? embeddingModel.name : embeddingModel.name + ` (${m.disabled()})`}
+        title={embeddingModel.inSpace
+          ? embeddingModel.name
+          : embeddingModel.name + ` (${m.disabled()})`}
         filterFn={createModelFilter(embeddingModel)}
       ></Table.Group>
     {/each}

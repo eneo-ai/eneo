@@ -27,4 +27,5 @@
   $: table.update(userGroups);
 </script>
 
-<Table.Root {viewModel} resourceName="user group" emptyMessage={m.no_user_groups_configured()}></Table.Root>
+<Table.Root {viewModel} resourceName="user group" emptyMessage={m.no_user_groups_configured()}
+></Table.Root>

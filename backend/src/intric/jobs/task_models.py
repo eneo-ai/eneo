@@ -28,6 +28,13 @@ class UploadTask(InfoBlobTask):
     mimetype: str
 
 
+class UpdateUsageStatsTaskParams(TaskParams):
+    """Parameters for updating completion model usage statistics."""
+    tenant_id: UUID
+    model_id: Optional[UUID] = None
+    full_recalc: bool = False
+
+
 class UploadInfoBlob(UploadTask):
     pass
 

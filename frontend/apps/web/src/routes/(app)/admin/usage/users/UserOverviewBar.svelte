@@ -19,9 +19,11 @@
 
   const items = $derived.by(() => {
     // Group users by usage level (High, Medium, Low) for the visual bar
-    const high = userStats.users.filter(user => user.total_requests > 100);
-    const medium = userStats.users.filter(user => user.total_requests > 20 && user.total_requests <= 100);
-    const low = userStats.users.filter(user => user.total_requests <= 20);
+    const high = userStats.users.filter((user) => user.total_requests > 100);
+    const medium = userStats.users.filter(
+      (user) => user.total_requests > 20 && user.total_requests <= 100
+    );
+    const low = userStats.users.filter((user) => user.total_requests <= 20);
 
     return [
       {
@@ -42,14 +44,13 @@
         tokenCount: low.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-green"
       }
-    ].filter(item => item.userCount > 0).sort((a, b) => b.tokenCount - a.tokenCount);
+    ]
+      .filter((item) => item.userCount > 0)
+      .sort((a, b) => b.tokenCount - a.tokenCount);
   });
 </script>
 
-<Settings.Row
-  title={m.user_summary()}
-  description={m.user_summary_description()}
->
+<Settings.Row title={m.user_summary()} description={m.user_summary_description()}>
   <div class="flex flex-col gap-4">
     <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full lg:mt-2">
       {#each items.filter((item) => item.tokenCount > 0) as item (item)}
@@ -69,9 +70,9 @@
             class="border-stronger h-3 w-3 rounded-full border"
           ></div>
           <p>
-            <span class="font-medium">{item.label}</span>: {formatNumber(
-              item.userCount
-            )} {m.users()}, {formatNumber(item.tokenCount, "compact")} {m.tokens()}
+            <span class="font-medium">{item.label}</span>: {formatNumber(item.userCount)}
+            {m.users()}, {formatNumber(item.tokenCount, "compact")}
+            {m.tokens()}
           </p>
         </div>
       {/each}

@@ -51,7 +51,7 @@ USING_ACCESS_MANAGEMENT=True  # Enables Users tab in admin panel
 
 ```bash
 cd backend
-poetry run python init_db.py
+uv run python init_db.py
 ```
 
 > **Important**: The `init_db.py` script:
@@ -66,7 +66,7 @@ Open **3 separate terminals** in VS Code:
 **Terminal 1 - Backend API:**
 ```bash
 cd backend
-poetry run start
+uv run start
 ```
 
 **Terminal 2 - Frontend:**
@@ -78,7 +78,7 @@ pnpm run dev
 **Terminal 3 - Worker (Optional, for document processing and for the crawler & apps to work):**
 ```bash
 cd backend
-poetry run arq src.intric.worker.arq.WorkerSettings
+uv run arq src.intric.worker.arq.WorkerSettings
 ```
 
 ## ✅ Verify Installation
@@ -178,7 +178,7 @@ server: {
 Re-run the initialization script to apply new migrations:
 ```bash
 cd backend
-poetry run python init_db.py
+uv run python init_db.py
 ```
 
 This safely applies any new database migrations without losing data.
@@ -201,10 +201,10 @@ lsof -i :6379   # Redis
 2. **Pull Latest Changes** - `git pull origin develop`
 3. **Update Dependencies** (if needed):
    ```bash
-   cd backend && poetry install
+   cd backend && uv sync
    cd frontend && pnpm install
    ```
-4. **Apply Migrations** - `cd backend && poetry run python init_db.py`
+4. **Apply Migrations** - `cd backend && uv run python init_db.py`
 5. **Start Services** - Run the 3 terminal commands
 
 ### Testing Your Changes
@@ -212,8 +212,8 @@ lsof -i :6379   # Redis
 **Backend Tests:**
 ```bash
 cd backend
-poetry run pytest                 # Run all tests
-poetry run pytest tests/api/ -v   # Specific tests with verbose output
+uv run pytest                 # Run all tests
+uv run pytest tests/api/ -v   # Specific tests with verbose output
 ```
 
 **Frontend Tests:**
@@ -229,8 +229,8 @@ pnpm run check         # Type checking
 After modifying database models:
 ```bash
 cd backend
-poetry run alembic revision --autogenerate -m "describe your changes"
-poetry run alembic upgrade head
+uv run alembic revision --autogenerate -m "describe your changes"
+uv run alembic upgrade head
 ```
 
 ## 🎯 Next Steps

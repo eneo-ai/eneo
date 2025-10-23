@@ -36,12 +36,12 @@ cp frontend/apps/web/.env.example frontend/apps/web/.env
 # Edit .env files with your settings
 
 # Initialize database
-cd backend && poetry run python init_db.py
+cd backend && uv run python init_db.py
 
 # Start development servers (3 terminals)
-cd backend && poetry run start              # Terminal 1
+cd backend && uv run start              # Terminal 1
 cd frontend && pnpm run dev                 # Terminal 2  
-cd backend && poetry run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
+cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
 ```
 
 ### 2. Make Your First Contribution
@@ -54,7 +54,7 @@ git checkout -b feature/your-feature-name
 # ... your development work ...
 
 # Run tests
-cd backend && poetry run pytest
+cd backend && uv run pytest
 cd frontend && pnpm run test
 
 # Commit changes
@@ -325,16 +325,16 @@ async def test_create_assistant():
 cd backend
 
 # Run all tests
-poetry run pytest
+uv run pytest
 
 # Run specific domain tests
-poetry run pytest tests/unittests/assistants/
+uv run pytest tests/unittests/assistants/
 
 # Run with coverage
-poetry run pytest --cov=src --cov-report=html
+uv run pytest --cov=src --cov-report=html
 
 # Run specific test
-poetry run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
+uv run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
 ```
 
 ### Frontend Testing
@@ -465,17 +465,17 @@ Brief description of changes and motivation.
 cd backend
 
 # Generate migration for model changes
-poetry run alembic revision --autogenerate -m "add assistant categories"
+uv run alembic revision --autogenerate -m "add assistant categories"
 
 # Review generated migration file
 # Edit if necessary for data migrations or complex changes
 
 # Apply migration locally
-poetry run alembic upgrade head
+uv run alembic upgrade head
 
 # Test rollback
-poetry run alembic downgrade -1
-poetry run alembic upgrade head
+uv run alembic downgrade -1
+uv run alembic upgrade head
 ```
 
 **Migration Best Practices:**
@@ -590,10 +590,10 @@ async def get_assistant(
 cd backend
 
 # Add runtime dependency
-poetry add package-name
+uv add package-name
 
 # Add development dependency  
-poetry add --group dev package-name
+uv add --group dev package-name
 
 # Update pyproject.toml with specific version constraints
 # Commit both pyproject.toml and poetry.lock

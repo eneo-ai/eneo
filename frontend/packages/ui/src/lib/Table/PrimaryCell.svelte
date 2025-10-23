@@ -37,7 +37,7 @@
       {#if icon}
         <svelte:component this={icon} class="min-w-6"></svelte:component>
       {/if}
-      <button class="truncate overflow-ellipsis" type="button" {...(trigger && trigger[0] || {})}>
+      <button class="truncate overflow-ellipsis" type="button" {...(trigger && trigger[0]) || {}}>
         {label}
       </button>
     {/if}

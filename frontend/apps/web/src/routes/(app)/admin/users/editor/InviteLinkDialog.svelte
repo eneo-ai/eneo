@@ -38,7 +38,8 @@
         <p
           class="border-accent-default bg-accent-dimmer text-accent-stronger border-l-2 px-4 py-2 text-sm"
         >
-          <span class="font-bold">{m.note()}</span> {m.signup_same_email_note()}
+          <span class="font-bold">{m.note()}</span>
+          {m.signup_same_email_note()}
         </p>
         <div class="bg-primary flex items-center justify-between rounded-lg border p-1 shadow-sm">
           <span class="pl-2 font-mono">{inviteLink}</span>

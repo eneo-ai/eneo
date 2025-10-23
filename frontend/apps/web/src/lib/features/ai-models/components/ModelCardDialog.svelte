@@ -61,7 +61,9 @@
   {/if}
 
   <Dialog.Content width="dynamic">
-    <Dialog.Title>{m.model_info_for()} {"nickname" in model ? model.nickname : model.name}</Dialog.Title>
+    <Dialog.Title
+      >{m.model_info_for()} {"nickname" in model ? model.nickname : model.name}</Dialog.Title
+    >
 
     <Dialog.Section>
       <div class="flex flex-col gap-2 p-8">

@@ -14,6 +14,10 @@ services:
       - REDIS_HOST=redis
     volumes:
       - ../:/workspace
+      # Mount Docker socket for testcontainers support
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Docker group is created dynamically in post-create.sh with the correct GID
+    # This ensures it works on any system regardless of the host's docker GID
 
   db:
     image: pgvector/pgvector:pg13

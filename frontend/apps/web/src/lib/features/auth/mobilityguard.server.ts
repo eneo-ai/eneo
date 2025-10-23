@@ -17,6 +17,36 @@ import { getRequestEvent } from "$app/server";
 const MobilityguardCookie = "mobilityguard-verifier" as const;
 const scopes = ["openid", "email"];
 
+/**
+ * Get the configured public origin for OIDC redirect URIs.
+ *
+ * SECURITY: Uses explicit PUBLIC_ORIGIN configuration instead of
+ * event.url.origin to prevent redirect_uri mismatches behind reverse proxies.
+ *
+ * @returns The configured public origin (e.g., "https://eneo.sundsvall.se")
+ * @throws Error if PUBLIC_ORIGIN is not configured
+ */
+function getPublicOrigin(): string {
+  if (!env.PUBLIC_ORIGIN) {
+    throw new Error(
+      '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
+      'Set it to the externally-reachable URL for this application. ' +
+      'Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se'
+    );
+  }
+
+  // Validate format (basic check)
+  if (!env.PUBLIC_ORIGIN.startsWith('https://')) {
+    throw new Error(
+      '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
+      `Got: ${env.PUBLIC_ORIGIN}`
+    );
+  }
+
+  // Remove trailing slash if present
+  return env.PUBLIC_ORIGIN.replace(/\/$/, '');
+}
+
 export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }) {
   // Only generate an url if the environment is correctly set
   if (!env.MOBILITYGUARD_CLIENT_ID || !env.MOBILITY_GUARD_AUTH) {
@@ -45,7 +75,7 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
     scope: scopes.join(" "),
     client_id: env.MOBILITYGUARD_CLIENT_ID,
     response_type: "code",
-    redirect_uri: `${event.url.origin}/login/callback`,
+    redirect_uri: `${getPublicOrigin()}/login/callback`,
     state: encodeState({
       loginMethod: "mobilityguard",
       next: event.url.searchParams.get("next")
@@ -60,13 +90,10 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
 export async function loginWithMobilityguard(code: string): Promise<boolean> {
   // Only try to login if the environment is correctly set
   if (!env.MOBILITYGUARD_CLIENT_ID || !env.MOBILITY_GUARD_AUTH) {
-    console.error(
-      "[OIDC] Missing configuration (MobilityGuard):",
-      {
-        hasClientId: !!env.MOBILITYGUARD_CLIENT_ID,
-        hasAuthUrl: !!env.MOBILITY_GUARD_AUTH
-      }
-    );
+    console.error("[OIDC] Missing configuration (MobilityGuard):", {
+      hasClientId: !!env.MOBILITYGUARD_CLIENT_ID,
+      hasAuthUrl: !!env.MOBILITY_GUARD_AUTH
+    });
     return false;
   }
 
@@ -84,44 +111,35 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
     return false;
   }
 
-  console.debug(
-    "[OIDC] Starting login (MobilityGuard)",
-    {
-      hasCode: !!code,
-      hasCodeVerifier: !!code_verifier,
-      redirectUri: `${event.url.origin}/login/callback`,
-      backendUrl: env.INTRIC_BACKEND_URL
-    }
-  );
+  console.debug("[OIDC] Starting login (MobilityGuard)", {
+    hasCode: !!code,
+    hasCodeVerifier: !!code_verifier,
+    redirectUri: `${getPublicOrigin()}/login/callback`,
+    backendUrl: env.INTRIC_BACKEND_URL
+  });
 
   const body = JSON.stringify({
     code,
     code_verifier,
     scope: scopes.join("+"),
-    redirect_uri: `${event.url.origin}/login/callback`,
+    redirect_uri: `${getPublicOrigin()}/login/callback`,
     client_id: env.MOBILITYGUARD_CLIENT_ID
   });
 
   const backendUrl = `${env.INTRIC_BACKEND_URL}/api/v1/users/login/openid-connect/mobilityguard/`;
-  console.debug(
-    "[OIDC] Calling backend (MobilityGuard)",
-    {
-      url: backendUrl,
-      redirectUri: `${event.url.origin}/login/callback`
-    }
-  );
+  console.debug("[OIDC] Calling backend (MobilityGuard)", {
+    url: backendUrl,
+    redirectUri: `${getPublicOrigin()}/login/callback`
+  });
 
   try {
-    const response = await event.fetch(
-      backendUrl,
-      {
-        body,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        }
+    const response = await event.fetch(backendUrl, {
+      body,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
       }
-    );
+    });
 
     if (!response.ok) {
       const responseText = await response.text();
@@ -132,15 +150,12 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
         errorDetails = responseText;
       }
 
-      console.error(
-        "[OIDC] Backend login failed (MobilityGuard)",
-        {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorDetails,
-          url: backendUrl
-        }
-      );
+      console.error("[OIDC] Backend login failed (MobilityGuard)", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorDetails,
+        url: backendUrl
+      });
 
       // Log different error scenarios
       if (response.status === 401) {
@@ -164,10 +179,7 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
     const { access_token } = data;
 
     if (!access_token) {
-      console.error(
-        "[OIDC] No access token in response",
-        { responseKeys: Object.keys(data) }
-      );
+      console.error("[OIDC] No access token in response", { responseKeys: Object.keys(data) });
       return false;
     }
 
@@ -176,15 +188,11 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
 
     console.debug("[OIDC] Login complete, auth cookie set");
     return true;
-
   } catch (error) {
-    console.error(
-      "[OIDC] Unexpected error during login (MobilityGuard)",
-      {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      }
-    );
+    console.error("[OIDC] Unexpected error during login (MobilityGuard)", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return false;
   }
 }

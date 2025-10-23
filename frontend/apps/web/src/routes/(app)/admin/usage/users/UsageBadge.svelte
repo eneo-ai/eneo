@@ -20,7 +20,7 @@
       };
     } else if (requests > 20) {
       return {
-        intensity: "Medium", 
+        intensity: "Medium",
         badgeClass: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
       };
     } else {
@@ -32,6 +32,8 @@
   });
 </script>
 
-<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {usageLevel.badgeClass}">
+<span
+  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {usageLevel.badgeClass}"
+>
   {usageLevel.intensity}
 </span>

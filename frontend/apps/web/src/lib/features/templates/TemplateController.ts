@@ -1,4 +1,5 @@
 import { createContext } from "$lib/core/context";
+import { m } from "$lib/paraglide/messages";
 import { type GroupSparse, type TemplateAdditionalField } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { type Attachment } from "../attachments/AttachmentManager";
@@ -49,10 +50,12 @@ function createTemplateController(data: TemplateControllerParams) {
     [hasWizard, currentStep, creationMode],
     ([$hasWizard, $currentStep, $creationMode]) => {
       if ($creationMode === "blank" || !$hasWizard) {
-        return `Create ${adapter.getResourceName().singular}`;
+        return `${m.create()} ${adapter.getResourceName().singular}`;
       }
 
-      return $currentStep === "start" ? "Next" : `Create ${adapter.getResourceName().singular}`;
+      return $currentStep === "start"
+        ? m.next()
+        : `${m.create()} ${adapter.getResourceName().singular}`;
     }
   );
 

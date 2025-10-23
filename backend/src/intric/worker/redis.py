@@ -2,12 +2,31 @@ import redis.asyncio as aioredis
 from datetime import datetime, timezone
 from typing import NamedTuple
 
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 
-pool = aioredis.ConnectionPool.from_url(
-    f"redis://{SETTINGS.redis_host}:{SETTINGS.redis_port}"
-)
-r = aioredis.Redis(connection_pool=pool)
+
+def _get_redis_connection():
+    """Lazy initialization of Redis connection using current settings."""
+    settings = get_settings()
+    pool = aioredis.ConnectionPool.from_url(
+        f"redis://{settings.redis_host}:{settings.redis_port}"
+    )
+    return aioredis.Redis(connection_pool=pool)
+
+
+# Initialize on first import
+_redis_client = None
+
+
+def get_redis():
+    """Get Redis client, creating it if needed."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = _get_redis_connection()
+    return _redis_client
+
+
+r = get_redis()
 
 
 class WorkerHealth(NamedTuple):

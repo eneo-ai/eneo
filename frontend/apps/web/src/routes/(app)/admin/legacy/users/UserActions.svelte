@@ -49,7 +49,8 @@
   <Dialog.Content width="small">
     <Dialog.Title>{m.delete_user()}</Dialog.Title>
     <Dialog.Description
-      >{m.do_you_really_want_to_delete()} <span class="italic">{user.username}</span>?</Dialog.Description
+      >{m.do_you_really_want_to_delete()}
+      <span class="italic">{user.username}</span>?</Dialog.Description
     >
 
     <Dialog.Controls let:close>
