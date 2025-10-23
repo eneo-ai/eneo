@@ -9,7 +9,6 @@ from intric.integration.infrastructure.auth_service.base_auth_service import (
 )
 from intric.main.config import get_settings
 
-settings = get_settings()
 logger = getLogger(__name__)
 
 
@@ -21,6 +20,7 @@ class SharepointAuthService(BaseOauthService):
 
     @property
     def client_id(self) -> str:
+        settings = get_settings()
         client_id = settings.sharepoint_client_id
         if client_id is None:
             raise ValueError("SHAREPOINT_CLIENT_ID is not set")
@@ -28,6 +28,7 @@ class SharepointAuthService(BaseOauthService):
 
     @property
     def client_secret(self) -> str:
+        settings = get_settings()
         client_secret = settings.sharepoint_client_secret
         if client_secret is None:
             raise ValueError("SHAREPOINT_CLIENT_SECRET is not set")
@@ -35,6 +36,7 @@ class SharepointAuthService(BaseOauthService):
 
     @property
     def redirect_uri(self) -> str:
+        settings = get_settings()
         redirect_uri = settings.oauth_callback_url
         if redirect_uri is None:
             raise ValueError("OAUTH_CALLBACK_URL is not set")

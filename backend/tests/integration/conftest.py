@@ -159,19 +159,6 @@ def test_settings(
 
     encryption_key = Fernet.generate_key().decode()
 
-    # CRITICAL: Clear LLM API key environment variables to prevent reading real keys
-    # Integration tests must NEVER use real API keys
-    for key in [
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "AZURE_API_KEY",
-        "BERGET_API_KEY",
-        "MISTRAL_API_KEY",
-        "OVHCLOUD_API_KEY",
-        "VLLM_API_KEY",
-    ]:
-        os.environ.pop(key, None)
-
     # Create test settings
     settings = Settings(
         # PostgreSQL settings
@@ -605,12 +592,12 @@ async def async_session(setup_database):
 
 @pytest.fixture(autouse=True)
 def clear_api_keys_for_all_tests(request, monkeypatch):
-    """Auto-use fixture to ensure API keys are cleared for integration tests only.
+    """Auto-use fixture to ensure API keys are cleared for integration tests ONLY.
 
     CRITICAL: This ensures integration tests NEVER use real API keys from the environment.
-    Only runs for tests marked with @pytest.mark.integration.
+    Only runs for tests marked with @pytest.mark.integration to avoid affecting unit tests.
     """
-    # Only clear API keys for integration tests
+    # Skip if not an integration test
     if "integration" not in request.keywords:
         return
 
