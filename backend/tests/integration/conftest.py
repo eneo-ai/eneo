@@ -604,12 +604,16 @@ async def async_session(setup_database):
 
 
 @pytest.fixture(autouse=True)
-def clear_api_keys_for_all_tests(monkeypatch):
-    """Auto-use fixture to ensure API keys are cleared for every test.
+def clear_api_keys_for_all_tests(request, monkeypatch):
+    """Auto-use fixture to ensure API keys are cleared for integration tests only.
 
     CRITICAL: This ensures integration tests NEVER use real API keys from the environment.
-    Runs before each test to guarantee clean environment.
+    Only runs for tests marked with @pytest.mark.integration.
     """
+    # Only clear API keys for integration tests
+    if "integration" not in request.keywords:
+        return
+
     for key in [
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
