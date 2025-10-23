@@ -254,6 +254,17 @@ export interface paths {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
   };
+  "/api/v1/assistants/{id}/token-estimate": {
+    /**
+     * Estimate token usage for text and files
+     * @description Estimate token usage for the given text and files for this assistant.
+     *
+     * The Space Actor + FileService stack already enforces tenant and ownership
+     * boundaries; this endpoint adds lightweight guardrails to keep the operation
+     * responsive while supporting large-context models.
+     */
+    post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
+  };
   "/api/v1/group-chats/{id}/": {
     /**
      * Get Group Chat
@@ -1285,7 +1296,7 @@ export interface paths {
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     /**
      * Set tenant API credential
-     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name) are required.
+     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
      */
     put: operations["set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put"];
     /**
@@ -1888,6 +1899,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2678,6 +2690,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -3023,6 +3036,8 @@ export interface components {
       size: number;
       /** Transcription */
       transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -3747,6 +3762,18 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /**
+     * ModelInfo
+     * @description Information about the model used by the assistant.
+     */
+    ModelInfo: {
+      /** Name */
+      name: string;
+      /** Token Limit */
+      token_limit: number;
+      /** Prompt Tokens */
+      prompt_tokens?: number | null;
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -5312,8 +5339,10 @@ export interface components {
      * SetCredentialRequest
      * @description Request model for setting tenant API credentials.
      *
-     * For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name)
-     * are required. For other providers, only api_key is required.
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
      *
      * Example for OpenAI:
      *     {
@@ -5324,11 +5353,10 @@ export interface components {
      *     {
      *         "api_key": "abc123...",
      *         "endpoint": "https://my-resource.openai.azure.com",
-     *         "api_version": "2024-02-15-preview",
-     *         "deployment_name": "gpt-4"
+     *         "api_version": "2024-02-15-preview"
      *     }
      *
-     * Example for VLLM:
+     * Example for vLLM:
      *     {
      *         "api_key": "vllm-secret-key",
      *         "endpoint": "http://tenant-vllm:8000"
@@ -5360,12 +5388,17 @@ export interface components {
      * SetCredentialResponse
      * @description Response model for setting tenant API credentials.
      *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
      * Example:
      *     {
      *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
      *         "provider": "openai",
      *         "masked_key": "...xyz9",
-     *         "message": "API credential for openai set successfully"
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
      *     }
      */
     SetCredentialResponse: {
@@ -5380,6 +5413,11 @@ export interface components {
       masked_key: string;
       /** Message */
       message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
     };
     /**
      * SetFederationRequest
@@ -5411,6 +5449,16 @@ export interface components {
        * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
        */
       allowed_domains?: string[];
+      /**
+       * Canonical Public Origin
+       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required for multi-tenant federation to construct redirect_uri
+       */
+      canonical_public_origin?: string | null;
+      /**
+       * Redirect Path
+       * @description Optional custom redirect path starting with /
+       */
+      redirect_path?: string | null;
     };
     /**
      * SetFederationResponse
@@ -5946,6 +5994,74 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
+    };
+    /**
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
+     */
+    TokenEstimateBreakdown: {
+      /**
+       * Prompt
+       * @description Tokens used by assistant prompt
+       */
+      prompt: number;
+      /**
+       * Text
+       * @description Tokens used by user input text
+       */
+      text: number;
+      /**
+       * Files
+       * @description Total tokens used by all files
+       */
+      files: number;
+      /**
+       * File Details
+       * @description Per-file token counts
+       */
+      file_details?: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * TokenEstimateRequest
+     * @description Request payload for estimating tokens.
+     */
+    TokenEstimateRequest: {
+      /**
+       * Text
+       * @description User input text to evaluate
+       * @default
+       */
+      text?: string;
+      /**
+       * File Ids
+       * @description List of file IDs to include in the estimate
+       */
+      file_ids?: string[];
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -8477,6 +8593,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -8775,6 +8893,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -9056,6 +9176,52 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Estimate token usage for text and files
+   * @description Estimate token usage for the given text and files for this assistant.
+   *
+   * The Space Actor + FileService stack already enforces tenant and ownership
+   * boundaries; this endpoint adds lightweight guardrails to keep the operation
+   * responsive while supporting large-context models.
+   */
+  estimate_tokens_api_v1_assistants__id__token_estimate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TokenEstimateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -9406,6 +9572,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                 };
               },
@@ -9448,6 +9616,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -14073,7 +14243,7 @@ export interface operations {
   };
   /**
    * Set tenant API credential
-   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. For Azure provider, all four fields (api_key, endpoint, api_version, deployment_name) are required.
+   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
    */
   set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put: {
     parameters: {

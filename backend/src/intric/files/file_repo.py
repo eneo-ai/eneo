@@ -38,6 +38,23 @@ class FileRepository:
 
         return files
 
+    async def get_list_by_id_and_tenant(
+        self, ids: list[UUID], tenant_id: UUID, include_transcription: bool = True
+    ) -> list[File]:
+        stmt = (
+            sa.select(Files)
+            .where(Files.id.in_(ids))
+            .where(Files.tenant_id == tenant_id)
+            .order_by(Files.created_at)
+        )
+
+        if not include_transcription:
+            stmt = stmt.options(defer(Files.transcription, raiseload=True))
+
+        files_in_db = await self.session.scalars(stmt)
+
+        return [File.model_validate(file) for file in files_in_db]
+
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
         return File.model_validate(file)

@@ -4,7 +4,9 @@ from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantType,
     DefaultAssistant,
+    ModelInfo,
 )
+from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.assistants.assistant import Assistant
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
@@ -84,6 +86,29 @@ class AssistantAssembler:
             items=assistant.integration_knowledge_list
         )
 
+        # Calculate model info
+        model_info = None
+        if assistant.completion_model:
+            prompt_tokens = 0
+            if assistant.prompt:
+                prompt_text = getattr(assistant.prompt, "prompt", None) or getattr(
+                    assistant.prompt, "text", None
+                )
+                if prompt_text:
+                    try:
+                        prompt_tokens = count_assistant_prompt_tokens(
+                            prompt_text, assistant.completion_model.name
+                        )
+                    except Exception:
+                        # If token counting fails, don't break the response
+                        pass
+
+            model_info = ModelInfo(
+                name=assistant.completion_model.name,
+                token_limit=assistant.completion_model.token_limit,
+                prompt_tokens=prompt_tokens,
+            )
+
         return AssistantPublic(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -108,6 +133,7 @@ class AssistantAssembler:
             type=assistant.type,
             data_retention_days=assistant.data_retention_days,
             metadata_json=assistant.metadata_json,
+            model_info=model_info,
         )
 
     def from_assistant_to_default_assistant_model(
