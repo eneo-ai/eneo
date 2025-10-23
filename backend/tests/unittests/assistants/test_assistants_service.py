@@ -66,6 +66,7 @@ def setup_fixture():
         integration_knowledge_repo=AsyncMock(),
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
+        web_search=AsyncMock(),
     )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
