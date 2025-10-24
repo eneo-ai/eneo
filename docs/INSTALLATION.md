@@ -4,21 +4,21 @@ This guide covers setting up Eneo for development and testing using the DevConta
 
 > **Production Deployment?** See the [DEPLOYMENT.md](./DEPLOYMENT.md) guide for production setup.
 
-## 🎯 Quick Overview
+## Quick Overview
 
 - **Development Port**: `8123` (Backend API)
 - **Frontend Port**: `3000`
 - **Recommended Setup**: VS Code DevContainer
 - **Time to Setup**: ~10 minutes
 
-## 📋 Prerequisites
+## Prerequisites
 
 - **Docker Desktop** - [Download here](https://www.docker.com/products/docker-desktop/)
 - **VS Code** - [Download here](https://code.visualstudio.com/)
 - **Dev Containers Extension** - Install from VS Code marketplace
 - **At least one AI provider API key** (OpenAI, Anthropic, etc.)
 
-## 🚀 DevContainer Setup (5 Steps)
+## DevContainer Setup (5 Steps)
 
 ### Step 1: Clone and Open
 
@@ -72,7 +72,7 @@ uv run start
 **Terminal 2 - Frontend:**
 ```bash
 cd frontend
-pnpm run dev
+bun run dev
 ```
 
 **Terminal 3 - Worker (Optional, for document processing and for the crawler & apps to work):**
@@ -81,7 +81,7 @@ cd backend
 uv run arq src.intric.worker.arq.WorkerSettings
 ```
 
-## ✅ Verify Installation
+## Verify Installation
 
 1. **Access the Application**
    - Frontend: http://localhost:3000
@@ -95,7 +95,7 @@ uv run arq src.intric.worker.arq.WorkerSettings
    - Click user menu (top-right corner)
    - Select "Change Password"
 
-## ⚙️ Essential Configuration
+## Essential Configuration
 
 ### AI Provider Setup
 
@@ -138,7 +138,7 @@ INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
 UPLOAD_MAX_FILE_SIZE=10485760
 ```
 
-## 🔧 Common Issues & Solutions
+## Common Issues & Solutions
 
 ### Cannot Access "Users" in Admin Panel
 
@@ -193,7 +193,7 @@ lsof -i :5432   # PostgreSQL
 lsof -i :6379   # Redis
 ```
 
-## 📝 Development Workflow
+## Development Workflow
 
 ### Daily Development
 
@@ -202,7 +202,7 @@ lsof -i :6379   # Redis
 3. **Update Dependencies** (if needed):
    ```bash
    cd backend && uv sync
-   cd frontend && pnpm install
+   cd frontend && bun install
    ```
 4. **Apply Migrations** - `cd backend && uv run python init_db.py`
 5. **Start Services** - Run the 3 terminal commands
@@ -219,9 +219,9 @@ uv run pytest tests/api/ -v   # Specific tests with verbose output
 **Frontend Tests:**
 ```bash
 cd frontend
-pnpm run test          # Run tests
-pnpm run lint          # Check code style
-pnpm run check         # Type checking
+bun run test          # Run tests
+bun run lint          # Check code style
+bun run check         # Type checking
 ```
 
 ### Creating Database Migrations
@@ -233,7 +233,7 @@ uv run alembic revision --autogenerate -m "describe your changes"
 uv run alembic upgrade head
 ```
 
-## 🎯 Next Steps
+## Next Steps
 
 1. **Explore the API** - Visit http://localhost:8123/docs
 2. **Create Your First Assistant** - Use the web interface
@@ -241,7 +241,7 @@ uv run alembic upgrade head
 4. **Configure Additional Models** - Through the admin panel
 5. **Review Architecture** - Check [ARCHITECTURE.md](./ARCHITECTURE.md)
 
-## 📚 Additional Resources
+## Additional Resources
 
 - **[Deployment Guide](./DEPLOYMENT.md)** - Production setup
 - **[API Documentation](http://localhost:8123/docs)** - Interactive API explorer

@@ -196,6 +196,62 @@ To get access to the modules endpoint, set a separate, higher-privileged API key
 INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
 ```
 
+### Multi-Tenant Features
+
+Eneo supports advanced multi-tenancy for organizations hosting multiple municipalities or departments:
+
+**Per-Tenant LLM Credentials:**
+
+Enable tenant-specific API keys for isolated billing and compliance:
+
+```bash
+# 1. Generate encryption key (required for credential security)
+cd backend
+docker compose exec backend uv run python -m intric.cli.generate_encryption_key
+
+# 2. Add to env_backend.env
+ENCRYPTION_KEY=<generated-44-char-key>
+TENANT_CREDENTIALS_ENABLED=true
+
+# 3. Configure per-tenant credentials via API
+curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/openai \
+  -H "X-API-Key: ${INTRIC_SUPER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "sk-proj-tenant-specific-key"}'
+```
+
+**Per-Tenant Identity Providers:**
+
+Allow each tenant to use their own IdP (Entra ID, Auth0, Okta, etc.):
+
+```bash
+# 1. Enable federation mode in env_backend.env
+FEDERATION_PER_TENANT_ENABLED=true
+ENCRYPTION_KEY=<same-key-as-above>
+
+# 2. Configure per-tenant IdP via API
+curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation \
+  -H "X-API-Key: ${INTRIC_SUPER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "entra_id",
+    "discovery_endpoint": "https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration",
+    "client_id": "...",
+    "client_secret": "...",
+    "allowed_domains": ["municipality.gov"]
+  }'
+```
+
+**⚠️ Important Notes:**
+- Backup your `ENCRYPTION_KEY` securely - lost keys make encrypted data unrecoverable
+- In strict mode (`TENANT_CREDENTIALS_ENABLED=true`), tenants without configured credentials cannot use LLM features
+- Federation requires each tenant to have a unique `slug` - run `uv run python -m intric.cli.backfill_tenant_slugs` if needed
+
+**Documentation:**
+- [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - Architecture and setup
+- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) - Credential management
+- [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Step-by-step guide
+
 ## 🔧 Troubleshooting
 
 If you encounter issues, here are some common problems and their solutions.

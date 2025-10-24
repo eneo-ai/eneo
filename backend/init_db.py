@@ -28,8 +28,11 @@ settings = Settings()
 # Alembic command
 def run_alembic_migrations():
     try:
-        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
         print("Alembic migrations ran successfully.")
+    except FileNotFoundError:
+        print("Error: alembic not found on PATH. Ensure it's installed in /app/.venv and PATH includes /app/.venv/bin")
+        exit(1)
     except subprocess.CalledProcessError as e:
         print(f"Error running alembic migrations: {e}")
         exit(1)

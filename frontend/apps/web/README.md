@@ -37,13 +37,13 @@ Use the vite dev server for local development; setup a `.env` file locally to co
 
 ```bash
 # Prepare everything, install and build dependencies
-pnpm -w run setup
+bun -w run setup
 
 # Start vite dev server
-pnpm run dev
+bun run dev
 ```
 
-If you want to work on the client and the UI library at the same time as developing the Web GUI, you should run `pnpm -w run dev` to run all dev scripts simultaneously.
+If you want to work on the client and the UI library at the same time as developing the Web GUI, you should run `bun -w run dev` to run all dev scripts simultaneously.
 
 ## OpenId Connect / MobilityGuard
 
@@ -56,7 +56,7 @@ The callback URI will always be in the format `https://<deployment>.<tld>/login/
 Prettier is configured for this project, ideally you run format on save, or
 
 ```bash
-pnpm run format
+bun run format
 ```
 
 before comitting a file to git.

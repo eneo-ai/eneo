@@ -1,28 +1,28 @@
 # Architecture Guide
 
-This guide provides a comprehensive overview of Eneo's technical architecture, design patterns, and system components.
+This guide covers Eneo's technical architecture, design patterns, and system components.
 
 ---
 
-## 🏗️ System Overview
+## System Overview
 
-Eneo follows a **microservices architecture** with **domain-driven design** principles, built for scalability, maintainability, and democratic AI governance.
+Eneo uses a microservices architecture with domain-driven design principles for scalability, maintainability, and democratic AI governance.
 
 ### Core Principles
 
-- **🏛️ Domain-Driven Design**: Business logic organized by domain boundaries
-- **🔄 Event-Driven Architecture**: Asynchronous processing via Redis pub/sub
-- **🔌 API-First Design**: OpenAPI specification with auto-generated documentation
-- **🎯 Multi-Tenancy**: Secure isolation between organizations
-- **🚀 Real-Time Communication**: WebSockets and Server-Sent Events
-- **🔒 Security by Design**: Built-in compliance and access control
+- **Domain-Driven Design** - Business logic organized by domain boundaries
+- **Event-Driven Architecture** - Asynchronous processing via Redis pub/sub
+- **API-First Design** - OpenAPI specification with auto-generated documentation
+- **Multi-Tenancy** - Secure isolation between organizations
+- **Real-Time Communication** - WebSockets and Server-Sent Events
+- **Security by Design** - Built-in compliance and access control
 
 ---
 
-## 🗄️ High-Level Architecture
+## High-Level Architecture
 
 <details>
-<summary>🔍 Click to view complete system architecture</summary>
+<summary>View complete system architecture</summary>
 
 ```mermaid
 graph TB
@@ -116,7 +116,7 @@ graph TB
 
 ---
 
-## 🏢 Domain-Driven Design Structure
+## Domain-Driven Design Structure
 
 Eneo implements DDD patterns with clear domain boundaries and consistent architectural patterns.
 
@@ -142,7 +142,7 @@ backend/src/intric/
 Each domain follows a consistent layered architecture:
 
 <details>
-<summary>📁 Click to view domain structure pattern</summary>
+<summary>View domain structure pattern</summary>
 
 ```
 domain_name/
@@ -171,10 +171,10 @@ domain_name/
 
 ---
 
-## 🖥️ Frontend Architecture
+## Frontend Architecture
 
 <details>
-<summary>🔍 Click to view SvelteKit application structure</summary>
+<summary>View SvelteKit application structure</summary>
 
 ```mermaid
 graph LR
@@ -216,7 +216,7 @@ graph LR
 ### Key Frontend Technologies
 
 - **Framework**: SvelteKit with TypeScript
-- **Package Manager**: pnpm with workspace support
+- **Package Manager**: bun with workspace support
 - **UI Components**: Custom component library (@intric/ui)
 - **Styling**: Tailwind CSS v4
 - **API Client**: Type-safe client (@intric/intric-js)
@@ -226,12 +226,12 @@ graph LR
 
 ---
 
-## ⚙️ Backend Architecture
+## Backend Architecture
 
 ### FastAPI Application Structure
 
 <details>
-<summary>🔍 Click to view backend architecture diagram</summary>
+<summary>View backend architecture diagram</summary>
 
 ```mermaid
 graph TB
@@ -306,12 +306,12 @@ graph TB
 
 ---
 
-## 💾 Data Architecture
+## Data Architecture
 
 ### Database Design
 
 <details>
-<summary>🗄️ Click to view database schema overview</summary>
+<summary>View database schema overview</summary>
 
 ```mermaid
 erDiagram
@@ -412,12 +412,86 @@ erDiagram
 
 ---
 
-## 🔄 Real-Time Communication
+## Multi-Tenancy Architecture
+
+Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant identity providers, and encrypted credential management.
+
+### Tenant Isolation
+
+**Database Level:**
+- All entities include `tenant_id` for row-level security
+- PostgreSQL policies enforce tenant separation
+- UUID primary keys prevent enumeration
+
+**Authentication Modes:**
+
+- **Single-Tenant (Default)** - Shared IdP via `OIDC_DISCOVERY_ENDPOINT`
+- **Multi-Tenant Federation** - Per-tenant IdPs (Entra ID, MobilityGuard, Auth0, Okta), encrypted with Fernet, enabled via `FEDERATION_PER_TENANT_ENABLED=true`
+
+**Federation Configuration:**
+```bash
+# Example: Entra ID for a municipality
+PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+{
+  "provider": "entra_id",
+  "discovery_endpoint": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration",
+  "client_id": "...",
+  "client_secret": "...",  # Encrypted at rest
+  "allowed_domains": ["municipality.gov"]
+}
+
+# Example: MobilityGuard
+PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+{
+  "provider": "mobilityguard",
+  "discovery_endpoint": "https://login.mobilityguard.com/.well-known/openid-configuration",
+  "client_id": "...",
+  "client_secret": "...",
+  "allowed_domains": ["municipality.se"]
+}
+```
+
+**Credential Management:**
+
+- **Shared Mode** (`TENANT_CREDENTIALS_ENABLED=false`) - All tenants use global API keys
+- **Strict Mode** (`TENANT_CREDENTIALS_ENABLED=true`) - Each tenant configures encrypted credentials
+
+Supported providers: OpenAI, Anthropic, Azure, vLLM, Berget, Mistral. All credentials encrypted with Fernet using `ENCRYPTION_KEY`. Additional encrypted data includes crawler HTTP auth and custom integration secrets.
+
+Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
+
+**See Also:**
+- [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - IdP architecture
+- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) - Detailed credential management
+- [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Provisioning guide
+
+### Observability & Debugging
+
+**OIDC Debug Toggle:**
+
+Enable verbose authentication logging without redeployment for troubleshooting:
+
+```bash
+POST /api/v1/sysadmin/observability/oidc-debug/
+{
+  "enabled": true,
+  "duration_minutes": 10,
+  "reason": "Investigating login issue #452"
+}
+```
+
+**Workflow:** Enable toggle → Reproduce issue → Capture `correlationId` from UI → Filter logs: `journalctl | jq 'select(.correlation_id=="abc123")'` → Identify misconfiguration → Disable toggle
+
+**See Also:** [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
+
+---
+
+## Real-Time Communication
 
 ### Communication Patterns
 
 <details>
-<summary>🔍 Click to view real-time architecture</summary>
+<summary>View real-time architecture</summary>
 
 ```mermaid
 sequenceDiagram
@@ -485,7 +559,7 @@ sequenceDiagram
 
 ---
 
-## 🔌 AI Integration
+## AI Integration
 
 ### Multi-Provider Architecture
 
@@ -505,7 +579,7 @@ Eneo supports multiple AI providers through a unified interface, allowing organi
 
 ---
 
-## 🏭 Background Processing
+## Background Processing
 
 ### ARQ Task System
 
@@ -525,7 +599,7 @@ Eneo uses ARQ (Async Redis Queue) for handling time-intensive operations that sh
 
 ---
 
-## 🔒 Security
+## Security
 
 ### Security by Design
 
@@ -539,21 +613,30 @@ Eneo implements security at every layer to protect sensitive public sector data 
 
 **Data Protection:**
 - **Encryption**: AES-256 for data at rest, TLS 1.3 in transit
+- **Tenant Data Encryption**: Fernet encryption for tenant credentials and federation configs
 - **Password Security**: Bcrypt hashing with secure salts
 - **Audit Trails**: All actions logged for compliance
 - **Data Retention**: Automatic deletion per policy
+
+**Multi-Tenant Security:**
+- Database isolation with row-level security
+- Encrypted credentials (Fernet) for LLM keys and IdP secrets
+- Per-tenant federation support
+- Masked credential responses
 
 **Compliance Ready:**
 - **GDPR**: Built-in data subject rights and privacy controls
 - **EU AI Act**: Transparency and accountability features
 - **Public Sector**: Designed for government security requirements
 
+**See Also:** [Multi-Tenancy Architecture](#multi-tenancy-architecture) for detailed security implementation
+
 ---
 
 <details>
-<summary>📊 Click to view monitoring and observability</summary>
+<summary>View monitoring and observability</summary>
 
-## 📊 Monitoring and Observability
+## Monitoring and Observability
 
 ### Built-in Monitoring
 
@@ -581,12 +664,12 @@ Eneo includes comprehensive monitoring capabilities for production deployments.
 
 ---
 
-## 🚀 Deployment Architecture
+## Deployment Architecture
 
 ### Container Architecture
 
 <details>
-<summary>📦 Click to view container deployment architecture</summary>
+<summary>View container deployment architecture</summary>
 
 ```mermaid
 graph TB
@@ -673,7 +756,7 @@ graph TB
 
 ---
 
-## 📈 Scalability Considerations
+## Scalability Considerations
 
 ### Horizontal Scaling
 
@@ -711,7 +794,7 @@ graph TB
 
 ---
 
-## 📚 Architecture Decision Records
+## Architecture Decision Records
 
 ### Key Architectural Decisions
 
