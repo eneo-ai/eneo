@@ -197,6 +197,16 @@ def test_settings(
         url_signing_key="test_url_signing_key",
         intric_super_api_key="test-super-admin-key-for-integration-tests",
 
+        # LLM API Keys - CRITICAL: Set to None to prevent reading from environment
+        # Integration tests should NEVER use real API keys
+        openai_api_key=None,
+        anthropic_api_key=None,
+        azure_api_key=None,
+        berget_api_key=None,
+        mistral_api_key=None,
+        ovhcloud_api_key=None,
+        vllm_api_key=None,
+
         # Feature flags
         using_access_management=False,
         using_iam=False,
@@ -578,6 +588,29 @@ async def async_session(setup_database):
     async with sessionmanager.session() as session:
         async with session.begin():
             yield session
+
+
+@pytest.fixture(autouse=True)
+def clear_api_keys_for_all_tests(request, monkeypatch):
+    """Auto-use fixture to ensure API keys are cleared for integration tests ONLY.
+
+    CRITICAL: This ensures integration tests NEVER use real API keys from the environment.
+    Only runs for tests marked with @pytest.mark.integration to avoid affecting unit tests.
+    """
+    # Skip if not an integration test
+    if "integration" not in request.keywords:
+        return
+
+    for key in [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "AZURE_API_KEY",
+        "BERGET_API_KEY",
+        "MISTRAL_API_KEY",
+        "OVHCLOUD_API_KEY",
+        "VLLM_API_KEY",
+    ]:
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture

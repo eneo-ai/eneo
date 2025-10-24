@@ -119,6 +119,7 @@ def litellm_completion_model(mock_user):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_completion_service_creates_adapter_with_tenant_credentials(
     legacy_credentials_mode,
     mock_tenant,
@@ -147,6 +148,7 @@ async def test_completion_service_creates_adapter_with_tenant_credentials(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_completion_service_without_tenant_creates_adapter_without_credentials(
     legacy_credentials_mode,
     mock_settings,
@@ -173,8 +175,8 @@ async def test_completion_service_without_tenant_creates_adapter_without_credent
     assert adapter.credential_resolver is None, "Adapter should not have credential_resolver when tenant is None"
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_completion_service_uses_tenant_api_key_in_request(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -288,6 +290,7 @@ async def test_completion_service_uses_tenant_api_key_in_request(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_completion_service_falls_back_to_global_key_when_no_tenant_credential(
     legacy_credentials_mode,
     mock_settings,
