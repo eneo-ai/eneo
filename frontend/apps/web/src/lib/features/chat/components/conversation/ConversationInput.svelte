@@ -121,6 +121,13 @@
 
 	let useWebSearch = $state(false);
 
+	// Disable web search when there are attachments
+	$effect(() => {
+		if ($attachments.length > 0 && useWebSearch) {
+			useWebSearch = false;
+		}
+	});
+
 	const shouldShowMentionButton = $derived.by(() => {
 		const hasTools = chat.partner.tools.assistants.length > 0;
 		const isEnabled =
@@ -169,89 +176,102 @@
 	});
 </script>
 
-<form
-	class="border-default bg-primary ring-dimmer focus-within:border-stronger hover:border-stronger relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 focus-within:shadow-lg hover:ring-4 md:w-full md:rounded-xl md:border"
->
-	<!-- Icon always absolutely positioned to prevent jumping -->
-	{#if modelInfo && tokenLimit > 0}
-		<div class="absolute top-2 right-2.5 z-10">
-			<Tooltip text={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()} placement="top">
-				<button
-					type="button"
-					onclick={(e) => {
-						e.stopPropagation();
-						tokenUsageEnabled = !tokenUsageEnabled;
-					}}
-					class="flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-black/5 {tokenUsageColorClass()}"
-					aria-label={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()}
-					aria-pressed={tokenUsageEnabled ? "true" : "false"}
-				>
-					<ChartPie class="h-4.5 w-4.5 transition-colors duration-200" />
-				</button>
-			</Tooltip>
+<div class="flex w-[100%] max-w-[74ch] flex-col md:w-full">
+	{#if useWebSearch}
+		<div class="bg-yellow-200 text-yellow-900 border-l border-r border-t border-yellow-400 text-sm px-3 py-2 rounded-t-xl text-center md:rounded-t-xl">
+			{m.websearch_notice()}
 		</div>
 	{/if}
 
-	<!-- Usage bar slides in below, with smooth animation -->
-	{#if modelInfo && tokenLimit > 0 && tokenUsageEnabled}
-		<div
-			transition:slide={{ duration: 350, easing: quintOut, axis: 'y' }}
-		>
-			<div class="px-2 pt-1 pr-11 pb-2">
-			<TokenUsageBar tokens={newTokens} limit={tokenLimit} {historyTokens} {promptTokens} {isApproximate} />
-			</div>
-		</div>
-	{/if}
-
-	<MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
-
-	<div class="flex justify-between mt-2">
-		<div class="flex items-center gap-2">
-			<AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
-			{#if shouldShowMentionButton}
-				<MentionButton></MentionButton>
-			{/if}
-
-			{#if chat.partner.type === 'default-assistant' && featureFlags.showWebSearch}
-				<div
-					class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
-				>
-					<Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
-						<span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
+	<!-- This interaction is just a convenience function -->
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<form
+		onclick={() => {
+			focusMentionInput();
+		}}
+		class="{useWebSearch ? 'border-yellow-400 focus-within:border-yellow-500 hover:border-yellow-500' : 'border-default focus-within:border-stronger hover:border-stronger'} bg-primary ring-dimmer relative flex flex-col gap-2 border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 focus-within:shadow-lg hover:ring-4 {useWebSearch ? 'rounded-b-xl rounded-t-none border-l border-r border-b md:rounded-b-xl md:rounded-t-none' : 'rounded-xl border'} md:border"
+	>
+		<!-- Icon always absolutely positioned to prevent jumping -->
+		{#if modelInfo && tokenLimit > 0}
+			<div class="absolute top-2 right-2.5 z-10">
+				<Tooltip text={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()} placement="top">
+					<button
+						type="button"
+						onclick={(e) => {
+							e.stopPropagation();
+							tokenUsageEnabled = !tokenUsageEnabled;
+						}}
+						class="flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-black/5 {tokenUsageColorClass()}"
+						aria-label={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()}
+						aria-pressed={tokenUsageEnabled ? "true" : "false"}
 					>
-				</div>
-			{/if}
-		</div>
+						<ChartPie class="h-4.5 w-4.5 transition-colors duration-200" />
+					</button>
+				</Tooltip>
+			</div>
+		{/if}
 
-		<div class="flex items-center gap-2">
-			{#if chat.askQuestion.isLoading}
-				<Tooltip text={m.cancel_your_request()} placement="top" let:trigger asFragment>
+		<!-- Usage bar slides in below, with smooth animation -->
+		{#if modelInfo && tokenLimit > 0 && tokenUsageEnabled}
+			<div
+				transition:slide={{ duration: 350, easing: quintOut, axis: 'y' }}
+			>
+				<div class="px-2 pt-1 pr-11 pb-2">
+					<TokenUsageBar tokens={newTokens} limit={tokenLimit} {historyTokens} {promptTokens} {isApproximate} />
+				</div>
+			</div>
+		{/if}
+
+		<MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
+
+		<div class="flex justify-between">
+			<div class="flex items-center gap-2">
+				<AttachmentUploadIconButton disabled={useWebSearch} label={m.upload_documents_to_conversation()} />
+				{#if shouldShowMentionButton}
+					<MentionButton></MentionButton>
+				{/if}
+				{#if chat.partner.type === 'default-assistant' && featureFlags.showWebSearch}
+					<div
+						class="border-default flex items-center justify-center rounded-full border p-1.5 {$attachments.length > 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent-dimmer hover:text-accent-stronger hover:border-accent-default'}"
+					>
+						<Input.Switch bind:value={useWebSearch} disabled={$attachments.length > 0} class={$attachments.length > 0 ? '*:!cursor-not-allowed' : '*:!cursor-pointer'}>
+							<span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
+						>
+					</div>
+				{/if}
+			</div>
+
+			<div class="flex items-center gap-2">
+				{#if chat.askQuestion.isLoading}
+					<Tooltip text={m.cancel_your_request()} placement="top" let:trigger asFragment>
+						<Button
+							unstyled
+							aria-label={m.cancel_your_request()}
+							type="submit"
+							is={trigger}
+							onclick={() => abortController?.abort('User cancelled')}
+							name="ask"
+							class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
+						>
+							{m.stop_answer()}
+							<IconStopCircle />
+						</Button>
+					</Tooltip>
+				{:else}
 					<Button
-						unstyled
-						aria-label={m.cancel_your_request()}
+						disabled={isAskingDisabled}
+						aria-label={m.submit_your_question()}
 						type="submit"
-						is={trigger}
-						onclick={() => abortController?.abort('User cancelled')}
+						onclick={() => ask()}
 						name="ask"
 						class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
 					>
-						{m.stop_answer()}
-						<IconStopCircle />
+						{m.send()}
+						<IconEnter />
 					</Button>
-				</Tooltip>
-			{:else}
-				<Button
-					disabled={isAskingDisabled}
-					aria-label={m.submit_your_question()}
-					type="submit"
-					onclick={() => ask()}
-					name="ask"
-					class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
-				>
-					{m.send()}
-					<IconEnter />
-				</Button>
-			{/if}
+				{/if}
+			</div>
 		</div>
-	</div>
-</form>
+	</form>
+</div>
