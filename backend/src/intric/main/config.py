@@ -135,6 +135,8 @@ class Settings(BaseSettings):
     tenant_worker_concurrency_limit: int = 4
     tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
     tenant_worker_retry_delay_seconds: int = 30
+    tenant_worker_retry_max_delay_seconds: int = 5 * 60
+    tenant_worker_retry_backoff_ttl_seconds: int = 5 * 60
 
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
@@ -300,6 +302,31 @@ class Settings(BaseSettings):
             logging.error(
                 "TENANT_WORKER_RETRY_DELAY_SECONDS cannot be negative. Current value: %s",
                 self.tenant_worker_retry_delay_seconds,
+            )
+            sys.exit(1)
+
+        if self.tenant_worker_retry_max_delay_seconds <= 0:
+            logging.error(
+                "TENANT_WORKER_RETRY_MAX_DELAY_SECONDS must be greater than zero. Current value: %s",
+                self.tenant_worker_retry_max_delay_seconds,
+            )
+            sys.exit(1)
+
+        if (
+            self.tenant_worker_retry_max_delay_seconds
+            < self.tenant_worker_retry_delay_seconds
+        ):
+            logging.warning(
+                "TENANT_WORKER_RETRY_MAX_DELAY_SECONDS (%s) is lower than the base retry delay (%s). "
+                "Backoff will be capped at the base delay.",
+                self.tenant_worker_retry_max_delay_seconds,
+                self.tenant_worker_retry_delay_seconds,
+            )
+
+        if self.tenant_worker_retry_backoff_ttl_seconds <= 0:
+            logging.error(
+                "TENANT_WORKER_RETRY_BACKOFF_TTL_SECONDS must be greater than zero. Current value: %s",
+                self.tenant_worker_retry_backoff_ttl_seconds,
             )
             sys.exit(1)
 
