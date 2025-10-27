@@ -364,7 +364,7 @@ async def test_concurrent_fallback_calls_respect_per_tenant_limit():
 
     # Tenant A: 1 already acquired + 1 more from gather = 2 total (reached limit)
     # From the 5 gather calls: 1 succeeds, 4 fail
-    assert results_a.count(True) == 1, f"Tenant A should get 1 more slot (already has 1)"
+    assert results_a.count(True) == 1, "Tenant A should get 1 more slot (already has 1)"
     assert results_a.count(False) == 4
 
     # Tenant B: 2 succeed, 3 fail (independent limit)
