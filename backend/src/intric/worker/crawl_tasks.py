@@ -1,11 +1,13 @@
 import asyncio
 import hashlib
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from arq import Retry
 from dependency_injector import providers
+import redis.asyncio as aioredis
 import sqlalchemy as sa
 
 from intric.main.container.container import Container
@@ -19,6 +21,69 @@ from intric.websites.crawl_dependencies.crawl_models import (
 # Page content hashing removed due to dynamic content (timestamps, etc.)
 
 logger = get_logger(__name__)
+
+_BACKOFF_JITTER_RATIO = 0.25
+
+
+async def _tenant_retry_delay(
+    *,
+    tenant_id: UUID,
+    redis_client: aioredis.Redis | None,
+    base_delay: float,
+    max_delay: float,
+    ttl_seconds: int,
+) -> float:
+    """Compute a per-tenant retry delay with exponential backoff.
+
+    Falls back to the base delay if Redis is unavailable.
+    """
+
+    base_delay = max(base_delay, 0)
+    max_delay = max(max_delay, base_delay)
+
+    if not redis_client:
+        return base_delay
+
+    key = f"tenant:{tenant_id}:limiter_backoff"
+    try:
+        failures = await redis_client.incr(key)
+        if failures == 1:
+            await redis_client.expire(key, ttl_seconds)
+    except Exception as exc:  # pragma: no cover - safety fallback
+        logger.warning(
+            "Failed to update tenant backoff counter",
+            extra={
+                "tenant_id": str(tenant_id),
+                "error": str(exc),
+            },
+        )
+        return base_delay or 1
+
+    delay = base_delay or 1
+    delay *= max(failures, 1)
+    delay = min(delay, max_delay or delay)
+
+    jitter = delay * _BACKOFF_JITTER_RATIO
+    if jitter > 0:
+        delay = max(0, delay + random.uniform(-jitter, jitter))
+
+    return max(delay, base_delay or 1)
+
+
+async def _reset_tenant_retry_delay(
+    *, tenant_id: UUID, redis_client: aioredis.Redis | None
+) -> None:
+    if not redis_client:
+        return
+
+    key = f"tenant:{tenant_id}:limiter_backoff"
+    try:
+        await redis_client.delete(key)
+    except Exception:  # pragma: no cover - best effort cleanup
+        logger.debug(
+            "Failed to reset tenant backoff counter",
+            extra={"tenant_id": str(tenant_id)},
+        )
 
 
 async def process_page_with_retry(
@@ -165,6 +230,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     tenant = None
     limiter = None
     acquired = False
+    redis_client: aioredis.Redis | None = None
 
     try:
         tenant = container.tenant()
@@ -173,8 +239,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
     if tenant:
         limiter = container.tenant_concurrency_limiter()
+        try:
+            redis_client = container.redis_client()
+        except Exception:  # pragma: no cover - container guard
+            redis_client = None
+
         acquired = await limiter.acquire(tenant.id)
         if not acquired:
+            retry_delay = await _tenant_retry_delay(
+                tenant_id=tenant.id,
+                redis_client=redis_client,
+                base_delay=settings.tenant_worker_retry_delay_seconds,
+                max_delay=settings.tenant_worker_retry_max_delay_seconds,
+                ttl_seconds=settings.tenant_worker_retry_backoff_ttl_seconds,
+            )
+
             logger.warning(
                 "Tenant concurrency limit reached, requeueing crawl",
                 extra={
@@ -182,9 +261,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "tenant_slug": tenant.slug,
                     "job_id": str(job_id),
                     "max_concurrent": settings.tenant_worker_concurrency_limit,
+                    "retry_delay_seconds": retry_delay,
+                    "metric_name": "tenant.limiter.requeued",
+                    "metric_value": 1,
                 },
             )
-            raise Retry(defer=settings.tenant_worker_retry_delay_seconds)
+            raise Retry(defer=retry_delay)
 
     try:
         async with task_manager.set_status_on_exception():
@@ -587,3 +669,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     finally:
         if limiter is not None and tenant is not None and acquired:
             await limiter.release(tenant.id)
+            await _reset_tenant_retry_delay(
+                tenant_id=tenant.id, redis_client=redis_client
+            )
