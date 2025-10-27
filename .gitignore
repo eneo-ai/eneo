@@ -28,13 +28,9 @@ backend/.release-please-manifest.json
 
 # Claude Code configuration
 CLAUDE.md
-eneo-*.md
-.CLAUDE.md
 .claude/
 .specify/
 specs/
 .devcontainer/claude-config/
-.devcontainer/
 .code/
 .mcp.json
-devcontainer.json
