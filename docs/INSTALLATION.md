@@ -35,6 +35,8 @@ When VS Code opens:
 2. Click **"Reopen in Container"**
 3. Wait 2-3 minutes for initial setup (only first time)
 
+> **Note:** If you don't see the notification, install the "Dev Containers" extension from the VS Code marketplace (`ms-vscode-remote.remote-containers`), then reload VS Code.
+
 ### Step 3: Configure Environment
 
 Now edit `backend/.env` and add your AI provider key:
@@ -163,15 +165,12 @@ UPLOAD_MAX_FILE_SIZE=10485760  # 10MB in bytes
 
 ### Login Issues During Development
 
-If running locally and experiencing login problems, edit `frontend/apps/web/vite.config.ts`:
+The frontend is configured to bind to `0.0.0.0` by default (see `vite.config.ts` line 36), which should work in most development environments including WSL.
 
-```javascript
-server: {
-  host: "0.0.0.0",  // Change from conditional to explicit
-  port: 3000,
-  strictPort: true
-},
-```
+If you still experience login issues:
+1. Verify the backend is running on port 8123: `curl http://localhost:8123/version`
+2. Check that the `JWT_SECRET` in `backend/.env` is set
+3. Clear your browser cookies and try again
 
 ### Database Issues After Code Updates
 

@@ -2,6 +2,8 @@
 
 Quick deployment reference for Eneo using Docker Compose.
 
+> **First time deploying?** See the [Full Deployment Guide](../DEPLOYMENT.md) for detailed explanations and troubleshooting.
+
 ## Files in This Directory
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
