@@ -431,6 +431,18 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         user_password="test_password",
     )
 
+    # Recreate using_templates feature flag (required for template tests)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'using_templates',
+            'Enable tenant-scoped template management for Assistants and Apps',
+            false, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    conn.commit()
+    cursor.close()
+
     conn.close()
     print("Cleaned up and reseeded test database")
 

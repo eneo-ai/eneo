@@ -26,6 +26,9 @@ class AppTemplateFactory:
             input_description=item.input_description,
             input_type=item.input_type,
             organization=item.organization,
+            tenant_id=item.tenant_id,
+            deleted_at=item.deleted_at,
+            original_snapshot=item.original_snapshot,
         )
 
     @staticmethod

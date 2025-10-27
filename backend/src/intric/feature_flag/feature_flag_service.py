@@ -45,4 +45,6 @@ class FeatureFlagService:
         tenant_id: UUID | None = None,
     ) -> bool:
         feature_flag = await self.feature_flag_repo.one_or_none(name=feature_name)
-        return not feature_flag or feature_flag.is_enabled(tenant_id=tenant_id)
+        if feature_flag is None:
+            return False  # Disabled by default when flag doesn't exist
+        return feature_flag.is_enabled(tenant_id=tenant_id)

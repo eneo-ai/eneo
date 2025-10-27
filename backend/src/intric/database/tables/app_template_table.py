@@ -1,7 +1,8 @@
 from typing import Optional
 from uuid import UUID
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text
+from sqlalchemy import ForeignKey, Text, TIMESTAMP
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +25,22 @@ class AppTemplates(BasePublic):
 
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id),
+    )
+
+    # New fields for tenant-scoped template management
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        index=True
+    )
+    original_snapshot: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
     )
 
     completion_model: Mapped[CompletionModels] = relationship()

@@ -1,8 +1,10 @@
 from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy import or_, func, update
 
 from intric.database.tables.assistant_template_table import AssistantTemplates
 
@@ -38,11 +40,26 @@ class AssistantTemplateRepository:
         return query
 
     async def get_by_id(
-        self, assistant_template_id: "UUID"
+        self, assistant_template_id: "UUID", tenant_id: Optional["UUID"] = None
     ) -> Optional["AssistantTemplate"]:
+        """Get template by ID.
+
+        If tenant_id provided:
+          - Filter by: id AND tenant_id AND deleted_at IS NULL
+          - Returns: Only if belongs to tenant
+
+        If tenant_id is None:
+          - Filter by: id AND deleted_at IS NULL
+          - Returns: Template regardless of tenant_id (used for internal queries)
+        """
         base_query = select(self._db_model).where(
-            self._db_model.id == assistant_template_id
+            self._db_model.id == assistant_template_id,
+            self._db_model.deleted_at.is_(None)
         )
+
+        if tenant_id is not None:
+            base_query = base_query.where(self._db_model.tenant_id == tenant_id)
+
         query = self._apply_options(query=base_query)
 
         record = await self.session.scalar(query)
@@ -52,8 +69,31 @@ class AssistantTemplateRepository:
 
         return self.factory.create_assistant_template(item=record)
 
-    async def get_assistant_template_list(self) -> list["AssistantTemplate"]:
-        base_query = select(self._db_model)
+    async def get_assistant_template_list(self, tenant_id: Optional["UUID"] = None) -> list["AssistantTemplate"]:
+        """Get all active templates.
+
+        If tenant_id provided:
+          - Return templates WHERE (tenant_id = ? OR tenant_id IS NULL) AND deleted_at IS NULL
+          - Includes both tenant-specific and global templates
+
+        If tenant_id is None:
+          - Return templates WHERE tenant_id IS NULL AND deleted_at IS NULL
+          - Global templates only
+        """
+        base_query = select(self._db_model).where(
+            self._db_model.deleted_at.is_(None)
+        )
+
+        if tenant_id is not None:
+            base_query = base_query.where(
+                or_(
+                    self._db_model.tenant_id == tenant_id,
+                    self._db_model.tenant_id.is_(None)
+                )
+            )
+        else:
+            base_query = base_query.where(self._db_model.tenant_id.is_(None))
+
         query = self._apply_options(query=base_query)
 
         results = await self.session.scalars(query)
@@ -103,3 +143,103 @@ class AssistantTemplateRepository:
         result = await self.session.execute(stmt)
         template_updated = result.scalar_one()
         return self.factory.create_assistant_template(item=template_updated)
+
+    async def get_for_tenant(self, tenant_id: "UUID") -> list["AssistantTemplate"]:
+        """Get tenant-owned templates only (admin view).
+
+        Returns templates WHERE tenant_id = ? AND deleted_at IS NULL
+        Excludes global templates (tenant_id IS NULL).
+        Used for admin management page.
+        """
+        base_query = select(self._db_model).where(
+            self._db_model.tenant_id == tenant_id,
+            self._db_model.deleted_at.is_(None)
+        )
+        query = self._apply_options(query=base_query)
+        results = await self.session.scalars(query)
+        return self.factory.create_assistant_template_list(items=results.all())
+
+    async def check_duplicate_name(self, name: str, tenant_id: Optional["UUID"] = None) -> bool:
+        """Check if template name already exists.
+
+        If tenant_id provided:
+          - Check: name exists for this tenant (tenant_id = ?) AND NOT deleted
+
+        If tenant_id is None:
+          - Check: name exists globally (tenant_id IS NULL) AND NOT deleted
+
+        Returns True if duplicate exists, False otherwise.
+        """
+        query = select(func.count(self._db_model.id)).where(
+            self._db_model.name == name,
+            self._db_model.deleted_at.is_(None)
+        )
+        if tenant_id is not None:
+            query = query.where(self._db_model.tenant_id == tenant_id)
+        else:
+            query = query.where(self._db_model.tenant_id.is_(None))
+
+        count = await self.session.scalar(query)
+        return count > 0
+
+    async def soft_delete(self, id: "UUID", tenant_id: "UUID") -> "AssistantTemplate":
+        """Soft-delete template (mark with deleted_at).
+
+        Validates: template belongs to tenant
+        """
+        stmt = (
+            update(self._db_model)
+            .where(
+                self._db_model.id == id,
+                self._db_model.tenant_id == tenant_id
+            )
+            .values(deleted_at=datetime.now(timezone.utc))
+            .returning(self._db_model)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        record = result.scalar_one_or_none()
+
+        if not record:
+            return None
+
+        return self.factory.create_assistant_template(item=record)
+
+    async def restore(self, id: "UUID", tenant_id: "UUID") -> "AssistantTemplate":
+        """Restore soft-deleted template (clear deleted_at).
+
+        Validates: template belongs to tenant and is deleted
+        """
+        stmt = (
+            update(self._db_model)
+            .where(
+                self._db_model.id == id,
+                self._db_model.tenant_id == tenant_id,
+                self._db_model.deleted_at.is_not(None)
+            )
+            .values(deleted_at=None)
+            .returning(self._db_model)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        record = result.scalar_one_or_none()
+
+        if not record:
+            return None
+
+        return self.factory.create_assistant_template(item=record)
+
+    async def get_deleted_for_tenant(self, tenant_id: "UUID") -> list["AssistantTemplate"]:
+        """Get soft-deleted templates for audit trail view.
+
+        Returns templates WHERE tenant_id = ? AND deleted_at IS NOT NULL
+        Ordered by deleted_at DESC (most recently deleted first)
+        """
+        base_query = select(self._db_model).where(
+            self._db_model.tenant_id == tenant_id,
+            self._db_model.deleted_at.is_not(None)
+        ).order_by(self._db_model.deleted_at.desc())
+
+        query = self._apply_options(query=base_query)
+        results = await self.session.scalars(query)
+        return self.factory.create_assistant_template_list(items=results.all())

@@ -873,6 +873,8 @@
   "template_preview": "Mallförhandsvisning",
   "use_template": "Använd mall",
   "template_description": "Mallbeskrivning",
+  "template_singular": "mall",
+  "template_plural": "mallar",
   "getting_started": "Komma igång",
   "popular_templates": "Populära mallar",
   "send_email_link_instructions": "Skicka {email} länken nedan så att de kan skapa sitt konto.",

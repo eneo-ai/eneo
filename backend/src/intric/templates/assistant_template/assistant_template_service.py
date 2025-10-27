@@ -1,12 +1,20 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timezone
 
-from intric.main.exceptions import NotFoundException
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
+from intric.main.exceptions import (
+    NotFoundException,
+    BadRequestException,
+    NameCollisionException,
+)
 from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateCreate,
 )
 
 if TYPE_CHECKING:
     from uuid import UUID
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.templates.assistant_template.assistant_template_factory import (
@@ -18,6 +26,7 @@ if TYPE_CHECKING:
     from intric.templates.assistant_template.api.assistant_template_models import (
         AssistantTemplateUpdate,
     )
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
 
 
 class AssistantTemplateService:
@@ -25,37 +34,330 @@ class AssistantTemplateService:
         self,
         factory: "AssistantTemplateFactory",
         repo: "AssistantTemplateRepository",
+        feature_flag_service: "FeatureFlagService",
+        session: "AsyncSession",
     ) -> None:
         self.factory = factory
         self.repo = repo
+        self.feature_flag_service = feature_flag_service
+        self.session = session
 
     async def get_assistant_template(
-        self, assistant_template_id: "UUID"
+        self, assistant_template_id: "UUID", tenant_id: Optional["UUID"] = None
     ) -> "AssistantTemplate":
+        """Get template by ID.
+
+        Time complexity: O(log n) using primary key and composite index
+        """
         assistant_template = await self.repo.get_by_id(
-            assistant_template_id=assistant_template_id
+            assistant_template_id=assistant_template_id,
+            tenant_id=tenant_id
         )
 
         if assistant_template is None:
-            raise NotFoundException()
+            raise NotFoundException("Template not found")
 
         return assistant_template
 
-    async def get_assistant_templates(self) -> list["AssistantTemplate"]:
-        return await self.repo.get_assistant_template_list()
+    async def get_assistant_templates(
+        self, tenant_id: "UUID"
+    ) -> list["AssistantTemplate"]:
+        """Get templates for gallery (tenant + global).
 
-    async def create_assistant_template(
-        self, obj: AssistantTemplateCreate
-    ) -> "AssistantTemplate":
-        template = await self.repo.add(obj=obj)
-        return template
+        Returns tenant-specific and global templates for template selection gallery.
+        Feature flag gated - returns empty list if disabled.
 
-    async def delete_assistant_template(self, id: "UUID") -> None:
-        await self.repo.delete(id=id)
+        Time complexity: O(k log n) where k is number of matching templates
+        """
+        # Check feature flag
+        is_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates",
+            tenant_id=tenant_id
+        )
+        if not is_enabled:
+            # Return empty list when feature disabled (not error)
+            return []
 
-    async def update_assistant_template(
+        return await self.repo.get_assistant_template_list(tenant_id=tenant_id)
+
+    async def create_template(
         self,
-        id: "UUID",
-        obj: "AssistantTemplateUpdate",
+        data: AssistantTemplateCreate,
+        tenant_id: "UUID",
     ) -> "AssistantTemplate":
-        return await self.repo.update(id=id, obj=obj)
+        """Create tenant-scoped template with snapshot.
+
+        Business logic:
+        - Feature flag must be enabled
+        - Name must be unique within tenant
+        - Original state saved to snapshot
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for feature check + duplicate check + insert
+        """
+        # Check feature flag enabled for tenant
+        is_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates",
+            tenant_id=tenant_id
+        )
+        if not is_enabled:
+            raise BadRequestException(
+                "Templates feature is not enabled for this tenant. Enable in settings first."
+            )
+
+        # Check duplicate name within tenant
+        duplicate_exists = await self.repo.check_duplicate_name(
+            name=data.name,
+            tenant_id=tenant_id
+        )
+        if duplicate_exists:
+            raise NameCollisionException(
+                f"A template with name '{data.name}' already exists in this tenant"
+            )
+
+        # Create template with tenant_id
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+        import sqlalchemy as sa
+
+        # Create snapshot from initial data
+        snapshot = {
+            "name": data.name,
+            "description": data.description,
+            "category": data.category,
+            "prompt_text": data.prompt,
+            "completion_model_kwargs": data.completion_model_kwargs,
+            "wizard": data.wizard.model_dump() if data.wizard else None,
+        }
+
+        stmt = (
+            sa.insert(AssistantTemplates)
+            .values(
+                name=data.name,
+                description=data.description,
+                category=data.category,
+                prompt_text=data.prompt,
+                wizard=data.wizard.model_dump() if data.wizard else None,
+                completion_model_kwargs=data.completion_model_kwargs,
+                tenant_id=tenant_id,
+                deleted_at=None,
+                original_snapshot=snapshot,
+            )
+            .returning(AssistantTemplates)
+        )
+
+        try:
+            result = await self.session.execute(stmt)
+            template_record = result.scalar_one()
+        except IntegrityError as e:
+            if 'uq_assistant_templates_name_tenant' in str(e):
+                raise NameCollisionException(
+                    f"A template with name '{data.name}' already exists in this tenant"
+                )
+            raise
+
+        return self.factory.create_assistant_template(item=template_record)
+
+    async def update_template(
+        self,
+        template_id: "UUID",
+        data: "AssistantTemplateUpdate",
+        tenant_id: "UUID",
+    ) -> "AssistantTemplate":
+        """Update tenant-scoped template.
+
+        Business logic:
+        - Must belong to tenant
+        - If name changed: check uniqueness
+        - original_snapshot NOT updated (preserved for rollback)
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership check + optional duplicate check + update
+        """
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            assistant_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # If name changed, check duplicate
+        if data.name and data.name != template.name:
+            duplicate_exists = await self.repo.check_duplicate_name(
+                name=data.name,
+                tenant_id=tenant_id
+            )
+            if duplicate_exists:
+                raise NameCollisionException(
+                    f"A template with name '{data.name}' already exists in this tenant"
+                )
+
+        # Update template (original_snapshot preserved)
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+        import sqlalchemy as sa
+
+        update_values = {}
+        if data.name is not None:
+            update_values["name"] = data.name
+        if data.description is not None:
+            update_values["description"] = data.description
+        if data.category is not None:
+            update_values["category"] = data.category
+        if data.prompt is not None:
+            update_values["prompt_text"] = data.prompt
+        if data.wizard is not None:
+            update_values["wizard"] = data.wizard.model_dump() if data.wizard else None
+        if data.completion_model_kwargs is not None:
+            update_values["completion_model_kwargs"] = data.completion_model_kwargs
+
+        stmt = (
+            sa.update(AssistantTemplates)
+            .where(
+                AssistantTemplates.id == template_id,
+                AssistantTemplates.tenant_id == tenant_id
+            )
+            .values(**update_values)
+            .returning(AssistantTemplates)
+        )
+        result = await self.session.execute(stmt)
+        updated_record = result.scalar_one()
+
+        return self.factory.create_assistant_template(item=updated_record)
+
+    async def delete_template(
+        self,
+        template_id: "UUID",
+        tenant_id: "UUID",
+    ) -> None:
+        """Soft-delete tenant-scoped template.
+
+        Business logic:
+        - Must belong to tenant
+        - Cannot delete if in use by assistants
+        - Sets deleted_at timestamp
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership + usage check + soft-delete
+        """
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            assistant_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # Check if template is in use
+        usage_count = await self._count_template_usage(template_id)
+        if usage_count > 0:
+            raise BadRequestException(
+                f"Cannot delete template '{template.name}'. It is used by {usage_count} assistant(s)."
+            )
+
+        # Soft-delete
+        result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id)
+        if not result:
+            raise NotFoundException("Template not found")
+
+    async def rollback_template(
+        self,
+        template_id: "UUID",
+        tenant_id: "UUID",
+    ) -> "AssistantTemplate":
+        """Restore template to original state from snapshot.
+
+        Business logic:
+        - Must belong to tenant
+        - Must have original_snapshot
+        - Restores all fields from snapshot
+        - Updates updated_at timestamp
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership check + update
+        """
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            assistant_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # Check snapshot exists
+        if not template.original_snapshot:
+            raise BadRequestException(
+                "Cannot rollback template. Original snapshot not found."
+            )
+
+        # Restore from snapshot
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+        import sqlalchemy as sa
+
+        snapshot = template.original_snapshot
+
+        stmt = (
+            sa.update(AssistantTemplates)
+            .where(
+                AssistantTemplates.id == template_id,
+                AssistantTemplates.tenant_id == tenant_id
+            )
+            .values(
+                name=snapshot.get("name"),
+                description=snapshot.get("description"),
+                category=snapshot.get("category"),
+                prompt_text=snapshot.get("prompt_text"),
+                completion_model_kwargs=snapshot.get("completion_model_kwargs"),
+                wizard=snapshot.get("wizard"),
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(AssistantTemplates)
+        )
+        result = await self.session.execute(stmt)
+        restored_record = result.scalar_one()
+
+        return self.factory.create_assistant_template(item=restored_record)
+
+    async def get_templates_for_tenant(
+        self,
+        tenant_id: "UUID",
+    ) -> list["AssistantTemplate"]:
+        """Get tenant-specific templates only (admin view).
+
+        Returns only templates where tenant_id matches (NOT global templates).
+        Used for admin management page.
+
+        Time complexity: O(k log n) where k is number of tenant templates
+        """
+        return await self.repo.get_for_tenant(tenant_id=tenant_id)
+
+    async def get_deleted_templates_for_tenant(
+        self,
+        tenant_id: "UUID",
+    ) -> list["AssistantTemplate"]:
+        """Get soft-deleted templates for audit trail.
+
+        Returns deleted templates ordered by deleted_at DESC.
+        Admin only (enforced at router level).
+
+        Time complexity: O(k log n) where k is number of deleted templates
+        """
+        return await self.repo.get_deleted_for_tenant(tenant_id=tenant_id)
+
+    async def _count_template_usage(self, template_id: "UUID") -> int:
+        """Count how many assistants use this template.
+
+        Time complexity: O(log n) using template_id index
+        """
+        from intric.database.tables.assistant_table import Assistants
+
+        stmt = select(func.count(Assistants.id)).where(
+            Assistants.template_id == template_id
+        )
+        result = await self.session.scalar(stmt)
+        return result or 0

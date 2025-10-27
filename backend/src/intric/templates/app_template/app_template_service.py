@@ -1,9 +1,17 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timezone
 
-from intric.main.exceptions import NotFoundException
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
+from intric.main.exceptions import (
+    NotFoundException,
+    BadRequestException,
+    NameCollisionException,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     from intric.templates.app_template.api.app_template_models import AppTemplateCreate
     from intric.templates.app_template.app_template import AppTemplate
@@ -14,6 +22,7 @@ if TYPE_CHECKING:
         AppTemplateRepository,
     )
     from intric.templates.app_template.api.app_template_models import AppTemplateUpdate
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
 
 
 class AppTemplateService:
@@ -21,31 +30,335 @@ class AppTemplateService:
         self,
         factory: "AppTemplateFactory",
         repo: "AppTemplateRepository",
+        feature_flag_service: "FeatureFlagService",
+        session: "AsyncSession",
     ) -> None:
         self.factory = factory
         self.repo = repo
+        self.feature_flag_service = feature_flag_service
+        self.session = session
 
-    async def get_app_template(self, app_template_id: "UUID") -> "AppTemplate":
-        app_template = await self.repo.get_by_id(app_template_id=app_template_id)
+    async def get_app_template(
+        self, app_template_id: "UUID", tenant_id: Optional["UUID"] = None
+    ) -> "AppTemplate":
+        """Get template by ID.
+
+        Time complexity: O(log n) using primary key and composite index
+        """
+        app_template = await self.repo.get_by_id(
+            app_template_id=app_template_id,
+            tenant_id=tenant_id
+        )
 
         if app_template is None:
-            raise NotFoundException()
+            raise NotFoundException("Template not found")
 
         return app_template
 
-    async def get_app_templates(self) -> list["AppTemplate"]:
-        return await self.repo.get_app_template_list()
+    async def get_app_templates(
+        self, tenant_id: "UUID"
+    ) -> list["AppTemplate"]:
+        """Get templates for gallery (tenant + global).
 
-    async def create_app_template(self, obj: "AppTemplateCreate") -> "AppTemplate":
-        template = await self.repo.add(obj=obj)
-        return template
+        Feature flag gated - returns empty list if disabled.
+        """
+        is_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates",
+            tenant_id=tenant_id
+        )
+        if not is_enabled:
+            return []
 
-    async def delete_app_template(self, id: "UUID") -> None:
-        await self.repo.delete(id=id)
+        return await self.repo.get_app_template_list(tenant_id=tenant_id)
 
-    async def update_app_template(
+    async def create_template(
         self,
-        id: "UUID",
-        obj: "AppTemplateUpdate",
+        data: "AppTemplateCreate",
+        tenant_id: "UUID",
     ) -> "AppTemplate":
-        return await self.repo.update(id=id, obj=obj)
+        """Create tenant-scoped template with snapshot.
+
+        Business logic:
+        - Feature flag must be enabled
+        - Name must be unique within tenant
+        - Original state saved to snapshot
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for feature check + duplicate check + insert
+        """
+        # Check feature flag enabled for tenant
+        is_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates",
+            tenant_id=tenant_id
+        )
+        if not is_enabled:
+            raise BadRequestException(
+                "Templates feature is not enabled for this tenant. Enable in settings first."
+            )
+
+        # Check duplicate name within tenant
+        duplicate_exists = await self.repo.check_duplicate_name(
+            name=data.name,
+            tenant_id=tenant_id
+        )
+        if duplicate_exists:
+            raise NameCollisionException(
+                f"A template with name '{data.name}' already exists in this tenant"
+            )
+
+        # Create template with tenant_id
+        from intric.database.tables.app_template_table import AppTemplates
+        import sqlalchemy as sa
+
+        # Create snapshot from initial data
+        snapshot = {
+            "name": data.name,
+            "description": data.description,
+            "category": data.category,
+            "prompt_text": data.prompt,
+            "completion_model_kwargs": data.completion_model_kwargs,
+            "wizard": data.wizard.model_dump() if data.wizard else None,
+            "input_type": data.input_type,
+            "input_description": data.input_description,
+        }
+
+        stmt = (
+            sa.insert(AppTemplates)
+            .values(
+                name=data.name,
+                description=data.description,
+                category=data.category,
+                prompt_text=data.prompt,
+                wizard=data.wizard.model_dump() if data.wizard else None,
+                completion_model_kwargs=data.completion_model_kwargs,
+                input_type=data.input_type,
+                input_description=data.input_description,
+                tenant_id=tenant_id,
+                deleted_at=None,
+                original_snapshot=snapshot,
+            )
+            .returning(AppTemplates)
+        )
+
+        try:
+            result = await self.session.execute(stmt)
+            template_record = result.scalar_one()
+        except IntegrityError as e:
+            if 'uq_app_templates_name_tenant' in str(e):
+                raise NameCollisionException(
+                    f"A template with name '{data.name}' already exists in this tenant"
+                )
+            raise
+
+        return self.factory.create_app_template(item=template_record)
+
+    async def update_template(
+        self,
+        template_id: "UUID",
+        data: "AppTemplateUpdate",
+        tenant_id: "UUID",
+    ) -> "AppTemplate":
+        """Update tenant-scoped template.
+
+        Business logic:
+        - Must belong to tenant
+        - If name changed: check uniqueness
+        - original_snapshot NOT updated (preserved for rollback)
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership check + optional duplicate check + update
+        """
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            app_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # If name changed, check duplicate
+        if data.name and data.name != template.name:
+            duplicate_exists = await self.repo.check_duplicate_name(
+                name=data.name,
+                tenant_id=tenant_id
+            )
+            if duplicate_exists:
+                raise NameCollisionException(
+                    f"A template with name '{data.name}' already exists in this tenant"
+                )
+
+        # Update template (original_snapshot preserved)
+        from intric.database.tables.app_template_table import AppTemplates
+        import sqlalchemy as sa
+
+        update_values = {}
+        if data.name is not None:
+            update_values["name"] = data.name
+        if data.description is not None:
+            update_values["description"] = data.description
+        if data.category is not None:
+            update_values["category"] = data.category
+        if data.prompt is not None:
+            update_values["prompt_text"] = data.prompt
+        if data.wizard is not None:
+            update_values["wizard"] = data.wizard.model_dump() if data.wizard else None
+        if data.completion_model_kwargs is not None:
+            update_values["completion_model_kwargs"] = data.completion_model_kwargs
+        if data.input_type is not None:
+            update_values["input_type"] = data.input_type
+        if data.input_description is not None:
+            update_values["input_description"] = data.input_description
+
+        stmt = (
+            sa.update(AppTemplates)
+            .where(
+                AppTemplates.id == template_id,
+                AppTemplates.tenant_id == tenant_id
+            )
+            .values(**update_values)
+            .returning(AppTemplates)
+        )
+        result = await self.session.execute(stmt)
+        updated_record = result.scalar_one()
+
+        return self.factory.create_app_template(item=updated_record)
+
+    async def delete_template(
+        self,
+        template_id: "UUID",
+        tenant_id: "UUID",
+    ) -> None:
+        """Soft-delete tenant-scoped template.
+
+        Business logic:
+        - Must belong to tenant
+        - Cannot delete if in use by apps
+        - Sets deleted_at timestamp
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership + usage check + soft-delete
+        """
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            app_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # Check if template is in use
+        usage_count = await self._count_template_usage(template_id)
+        if usage_count > 0:
+            raise BadRequestException(
+                f"Cannot delete template '{template.name}'. It is used by {usage_count} app(s)."
+            )
+
+        # Soft-delete
+        result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id)
+        if not result:
+            raise NotFoundException("Template not found")
+
+    async def rollback_template(
+        self,
+        template_id: "UUID",
+        tenant_id: "UUID",
+    ) -> "AppTemplate":
+        """Restore template to original state from snapshot.
+
+        Business logic:
+        - Must belong to tenant
+        - Must have original_snapshot
+        - Restores all fields from snapshot
+        - Updates updated_at timestamp
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership check + update
+        """
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            app_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # Check snapshot exists
+        if not template.original_snapshot:
+            raise BadRequestException(
+                "Cannot rollback template. Original snapshot not found."
+            )
+
+        # Restore from snapshot
+        from intric.database.tables.app_template_table import AppTemplates
+        import sqlalchemy as sa
+
+        snapshot = template.original_snapshot
+
+        stmt = (
+            sa.update(AppTemplates)
+            .where(
+                AppTemplates.id == template_id,
+                AppTemplates.tenant_id == tenant_id
+            )
+            .values(
+                name=snapshot.get("name"),
+                description=snapshot.get("description"),
+                category=snapshot.get("category"),
+                prompt_text=snapshot.get("prompt_text"),
+                completion_model_kwargs=snapshot.get("completion_model_kwargs"),
+                wizard=snapshot.get("wizard"),
+                input_type=snapshot.get("input_type"),
+                input_description=snapshot.get("input_description"),
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(AppTemplates)
+        )
+        result = await self.session.execute(stmt)
+        restored_record = result.scalar_one()
+
+        return self.factory.create_app_template(item=restored_record)
+
+    async def get_templates_for_tenant(
+        self,
+        tenant_id: "UUID",
+    ) -> list["AppTemplate"]:
+        """Get tenant-specific templates only (admin view).
+
+        Returns only templates where tenant_id matches (NOT global templates).
+        Used for admin management page.
+
+        Time complexity: O(k log n) where k is number of tenant templates
+        """
+        return await self.repo.get_for_tenant(tenant_id=tenant_id)
+
+    async def get_deleted_templates_for_tenant(
+        self,
+        tenant_id: "UUID",
+    ) -> list["AppTemplate"]:
+        """Get soft-deleted templates for audit trail.
+
+        Returns deleted templates ordered by deleted_at DESC.
+        Admin only (enforced at router level).
+
+        Time complexity: O(k log n) where k is number of deleted templates
+        """
+        return await self.repo.get_deleted_for_tenant(tenant_id=tenant_id)
+
+    async def _count_template_usage(self, template_id: "UUID") -> int:
+        """Count how many apps use this template.
+
+        Time complexity: O(log n) using template_id index
+        """
+        from intric.database.tables.app_table import Apps
+
+        stmt = select(func.count(Apps.id)).where(
+            Apps.template_id == template_id
+        )
+        result = await self.session.scalar(stmt)
+        return result or 0

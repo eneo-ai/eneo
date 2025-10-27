@@ -30,7 +30,9 @@ backend/.release-please-manifest.json
 CLAUDE.md
 .claude/
 .specify/
-specs/
 .devcontainer/claude-config/
 .code/
 .mcp.json
+specs/
+install-claude.sh
+devcontainer.json

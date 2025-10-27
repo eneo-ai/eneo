@@ -30,6 +30,9 @@ class AssistantTemplateFactory:
             updated_at=item.updated_at,
             created_at=item.created_at,
             organization=item.organization,
+            tenant_id=item.tenant_id,
+            deleted_at=item.deleted_at,
+            original_snapshot=item.original_snapshot,
         )
 
     @staticmethod

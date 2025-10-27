@@ -86,5 +86,68 @@ class AppTemplateCreate(BaseModel):
         return self
 
 
-class AppTemplateUpdate(AppTemplateCreate):
-    pass
+class AppTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    prompt: Optional[str] = None
+    organization: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: Optional[str] = None
+    input_description: Optional[str] = None
+
+
+# Admin-specific models for tenant-scoped templates
+
+class AppTemplateAdminPublic(BaseModel):
+    """Admin view of template with tenant fields."""
+    id: UUID
+    name: str
+    description: str
+    category: str
+    prompt_text: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = {}
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: str
+    input_description: Optional[str] = None
+    organization: str
+    tenant_id: UUID
+    deleted_at: Optional[datetime] = None
+    original_snapshot: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AppTemplateAdminListPublic(BaseModel):
+    """Admin list response."""
+    items: list[AppTemplateAdminPublic]
+
+    @computed_field
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+class AppTemplateAdminCreate(BaseModel):
+    """Admin template creation request."""
+    name: str
+    description: str
+    category: str
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = {}
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: str
+    input_description: Optional[str] = None
+
+
+class AppTemplateAdminUpdate(BaseModel):
+    """Admin template update request (PATCH semantics)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: Optional[str] = None
+    input_description: Optional[str] = None

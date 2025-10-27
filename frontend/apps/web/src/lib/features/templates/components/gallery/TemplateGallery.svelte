@@ -21,51 +21,66 @@
 <Dialog.Root openController={showTemplateGallery}>
   <Dialog.Content width="large">
     <Dialog.Section class="mt-2">
+      <!-- Dialog Header -->
       <div class="flex items-center justify-between px-10 pt-12 pb-10">
-        <div class="border-default flex w-full flex-col">
-          <h3 class="px-4 pb-1 text-2xl font-bold">{m.select_a_template()}</h3>
+        <div class="flex w-full flex-col">
+          <h2 class="px-4 pb-1 text-2xl font-bold">{m.select_a_template()}</h2>
           <p class="text-secondary max-w-[50ch] px-4">
             {m.get_started_with_template({ resourceName: resourceName.singular })}
           </p>
         </div>
         <TemplateLanguageSwitcher></TemplateLanguageSwitcher>
       </div>
-      {#each sections as section (section)}
-        <div class="flex w-full flex-col gap-2 p-6 pb-2 last-of-type:pb-6">
-          <div class="flex flex-col items-start gap-0.5 px-8 py-3">
-            <h3 class="top-0 inline-block text-lg font-medium">
+
+      <!-- Template Gallery with Responsive Grid -->
+      {#each sections as section, idx (section.title)}
+        <section
+          role="group"
+          aria-labelledby="category-{idx}"
+          class="flex w-full flex-col gap-2 p-6 pb-2 last-of-type:pb-6"
+        >
+          <!-- Category Header with Count Badge -->
+          <div class="flex items-center gap-3 px-8 pb-3 border-b border-border-dimmer">
+            <h3 id="category-{idx}" class="flex-1 text-lg font-medium">
               {section.title}
             </h3>
-            <p class="text-secondary">{section.description}</p>
+            <span class="inline-flex items-center px-3 py-1 rounded-full bg-bg-tertiary text-sm text-text-secondary">
+              {section.templates.length} {section.templates.length === 1 ? m.template_singular() : m.template_plural()}
+            </span>
           </div>
-          <div class="grid w-full flex-grow grid-cols-1 gap-x-6 gap-y-4 px-2 lg:grid-cols-3">
+
+          <!-- Responsive Template Grid -->
+          <div class="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 lg:gap-6 px-2">
             {#each section.templates as template (template.id)}
               {@const isSelected = template.id === currentlySelected?.id}
               <button
+                role="option"
+                aria-selected={isSelected}
                 on:click|preventDefault={() => {
                   currentlySelected = template;
                 }}
                 {...dynamicColour({ basedOn: template.category })}
-                class="rounded-2xl"
+                type="button"
+                class="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:ring-offset-2 transition-colors duration-150"
                 data-selected={isSelected}
               >
                 <div
-                  class="tile-bg border-default flex h-full flex-col gap-2.5 overflow-clip rounded-2xl border p-4 px-5 transition-all"
+                  class="tile-bg border-default flex h-full min-h-[180px] flex-col gap-4 overflow-clip rounded-2xl border p-6 transition-all"
                 >
-                  <div class="-ml-0.5 flex w-full items-center gap-3">
+                  <div class="flex w-full items-center gap-3">
                     <TemplateIcon {template}></TemplateIcon>
-                    <h4 class="text-dynamic-stronger text-left text-lg font-medium">
+                    <h4 class="text-dynamic-stronger text-left text-base font-medium line-clamp-2">
                       {formatEmojiTitle(template.name)}
                     </h4>
                   </div>
-                  <p class="w-full flex-grow text-left">
+                  <p class="w-full flex-grow text-left text-sm line-clamp-3">
                     {template.description}
                   </p>
                 </div>
               </button>
             {/each}
           </div>
-        </div>
+        </section>
       {/each}
     </Dialog.Section>
 

@@ -67,5 +67,60 @@ class AssistantTemplateCreate(BaseModel):
     wizard: AssistantTemplateWizard
 
 
-class AssistantTemplateUpdate(AssistantTemplateCreate):
-    pass
+class AssistantTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    prompt: Optional[str] = None
+    organization: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    wizard: Optional[AssistantTemplateWizard] = None
+
+
+# Admin-specific models for tenant-scoped templates
+
+class AssistantTemplateAdminPublic(BaseModel):
+    """Admin view of template with tenant fields."""
+    id: UUID
+    name: str
+    description: str
+    category: str
+    prompt_text: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = Field(default={})
+    wizard: Optional[AssistantTemplateWizard] = None
+    organization: str
+    tenant_id: UUID
+    deleted_at: Optional[datetime] = None
+    original_snapshot: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantTemplateAdminListPublic(BaseModel):
+    """Admin list response."""
+    items: list[AssistantTemplateAdminPublic]
+
+    @computed_field
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+class AssistantTemplateAdminCreate(BaseModel):
+    """Admin template creation request."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(..., min_length=1, max_length=2000)
+    category: str = Field(..., min_length=1, max_length=100)
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = Field(default={})
+    wizard: Optional[AssistantTemplateWizard] = None
+
+
+class AssistantTemplateAdminUpdate(BaseModel):
+    """Admin template update request (PATCH semantics)."""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, min_length=1, max_length=2000)
+    category: Optional[str] = Field(None, min_length=1, max_length=100)
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    wizard: Optional[AssistantTemplateWizard] = None

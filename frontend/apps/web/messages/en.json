@@ -877,6 +877,8 @@
   "template_preview": "Template preview",
   "use_template": "Use template",
   "template_description": "Template description",
+  "template_singular": "template",
+  "template_plural": "templates",
   "getting_started": "Getting started",
   "popular_templates": "Popular templates",
   "send_email_link_instructions": "Send {email} the link below so they can create their account.",
