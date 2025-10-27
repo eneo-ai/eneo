@@ -183,16 +183,28 @@ INTRIC_SUPER_DUPER_API_KEY=
 # Background Worker Configuration
 # ----------------------------------------------------------------------------
 # Controls ARQ worker pool behavior and per-tenant concurrency fairness
+#
+# NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as
+# a background task processor instead of HTTP server. Both backend and worker
+# containers use the same image; run.sh detects RUN_AS_WORKER=true to launch
+# the ARQ worker instead of Gunicorn.
+# ----------------------------------------------------------------------------
+
 # [OPTIONAL] Max concurrent jobs across all tenants (default: 20)
+# Memory impact: Each job uses 100-500MB depending on task type
+# Recommendation: 10-15 for <8GB RAM, 20+ for 16GB+ RAM
 WORKER_MAX_CONCURRENT_JOBS=20
 
 # [OPTIONAL] Max concurrent jobs per tenant (default: 4)
+# Prevents one tenant from monopolizing worker slots
 TENANT_WORKER_CONCURRENCY_LIMIT=4
 
-# [OPTIONAL] Semaphore TTL - auto-cleanup for crashed workers
+# [OPTIONAL] Semaphore TTL - auto-cleanup for crashed workers (default: 36000 = 10 hours)
+# Keep >= CRAWL_MAX_LENGTH so long crawls never drop their semaphore key
 TENANT_WORKER_SEMAPHORE_TTL_SECONDS=36000
 
 # [OPTIONAL] Retry delay when tenant hits limit (default: 30 seconds)
+# Base delay for exponential backoff: 30s → 60s → 90s → ...
 TENANT_WORKER_RETRY_DELAY_SECONDS=30
 
 # ----------------------------------------------------------------------------

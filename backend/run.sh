@@ -2,6 +2,13 @@
 
 set -e
 
+# Check if running as worker
+if [[ "${RUN_AS_WORKER,,}" == "true" ]]; then
+    echo "Starting ARQ worker for background task processing"
+    echo "Launching... Go, intric.ai worker!"
+    exec arq src.intric.worker.arq.WorkerSettings
+fi
+
 # Skip Alembic migrations in OpenAPI-only mode
 if [[ "${OPENAPI_ONLY_MODE,,}" != "true" ]]; then
     alembic upgrade head
