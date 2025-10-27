@@ -1,3 +1,21 @@
+# ============================================================================
+# ENEO PRODUCTION DEPLOYMENT - Docker Compose Configuration
+# ============================================================================
+# Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
+#
+# BEFORE DEPLOYING:
+#   1. Replace "your-email@domain.com" (line 23) with your email
+#   2. Replace "your-domain.com" (lines 47, 50, 73, 76) with your domain
+#   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
+#   4. Create external network: docker network create proxy_tier
+#
+# CUSTOMIZATION NOTE:
+#   This is a reference configuration. Customize for your organization's
+#   security requirements, network topology, and infrastructure needs.
+#
+# Full documentation: ../DEPLOYMENT.md
+# ============================================================================
+
 version: '3.8'
 
 services:

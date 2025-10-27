@@ -1,62 +1,100 @@
-# Frontend Environment Configuration for Eneo
+# ============================================================================
+# ENEO FRONTEND ENVIRONMENT CONFIGURATION - PRODUCTION DEPLOYMENT
+# ============================================================================
+# This template is for production Docker deployments using docker-compose.yml
+# ============================================================================
 
-###############
-# REQUIRED: Public URL Configuration
-###############
-# The public URL where Eneo will be accessible
-ORIGIN=https://your-domain.com
+# ----------------------------------------------------------------------------
+# Backend Connection (REQUIRED)
+# ----------------------------------------------------------------------------
+# SSR backend URL (server-side rendering within Docker network)
+INTRIC_BACKEND_URL=http://backend:8000
 
-# Backend URL as seen from the browser (public URL)
-INTRIC_BACKEND_URL=https://your-domain.com
+# Client-side backend URL (browser - must start with PUBLIC_)
+# For production with Traefik: use your public domain
+# Example: https://eneo.yourdomain.com
+PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
 
-# Backend URL for server-side rendering (internal container communication)
-INTRIC_BACKEND_SERVER_URL=http://backend:8000
+# [OPTIONAL] Server-to-server override (usually not needed in Docker Compose)
+INTRIC_BACKEND_SERVER_URL=
 
-###############
-# REQUIRED: Security Settings - MUST match backend!
-###############
-# Must be the same as JWT_SECRET in backend configuration
+# ----------------------------------------------------------------------------
+# Security (REQUIRED)
+# ----------------------------------------------------------------------------
+# Cookie signing key (must match backend JWT_SECRET)
+# Generate with: python -c 'import secrets; print(secrets.token_hex(32))'
 JWT_SECRET=
 
-###############
-# Feature Flags
-###############
-# Show template assistants
-SHOW_TEMPLATES=true
+# ----------------------------------------------------------------------------
+# Authentication Configuration
+# ----------------------------------------------------------------------------
+# Choose ONE of two modes:
+#   1. Single-Tenant OIDC: One shared IdP for all users (recommended for most)
+#   2. Multi-Tenant Federation: Each tenant has their own IdP (enterprise)
+# ----------------------------------------------------------------------------
 
-# Enable web search functionality
-SHOW_WEB_SEARCH=true
+# SINGLE-TENANT OIDC MODE (Default - Recommended)
+# Direct login via one identity provider (Auth0, Entra ID, Keycloak, etc.)
+# ----------------------------------------------------------------------------
+# OIDC discovery endpoint URL (auto-configures authorization/token/jwks endpoints)
+# Examples:
+#   Auth0: https://{your-domain}.auth0.com/.well-known/openid-configuration
+#   Azure/Entra ID: https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+#   Keycloak: https://{keycloak-url}/realms/{realm-name}/.well-known/openid-configuration
+OIDC_DISCOVERY_ENDPOINT=
 
-###############
-# Environment Settings
-###############
-NODE_ENV=production
-LOGLEVEL=INFO
+# OIDC client credentials (from your IdP application registration)
+OIDC_CLIENT_ID=
+OIDC_CLIENT_SECRET=
 
-###############
-# Optional: Authentication Configuration
-###############
-# MobilityGuard SSO (if using)
+# PUBLIC_ORIGIN (REQUIRED for OIDC authentication)
+# The externally-reachable URL where users access Eneo
+# Must match the backend PUBLIC_ORIGIN and IdP redirect_uri configuration
+# Examples:
+#   Production: https://eneo.yourcompany.com
+PUBLIC_ORIGIN=https://your-domain.com
+
+# MULTI-TENANT FEDERATION MODE (Enterprise Only)
+# Enable per-tenant identity providers (each tenant configures their own IdP)
+# ----------------------------------------------------------------------------
+FEDERATION_PER_TENANT_ENABLED=false
+
+# ----------------------------------------------------------------------------
+# Legacy Authentication (DEPRECATED - Use OIDC_* variables instead)
+# ----------------------------------------------------------------------------
+# MobilityGuard
+# DEPRECATED: Use OIDC_DISCOVERY_ENDPOINT instead
 # MOBILITY_GUARD_AUTH=
+# MOBILITYGUARD_CLIENT_ID=
 
-# MobilityGuard client ID - must match the MOBILITYGUARD_CLIENT_ID in your backend configuration
-# MOBILITYGUARD_CLIENT_ID="your-client-id" #Hardcoded now but will be changed in the next release.
-# Force legacy authentication
+# Zitadel
+# DEPRECATED: Use OIDC_DISCOVERY_ENDPOINT instead
+# ZITADEL_INSTANCE_URL=
+# ZITADEL_PROJECT_CLIENT_ID=
+
+# Legacy authentication bypass (for development only)
 # FORCE_LEGACY_AUTH=false
 
-###############
-# Optional: Support Configuration
-###############
-# External feedback form URL
+# ----------------------------------------------------------------------------
+# UI Feature Flags (OPTIONAL)
+# ----------------------------------------------------------------------------
+# Enable optional UI features
+SHOW_TEMPLATES=true
+SHOW_WEB_SEARCH=true
+# SHOW_HELP_CENTER=false
+
+# ----------------------------------------------------------------------------
+# External Services (OPTIONAL)
+# ----------------------------------------------------------------------------
+# Feedback and support links
 # FEEDBACK_FORM_URL=
+# REQUEST_INTEGRATION_FORM_URL=
+# HELP_CENTER_URL=
+# SUPPORT_EMAIL=support@yourdomain.com
+# SALES_EMAIL=sales@yourdomain.com
 
-# Support contact email
-# SUPPORT_EMAIL=support@your-domain.com
-
-# MOBILITYGUARD_CLIENT_ID="your-client-id"
-# ZITADEL_INSTANCE_URL="https://your-zitadel-instance.com"
-# ZITADEL_PROJECT_CLIENT_ID="your-zitadel-client-id"
-# SHOW_HELP_CENTER=False
-# REQUEST_INTEGRATION_FORM_URL="https://..."
-# HELP_CENTER_URL="https://www.eneo.ai/en/external-support-assistant"
-# SALES_EMAIL="sales@eneo.ai"
+# ----------------------------------------------------------------------------
+# Environment Settings
+# ----------------------------------------------------------------------------
+NODE_ENV=production
+LOGLEVEL=INFO

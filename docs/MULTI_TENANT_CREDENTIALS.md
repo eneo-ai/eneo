@@ -19,7 +19,7 @@
 1. Generate a Fernet key once and store it safely:
    ```bash
    cd backend
-   poetry run python -m intric.cli.generate_encryption_key
+   uv run python -m intric.cli.generate_encryption_key
    ```
 2. Set environment variables:
    ```bash

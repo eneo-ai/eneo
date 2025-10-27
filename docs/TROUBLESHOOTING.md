@@ -197,38 +197,30 @@ your public URL.
 </details>
 
 <details>
-<summary>🐍 Python/Poetry dependency issues</summary>
+<summary>🐍 Python/uv dependency issues</summary>
 
-**Problem**: Poetry installation fails or dependencies conflict.
+**Problem**: uv installation fails or dependencies conflict.
 
 **Solutions**:
-1. **Clear Poetry cache**:
+1. **Clear uv cache and reinstall**:
    ```bash
-   poetry cache clear pypi --all
-   poetry env remove --all
-   poetry install
+   uv cache clean
+   uv sync
    ```
 
-2. **Update Poetry**:
-   ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
-   ```
-
-3. **Python version mismatch**:
+2. **Python version check**:
    ```bash
    # Check Python version
    python3 --version  # Should be 3.11+
-   
-   # Set specific Python version
-   poetry env use python3.11
-   poetry install
+
+   # uv uses system Python - ensure correct version is installed
    ```
 
-4. **Lock file issues**:
+3. **Lock file issues**:
    ```bash
-   # Delete lock file and reinstall
-   rm poetry.lock
-   poetry install
+   # Delete lock file and regenerate
+   rm uv.lock
+   uv sync
    ```
 
 **Prevention**: Use the provided DevContainer for consistent environment.
@@ -236,22 +228,22 @@ your public URL.
 </details>
 
 <details>
-<summary>📦 Node.js/pnpm dependency issues</summary>
+<summary>📦 Node.js/bun dependency issues</summary>
 
-**Problem**: pnpm installation fails or packages conflict.
+**Problem**: bun installation fails or packages conflict.
 
 **Solutions**:
-1. **Update pnpm**:
+1. **Update bun**:
    ```bash
-   npm install -g pnpm@9.12.3
+   npm install -g bun
    ```
 
-2. **Clear pnpm cache**:
+2. **Clear bun cache**:
    ```bash
-   pnpm store prune
+   bun pm cache rm
    rm -rf node_modules
-   rm pnpm-lock.yaml
-   pnpm install
+   rm bun.lock
+   bun install
    ```
 
 3. **Node version issues**:
@@ -266,10 +258,10 @@ your public URL.
 4. **Workspace issues**:
    ```bash
    # Reinstall all workspace dependencies
-   pnpm install -r
+   bun install
    ```
 
-**Prevention**: Use specified Node.js and pnpm versions.
+**Prevention**: Use specified Node.js and bun versions.
 
 </details>
 
@@ -613,7 +605,7 @@ your public URL.
    ```bash
    # Frontend development
    cd frontend
-   PORT=3001 pnpm run dev
+   PORT=3001 bun run dev
    ```
 
 **Prevention**: Check for running services before starting Eneo.
@@ -930,7 +922,7 @@ your public URL.
 2. **Verify development server**:
    ```bash
    cd frontend
-   pnpm run dev --host 0.0.0.0 --port 3000
+   bun run dev --host 0.0.0.0 --port 3000
    ```
 
 3. **Check file permissions**:

@@ -13,7 +13,7 @@
 - Each tenant has a slug (`tenant.slug`). Backfill once with:
   ```bash
   cd backend
-  poetry run python -m intric.cli.backfill_tenant_slugs
+  uv run python -m intric.cli.backfill_tenant_slugs
   ```
 
 Terminology
