@@ -273,6 +273,7 @@ class AssistantService:
         groups: list[UUID] | None = None,
         websites: list[UUID] | None = None,
         integration_knowledge_ids: list[UUID] | None = None,
+        mcp_server_ids: list[UUID] | None = None,
         attachment_ids: list[UUID] | None = None,
         description: Union[str, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
@@ -321,6 +322,9 @@ class AssistantService:
                 space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
                 for integration_knowledge_id in integration_knowledge_ids
             ]
+
+        # Store MCP server IDs for repository to handle
+        assistant._mcp_server_ids = mcp_server_ids
 
         assistant.update(
             name=name,
@@ -668,6 +672,191 @@ class AssistantService:
         await self.space_repo.update(space)
 
         # TODO: Review how we get the permissions to the presentation layer
+        permissions = actor.get_assistant_permissions(assistant=assistant)
+
+        return assistant, permissions
+
+    async def get_assistant_mcp_servers(self, assistant_id: UUID):
+        """Get all MCP servers associated with an assistant."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_read_assistants():
+            raise UnauthorizedException()
+
+        return assistant.mcp_servers
+
+    async def add_mcp_to_assistant(
+        self,
+        assistant_id: UUID,
+        mcp_server_id: UUID,
+        enabled: bool = True,
+        config: dict | None = None,
+        priority: int = 0,
+    ):
+        """Add an MCP server to an assistant."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_edit_assistants():
+            raise UnauthorizedException()
+
+        # TODO: Validate that the MCP server is enabled for the tenant
+
+        # Get existing associations from the database
+        from intric.database.tables.assistant_table import AssistantMCPServers
+        import sqlalchemy as sa
+
+        stmt = sa.select(AssistantMCPServers).where(
+            AssistantMCPServers.assistant_id == assistant_id
+        )
+        result = await self.repo.session.execute(stmt)
+        existing_associations = [
+            {
+                "mcp_server_id": row.mcp_server_id,
+                "enabled": row.enabled,
+                "config": row.config,
+                "priority": row.priority,
+            }
+            for row in result.scalars()
+        ]
+
+        # Check if already exists
+        if any(a["mcp_server_id"] == mcp_server_id for a in existing_associations):
+            raise BadRequestException("MCP server already associated with assistant")
+
+        # Add new association
+        existing_associations.append({
+            "mcp_server_id": mcp_server_id,
+            "enabled": enabled,
+            "config": config,
+            "priority": priority,
+        })
+
+        # Update via repository
+        from intric.database.tables.assistant_table import Assistants
+        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
+        assistant_in_db = await self.repo.session.scalar(stmt)
+
+        await self.repo._set_mcp_servers(assistant_in_db, existing_associations)
+
+        # Refresh and return
+        refreshed_space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
+        permissions = actor.get_assistant_permissions(assistant=assistant)
+
+        return assistant, permissions
+
+    async def remove_mcp_from_assistant(
+        self,
+        assistant_id: UUID,
+        mcp_server_id: UUID,
+    ):
+        """Remove an MCP server from an assistant."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_edit_assistants():
+            raise UnauthorizedException()
+
+        # Get existing associations from the database
+        from intric.database.tables.assistant_table import AssistantMCPServers, Assistants
+        import sqlalchemy as sa
+
+        stmt = sa.select(AssistantMCPServers).where(
+            AssistantMCPServers.assistant_id == assistant_id
+        )
+        result = await self.repo.session.execute(stmt)
+        existing_associations = [
+            {
+                "mcp_server_id": row.mcp_server_id,
+                "enabled": row.enabled,
+                "config": row.config,
+                "priority": row.priority,
+            }
+            for row in result.scalars()
+        ]
+
+        # Remove the association
+        existing_associations = [
+            a for a in existing_associations if a["mcp_server_id"] != mcp_server_id
+        ]
+
+        # Update via repository
+        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
+        assistant_in_db = await self.repo.session.scalar(stmt)
+
+        await self.repo._set_mcp_servers(assistant_in_db, existing_associations)
+
+        # Refresh and return
+        refreshed_space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
+        permissions = actor.get_assistant_permissions(assistant=assistant)
+
+        return assistant, permissions
+
+    async def update_assistant_mcp_config(
+        self,
+        assistant_id: UUID,
+        mcp_server_id: UUID,
+        enabled: bool | None = None,
+        config: dict | None = None,
+        priority: int | None = None,
+    ):
+        """Update the configuration of an MCP server association."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_edit_assistants():
+            raise UnauthorizedException()
+
+        # Get existing associations from the database
+        from intric.database.tables.assistant_table import AssistantMCPServers, Assistants
+        import sqlalchemy as sa
+
+        stmt = sa.select(AssistantMCPServers).where(
+            AssistantMCPServers.assistant_id == assistant_id
+        )
+        result = await self.repo.session.execute(stmt)
+        existing_associations = [
+            {
+                "mcp_server_id": row.mcp_server_id,
+                "enabled": row.enabled,
+                "config": row.config,
+                "priority": row.priority,
+            }
+            for row in result.scalars()
+        ]
+
+        # Find and update the association
+        found = False
+        for assoc in existing_associations:
+            if assoc["mcp_server_id"] == mcp_server_id:
+                found = True
+                if enabled is not None:
+                    assoc["enabled"] = enabled
+                if config is not None:
+                    assoc["config"] = config
+                if priority is not None:
+                    assoc["priority"] = priority
+                break
+
+        if not found:
+            raise BadRequestException("MCP server not associated with assistant")
+
+        # Update via repository
+        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
+        assistant_in_db = await self.repo.session.scalar(stmt)
+
+        await self.repo._set_mcp_servers(assistant_in_db, existing_associations)
+
+        # Refresh and return
+        refreshed_space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
         permissions = actor.get_assistant_permissions(assistant=assistant)
 
         return assistant, permissions

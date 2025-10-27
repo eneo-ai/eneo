@@ -28,6 +28,9 @@ from intric.integration.presentation.integration_auth_router import (
 from intric.integration.presentation.integration_router import (
     router as integration_router,
 )
+from intric.mcp_servers.presentation.mcp_server_router import (
+    router as mcp_server_router,
+)
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
@@ -124,6 +127,7 @@ router.include_router(
     tags=["security-classifications"],
 )
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
+router.include_router(mcp_server_router, prefix="/mcp-servers", tags=["mcp-servers"])
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 
 router.include_router(integration_auth_router, prefix="/integrations/auth", tags=["integrations"])

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.websites.domain.website import Website
 
@@ -56,6 +57,7 @@ class Assistant(Entity):
         attachments: list[FileInfo],
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] = [],
+        mcp_servers: list["MCPServer"] = [],
         created_at: datetime = None,
         updated_at: datetime = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -78,6 +80,7 @@ class Assistant(Entity):
         self._websites = websites
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list
+        self.mcp_servers = mcp_servers
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -217,6 +220,7 @@ class Assistant(Entity):
         collections: list["Collection"] | None = None,
         websites: list["Website"] | None = None,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
@@ -248,6 +252,9 @@ class Assistant(Entity):
 
         if integration_knowledge_list is not None:
             self.integration_knowledge_list = integration_knowledge_list
+
+        if mcp_servers is not None:
+            self.mcp_servers = mcp_servers
 
         if description is not NOT_PROVIDED:
             self.description = description

@@ -116,6 +116,9 @@ class AssistantCreatePublic(AssistantBase):
     integration_knowledge_list: list[ModelId] = Field(
         default=[], deprecated=True, description="This field is deprecated and will be ignored"
     )
+    mcp_servers: list[ModelId] = Field(
+        default=[], deprecated=True, description="This field is deprecated and will be ignored"
+    )
     guardrail: Optional[AssistantGuard] = Field(
         default=None, deprecated=True, description="This field is deprecated and will be ignored"
     )

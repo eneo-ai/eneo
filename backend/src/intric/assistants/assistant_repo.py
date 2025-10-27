@@ -10,6 +10,7 @@ from intric.assistants.assistant_factory import AssistantFactory
 from intric.database.database import AsyncSession
 from intric.database.tables.assistant_table import (
     AssistantIntegrationKnowledge,
+    AssistantMCPServers,
     Assistants,
     AssistantsFiles,
     AssistantsGroups,
@@ -68,6 +69,7 @@ class AssistantRepository:
             .selectinload(IntegrationKnowledge.user_integration)
             .selectinload(UserIntegrationDBModel.tenant_integration)
             .selectinload(TenantIntegrationDBModel.integration),
+            selectinload(Assistants.mcp_servers),
         ]
 
     async def _set_is_selected_to_false(self, assistant_id: UUID):
@@ -205,6 +207,44 @@ class AssistantRepository:
                     for knowledge in integration_knowledge
                 ]
             )
+            await self.session.execute(stmt)
+
+        await self.session.refresh(assistant_in_db)
+
+    async def _set_mcp_servers(
+        self,
+        assistant_in_db: Assistants,
+        mcp_server_associations: list[dict],
+    ):
+        """Set MCP server associations for an assistant.
+
+        Args:
+            assistant_in_db: The assistant database record
+            mcp_server_associations: List of dicts with keys:
+                - mcp_server_id: UUID
+                - enabled: bool (optional, defaults to True)
+                - config: dict (optional)
+                - priority: int (optional, defaults to 0)
+        """
+        # Delete all existing associations
+        stmt = sa.delete(AssistantMCPServers).where(
+            AssistantMCPServers.assistant_id == assistant_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if mcp_server_associations:
+            # Ensure each association has required fields
+            values = []
+            for assoc in mcp_server_associations:
+                values.append({
+                    "assistant_id": assistant_in_db.id,
+                    "mcp_server_id": assoc["mcp_server_id"],
+                    "enabled": assoc.get("enabled", True),
+                    "config": assoc.get("config"),
+                    "priority": assoc.get("priority", 0),
+                })
+
+            stmt = sa.insert(AssistantMCPServers).values(values)
             await self.session.execute(stmt)
 
         await self.session.refresh(assistant_in_db)
@@ -348,6 +388,11 @@ class AssistantRepository:
         await self._set_websites(entry_in_db, assistant.websites)
         await self._set_integration_knowledge(entry_in_db, assistant.integration_knowledge_list)
         await self._set_attachments(entry_in_db, assistant.attachments)
+
+        # Set MCP servers if provided
+        if hasattr(assistant, '_mcp_server_ids') and assistant._mcp_server_ids is not None:
+            mcp_associations = [{"mcp_server_id": mcp_id} for mcp_id in assistant._mcp_server_ids]
+            await self._set_mcp_servers(entry_in_db, mcp_associations)
 
         if assistant.prompt:
             await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)

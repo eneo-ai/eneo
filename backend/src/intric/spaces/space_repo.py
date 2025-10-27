@@ -534,6 +534,7 @@ class SpaceRepository:
                 selectinload(Assistants.assistant_integration_knowledge),
                 selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
                 selectinload(Assistants.template),
+                selectinload(Assistants.mcp_servers),
             )
             .order_by(Assistants.created_at)
         )

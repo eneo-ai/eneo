@@ -158,6 +158,24 @@ from intric.integration.presentation.assemblers.tenant_integration_assembler imp
 from intric.integration.presentation.assemblers.user_integration_assembler import (
     UserIntegrationAssembler,
 )
+from intric.mcp_servers.application.mcp_server_service import MCPServerService
+from intric.mcp_servers.application.mcp_server_settings_service import (
+    MCPServerSettingsService,
+)
+from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
+from intric.mcp_servers.infrastructure.mappers.mcp_server_settings_mapper import (
+    MCPServerSettingsMapper,
+)
+from intric.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
+    MCPServerRepoImpl,
+)
+from intric.mcp_servers.infrastructure.repo_impl.mcp_server_settings_repo_impl import (
+    MCPServerSettingsRepoImpl,
+)
+from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+    MCPServerAssembler,
+    MCPServerSettingsAssembler,
+)
 from intric.jobs.job_repo import JobRepository
 from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
@@ -387,12 +405,20 @@ class Container(containers.DeclarativeContainer):
     tenant_integration_assembler = providers.Factory(TenantIntegrationAssembler)
     user_integration_assembler = providers.Factory(UserIntegrationAssembler)
 
+    # MCP assemblers
+    mcp_server_assembler = providers.Factory(MCPServerAssembler)
+    mcp_server_settings_assembler = providers.Factory(MCPServerSettingsAssembler)
+
     # Mappers for integration domain
     integration_mapper = providers.Factory(IntegrationMapper)
     tenant_integration_mapper = providers.Factory(TenantIntegrationMapper)
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
     confluence_token_mapper = providers.Factory(OauthTokenMapper)
+
+    # MCP mappers
+    mcp_server_mapper = providers.Factory(MCPServerMapper)
+    mcp_server_settings_mapper = providers.Factory(MCPServerSettingsMapper)
 
     # HTTP auth encryption service
     http_auth_encryption_service = providers.Factory(HttpAuthEncryptionService)
@@ -451,6 +477,15 @@ class Container(containers.DeclarativeContainer):
     oauth_token_repo = providers.Factory(
         OauthTokenRepoImpl, session=session, mapper=confluence_token_mapper
     )
+
+    # MCP repositories
+    mcp_server_repo = providers.Factory(
+        MCPServerRepoImpl, session=session, mapper=mcp_server_mapper
+    )
+    mcp_server_settings_repo = providers.Factory(
+        MCPServerSettingsRepoImpl, session=session, mapper=mcp_server_settings_mapper
+    )
+
     transcription_model_enable_service = providers.Factory(
         TranscriptionModelEnableService, session=session
     )
@@ -835,6 +870,17 @@ class Container(containers.DeclarativeContainer):
     integration_service = providers.Factory(
         IntegrationService,
         integration_repo=integration_repo,
+    )
+    mcp_server_service = providers.Factory(
+        MCPServerService,
+        mcp_server_repo=mcp_server_repo,
+        user=user,
+    )
+    mcp_server_settings_service = providers.Factory(
+        MCPServerSettingsService,
+        settings_repo=mcp_server_settings_repo,
+        mcp_server_repo=mcp_server_repo,
+        user=user,
     )
     integration_knowledge_service = providers.Factory(
         IntegrationKnowledgeService,

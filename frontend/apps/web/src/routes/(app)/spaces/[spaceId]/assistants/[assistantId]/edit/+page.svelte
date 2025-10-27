@@ -13,6 +13,7 @@
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
@@ -21,7 +22,7 @@
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { m } from "$lib/paraglide/messages";
 
-  export let data;
+  let { data } = $props();
 
   const {
     state: { currentSpace },
@@ -42,8 +43,21 @@
 
   let cancelUploadsAndClearQueue: () => void;
 
+  // Initialize MCP servers from loaded data
+  if (!$update.mcp_servers) {
+    $update.mcp_servers = data.mcpServers.map((mcp: any) => ({ id: mcp.mcp_server_id }));
+  }
+
+  // Helper to convert between MCP server ID list and object list for the component
+  let selectedMCPServerIds = $state($update.mcp_servers?.map((mcp: any) => mcp.id) || []);
+
+  $effect(() => {
+    // Sync changes from the component back to the editor
+    $update.mcp_servers = selectedMCPServerIds.map((id: string) => ({ id }));
+  });
+
   // Behavior-specific change detection for models with model-specific parameters
-  $: hasBehaviorChanges = (() => {
+  let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
 
     // For reasoning models or LiteLLM models, only show behavior changes if behavior-relevant fields changed
@@ -62,7 +76,7 @@
 
     // For regular models, show changes if any kwargs changed
     return true;
-  })();
+  });
 
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
@@ -320,6 +334,20 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+      </Settings.Group>
+
+      <Settings.Group title={m.mcp_servers()}>
+        <Settings.Row
+          title={m.mcp_servers()}
+          description={m.select_mcp_servers_description()}
+          hasChanges={$currentChanges.diff.mcp_servers !== undefined}
+          revertFn={() => {
+            discardChanges("mcp_servers");
+            selectedMCPServerIds = $update.mcp_servers?.map((mcp: any) => mcp.id) || [];
+          }}
+        >
+          <SelectMCPServers bind:selectedMCPServers={selectedMCPServerIds} />
+        </Settings.Row>
       </Settings.Group>
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}

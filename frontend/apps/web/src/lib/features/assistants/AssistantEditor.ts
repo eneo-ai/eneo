@@ -36,6 +36,7 @@ function initAssistantEditor(data: {
       websites: ["id"],
       groups: ["id"],
       integration_knowledge_list: ["id"],
+      mcp_servers: ["id"],
       attachments: ["id"]
     },
     manageAttachements: "attachments"

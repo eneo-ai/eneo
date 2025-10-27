@@ -1135,6 +1135,59 @@ export interface paths {
     /** Get Integration By Id */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
   };
+  "/api/v1/mcp-servers/": {
+    /**
+     * Get Mcp Servers
+     * @description Get all MCP servers from global catalog with optional tag filtering.
+     */
+    get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
+    /**
+     * Create Mcp Server
+     * @description Create a new MCP server in global catalog (admin only).
+     */
+    post: operations["create_mcp_server_api_v1_mcp_servers__post"];
+  };
+  "/api/v1/mcp-servers/{id}/": {
+    /**
+     * Get Mcp Server
+     * @description Get a single MCP server by ID.
+     */
+    get: operations["get_mcp_server_api_v1_mcp_servers__id___get"];
+    /**
+     * Update Mcp Server
+     * @description Update an MCP server in global catalog (admin only).
+     */
+    post: operations["update_mcp_server_api_v1_mcp_servers__id___post"];
+    /**
+     * Delete Mcp Server
+     * @description Delete an MCP server from global catalog (admin only).
+     */
+    delete: operations["delete_mcp_server_api_v1_mcp_servers__id___delete"];
+  };
+  "/api/v1/mcp-servers/settings/": {
+    /**
+     * Get Tenant Mcp Settings
+     * @description Get all available MCP servers with tenant enablement status.
+     */
+    get: operations["get_tenant_mcp_settings_api_v1_mcp_servers_settings__get"];
+  };
+  "/api/v1/mcp-servers/settings/{mcp_server_id}/": {
+    /**
+     * Update Mcp Settings
+     * @description Update MCP server settings for the current tenant.
+     */
+    put: operations["update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put"];
+    /**
+     * Enable Mcp For Tenant
+     * @description Enable an MCP server for the current tenant with optional credentials.
+     */
+    post: operations["enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post"];
+    /**
+     * Disable Mcp For Tenant
+     * @description Disable an MCP server for the current tenant.
+     */
+    delete: operations["disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete"];
+  };
   "/api/v1/ai-models/": {
     /**
      * Get all AI models
@@ -3651,6 +3704,167 @@ export interface components {
       /** Json Body */
       json_body: unknown;
     };
+    /**
+     * MCPServerCreate
+     * @description DTO for creating an MCP server (admin only).
+     */
+    MCPServerCreate: {
+      /** Name */
+      name: string;
+      /**
+       * Server Type
+       * @enum {string}
+       */
+      server_type: "npm" | "docker" | "http";
+      /** Description */
+      description?: string | null;
+      /** Npm Package */
+      npm_package?: string | null;
+      /** Docker Image */
+      docker_image?: string | null;
+      /** Http Url */
+      http_url?: string | null;
+      /** Config Schema */
+      config_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags?: string[] | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Documentation Url */
+      documentation_url?: string | null;
+    };
+    /**
+     * MCPServerPublic
+     * @description Public DTO for MCP server.
+     */
+    MCPServerPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Server Type */
+      server_type: string;
+      /** Npm Package */
+      npm_package: string | null;
+      /** Docker Image */
+      docker_image: string | null;
+      /** Http Url */
+      http_url: string | null;
+      /** Config Schema */
+      config_schema: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Documentation Url */
+      documentation_url: string | null;
+    };
+    /**
+     * MCPServerSettingsCreate
+     * @description DTO for enabling an MCP server for tenant.
+     */
+    MCPServerSettingsCreate: {
+      /** Env Vars */
+      env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * MCPServerSettingsPublic
+     * @description DTO for MCP server with tenant settings.
+     */
+    MCPServerSettingsPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Server Type */
+      server_type: string;
+      /** Npm Package */
+      npm_package: string | null;
+      /** Docker Image */
+      docker_image: string | null;
+      /** Http Url */
+      http_url: string | null;
+      /** Config Schema */
+      config_schema: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Documentation Url */
+      documentation_url: string | null;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Is Org Enabled */
+      is_org_enabled: boolean;
+      /** Has Credentials */
+      has_credentials: boolean;
+      /**
+       * Is Available
+       * @description Whether this MCP is enabled and available for use.
+       */
+      is_available: boolean;
+    };
+    /**
+     * MCPServerSettingsUpdate
+     * @description DTO for updating MCP server settings.
+     */
+    MCPServerSettingsUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Env Vars */
+      env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * MCPServerUpdate
+     * @description DTO for updating an MCP server (admin only).
+     */
+    MCPServerUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Server Type */
+      server_type?: ("npm" | "docker" | "http") | null;
+      /** Description */
+      description?: string | null;
+      /** Npm Package */
+      npm_package?: string | null;
+      /** Docker Image */
+      docker_image?: string | null;
+      /** Http Url */
+      http_url?: string | null;
+      /** Config Schema */
+      config_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags?: string[] | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Documentation Url */
+      documentation_url?: string | null;
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -4421,6 +4635,32 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["JobPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[MCPServerPublic] */
+    PaginatedResponse_MCPServerPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["MCPServerPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[MCPServerSettingsPublic] */
+    PaginatedResponse_MCPServerSettingsPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["MCPServerSettingsPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -13479,6 +13719,333 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["Integration"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Mcp Servers
+   * @description Get all MCP servers from global catalog with optional tag filtering.
+   */
+  get_mcp_servers_api_v1_mcp_servers__get: {
+    parameters: {
+      query?: {
+        tags?: string[] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_MCPServerPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Mcp Server
+   * @description Create a new MCP server in global catalog (admin only).
+   */
+  create_mcp_server_api_v1_mcp_servers__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Mcp Server
+   * @description Get a single MCP server by ID.
+   */
+  get_mcp_server_api_v1_mcp_servers__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Mcp Server
+   * @description Update an MCP server in global catalog (admin only).
+   */
+  update_mcp_server_api_v1_mcp_servers__id___post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Mcp Server
+   * @description Delete an MCP server from global catalog (admin only).
+   */
+  delete_mcp_server_api_v1_mcp_servers__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Tenant Mcp Settings
+   * @description Get all available MCP servers with tenant enablement status.
+   */
+  get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_MCPServerSettingsPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Mcp Settings
+   * @description Update MCP server settings for the current tenant.
+   */
+  update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerSettingsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Enable Mcp For Tenant
+   * @description Enable an MCP server for the current tenant with optional credentials.
+   */
+  enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerSettingsCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerSettingsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Disable Mcp For Tenant
+   * @description Disable an MCP server for the current tenant.
+   */
+  disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
