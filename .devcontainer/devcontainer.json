@@ -1,0 +1,46 @@
+// Copyright (c) 2024 Sundsvalls Kommun
+//
+// Licensed under the MIT License.
+
+{
+	"name": "Eneo Devcontainer",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "eneo",
+	"workspaceFolder": "/workspace",
+	"forwardPorts": [
+		3000, // Frontend
+		8123
+	],
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "20",
+		},
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"version": "latest",
+			"moby": false
+		}
+	},
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	"postStartCommand": "bash .devcontainer/post-start.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"charliermarsh.ruff",
+				"svelte.svelte-vscode",
+				"bradlc.vscode-tailwindcss"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/workspace/backend/.venv/bin/python",
+				"python.pythonPath": "/workspace/backend/.venv/bin/python",
+				"python.terminal.activateEnvironment": true,
+				"[python]": {
+					"editor.defaultFormatter": "charliermarsh.ruff"
+				}
+			}
+		}
+	},
+	"remoteEnv": {
+		"VIRTUAL_ENV": "/workspace/backend/.venv",
+		"PATH": "/workspace/backend/.venv/bin:${containerEnv:PATH}"
+	}
+}
