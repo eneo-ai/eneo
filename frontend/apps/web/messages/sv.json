@@ -1267,6 +1267,7 @@
   "resource_results": "resultat",
   "resource_user_groups": "användargrupper",
   "resource_files": "filer",
+  "websearch_notice": "Ditt meddelande kommer att skickas till en sökmotor för att hitta relevant information",
   "select_your_organization": "Välj din organisation",
   "loading_organizations": "Laddar organisationer...",
   "failed_to_load_organizations": "Misslyckades med att ladda organisationer. Försök igen.",
