@@ -5,7 +5,7 @@ set -e
 # Check if running as worker
 if [[ "${RUN_AS_WORKER,,}" == "true" ]]; then
     echo "Starting ARQ worker for background task processing"
-    echo "Launching... Go, intric.ai worker!"
+    echo "Launching..."
     exec arq src.intric.worker.arq.WorkerSettings
 fi
 
@@ -20,7 +20,6 @@ else
     workers=$NUM_WORKERS
 fi
 
-echo "Starting intric.ai with $workers workers"
-echo "Launching... Go, intric.ai!"
+echo "Starting Eneo backend with $workers workers"
 
 exec gunicorn src.intric.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
