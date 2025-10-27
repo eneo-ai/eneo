@@ -3,6 +3,9 @@ from typing import AsyncGenerator, Optional
 
 import litellm
 from litellm import AuthenticationError, APIError, RateLimitError
+from litellm.experimental_mcp_client import load_mcp_tools, call_openai_tool
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
@@ -209,6 +212,33 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         return messages
 
+    async def setup_mcp_tools(self):
+        """Setup MCP tools from context7 server using stdio."""
+        tools = []
+
+        try:
+            # Connect to context7 MCP server via stdio
+            logger.info("[MCP] Connecting to context7 server via stdio")
+            server_params = StdioServerParameters(
+                command="npx",
+                args=["-y", "@upstash/context7-mcp"],
+            )
+
+            async with stdio_client(server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    logger.info("[MCP] Successfully connected to context7 server")
+
+                    # Load tools in OpenAI format
+                    context7_tools = await load_mcp_tools(session=session, format="openai")
+                    tools.extend(context7_tools)
+                    logger.info(f"[MCP] Loaded {len(context7_tools)} tools from context7")
+        except Exception:
+            logger.exception("[MCP] Failed to connect to context7 server")
+            # Continue without MCP tools rather than failing completely
+
+        return tools
+
     async def get_response(
         self, context: Context, model_kwargs: ModelKwargs | None = None
     ):
@@ -254,11 +284,27 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                 )
 
+        # Load MCP tools from context7
+        tools = await self.setup_mcp_tools()
+        mcp_session = None
+        if tools:
+            kwargs['tools'] = tools
+            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools to request")
+
+            # Keep MCP session for tool execution
+            server_params = StdioServerParameters(
+                command="npx",
+                args=["-y", "@upstash/context7-mcp"],
+            )
+            # Store session for tool execution
+            mcp_session = (server_params, tools)
+
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making completion request with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
         )
 
         try:
+            # Initial completion request
             response = await litellm.acompletion(
                 model=self.litellm_model, messages=messages, **kwargs
             )
@@ -266,7 +312,91 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             logger.info(
                 f"[LiteLLM] {self.litellm_model}: Completion successful, response received"
             )
-            content = response.choices[0].message.content or ""
+
+            # Check if model wants to call tools
+            message = response.choices[0].message
+            if hasattr(message, 'tool_calls') and message.tool_calls and mcp_session:
+                logger.info(f"[LiteLLM] {self.litellm_model}: Model requested {len(message.tool_calls)} tool call(s), executing...")
+
+                # Build informational message about tool execution
+                tool_info = "\n\n🔧 **Fetching up-to-date documentation...**\n"
+                for i, tc in enumerate(message.tool_calls, 1):
+                    tool_name = tc.function.name.replace('-', ' ').title()
+                    try:
+                        args = json.loads(tc.function.arguments)
+                        if 'libraryName' in args:
+                            tool_info += f"{i}. Searching for library: **{args['libraryName']}**\n"
+                        elif 'context7CompatibleLibraryID' in args:
+                            lib_id = args['context7CompatibleLibraryID'].split('/')[-1]
+                            topic = args.get('topic', 'documentation')
+                            tool_info += f"{i}. Fetching **{lib_id}** docs (topic: {topic})\n"
+                        else:
+                            tool_info += f"{i}. Executing: {tool_name}\n"
+                    except Exception:
+                        tool_info += f"{i}. Executing: {tool_name}\n"
+
+                # Add assistant message with tool calls to conversation
+                messages.append({
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in message.tool_calls
+                    ]
+                })
+
+                # Execute each tool call
+                server_params, _ = mcp_session
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+
+                        for tool_call in message.tool_calls:
+                            logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
+                            try:
+                                # Execute the tool using litellm's helper
+                                tool_result = await call_openai_tool(
+                                    session=session,
+                                    tool_call=tool_call
+                                )
+                                logger.info(f"[MCP] Tool {tool_call.function.name} executed successfully")
+
+                                # Add tool result to messages
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps(tool_result)
+                                })
+                            except Exception as e:
+                                logger.error(f"[MCP] Tool {tool_call.function.name} failed: {e}")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps({"error": str(e)})
+                                })
+
+                # Make second completion request with tool results
+                logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up request with tool results")
+                # Remove tools from kwargs for follow-up request
+                follow_up_kwargs = {k: v for k, v in kwargs.items() if k != 'tools'}
+                response = await litellm.acompletion(
+                    model=self.litellm_model,
+                    messages=messages,
+                    **follow_up_kwargs
+                )
+                message = response.choices[0].message
+
+                # Prepend tool info to the response
+                content = tool_info + (message.content or "")
+            else:
+                content = message.content or ""
+
             return Completion(text=content, stop=True)
 
         except AuthenticationError as exc:
@@ -377,6 +507,12 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for streaming {provider}: {endpoint}"
                 )
 
+        # Load MCP tools from context7
+        tools = await self.setup_mcp_tools()
+        if tools:
+            kwargs['tools'] = tools
+            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools to streaming request")
+
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Creating streaming connection with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
         )
@@ -387,6 +523,12 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 model=self.litellm_model, messages=messages, stream=True, **kwargs
             )
             logger.info(f"[LiteLLM] {self.litellm_model}: Stream connection created successfully")
+            # Store messages and kwargs for potential tool execution
+            stream._eneo_context = {
+                'messages': messages,
+                'kwargs': kwargs,
+                'has_tools': bool(tools)
+            }
             return stream
 
         except AuthenticationError as exc:
@@ -458,11 +600,143 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         try:
             logger.info(f"[LiteLLM] {self.litellm_model}: Starting stream iteration")
 
+            # Collect tool calls from stream
+            tool_calls_accumulator = {}
+            has_tool_calls = False
+
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
+
+                    # Accumulate tool calls
+                    if delta and hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        has_tool_calls = True
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_calls_accumulator:
+                                tool_calls_accumulator[idx] = {
+                                    'id': tc_delta.id if hasattr(tc_delta, 'id') else None,
+                                    'type': 'function',
+                                    'function': {
+                                        'name': '',
+                                        'arguments': ''
+                                    }
+                                }
+                            if hasattr(tc_delta, 'id') and tc_delta.id:
+                                tool_calls_accumulator[idx]['id'] = tc_delta.id
+                            if hasattr(tc_delta, 'function'):
+                                if hasattr(tc_delta.function, 'name') and tc_delta.function.name:
+                                    tool_calls_accumulator[idx]['function']['name'] = tc_delta.function.name
+                                if hasattr(tc_delta.function, 'arguments') and tc_delta.function.arguments:
+                                    tool_calls_accumulator[idx]['function']['arguments'] += tc_delta.function.arguments
+
                     if delta and delta.content:
                         yield Completion(text=delta.content)
+
+            # If tool calls were detected, execute them
+            if has_tool_calls and hasattr(stream, '_eneo_context') and stream._eneo_context['has_tools']:
+                logger.info(f"[LiteLLM] {self.litellm_model}: Model requested {len(tool_calls_accumulator)} tool call(s), executing...")
+
+                # Reconstruct tool calls
+                tool_calls = []
+                for idx in sorted(tool_calls_accumulator.keys()):
+                    tc = tool_calls_accumulator[idx]
+                    # Create a simple object to match the expected interface
+                    class ToolCall:
+                        def __init__(self, id, function_name, function_args):
+                            self.id = id
+                            self.type = 'function'
+                            self.function = type('Function', (), {
+                                'name': function_name,
+                                'arguments': function_args
+                            })()
+                    tool_calls.append(ToolCall(tc['id'], tc['function']['name'], tc['function']['arguments']))
+
+                # Yield informational message about tool execution
+                tool_info = "\n\n🔧 **Fetching up-to-date documentation...**\n"
+                for i, tc in enumerate(tool_calls, 1):
+                    tool_name = tc.function.name.replace('-', ' ').title()
+                    try:
+                        args = json.loads(tc.function.arguments)
+                        if 'libraryName' in args:
+                            tool_info += f"{i}. Searching for library: **{args['libraryName']}**\n"
+                        elif 'context7CompatibleLibraryID' in args:
+                            lib_id = args['context7CompatibleLibraryID'].split('/')[-1]
+                            topic = args.get('topic', 'documentation')
+                            tool_info += f"{i}. Fetching **{lib_id}** docs (topic: {topic})\n"
+                        else:
+                            tool_info += f"{i}. Executing: {tool_name}\n"
+                    except Exception:
+                        tool_info += f"{i}. Executing: {tool_name}\n"
+
+                yield Completion(text=tool_info)
+
+                # Get context from stream
+                messages = stream._eneo_context['messages']
+                kwargs = stream._eneo_context['kwargs']
+
+                # Add assistant message with tool calls
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in tool_calls
+                    ]
+                })
+
+                # Execute tools
+                server_params = StdioServerParameters(
+                    command="npx",
+                    args=["-y", "@upstash/context7-mcp"],
+                )
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+
+                        for tool_call in tool_calls:
+                            logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
+                            try:
+                                tool_result = await call_openai_tool(
+                                    session=session,
+                                    tool_call=tool_call
+                                )
+                                logger.info(f"[MCP] Tool {tool_call.function.name} executed successfully")
+
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps(tool_result)
+                                })
+                            except Exception as e:
+                                logger.error(f"[MCP] Tool {tool_call.function.name} failed: {e}")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps({"error": str(e)})
+                                })
+
+                # Make follow-up streaming request with tool results
+                logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up streaming request with tool results")
+                follow_up_kwargs = {k: v for k, v in kwargs.items() if k != 'tools'}
+                response = await litellm.acompletion(
+                    model=self.litellm_model,
+                    messages=messages,
+                    stream=True,
+                    **follow_up_kwargs
+                )
+
+                async for chunk in response:
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if delta and delta.content:
+                            yield Completion(text=delta.content)
 
             # Send final stop chunk
             logger.info(f"[LiteLLM] {self.litellm_model}: Stream iteration completed")
