@@ -11,6 +11,8 @@ These tests verify:
 
 import pytest
 from uuid import uuid4
+from sqlalchemy import text
+from intric.database.database import sessionmanager
 
 
 # Helper functions for test setup
@@ -54,8 +56,25 @@ async def _create_user(
     assert response.status_code == 200, response.text
     user = response.json()
 
-    # TODO: Set admin role if needed
-    # This depends on your user/role setup
+    # Assign Owner predefined role for admin permissions via SQL
+    if is_admin:
+        async with sessionmanager.session() as session:
+            async with session.begin():
+                # Get Owner predefined role ID
+                result = await session.execute(
+                    text("SELECT id FROM predefined_roles WHERE name = 'Owner'")
+                )
+                owner_role = result.first()
+                assert owner_role is not None, "Owner predefined role not found"
+
+                # Assign role to user
+                await session.execute(
+                    text(
+                        "INSERT INTO users_predefined_roles (user_id, predefined_role_id) "
+                        "VALUES (:user_id, :role_id) ON CONFLICT DO NOTHING"
+                    ),
+                    {"user_id": user["id"], "role_id": owner_role[0]}
+                )
 
     return user
 
@@ -409,16 +428,81 @@ async def test_rollback_restores_original_state(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_cannot_delete_template_in_use(
+async def test_delete_template_does_not_affect_existing_assistants(
     client,
     super_admin_token,
     patch_auth_service_jwt,
     mock_transcription_models,
 ):
-    """Cannot delete template that is being used by assistants."""
-    # This test requires creating an assistant from a template
-    # TODO: Implement when assistant creation from template is available
-    pass
+    """Deleting a template doesn't affect assistants created from it."""
+    tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
+    admin = await _create_user(
+        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+    )
+    api_key = await _login_user(client, admin["email"], "password123")
+    await _enable_templates_feature(client, api_key)
+
+    # Create a template
+    template_data = {
+        "name": "Customer Support Template",
+        "description": "Template for support assistants",
+        "category": "support",
+        "prompt": "You are a helpful support assistant",
+        "wizard": {"attachments": None, "collections": None},
+    }
+
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json=template_data,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 201
+    template = response.json()
+    template_id = template["id"]
+
+    # Create an assistant using this template
+    # First, get a space
+    response = await client.post(
+        "/api/v1/spaces/",
+        json={"name": "Test Space", "description": "Test"},
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 201
+    space_id = response.json()["id"]
+
+    # Create assistant from template
+    assistant_data = {
+        "name": "Support Bot",
+        "space_id": space_id,
+        "template_id": template_id,  # Using the template
+    }
+
+    response = await client.post(
+        "/api/v1/assistants/",
+        json=assistant_data,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    assistant_id = response.json()["id"]
+
+    # Delete the template - should succeed (templates are independent of assistants)
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 204  # Success
+
+    # Verify assistant still exists by listing all assistants
+    response = await client.get(
+        "/api/v1/assistants/",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    assistants = response.json()["items"]
+    # Find our assistant in the list
+    our_assistant = next((a for a in assistants if a["id"] == assistant_id), None)
+    assert our_assistant is not None, "Assistant should still exist after template deletion"
+    assert our_assistant["name"] == "Support Bot"
 
 
 @pytest.mark.integration
@@ -477,3 +561,308 @@ async def test_app_template_crud_operations(
     )
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_restore_soft_deleted_template(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    """Soft-deleted templates can be restored and appear in gallery again."""
+    tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
+    admin = await _create_user(
+        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+    )
+    api_key = await _login_user(client, admin["email"], "password123")
+    await _enable_templates_feature(client, api_key)
+
+    # Create template
+    template_data = {
+        "name": "Restorable Template",
+        "description": "Will be deleted and restored",
+        "category": "test",
+        "prompt": "Test prompt",
+        "wizard": {"attachments": None, "collections": None},
+    }
+
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json=template_data,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 201
+    template_id = response.json()["id"]
+
+    # Soft delete template
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 204
+
+    # Verify it's in deleted list
+    response = await client.get(
+        "/api/v1/admin/templates/assistants/deleted",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    deleted_templates = response.json()["items"]
+    assert template_id in [t["id"] for t in deleted_templates]
+    assert deleted_templates[0]["deleted_at"] is not None
+
+    # Restore the template
+    response = await client.post(
+        f"/api/v1/admin/templates/assistants/{template_id}/restore",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    restored = response.json()
+    assert restored["id"] == template_id
+    assert restored["deleted_at"] is None
+    assert restored["restored_at"] is not None
+    assert restored["restored_by_user_id"] is not None
+
+    # Verify it's back in regular gallery
+    response = await client.get(
+        "/api/v1/templates/assistants/",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    gallery_ids = [t["id"] for t in response.json()["items"]]
+    assert template_id in gallery_ids
+
+    # Verify it's NOT in deleted list anymore
+    response = await client.get(
+        "/api/v1/admin/templates/assistants/deleted",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    deleted_ids = [t["id"] for t in response.json()["items"]]
+    assert template_id not in deleted_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_permanent_delete_requires_soft_delete_first(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    """Can only permanently delete templates that are already soft-deleted."""
+    tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
+    admin = await _create_user(
+        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+    )
+    api_key = await _login_user(client, admin["email"], "password123")
+    await _enable_templates_feature(client, api_key)
+
+    # Create template
+    template_data = {
+        "name": "To Be Deleted",
+        "description": "Will be permanently deleted",
+        "category": "test",
+        "prompt": "Test",
+        "wizard": {"attachments": None, "collections": None},
+    }
+
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json=template_data,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 201
+    template_id = response.json()["id"]
+
+    # Try to permanent delete without soft delete first
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_id}/permanent",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    # Backend returns 404 if template is not soft-deleted (it's not in deleted list)
+    assert response.status_code in [400, 404]  # Either bad request or not found is acceptable
+
+    # Soft delete first
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 204
+
+    # Now permanent delete should succeed
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_id}/permanent",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 204
+
+    # Verify it's completely gone from deleted list
+    response = await client.get(
+        "/api/v1/admin/templates/assistants/deleted",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    deleted_ids = [t["id"] for t in response.json()["items"]]
+    assert template_id not in deleted_ids
+
+    # Verify it's gone from regular gallery too
+    response = await client.get(
+        "/api/v1/templates/assistants/",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    gallery_ids = [t["id"] for t in response.json()["items"]]
+    assert template_id not in gallery_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cross_tenant_access_denied(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    """Tenant cannot access another tenant's template by ID."""
+    # Create two tenants
+    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-a-{uuid4()}")
+    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-b-{uuid4()}")
+
+    # Create admin users
+    admin_a = await _create_user(
+        client, super_admin_token, tenant_a["id"], "admin-a@test.com", "password123", is_admin=True
+    )
+    admin_b = await _create_user(
+        client, super_admin_token, tenant_b["id"], "admin-b@test.com", "password123", is_admin=True
+    )
+
+    api_key_a = await _login_user(client, admin_a["email"], "password123")
+    api_key_b = await _login_user(client, admin_b["email"], "password123")
+
+    await _enable_templates_feature(client, api_key_a)
+    await _enable_templates_feature(client, api_key_b)
+
+    # Tenant A creates a template
+    template_data = {
+        "name": "Tenant A Template",
+        "description": "Private to Tenant A",
+        "category": "private",
+        "prompt": "Private prompt",
+        "wizard": {"attachments": None, "collections": None},
+    }
+
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json=template_data,
+        headers={"Authorization": f"Bearer {api_key_a}"},
+    )
+    assert response.status_code == 201
+    template_a_id = response.json()["id"]
+
+    # Tenant B tries to update Tenant A's template - should fail
+    response = await client.patch(
+        f"/api/v1/admin/templates/assistants/{template_a_id}",
+        json={"name": "Hacked Name"},
+        headers={"Authorization": f"Bearer {api_key_b}"},
+    )
+    assert response.status_code == 404
+
+    # Tenant B tries to delete Tenant A's template - should fail
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_a_id}",
+        headers={"Authorization": f"Bearer {api_key_b}"},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_gallery_endpoint_accessible_to_regular_users(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    """Regular users can access the public template gallery."""
+    tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
+
+    # Create regular user (NOT admin)
+    regular_user = await _create_user(
+        client, super_admin_token, tenant["id"], "user@test.com", "password123", is_admin=False
+    )
+
+    # Create admin user to enable feature and create a template
+    admin = await _create_user(
+        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+    )
+
+    user_key = await _login_user(client, regular_user["email"], "password123")
+    admin_key = await _login_user(client, admin["email"], "password123")
+
+    await _enable_templates_feature(client, admin_key)
+
+    # Admin creates a template
+    template_data = {
+        "name": "Public Template",
+        "description": "Available in gallery",
+        "category": "test",
+        "prompt": "Test prompt",
+        "wizard": {"attachments": None, "collections": None},
+    }
+
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json=template_data,
+        headers={"Authorization": f"Bearer {admin_key}"},
+    )
+    assert response.status_code == 201
+    template_id = response.json()["id"]
+
+    # Regular user CAN access the public gallery
+    response = await client.get(
+        "/api/v1/templates/assistants/",
+        headers={"Authorization": f"Bearer {user_key}"},
+    )
+    assert response.status_code == 200
+    templates = response.json()["items"]
+    # Should see the template in the gallery
+    assert template_id in [t["id"] for t in templates]
+    # Gallery returns basic template info
+    template_in_gallery = next(t for t in templates if t["id"] == template_id)
+    assert template_in_gallery["name"] == "Public Template"
+    assert template_in_gallery["category"] == "test"
+
+    # Verify regular user CANNOT perform admin operations (now enforced!)
+
+    # Try to create template
+    user_template_data = {
+        "name": "Unauthorized Template",
+        "description": "Should be blocked",
+        "category": "test",
+        "prompt": "Test",
+        "wizard": {"attachments": None, "collections": None},
+    }
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json=user_template_data,
+        headers={"Authorization": f"Bearer {user_key}"},
+    )
+    assert response.status_code == 403, "Regular user should not be able to create templates"
+
+    # Try to update template
+    response = await client.patch(
+        f"/api/v1/admin/templates/assistants/{template_id}",
+        json={"name": "Hacked Name"},
+        headers={"Authorization": f"Bearer {user_key}"},
+    )
+    assert response.status_code == 403, "Regular user should not be able to update templates"
+
+    # Try to delete template
+    response = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template_id}",
+        headers={"Authorization": f"Bearer {user_key}"},
+    )
+    assert response.status_code == 403, "Regular user should not be able to delete templates"

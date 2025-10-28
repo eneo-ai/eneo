@@ -755,6 +755,7 @@ class Container(containers.DeclarativeContainer):
         factory=assistant_template_factory,
         feature_flag_service=feature_flag_service,
         session=session,
+        user=user,
     )
     session_service = providers.Factory(
         SessionService,
@@ -804,6 +805,7 @@ class Container(containers.DeclarativeContainer):
         factory=app_template_factory,
         feature_flag_service=feature_flag_service,
         session=session,
+        user=user,
     )
 
     template_service = providers.Factory(

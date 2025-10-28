@@ -8,6 +8,7 @@ from intric.main.exceptions import (
     BadRequestException,
     NameCollisionException,
 )
+from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -32,11 +33,13 @@ class AppTemplateService:
         repo: "AppTemplateRepository",
         feature_flag_service: "FeatureFlagService",
         session: "AsyncSession",
+        user: "UserInDB",
     ) -> None:
         self.factory = factory
         self.repo = repo
         self.feature_flag_service = feature_flag_service
         self.session = session
+        self.user = user
 
     async def get_app_template(
         self, app_template_id: "UUID", tenant_id: Optional["UUID"] = None
@@ -71,6 +74,7 @@ class AppTemplateService:
 
         return await self.repo.get_app_template_list(tenant_id=tenant_id)
 
+    @validate_permissions(Permission.ADMIN)
     async def create_template(
         self,
         data: "AppTemplateCreate",
@@ -82,7 +86,7 @@ class AppTemplateService:
         - Feature flag must be enabled
         - Name must be unique within tenant
         - Original state saved to snapshot
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for feature check + duplicate check + insert
         """
@@ -152,6 +156,7 @@ class AppTemplateService:
 
         return self.factory.create_app_template(item=template_record)
 
+    @validate_permissions(Permission.ADMIN)
     async def update_template(
         self,
         template_id: "UUID",
@@ -164,7 +169,7 @@ class AppTemplateService:
         - Must belong to tenant
         - If name changed: check uniqueness
         - original_snapshot NOT updated (preserved for rollback)
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for ownership check + optional duplicate check + update
         """
@@ -225,6 +230,8 @@ class AppTemplateService:
 
         return self.factory.create_app_template(item=updated_record)
 
+    @validate_permissions(Permission.ADMIN)
+
     async def delete_template(
         self,
         template_id: "UUID",
@@ -256,6 +263,8 @@ class AppTemplateService:
         result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id, user_id=user_id)
         if not result:
             raise NotFoundException("Template not found")
+
+    @validate_permissions(Permission.ADMIN)
 
     async def rollback_template(
         self,
@@ -319,6 +328,8 @@ class AppTemplateService:
 
         return self.factory.create_app_template(item=restored_record)
 
+    @validate_permissions(Permission.ADMIN)
+
     async def restore_template(
         self,
         template_id: "UUID",
@@ -351,6 +362,8 @@ class AppTemplateService:
 
         return template
 
+    @validate_permissions(Permission.ADMIN)
+
     async def permanent_delete_template(
         self,
         template_id: "UUID",
@@ -371,6 +384,8 @@ class AppTemplateService:
             raise NotFoundException(
                 "Template not found or not in deleted state"
             )
+
+    @validate_permissions(Permission.ADMIN)
 
     async def get_templates_for_tenant(
         self,
@@ -420,6 +435,8 @@ class AppTemplateService:
             templates_with_usage.append((template, usage_count))
 
         return templates_with_usage
+
+    @validate_permissions(Permission.ADMIN)
 
     async def get_deleted_templates_for_tenant(
         self,

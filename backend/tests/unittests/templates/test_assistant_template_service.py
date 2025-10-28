@@ -49,13 +49,26 @@ def mock_session():
 
 
 @pytest.fixture
-def service(mock_repo, mock_factory, mock_feature_flag_service, mock_session):
+def mock_user():
+    """Mock user with admin permissions."""
+    from unittest.mock import Mock
+    from uuid import uuid4
+    user = Mock()
+    user.id = uuid4()
+    user.tenant_id = uuid4()
+    user.permissions = ["admin"]  # Admin permission
+    return user
+
+
+@pytest.fixture
+def service(mock_repo, mock_factory, mock_feature_flag_service, mock_session, mock_user):
     """Service instance with mocked dependencies."""
     return AssistantTemplateService(
         repo=mock_repo,
         factory=mock_factory,
         feature_flag_service=mock_feature_flag_service,
         session=mock_session,
+        user=mock_user,
     )
 
 
@@ -191,28 +204,33 @@ async def test_update_template_checks_duplicate_on_rename(service, mock_repo):
 
 
 @pytest.mark.asyncio
-async def test_delete_template_checks_usage(service, mock_repo, mock_session):
-    """Cannot delete template that is in use by assistants."""
+async def test_delete_template_allowed_even_when_in_use(service, mock_repo):
+    """Templates can be deleted even when in use (assistants remain independent)."""
     template_id = uuid4()
     tenant_id = uuid4()
+    user_id = uuid4()
 
     # Template exists
     mock_template = Mock()
     mock_template.name = "In Use Template"
     mock_repo.get_by_id.return_value = mock_template
 
-    # Template is in use (count > 0)
-    mock_session.scalar.return_value = 3
+    # Mock successful soft delete
+    mock_repo.soft_delete.return_value = True
 
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.delete_template(
-            template_id=template_id,
-            tenant_id=tenant_id
-        )
+    # Should succeed even if template is in use
+    await service.delete_template(
+        template_id=template_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
-    error_msg = str(exc_info.value).lower()
-    assert "used by" in error_msg
-    assert "3" in error_msg
+    # Verify soft_delete was called
+    mock_repo.soft_delete.assert_called_once_with(
+        id=template_id,
+        tenant_id=tenant_id,
+        user_id=user_id
+    )
 
 
 @pytest.mark.asyncio
@@ -236,16 +254,29 @@ async def test_rollback_template_validates_snapshot_exists(service, mock_repo):
 
 
 @pytest.mark.asyncio
-async def test_get_templates_for_tenant_excludes_global(service, mock_repo):
+async def test_get_templates_for_tenant_excludes_global(service, mock_session, mock_factory):
     """Admin list should only show tenant-specific templates."""
     tenant_id = uuid4()
-    mock_templates = [Mock(), Mock()]
-    mock_repo.get_for_tenant.return_value = mock_templates
+
+    # Mock the SQL query result
+    mock_template_record = Mock()
+    mock_template_record.id = uuid4()
+    mock_result = Mock()
+    mock_result.all.return_value = [(mock_template_record, 1)]
+
+    # Make execute async
+    async def mock_execute(*args, **kwargs):
+        return mock_result
+
+    mock_session.execute = mock_execute
+
+    mock_domain_template = Mock()
+    mock_factory.create_assistant_template.return_value = mock_domain_template
 
     result = await service.get_templates_for_tenant(tenant_id=tenant_id)
 
-    assert result == mock_templates
-    mock_repo.get_for_tenant.assert_called_once_with(tenant_id=tenant_id)
+    assert len(result) == 1
+    assert result[0][1] == 1  # usage_count
 
 
 @pytest.mark.asyncio

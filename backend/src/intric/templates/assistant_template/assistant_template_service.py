@@ -8,6 +8,7 @@ from intric.main.exceptions import (
     BadRequestException,
     NameCollisionException,
 )
+from intric.roles.permissions import Permission, validate_permissions
 from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateCreate,
 )
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
         AssistantTemplateUpdate,
     )
     from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.users.user import UserInDB
 
 
 class AssistantTemplateService:
@@ -36,11 +38,13 @@ class AssistantTemplateService:
         repo: "AssistantTemplateRepository",
         feature_flag_service: "FeatureFlagService",
         session: "AsyncSession",
+        user: "UserInDB",
     ) -> None:
         self.factory = factory
         self.repo = repo
         self.feature_flag_service = feature_flag_service
         self.session = session
+        self.user = user
 
     async def get_assistant_template(
         self, assistant_template_id: "UUID", tenant_id: Optional["UUID"] = None
@@ -80,6 +84,7 @@ class AssistantTemplateService:
 
         return await self.repo.get_assistant_template_list(tenant_id=tenant_id)
 
+    @validate_permissions(Permission.ADMIN)
     async def create_template(
         self,
         data: AssistantTemplateCreate,
@@ -91,7 +96,7 @@ class AssistantTemplateService:
         - Feature flag must be enabled
         - Name must be unique within tenant
         - Original state saved to snapshot
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for feature check + duplicate check + insert
         """
@@ -157,6 +162,7 @@ class AssistantTemplateService:
 
         return self.factory.create_assistant_template(item=template_record)
 
+    @validate_permissions(Permission.ADMIN)
     async def update_template(
         self,
         template_id: "UUID",
@@ -169,7 +175,7 @@ class AssistantTemplateService:
         - Must belong to tenant
         - If name changed: check uniqueness
         - original_snapshot NOT updated (preserved for rollback)
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for ownership check + optional duplicate check + update
         """
@@ -226,6 +232,7 @@ class AssistantTemplateService:
 
         return self.factory.create_assistant_template(item=updated_record)
 
+    @validate_permissions(Permission.ADMIN)
     async def delete_template(
         self,
         template_id: "UUID",
@@ -238,7 +245,7 @@ class AssistantTemplateService:
         - Must belong to tenant
         - Sets deleted_at timestamp
         - Tracks who deleted it (deleted_by_user_id)
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
         - Assistants using this template continue to work (FK has ondelete="SET NULL")
 
         Time complexity: O(log n) for ownership check + soft-delete
@@ -258,6 +265,7 @@ class AssistantTemplateService:
         if not result:
             raise NotFoundException("Template not found")
 
+    @validate_permissions(Permission.ADMIN)
     async def rollback_template(
         self,
         template_id: "UUID",
@@ -270,7 +278,7 @@ class AssistantTemplateService:
         - Must have original_snapshot
         - Restores all fields from snapshot
         - Updates updated_at timestamp
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for ownership check + update
         """
@@ -318,6 +326,7 @@ class AssistantTemplateService:
 
         return self.factory.create_assistant_template(item=restored_record)
 
+    @validate_permissions(Permission.ADMIN)
     async def restore_template(
         self,
         template_id: "UUID",
@@ -331,7 +340,7 @@ class AssistantTemplateService:
         - Must be soft-deleted (deleted_at IS NOT NULL)
         - Clears deleted_at to restore template
         - Tracks who restored it (restored_by_user_id, restored_at)
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for ownership check + update
 
@@ -350,6 +359,7 @@ class AssistantTemplateService:
 
         return template
 
+    @validate_permissions(Permission.ADMIN)
     async def permanent_delete_template(
         self,
         template_id: "UUID",
@@ -361,7 +371,7 @@ class AssistantTemplateService:
         - Must belong to tenant
         - Must be soft-deleted (deleted_at IS NOT NULL)
         - Cannot be undone - permanently removes from database
-        - Admin only (enforced at router level)
+        - Admin only (enforced via decorator)
 
         Time complexity: O(log n) for ownership check + delete
         """
@@ -371,6 +381,7 @@ class AssistantTemplateService:
                 "Template not found or not in deleted state"
             )
 
+    @validate_permissions(Permission.ADMIN)
     async def get_templates_for_tenant(
         self,
         tenant_id: "UUID",
@@ -380,6 +391,7 @@ class AssistantTemplateService:
         Returns only templates where tenant_id matches (NOT global templates).
         Used for admin management page.
         Each template is returned with its usage count (number of assistants created from it).
+        Admin only (enforced via decorator).
 
         Time complexity: O(k log n) where k is number of tenant templates
         """
@@ -419,6 +431,7 @@ class AssistantTemplateService:
 
         return templates_with_usage
 
+    @validate_permissions(Permission.ADMIN)
     async def get_deleted_templates_for_tenant(
         self,
         tenant_id: "UUID",
@@ -427,7 +440,7 @@ class AssistantTemplateService:
 
         Returns deleted templates ordered by deleted_at DESC.
         Each template is returned with its usage count.
-        Admin only (enforced at router level).
+        Admin only (enforced via decorator).
 
         Time complexity: O(k log n) where k is number of deleted templates
         """
