@@ -50,6 +50,157 @@ export function initTemplates(client) {
         method: "get"
       });
       return res.items;
+    },
+
+    /**
+     * Admin methods for template management (requires admin permissions)
+     */
+    admin: {
+      /**
+       * List all assistant templates for the tenant
+       * @throws {IntricError}
+       */
+      listAssistants: async () => {
+        const res = await client.fetch("/api/v1/admin/templates/assistants/", {
+          method: "get"
+        });
+        return res;
+      },
+
+      /**
+       * List all app templates for the tenant
+       * @throws {IntricError}
+       */
+      listApps: async () => {
+        const res = await client.fetch("/api/v1/admin/templates/apps/", {
+          method: "get"
+        });
+        return res;
+      },
+
+      /**
+       * List deleted assistant templates
+       * @throws {IntricError}
+       */
+      listDeletedAssistants: async () => {
+        const res = await client.fetch("/api/v1/admin/templates/assistants/deleted", {
+          method: "get"
+        });
+        return res;
+      },
+
+      /**
+       * List deleted app templates
+       * @throws {IntricError}
+       */
+      listDeletedApps: async () => {
+        const res = await client.fetch("/api/v1/admin/templates/apps/deleted", {
+          method: "get"
+        });
+        return res;
+      },
+
+      /**
+       * Create a new assistant template
+       * @param {any} data Template data
+       * @throws {IntricError}
+       */
+      createAssistant: async (data) => {
+        const res = await client.fetch("/api/v1/admin/templates/assistants/", {
+          method: "post",
+          requestBody: { "application/json": data }
+        });
+        return res;
+      },
+
+      /**
+       * Create a new app template
+       * @param {any} data Template data
+       * @throws {IntricError}
+       */
+      createApp: async (data) => {
+        const res = await client.fetch("/api/v1/admin/templates/apps/", {
+          method: "post",
+          requestBody: { "application/json": data }
+        });
+        return res;
+      },
+
+      /**
+       * Update an assistant template
+       * @param {string} id Template ID
+       * @param {any} data Updated template data
+       * @throws {IntricError}
+       */
+      updateAssistant: async (id, data) => {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/`, {
+          method: "patch",
+          requestBody: { "application/json": data }
+        });
+        return res;
+      },
+
+      /**
+       * Update an app template
+       * @param {string} id Template ID
+       * @param {any} data Updated template data
+       * @throws {IntricError}
+       */
+      updateApp: async (id, data) => {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/`, {
+          method: "patch",
+          requestBody: { "application/json": data }
+        });
+        return res;
+      },
+
+      /**
+       * Delete an assistant template (soft delete)
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      deleteAssistant: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/`, {
+          method: "delete"
+        });
+        return res;
+      },
+
+      /**
+       * Delete an app template (soft delete)
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      deleteApp: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/`, {
+          method: "delete"
+        });
+        return res;
+      },
+
+      /**
+       * Rollback an assistant template to its original state
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      rollbackAssistant: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/rollback`, {
+          method: "post"
+        });
+        return res;
+      },
+
+      /**
+       * Rollback an app template to its original state
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      rollbackApp: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/rollback`, {
+          method: "post"
+        });
+        return res;
+      }
     }
   };
 }

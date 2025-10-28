@@ -33,6 +33,6 @@ CLAUDE.md
 .devcontainer/claude-config/
 .code/
 .mcp.json
-specs/
 install-claude.sh
 devcontainer.json
+specs/

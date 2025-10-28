@@ -27,7 +27,9 @@
     openAssistantAfterCreation = creationMode === "blank";
   }
 
-  $: disableEditorOnTemplate($creationMode);
+  $effect(() => {
+    disableEditorOnTemplate($creationMode);
+  });
 </script>
 
 <Dialog.Root openController={showCreateDialog} on:close={resetForm}>
