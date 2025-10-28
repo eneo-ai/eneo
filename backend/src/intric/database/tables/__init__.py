@@ -24,6 +24,7 @@ import intric.database.tables.roles_table
 import intric.database.tables.service_table
 import intric.database.tables.sessions_table
 import intric.database.tables.settings_table
+import intric.database.tables.sync_log_table
 import intric.database.tables.spaces_table
 import intric.database.tables.tenant_table
 import intric.database.tables.user_groups_table

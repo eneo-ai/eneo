@@ -27,6 +27,14 @@ class IntegrationKnowledgeFactory:
             created_at=record.created_at,
             updated_at=record.updated_at,
             size=record.size,
+            site_id=record.site_id,
+            last_synced_at=record.last_synced_at,
+            last_sync_summary=record.last_sync_summary,
+            sharepoint_subscription_id=getattr(record, "sharepoint_subscription_id", None),
+            sharepoint_subscription_expires_at=getattr(
+                record, "sharepoint_subscription_expires_at", None
+            ),
+            delta_token=getattr(record, "delta_token", None),
         )
 
     @classmethod

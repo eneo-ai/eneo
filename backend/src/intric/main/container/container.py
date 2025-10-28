@@ -100,6 +100,9 @@ from intric.integration.infrastructure.auth_service.confluence_auth_service impo
 from intric.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
+from intric.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
+from intric.integration.infrastructure.office_change_key_service import OfficeChangeKeyService
+from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
 from intric.integration.infrastructure.content_service.confluence_content_service import (
     ConfluenceContentService,
 )
@@ -114,6 +117,9 @@ from intric.integration.infrastructure.mappers.integration_mapper import (
 )
 from intric.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
+)
+from intric.integration.infrastructure.mappers.sync_log_mapper import (
+    SyncLogMapper,
 )
 from intric.integration.infrastructure.mappers.tenant_integration_mapper import (
     TenantIntegrationMapper,
@@ -136,6 +142,9 @@ from intric.integration.infrastructure.repo_impl.integration_repo_impl import (
 )
 from intric.integration.infrastructure.repo_impl.oauth_token_repo_impl import (
     OauthTokenRepoImpl,
+)
+from intric.integration.infrastructure.repo_impl.sync_log_repo_impl import (
+    SyncLogRepoImpl,
 )
 from intric.integration.infrastructure.repo_impl.tenant_integration_repo_impl import (
     TenantIntegrationRepoImpl,
@@ -393,6 +402,7 @@ class Container(containers.DeclarativeContainer):
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
     confluence_token_mapper = providers.Factory(OauthTokenMapper)
+    sync_log_mapper = providers.Factory(SyncLogMapper)
 
     # HTTP auth encryption service
     http_auth_encryption_service = providers.Factory(HttpAuthEncryptionService)
@@ -450,6 +460,9 @@ class Container(containers.DeclarativeContainer):
     )
     oauth_token_repo = providers.Factory(
         OauthTokenRepoImpl, session=session, mapper=confluence_token_mapper
+    )
+    sync_log_repo = providers.Factory(
+        SyncLogRepoImpl, session=session, mapper=sync_log_mapper
     )
     transcription_model_enable_service = providers.Factory(
         TranscriptionModelEnableService, session=session
@@ -836,17 +849,7 @@ class Container(containers.DeclarativeContainer):
         IntegrationService,
         integration_repo=integration_repo,
     )
-    integration_knowledge_service = providers.Factory(
-        IntegrationKnowledgeService,
-        job_service=job_service,
-        user=user,
-        oauth_token_repo=oauth_token_repo,
-        space_repo=space_repo,
-        integration_knowledge_repo=integration_knowledge_repo,
-        embedding_model_repo=embedding_model_repo2,
-        user_integration_repo=user_integration_repo,
-        actor_manager=actor_manager,
-    )
+
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
         tenant_integration_repo=tenant_integration_repo,
@@ -876,6 +879,26 @@ class Container(containers.DeclarativeContainer):
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
     )
+
+    sharepoint_subscription_service = providers.Factory(
+        SharePointSubscriptionService,
+        integration_knowledge_repo=integration_knowledge_repo,
+        oauth_token_service=oauth_token_service
+    )
+
+    integration_knowledge_service = providers.Factory(
+        IntegrationKnowledgeService,
+        job_service=job_service,
+        user=user,
+        oauth_token_repo=oauth_token_repo,
+        space_repo=space_repo,
+        integration_knowledge_repo=integration_knowledge_repo,
+        embedding_model_repo=embedding_model_repo2,
+        user_integration_repo=user_integration_repo,
+        actor_manager=actor_manager,
+        sharepoint_subscription_service=sharepoint_subscription_service,
+    )
+
     confluence_content_service = providers.Factory(
         ConfluenceContentService,
         oauth_token_repo=oauth_token_repo,
@@ -898,6 +921,19 @@ class Container(containers.DeclarativeContainer):
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
+        sync_log_repo=sync_log_repo,
+    )
+    office_change_key_service = providers.Factory(
+        OfficeChangeKeyService,
+        redis_client=redis_client,
+    )
+    sharepoint_webhook_service = providers.Factory(
+        SharepointWebhookService,
+        session=session,
+        oauth_token_repo=oauth_token_repo,
+        job_repo=job_repo,
+        user_repo=user_repo,
+        change_key_service=office_change_key_service,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,

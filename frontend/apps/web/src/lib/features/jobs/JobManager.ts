@@ -1,6 +1,7 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
 import { createContext } from "$lib/core/context";
+import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
 import type { Intric, Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
 
@@ -59,9 +60,15 @@ function createJobManager(data: { intric: Intric }) {
         .map((job) => [job.id, job])
     );
     if (updatedJobs.size < currentJobs.size) {
-      // TODO: Some jobs have finished, for now we just blanket invalidate
+      // Some jobs have finished: refresh related data
       if (browser) {
         invalidate("blobs:list");
+        try {
+          const spacesManager = getSpacesManager();
+          spacesManager.refreshCurrentSpace();
+        } catch (error) {
+          console.warn("JobManager: could not refresh current space", error);
+        }
       }
     }
     currentJobs = updatedJobs;

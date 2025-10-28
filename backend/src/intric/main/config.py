@@ -233,6 +233,11 @@ class Settings(BaseSettings):
     # Sharepoint
     sharepoint_client_id: Optional[str] = None
     sharepoint_client_secret: Optional[str] = None
+    sharepoint_tenant_id: Optional[str] = None
+    sharepoint_scopes: Optional[str] = None
+    sharepoint_webhook_client_state: Optional[str] = None
+    sharepoint_webhook_notification_url: Optional[str] = None
+    sharepoint_subscription_lifetime_minutes: Optional[int] = None
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
     # Required for encrypting HTTP auth credentials, tenant API credentials, etc.

@@ -10,6 +10,7 @@ from intric.integration.presentation.models import (
 )
 from intric.jobs.job_models import Task
 from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
@@ -24,8 +25,12 @@ if TYPE_CHECKING:
         UserIntegrationRepository,
     )
     from intric.jobs.job_service import JobService
+    from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
     from intric.spaces.space_repo import SpaceRepository
     from intric.users.user import UserInDB
+
+
+logger = get_logger(__name__)
 
 
 class IntegrationKnowledgeService:
@@ -39,6 +44,7 @@ class IntegrationKnowledgeService:
         embedding_model_repo: "EmbeddingModelRepository",
         user_integration_repo: "UserIntegrationRepository",
         actor_manager: "ActorManager",
+        sharepoint_subscription_service: "SharePointSubscriptionService",
     ):
         self.job_service = job_service
         self.user = user
@@ -48,6 +54,7 @@ class IntegrationKnowledgeService:
         self.embedding_model_repo = embedding_model_repo
         self.user_integration_repo = user_integration_repo
         self.actor_manager = actor_manager
+        self.sharepoint_subscription_service = sharepoint_subscription_service
 
     async def create_space_integration_knowledge(
         self,
@@ -64,6 +71,7 @@ class IntegrationKnowledgeService:
 
         user_integration = await self.user_integration_repo.one(id=user_integration_id)
         embedding_model = await self.embedding_model_repo.one(model_id=embedding_model_id)
+        site_id_value = key if user_integration.integration_type == "sharepoint" else None
         obj = IntegrationKnowledge(
             name=name,
             space_id=space_id,
@@ -71,6 +79,7 @@ class IntegrationKnowledgeService:
             user_integration=user_integration,
             tenant_id=self.user.tenant_id,
             url=url,
+            site_id=site_id_value,
         )
         knowledge = await self.integration_knowledge_repo.add(obj=obj)
         token = await self.oauth_token_repo.one(user_integration_id=user_integration_id)
@@ -99,6 +108,16 @@ class IntegrationKnowledgeService:
                     site_id=key,
                 ),
             )
+            try:
+                knowledge = await self.sharepoint_subscription_service.ensure_subscription(
+                    token=token, knowledge=knowledge
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to register SharePoint subscription for knowledge %s: %s",
+                    knowledge.id,
+                    exc,
+                )
         else:
             raise ValueError("Unknown integration type")
 

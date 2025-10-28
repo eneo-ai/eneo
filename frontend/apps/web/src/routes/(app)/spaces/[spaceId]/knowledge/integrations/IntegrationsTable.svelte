@@ -3,11 +3,14 @@
   import { createRender } from "svelte-headless-table";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
-  import type { GroupSparse } from "@intric/intric-js";
+  import type { GroupSparse, IntegrationKnowledge } from "@intric/intric-js";
   import IntegrationNameCell from "./IntegrationNameCell.svelte";
+  import IntegrationSyncStatusCell from "./IntegrationSyncStatusCell.svelte";
   import IntegrationActions from "./IntegrationActions.svelte";
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
+
+  export let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = null;
 
   const {
     state: { currentSpace }
@@ -48,6 +51,19 @@
       cell: (item) => {
         return createRender(IntegrationNameCell, {
           knowledge: item.value
+        });
+      }
+    }),
+
+    table.column({
+      header: m.status(),
+      accessor: (item) => item,
+      cell: (item) => {
+        return createRender(IntegrationSyncStatusCell, {
+          knowledge: item.value,
+          onShowSyncHistory: () => {
+            selectedIntegrationForSyncHistory = item.value;
+          }
         });
       }
     }),

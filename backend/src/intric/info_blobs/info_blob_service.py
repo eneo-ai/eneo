@@ -124,6 +124,17 @@ class InfoBlobService:
                         f"({info_blob.website_id}) was replaced"
                     )
 
+            elif info_blob.integration_knowledge_id:
+                info_blobs_deleted = await self.repo.delete_by_title_and_integration_knowledge(
+                    info_blob.title, info_blob.integration_knowledge_id
+                )
+
+                if info_blobs_deleted:
+                    logger.debug(
+                        f"Replaced {len(info_blobs_deleted)} info blob(s) with title '{info_blob.title}' "
+                        f"from integration {info_blob.integration_knowledge_id}"
+                    )
+
     async def add_info_blob_without_validation(self, info_blob: InfoBlobAdd):
         await self._delete_if_same_title(info_blob)
         size_of_text = await self.quota_service.add_text(info_blob.text)
@@ -131,6 +142,21 @@ class InfoBlobService:
         info_blob_in_db = await self.repo.add(info_blob)
 
         return info_blob_in_db
+
+    async def upsert_info_blob_by_title_and_integration(
+        self, info_blob: InfoBlobAdd
+    ) -> InfoBlobInDB:
+        """Idempotent upsert for integration_knowledge blobs.
+
+        Handles duplicate webhooks by updating existing blobs instead of creating duplicates.
+        Automatically calculates size via quota_service.
+        """
+        # Calculate size
+        size_of_text = await self.quota_service.add_text(info_blob.text)
+        info_blob.size = size_of_text
+
+        # Use repo's upsert method
+        return await self.repo.upsert_by_title_and_integration_knowledge(info_blob)
 
     async def add_info_blob(self, info_blob: InfoBlobAdd):
         info_blob_in_db = await self.add_info_blob_without_validation(info_blob)

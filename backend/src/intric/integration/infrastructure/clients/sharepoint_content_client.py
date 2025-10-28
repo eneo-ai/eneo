@@ -84,51 +84,58 @@ class SharePointContentClient(BaseClient):
                 logger.error(f"SharePoint API error when getting page content: {e}")
                 raise
 
-    async def get_drives(
-        self, site_id: str, drive_name: str = "Documents"
-    ) -> Optional[str]:
-        """Get the Drive ID of a document library in a SharePoint site.
 
-        Args:
-            site_id: SharePoint site ID
-            drive_name: The name of the document library (default is "Documents")
-
-        Returns:
-            The Drive ID if found, else None
-        """
+    async def get_default_drive_id(self, site_id: str) -> Optional[str]:
+        """Returnerar default drive-id för sajten (språk-agnostiskt)."""
         try:
-            endpoint = f"v1.0/sites/{site_id}/drives"
-            response = await self.client.get(endpoint, headers=self.headers)
-
-            if "value" in response:
-                for drive in response["value"]:
-                    if drive.get("name") == drive_name:
-                        return drive.get("id")
-
-            return None
+            endpoint = f"v1.0/sites/{site_id}/drive"
+            resp = await self.client.get(endpoint, headers=self.headers)
+            # resp är redan JSON om BaseClient.get() dekodar; annars: resp = await resp.json()
+            return resp.get("id")
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "SharePoint token expired when getting drive ID, refreshing..."
-                )
                 await self.refresh_token()
+                resp = await self.client.get(endpoint, headers=self.headers)
+                return resp.get("id")
+            raise
 
-                endpoint = f"v1.0/sites/{site_id}/drives"
+    async def get_drives(self, site_id: str, drive_name: Optional[str] = None) -> Optional[str]:
+        """Returnerar drive-id. Om drive_name är None, välj default documentLibrary deterministiskt."""
+        endpoint = f"v1.0/sites/{site_id}/drives"
+        try:
+            response = await self.client.get(endpoint, headers=self.headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("SharePoint token expired when listing drives, refreshing...")
+                await self.refresh_token()
                 response = await self.client.get(endpoint, headers=self.headers)
-
-                if "value" in response:
-                    for drive in response["value"]:
-                        if drive.get("name") == drive_name:
-                            return drive.get("id")
-
-                return None
             else:
-                logger.error(f"Error getting drive ID: {e}")
+                logger.error(f"Error listing drives: {e}")
                 raise
+
+        drives = response.get("value", []) if isinstance(response, dict) else []
+        if not drives:
+            return None
+
+        if drive_name:
+            for d in drives:
+                if str(d.get("name", "")).lower() == drive_name.lower():
+                    return d.get("id")
+
+        for d in drives:
+            if d.get("driveType") == "documentLibrary":
+                return d.get("id")
+
+        return await self.get_default_drive_id(site_id)
 
     async def get_documents_in_drive(self, site_id: str) -> dict:
         try:
-            drive_id = await self.get_drives(site_id=site_id)
+            # Språk-agnostiskt: hämta default drive
+            drive_id = await self.get_default_drive_id(site_id)
+            if not drive_id:
+                logger.warning("No drive found for site %s", site_id)
+                return {"value": []}
+
             endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
             response = await self.client.get(endpoint, headers=self.headers)
             return response
@@ -136,8 +143,10 @@ class SharePointContentClient(BaseClient):
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("SharePoint token expired, refreshing...")
                 await self.refresh_token()
-
-                drive_id = await self.get_drives(site_id=site_id)
+                drive_id = await self.get_default_drive_id(site_id)
+                if not drive_id:
+                    logger.warning("No drive found for site %s after refresh", site_id)
+                    return {"value": []}
                 endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
                 response = await self.client.get(endpoint, headers=self.headers)
                 return response
@@ -210,18 +219,16 @@ class SharePointContentClient(BaseClient):
                 raise
 
     async def get_page_content(self, site_id: str, page_id: str) -> Dict[str, Any]:
+        endpoint = f"v1.0/sites/{site_id}/pages/{page_id}/microsoft.graph.sitePage?$expand=canvasLayout"
         try:
-            endpoint = f"v1.0/sites/{site_id}/pages/{page_id}/microsoft.graph.sitePage?$expand=canvasLayout"  # noqa E501
-            page_data = await self.client.get(endpoint, headers=self.headers)
-            return page_data
-
+            return await self.client.get(endpoint, headers=self.headers)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                page_data = await self.client.get(endpoint, headers=self.headers)
-                return page_data
-            else:
-                logger.error(f"SharePoint API error when getting page content: {e}")
-                raise
+                logger.info("SharePoint token expired while getting page content, refreshing...")
+                await self.refresh_token()
+                return await self.client.get(endpoint, headers=self.headers)
+            logger.error(f"SharePoint API error when getting page content: {e}")
+            raise
 
     async def get_file_content_by_id(
         self, drive_id: str, item_id: str
@@ -302,4 +309,132 @@ class SharePointContentClient(BaseClient):
                         return text, detected_content_type
             else:
                 logger.error(f"SharePoint API error when getting file content: {e}")
+                raise
+
+    async def initialize_delta_token(self, drive_id: str) -> Optional[str]:
+        """
+        Initialize delta tracking for a drive by calling delta without a token.
+        Returns the deltaLink token for future incremental syncs.
+
+        Args:
+            drive_id: The drive ID to track
+
+        Returns:
+            The delta token to use for future incremental syncs, or None if failed
+        """
+        try:
+            endpoint = f"v1.0/drives/{drive_id}/root/delta"
+
+            # Iterate through all pages to get to the final deltaLink
+            delta_link = None
+            next_link = endpoint
+
+            while next_link:
+                # Handle full URL or relative endpoint
+                if next_link.startswith("http"):
+                    # Extract just the path and query from the full URL
+                    from urllib.parse import urlparse
+                    parsed = urlparse(next_link)
+                    next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+
+                response = await self.client.get(next_link, headers=self.headers)
+
+                # Check for @odata.nextLink (more pages to fetch)
+                next_link = response.get("@odata.nextLink")
+
+                # Check for @odata.deltaLink (final page with token)
+                if "@odata.deltaLink" in response:
+                    delta_link = response["@odata.deltaLink"]
+                    break
+
+            if not delta_link:
+                logger.warning(f"No deltaLink found for drive {drive_id}")
+                return None
+
+            # Extract just the token parameter from the deltaLink
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(delta_link)
+            query_params = parse_qs(parsed.query)
+            token = query_params.get("token", [None])[0]
+
+            if not token:
+                logger.warning(f"Could not extract token from deltaLink: {delta_link}")
+                return None
+
+            logger.info(f"Initialized delta token for drive {drive_id}")
+            return token
+
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("SharePoint token expired during delta init, refreshing...")
+                await self.refresh_token()
+                return await self.initialize_delta_token(drive_id)
+            else:
+                logger.error(f"Error initializing delta token: {e}")
+                raise
+
+    async def get_delta_changes(
+        self, drive_id: str, delta_token: str
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """
+        Get changes since the last delta sync using the stored token.
+
+        Args:
+            drive_id: The drive ID
+            delta_token: The token from the previous sync
+
+        Returns:
+            Tuple of (list of changed items, new delta token for next sync)
+        """
+        try:
+            endpoint = f"v1.0/drives/{drive_id}/root/delta?token={delta_token}"
+
+            all_changes = []
+            next_link = endpoint
+            new_delta_token = None
+
+            while next_link:
+                # Handle full URL or relative endpoint
+                if next_link.startswith("http"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(next_link)
+                    next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+
+                response = await self.client.get(next_link, headers=self.headers)
+
+                # Collect changed items
+                items = response.get("value", [])
+                all_changes.extend(items)
+
+                # Check for next page
+                next_link = response.get("@odata.nextLink")
+
+                # Check for new delta token
+                if "@odata.deltaLink" in response:
+                    delta_link = response["@odata.deltaLink"]
+
+                    # Extract token from deltaLink
+                    from urllib.parse import urlparse, parse_qs
+                    parsed = urlparse(delta_link)
+                    query_params = parse_qs(parsed.query)
+                    new_delta_token = query_params.get("token", [None])[0]
+                    break
+
+            if not new_delta_token:
+                logger.warning(f"No new delta token received for drive {drive_id}")
+                # Return the old token so we don't lose sync state
+                new_delta_token = delta_token
+
+            logger.info(
+                f"Retrieved {len(all_changes)} changes for drive {drive_id}"
+            )
+            return all_changes, new_delta_token
+
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("SharePoint token expired during delta query, refreshing...")
+                await self.refresh_token()
+                return await self.get_delta_changes(drive_id, delta_token)
+            else:
+                logger.error(f"Error getting delta changes: {e}")
                 raise

@@ -133,6 +133,26 @@ export function initIntegrations(client) {
             path: { integration_knowledge_id, id }
           }
         });
+      },
+
+      /**
+       * Get paginated sync history for an integration knowledge
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge
+       * @param {number} args.skip Number of items to skip (default: 0)
+       * @param {number} args.limit Maximum number of sync logs per page (default: 10)
+       * @throws {IntricError}
+       * */
+      getSyncLogs: async ({ knowledge, skip = 0, limit = 10 }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const res = await client.fetch("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
+          method: "get",
+          params: {
+            path: { integration_knowledge_id },
+            query: { skip, limit }
+          }
+        });
+        return res;
       }
     },
 

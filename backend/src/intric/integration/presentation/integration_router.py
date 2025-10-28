@@ -1,12 +1,14 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from intric.integration.presentation.models import (
     Integration,
     IntegrationList,
     IntegrationPreviewDataList,
+    PaginatedSyncLogList,
+    SyncLog,
     TenantIntegration,
     TenantIntegrationFilter,
     TenantIntegrationList,
@@ -111,6 +113,56 @@ async def disconnect_user_integration(
     service = container.user_integration_service()
 
     await service.disconnect_integration(user_integration_id=user_integration_id)
+
+
+@router.get(
+    "/sync-logs/{integration_knowledge_id:uuid}/",
+    response_model=PaginatedSyncLogList,
+    status_code=200,
+)
+async def get_sync_logs(
+    integration_knowledge_id: UUID,
+    skip: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Get paginated sync history for an integration knowledge."""
+    sync_log_repo = container.sync_log_repo()
+
+    # Get total count
+    total_count = await sync_log_repo.count_by_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
+
+    # Get paginated logs
+    sync_logs = await sync_log_repo.get_by_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id,
+        limit=limit,
+        offset=skip
+    )
+
+    # Convert domain entities to presentation models
+    sync_log_models = [
+        SyncLog(
+            id=log.id,
+            integration_knowledge_id=log.integration_knowledge_id,
+            sync_type=log.sync_type,
+            status=log.status,
+            metadata=log.metadata,
+            error_message=log.error_message,
+            started_at=log.started_at,
+            completed_at=log.completed_at,
+            created_at=log.created_at,
+        )
+        for log in sync_logs
+    ]
+
+    return PaginatedSyncLogList(
+        items=sync_log_models,
+        total_count=total_count,
+        page_size=limit,
+        offset=skip
+    )
 
 
 @router.get(

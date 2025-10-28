@@ -117,7 +117,11 @@ export class IntegrationAuthService {
 
   receiveMessageHandler = async (event: MessageEvent) => {
     const { origin, data } = event;
-    if (origin !== "https://integrations.intric.ai") return;
+    const allowedOrigins = ["https://integrations.intric.ai"];
+    if (browser) {
+      allowedOrigins.push(window.location.origin);
+    }
+    if (!allowedOrigins.includes(origin)) return;
     if (!isIntegrationCallbackMessage(data)) return;
 
     const { code, state: integrationId } = data;

@@ -39,7 +39,15 @@ class IntegrationKnowledgeAssembler:
             user_integration_id=item.user_integration.id,
             embedding_model=embedding_model,
             permissions=getattr(item, "permissions", []),
-            metadata=IntegrationKnowledgeMetaData(size=item.size),
+            site_id=getattr(item, "site_id", None),
+            sharepoint_subscription_id=getattr(item, "sharepoint_subscription_id", None),
+            sharepoint_subscription_expires_at=getattr(item, "sharepoint_subscription_expires_at", None),
+            metadata=IntegrationKnowledgeMetaData(
+                size=item.size,
+                last_sync_summary=getattr(item, "last_sync_summary", None),
+                last_synced_at=getattr(item, "last_synced_at", None),
+                sharepoint_subscription_expires_at=getattr(item, "sharepoint_subscription_expires_at", None),
+            ),
             integration_type=integration_type,
             task=task,
         )
