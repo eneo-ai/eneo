@@ -9,7 +9,6 @@
 		appTemplateCategories,
 		formatCategoryTitle
 	} from '../../TemplateCategories';
-	import { fade } from 'svelte/transition';
 
 	interface Props {
 		value?: string;
@@ -22,14 +21,14 @@
 		type === 'assistant' ? assistantTemplateCategories : appTemplateCategories;
 	const categoryKeys = Object.keys(predefinedCategories);
 
-	// Mode: 'predefined' or 'custom'
-	let mode = $state<'predefined' | 'custom'>('predefined');
+	// Mode: true = predefined, false = custom
+	let isPredefined = $state(true);
 	let customValue = $state('');
 	let predefinedValue = $state(categoryKeys[0] || '');
 
 	// Ensure initial value is set for predefined mode
 	$effect(() => {
-		if (mode === 'predefined' && !value && predefinedValue) {
+		if (isPredefined && !value && predefinedValue) {
 			value = predefinedValue;
 		}
 	});
@@ -38,10 +37,10 @@
 	$effect(() => {
 		if (value) {
 			if (categoryKeys.includes(value)) {
-				mode = 'predefined';
+				isPredefined = true;
 				predefinedValue = value;
 			} else {
-				mode = 'custom';
+				isPredefined = false;
 				customValue = value;
 			}
 		}
@@ -49,7 +48,7 @@
 
 	// Update external value when mode or internal values change
 	$effect(() => {
-		if (mode === 'predefined') {
+		if (isPredefined) {
 			value = predefinedValue;
 		} else {
 			value = customValue;
@@ -77,104 +76,72 @@
 		}
 	});
 
-	function handleModeChange(newMode: 'predefined' | 'custom') {
-		mode = newMode;
-	}
 </script>
 
-<div class="flex flex-col gap-3">
-	<!-- Label and Mode Toggle -->
-	<div class="flex items-center justify-between gap-3">
-		<label class="text-sm font-medium text-default">
-			{m.category()} <span class="text-negative-default">*</span>
-		</label>
-
-		<!-- Compact Segmented Control -->
-		<div class="inline-flex gap-0 rounded-lg border border-default bg-secondary p-1">
-			<button
-				type="button"
-				class="rounded-md px-3 py-1 text-xs font-medium transition-all {mode === 'predefined'
-					? 'bg-primary text-default shadow-sm'
-					: 'text-secondary hover:text-default'}"
-				onclick={() => handleModeChange('predefined')}
-			>
-				{m.predefined()}
-			</button>
-			<button
-				type="button"
-				class="rounded-md px-3 py-1 text-xs font-medium transition-all {mode === 'custom'
-					? 'bg-primary text-default shadow-sm'
-					: 'text-secondary hover:text-default'}"
-				onclick={() => handleModeChange('custom')}
-			>
-				{m.custom()}
-			</button>
-		</div>
-	</div>
-
-	<!-- Description -->
-	<p class="text-xs text-secondary">
-		{m.category_selector_description()}
-	</p>
+<div class="flex flex-col gap-4">
+	<!-- Mode Toggle using RadioSwitch for consistency -->
+	<!-- Note: Label and description come from Settings.Row parent -->
+	<Input.RadioSwitch
+		bind:value={isPredefined}
+		labelTrue={m.predefined()}
+		labelFalse={m.custom()}
+	/>
 
 	<!-- Selector or Input based on mode -->
-	{#if mode === 'predefined'}
-		<div class="flex flex-col gap-2" transition:fade={{ duration: 150 }}>
-			<button
-				id="category-selector"
-				{...$trigger}
-				use:trigger
-				type="button"
-				aria-label={m.select_category()}
-				class="flex h-10 items-center justify-between rounded-lg border border-default px-3 hover:bg-hover-default"
-			>
-				<span class="text-default">
-					{predefinedCategories[predefinedValue]?.title || m.select_category()}
-				</span>
-				<IconChevronDown class="text-dimmer" />
-			</button>
-
-			{#if $open}
-				<div
-					class="z-50 flex max-h-64 flex-col overflow-y-auto rounded-lg border border-default bg-primary shadow-xl"
-					{...$menu}
-					use:menu
-					transition:fade={{ duration: 150 }}
+	<div class="flex flex-col gap-2">
+		{#if isPredefined}
+				<button
+					{...$trigger}
+					use:trigger
+					type="button"
+					aria-label={m.select_category()}
+					class="flex h-11 items-center justify-between rounded-lg border border-default px-4 py-2.5 hover:bg-hover-default"
 				>
-					{#each categoryKeys as categoryKey (categoryKey)}
-						<div
-							class="flex min-h-10 items-center justify-between border-b border-default px-3 last:border-b-0 hover:cursor-pointer hover:bg-hover-default"
-							{...$option({ value: categoryKey })}
-							use:option
-						>
-							<div class="flex flex-col gap-0.5">
-								<span class="text-sm text-default">
-									{predefinedCategories[categoryKey].title}
-								</span>
-								<span class="text-xs text-dimmer">
-									{predefinedCategories[categoryKey].description}
-								</span>
+					<span class="text-sm font-medium text-default">
+						{predefinedCategories[predefinedValue]?.title || m.select_category()}
+					</span>
+					<IconChevronDown class="text-dimmer" />
+				</button>
+
+				{#if $open}
+					<div
+						class="z-50 flex max-h-64 flex-col overflow-y-auto rounded-lg border border-default bg-primary shadow-xl"
+						{...$menu}
+						use:menu
+					>
+						{#each categoryKeys as categoryKey (categoryKey)}
+							<div
+								class="flex min-h-12 items-center justify-between border-b border-default px-4 py-3 last:border-b-0 hover:cursor-pointer hover:bg-hover-default"
+								{...$option({ value: categoryKey })}
+								use:option
+							>
+								<div class="flex flex-col gap-1">
+									<span class="text-sm font-medium text-default">
+										{predefinedCategories[categoryKey].title}
+									</span>
+									<span class="text-sm text-secondary">
+										{predefinedCategories[categoryKey].description}
+									</span>
+								</div>
+								<div class="check {$isSelected(categoryKey) ? 'block' : 'hidden'}">
+									<IconCheck class="text-positive-default" />
+								</div>
 							</div>
-							<div class="check {$isSelected(categoryKey) ? 'block' : 'hidden'}">
-								<IconCheck class="text-positive-default" />
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	{:else}
-		<div class="flex flex-col gap-2" transition:fade={{ duration: 150 }}>
+						{/each}
+					</div>
+				{/if}
+		{:else}
 			<Input.Text
 				bind:value={customValue}
 				placeholder={m.category_name_placeholder()}
 				required
+				hiddenLabel={true}
 			/>
-			<p class="text-xs text-dimmer">
+			<p class="text-sm text-secondary">
 				{m.custom_category_help()}
 			</p>
-		</div>
-	{/if}
+		{/if}
+	</div>
 </div>
 
 <style lang="postcss">

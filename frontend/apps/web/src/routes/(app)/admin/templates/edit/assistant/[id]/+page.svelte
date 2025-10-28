@@ -27,9 +27,21 @@
   let isSaving = $state(false);
 
   // Parse wizard configuration from template
-  const wizardConfig = data.template.wizard_config || [];
-  const attachmentsConfig = wizardConfig.find((c: any) => c.type === "attachments");
-  const collectionsConfig = wizardConfig.find((c: any) => c.type === "collections");
+  // Handle both object format {attachments: {...}, collections: {...}}
+  // and array format [{type: "attachments", ...}, {type: "collections", ...}]
+  const wizard = data.template.wizard_config || data.template.wizard || {};
+
+  let attachmentsConfig, collectionsConfig;
+
+  if (Array.isArray(wizard)) {
+    // Array format: [{type: "attachments", ...}, {type: "collections", ...}]
+    attachmentsConfig = wizard.find((c: any) => c.type === "attachments");
+    collectionsConfig = wizard.find((c: any) => c.type === "collections");
+  } else {
+    // Object format: {attachments: {...}, collections: {...}}
+    attachmentsConfig = wizard.attachments;
+    collectionsConfig = wizard.collections;
+  }
 
   let wizardAttachmentsEnabled = $state(!!attachmentsConfig);
   let wizardAttachmentsRequired = $state(attachmentsConfig?.required || false);
@@ -215,17 +227,15 @@
           hasChanges={false}
           fullWidth
         >
-          <div class="flex flex-col gap-3">
-            <div class="flex items-center gap-3">
-              <Input.RadioSwitch
-                bind:value={wizardAttachmentsEnabled}
-                labelTrue={m.enabled()}
-                labelFalse={m.disabled()}
-              />
-            </div>
+          <div class="flex flex-col gap-4">
+            <Input.RadioSwitch
+              bind:value={wizardAttachmentsEnabled}
+              labelTrue={m.enabled()}
+              labelFalse={m.disabled()}
+            />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-3 rounded-lg border border-default bg-hover-default p-4">
+              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
                   <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
@@ -256,17 +266,15 @@
           hasChanges={false}
           fullWidth
         >
-          <div class="flex flex-col gap-3">
-            <div class="flex items-center gap-3">
-              <Input.RadioSwitch
-                bind:value={wizardCollectionsEnabled}
-                labelTrue={m.enabled()}
-                labelFalse={m.disabled()}
-              />
-            </div>
+          <div class="flex flex-col gap-4">
+            <Input.RadioSwitch
+              bind:value={wizardCollectionsEnabled}
+              labelTrue={m.enabled()}
+              labelFalse={m.disabled()}
+            />
 
             {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-3 rounded-lg border border-default bg-hover-default p-4">
+              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardCollectionsRequired} />
                   <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>

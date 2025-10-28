@@ -314,17 +314,15 @@
           hasChanges={false}
           fullWidth
         >
-          <div class="flex flex-col gap-3">
-            <div class="flex items-center gap-3">
-              <Input.RadioSwitch
-                bind:value={wizardAttachmentsEnabled}
-                labelTrue={m.enabled()}
-                labelFalse={m.disabled()}
-              />
-            </div>
+          <div class="flex flex-col gap-4">
+            <Input.RadioSwitch
+              bind:value={wizardAttachmentsEnabled}
+              labelTrue={m.enabled()}
+              labelFalse={m.disabled()}
+            />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-3 rounded-lg border border-default bg-hover-default p-4">
+              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
                   <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
@@ -355,17 +353,15 @@
           hasChanges={false}
           fullWidth
         >
-          <div class="flex flex-col gap-3">
-            <div class="flex items-center gap-3">
-              <Input.RadioSwitch
-                bind:value={wizardCollectionsEnabled}
-                labelTrue={m.enabled()}
-                labelFalse={m.disabled()}
-              />
-            </div>
+          <div class="flex flex-col gap-4">
+            <Input.RadioSwitch
+              bind:value={wizardCollectionsEnabled}
+              labelTrue={m.enabled()}
+              labelFalse={m.disabled()}
+            />
 
             {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-3 rounded-lg border border-default bg-hover-default p-4">
+              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardCollectionsRequired} />
                   <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>

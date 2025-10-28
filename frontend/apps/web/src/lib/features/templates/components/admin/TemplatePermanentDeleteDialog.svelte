@@ -92,44 +92,31 @@
     </Dialog.Description>
 
     <Dialog.Section>
-      <div class="flex flex-col gap-6 py-4">
+      <div class="flex flex-col gap-4 py-4">
         <!-- Warning box with template name -->
         <div class="rounded-lg border border-negative-default bg-negative-default/15 px-4 py-3">
           <div class="flex items-start gap-3">
             <AlertTriangle class="text-negative-default shrink-0" size={20} />
             <div class="flex flex-col gap-1.5">
               <div class="font-semibold text-default">{template.name}</div>
-              <div class="text-sm text-dimmer">
+              <div class="text-sm text-secondary">
                 {m.permanent_delete_cannot_undo()}
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Confirmation input with prominent template name display -->
-        <div class="flex flex-col gap-3">
-          <div class="flex flex-col gap-2">
-            <label for="template-name-confirm" class="text-sm font-medium text-default">
-              To confirm this action, type the template name below:
-            </label>
-            <code class="select-all rounded-md bg-muted px-4 py-2.5 font-mono text-base font-semibold text-default border border-default">
-              {template.name}
-            </code>
-          </div>
-
-          <input
-            id="template-name-confirm"
-            bind:this={inputElement}
-            type="text"
-            bind:value={confirmationText}
-            placeholder={template.name}
-            autocomplete="off"
-            autocorrect="off"
-            spellcheck={false}
-            class="border-default bg-primary ring-accent-default rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 hover:ring-1 hover:ring-accent-dimmer transition-shadow"
-            aria-describedby="template-name-display"
-          />
-        </div>
+        <!-- Confirmation input -->
+        <Input.Text
+          id="template-name-confirm"
+          bind:inputElement
+          bind:value={confirmationText}
+          placeholder={template.name}
+          label={m.permanent_delete_type_to_confirm({ word: template.name })}
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck={false}
+        />
 
         {#if errorMessage}
           <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
