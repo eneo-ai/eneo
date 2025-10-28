@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 from intric.ai_models.ai_models_service import AIModelsService
 from intric.main.logging import get_logger
+from intric.roles.permissions import Permission, validate_permissions
 from intric.settings.settings import SettingsPublic, SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
 from intric.users.user import UserInDB
@@ -62,8 +63,16 @@ class SettingService:
     async def get_available_embedding_models(self):
         return await self.ai_models_service.get_embedding_models()
 
+    @validate_permissions(Permission.ADMIN)
     async def update_template_setting(self, enabled: bool) -> SettingsPublic:
-        """Toggle the using_templates feature flag for tenant."""
+        """Toggle the using_templates feature flag for tenant.
+
+        **Admin Only:** Only users with admin permissions can toggle this setting.
+        """
+        logger.info(
+            f"Admin user {self.user.username} toggling templates to {enabled} for tenant {self.user.tenant_id}"
+        )
+
         # Get the feature flag
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
             name="using_templates"
@@ -84,5 +93,14 @@ class SettingService:
                 tenant_id=self.user.tenant_id
             )
 
-        # Return updated settings
-        return await self.get_settings()
+        # Return updated settings with the known state (avoid read-after-write race)
+        settings = await self.repo.get(self.user.id)
+
+        logger.info(
+            f"Templates successfully toggled to {enabled} for tenant {self.user.tenant_id}"
+        )
+
+        return SettingsPublic(
+            chatbot_widget=settings.chatbot_widget if settings else {},
+            using_templates=enabled  # Use the value we just set, not a re-query
+        )

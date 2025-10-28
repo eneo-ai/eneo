@@ -12,23 +12,37 @@
   import StorageOverviewBar from "./usage/storage/StorageOverviewBar.svelte";
   import TokenOverviewBar from "./usage/tokens/TokenOverviewBar.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { invalidate } from "$app/navigation";
+  import { invalidate, invalidateAll } from "$app/navigation";
 
-  const { tenant, settings } = getAppContext();
+  const { tenant } = getAppContext();
   const intric = getIntric();
   let { data } = $props();
 
-  let usingTemplates = $state(settings.using_templates);
+  // Initialize from server data
+  let usingTemplates = $state(data.settings.using_templates);
 
-  async function handleToggleTemplates() {
+  // Handle toggle change - receives new value from Switch component
+  async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
+    console.log(`[Admin] Toggling templates from ${current} to ${next}`);
+
     const previousValue = usingTemplates;
+    usingTemplates = next; // Optimistic UI update
+
     try {
-      const updatedSettings = await intric.settings.updateTemplates(usingTemplates);
-      settings.using_templates = updatedSettings.using_templates;
-      await invalidate("app:layout");
+      const updatedSettings = await intric.settings.updateTemplates(next);
+      console.log(`[Admin] Backend returned using_templates:`, updatedSettings.using_templates);
+
+      // Update from server response
+      usingTemplates = updatedSettings.using_templates;
+
+      // Invalidate all page data to refresh template visibility across all routes
+      await Promise.all([
+        invalidate('app:settings'),  // Trigger template list refresh
+        invalidateAll()              // Refresh all other data
+      ]);
     } catch (error) {
-      usingTemplates = previousValue;
-      console.error("Error updating templates setting:", error);
+      console.error("[Admin] Error updating templates setting:", error);
+      usingTemplates = previousValue; // Revert on error
     }
   }
 </script>

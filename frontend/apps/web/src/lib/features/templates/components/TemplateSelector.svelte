@@ -8,15 +8,15 @@
   import { IconInfo } from "@intric/icons/info";
   import { IconCopy } from "@intric/icons/copy";
   import { IconFile } from "@intric/icons/file";
-  import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
+  import type { Settings } from "@intric/intric-js";
 
   const {
     state: { name, creationMode, selectedTemplate, showTemplateGallery, hasWizard },
     resourceName
   } = getTemplateController();
 
-  const { featureFlags } = getAppContext();
+  let { settings }: { settings: Settings } = $props();
 </script>
 
 <div class="outer relative flex flex-grow flex-col items-start justify-start text-left">
@@ -25,7 +25,7 @@
       {m.create_a_new_resource({ resourceName: resourceName.singular })}
     </h3>
     <p class="text-secondary max-w-[60ch] pr-36 pl-4">
-      {#if featureFlags.showTemplates}
+      {#if settings.using_templates}
         {m.create_from_scratch_or_template({ resourceName: resourceName.singular })}
       {:else}
         {m.get_started_creating_new_assistant()}
@@ -39,7 +39,7 @@
         >{m.assistant_name()}</Input.Text
       >
     </div>
-    {#if featureFlags.showTemplates}
+    {#if settings.using_templates}
       <div class="grid grid-cols-2 gap-4">
         <button
           data-selected={$creationMode === "blank"}

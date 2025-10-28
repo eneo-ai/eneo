@@ -37,7 +37,7 @@ class FeatureFlagService:
         feature_flag = await self.feature_flag_repo.one(id=feature_id)
         feature_flag.disable_tenant(tenant_id=tenant_id)
         updated_feature_flag = await self.feature_flag_repo.update(feature_flag)
-        await updated_feature_flag
+        return updated_feature_flag
 
     async def check_is_feature_enabled(
         self,
