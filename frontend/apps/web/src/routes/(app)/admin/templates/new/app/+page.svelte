@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
@@ -56,7 +57,7 @@
       fitViewport: true,
       sameWidth: true
     },
-    defaultSelected: { value: inputType },
+    defaultSelected: { value: untrack(() => inputType) },
     portal: null,
     onSelectedChange: ({ next }) => {
       if (next?.value) inputType = next.value;
@@ -335,8 +336,9 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label class="text-sm font-medium text-default">{m.description()}</label>
+                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
                   <textarea
+                    id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}
                     placeholder={m.wizard_attachments_description_placeholder()}
                     class="border-default bg-primary ring-default min-h-20 rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
@@ -374,8 +376,9 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label class="text-sm font-medium text-default">{m.description()}</label>
+                  <label for="wizard-collections-description" class="text-sm font-medium text-default">{m.description()}</label>
                   <textarea
+                    id="wizard-collections-description"
                     bind:value={wizardCollectionsDescription}
                     placeholder={m.wizard_collections_description_placeholder()}
                     class="border-default bg-primary ring-default min-h-20 rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"

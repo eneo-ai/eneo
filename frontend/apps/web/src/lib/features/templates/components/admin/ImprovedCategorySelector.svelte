@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { createSelect } from '@melt-ui/svelte';
 	import { IconChevronDown } from '@intric/icons/chevron-down';
 	import { IconCheck } from '@intric/icons/check';
@@ -60,7 +61,7 @@
 		helpers: { isSelected },
 		states: { open }
 	} = createSelect<string>({
-		defaultSelected: { value: predefinedValue },
+		defaultSelected: { value: untrack(() => predefinedValue) },
 		positioning: {
 			placement: 'bottom',
 			strategy: 'fixed',

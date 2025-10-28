@@ -18,7 +18,7 @@
   let { data } = $props();
 
   // Get active tab from URL or default to assistant_templates
-  let activeTab = $derived(page.url.hash ? page.url.hash.slice(1) : "assistant_templates");
+  let activeTab = $derived(page.url.searchParams.get("tab") ?? "assistant_templates");
 
   function handleCreateTemplate() {
     if (activeTab === "app_templates") {

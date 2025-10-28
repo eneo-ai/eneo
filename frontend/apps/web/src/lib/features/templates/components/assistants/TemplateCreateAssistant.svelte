@@ -22,8 +22,8 @@
 
   let { settings }: { settings: Settings } = $props();
 
-  let openAssistantAfterCreation = true;
-  let userTouchedToggle = false;
+  let openAssistantAfterCreation = $state(true);
+  let userTouchedToggle = $state(false);
 
   function disableEditorOnTemplate(creationMode: "blank" | "template") {
     if (userTouchedToggle) return;
