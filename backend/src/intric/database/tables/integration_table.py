@@ -1,7 +1,8 @@
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Dict
 from uuid import UUID
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import DateTime, JSON, BigInteger, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -90,6 +91,16 @@ class IntegrationKnowledge(BasePublic):
         ForeignKey(UserIntegration.id, ondelete="CASCADE")
     )
     size: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(JSONB, nullable=True)
+    site_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sharepoint_subscription_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sharepoint_subscription_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    delta_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user_integration: Mapped[UserIntegration] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()

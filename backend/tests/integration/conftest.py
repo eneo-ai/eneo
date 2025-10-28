@@ -6,6 +6,11 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+# Import fixtures from fixtures modules
+pytest_plugins = [
+    "tests.integration.fixtures.integrations",
+]
+
 
 # IMPORTANT: Configure environment variables BEFORE importing testcontainers
 # Disable Ryuk (testcontainers cleanup container) in devcontainer environments

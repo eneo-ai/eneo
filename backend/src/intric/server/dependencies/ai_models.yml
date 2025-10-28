@@ -321,6 +321,20 @@ completion_models:
     vision: true
     reasoning: true
 
+  - name: 'claude-haiku-4-5-20251001'
+    nickname: 'Claude-haiku-4-5'
+    family: 'claude'
+    token_limit: 200000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'usa'
+    deployment_name: 'claude-haiku-4-5'
+    litellm_model_name: 'anthropic/claude-haiku-4-5-20251001'
+    description: Ultra-efficient Claude Haiku 4.5 model designed for fast responses and strong reasoning within long contexts.
+    org: Anthropic
+    vision: true
+    reasoning: true
+
   - name: 'Meta-Llama-3_3-70B-Instruct'
     nickname: 'Llama 3.3'
     family: 'ovhcloud'

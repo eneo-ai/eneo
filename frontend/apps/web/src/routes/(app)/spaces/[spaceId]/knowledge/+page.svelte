@@ -6,13 +6,16 @@
   import WebsiteTable from "./websites/WebsiteTable.svelte";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getIntric } from "$lib/core/Intric";
   import { Button } from "@intric/ui";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
+  import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric";
+  import type { IntegrationKnowledge } from "@intric/intric-js";
+
   export let data;
 
   const intric = getIntric();
@@ -23,6 +26,8 @@
 
   let selectedTab = writable<string>();
   let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+  let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = null;
+  let showSyncHistoryDialog = false;
 
   // Website selection state (shared with WebsiteTable)
   let selectedWebsiteIds = writable<Set<string>>(new Set());
@@ -64,6 +69,10 @@
   $: userCanSeeIntegrations =
     $currentSpace.hasPermission("read", "integrationKnowledge") &&
     data.availableIntegrations.length > 0;
+
+  $: if (selectedIntegrationForSyncHistory) {
+    showSyncHistoryDialog = true;
+  }
 </script>
 
 <svelte:head>
@@ -152,7 +161,11 @@
             </div>
           </div>
         {/if}
-        <IntegrationsTable></IntegrationsTable>
+        <IntegrationsTable bind:selectedIntegrationForSyncHistory></IntegrationsTable>
+        <SyncHistoryDialog
+          knowledge={selectedIntegrationForSyncHistory}
+          bind:open={showSyncHistoryDialog}
+        ></SyncHistoryDialog>
       </Page.Tab>
     {/if}
   </Page.Main>

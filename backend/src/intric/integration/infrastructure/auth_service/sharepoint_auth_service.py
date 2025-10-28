@@ -1,4 +1,5 @@
 from logging import getLogger
+from urllib.parse import urlencode
 
 import httpx
 
@@ -13,10 +14,23 @@ logger = getLogger(__name__)
 
 
 class SharepointAuthService(BaseOauthService):
-    SCOPES = ["Sites.Read.All"]
+    DEFAULT_SCOPES = ["Files.Read"]
 
     def __init__(self):
-        self.authority = "https://login.microsoftonline.com/common"
+        settings = get_settings()
+        tenant_id = settings.sharepoint_tenant_id
+        if tenant_id:
+            self.authority = f"https://login.microsoftonline.com/{tenant_id}"
+        else:
+            self.authority = "https://login.microsoftonline.com/common"
+
+        configured_scopes = settings.sharepoint_scopes or ""
+        scopes = [segment.strip() for segment in configured_scopes.replace(",", " ").split() if segment.strip()]
+        scopes = [scope for scope in scopes if scope.lower() != "offline_access"]
+        if not scopes:
+            scopes = self.DEFAULT_SCOPES
+
+        self.scopes = scopes
 
     @property
     def client_id(self) -> str:
@@ -44,19 +58,18 @@ class SharepointAuthService(BaseOauthService):
 
     def gen_auth_url(self, state: str) -> dict:
         auth_endpoint = f"{self.authority}/oauth2/v2.0/authorize"
-        scope = "%20".join(self.SCOPES)
+        scope_param = " ".join(["offline_access", *self.scopes])
         params = {
             "client_id": self.client_id,
             "response_type": "code",
             "redirect_uri": self.redirect_uri,
             "response_mode": "query",
-            "scope": f"offline_access {scope}",
+            "scope": scope_param,
             "state": state,
             "prompt": "consent",
         }
 
-        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-        url = f"{auth_endpoint}?{query_string}"
+        url = f"{auth_endpoint}?{urlencode(params)}"
         return {"auth_url": url}
 
     async def exchange_token(self, auth_code: str) -> TokenResponse:

@@ -188,6 +188,13 @@ class SpaceFactory:
                     id=i.id,
                     url=i.url,
                     size=i.size,
+                    site_id=getattr(i, "site_id", None),
+                    last_synced_at=i.last_synced_at,
+                    last_sync_summary=i.last_sync_summary,
+                    sharepoint_subscription_id=getattr(i, "sharepoint_subscription_id", None),
+                    sharepoint_subscription_expires_at=getattr(
+                        i, "sharepoint_subscription_expires_at", None
+                    ),
                 )
             )
         all_assistants = [
