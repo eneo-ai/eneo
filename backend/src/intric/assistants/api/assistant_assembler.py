@@ -6,6 +6,7 @@ from intric.assistants.api.assistant_models import (
     DefaultAssistant,
     ModelInfo,
 )
+from intric.main.models import ModelId
 from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.assistants.assistant import Assistant
 from intric.collections.presentation.collection_models import CollectionPublic
@@ -122,6 +123,7 @@ class AssistantAssembler:
             groups=groups,
             websites=[WebsitePublic.from_domain(website) for website in assistant.websites],
             integration_knowledge_list=integration_knowledge_list,
+            mcp_servers=[ModelId(id=mcp.id) for mcp in assistant.mcp_servers],
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,
             logging_enabled=assistant.logging_enabled,

@@ -233,6 +233,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]
     integration_knowledge_list: list[IntegrationKnowledgePublic]
+    mcp_servers: list[ModelId]
     completion_model: CompletionModelSparse
     published: bool = False
     user: UserSparse

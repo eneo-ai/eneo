@@ -19,8 +19,8 @@
     is_org_enabled: boolean;
   }
 
-  /** Array of MCP server IDs that are selected */
-  export let selectedMCPServers: string[] = [];
+  /** Array of MCP server objects with id field that are selected */
+  export let selectedMCPServers: Array<{ id: string }> = [];
 
   const intric = getIntric();
   const {
@@ -50,10 +50,11 @@
   });
 
   function toggleMCP(mcpId: string) {
-    if (selectedMCPServers.includes(mcpId)) {
-      selectedMCPServers = selectedMCPServers.filter((id) => id !== mcpId);
+    const isSelected = selectedMCPServers.some((mcp) => mcp.id === mcpId);
+    if (isSelected) {
+      selectedMCPServers = selectedMCPServers.filter((mcp) => mcp.id !== mcpId);
     } else {
-      selectedMCPServers = [...selectedMCPServers, mcpId];
+      selectedMCPServers = [...selectedMCPServers, { id: mcpId }];
     }
   }
 </script>
@@ -70,8 +71,8 @@
     {#each availableMCPs as mcp}
       <div class="border-default flex items-start gap-3 rounded-lg border p-3">
         <Input.Checkbox
-          checked={selectedMCPServers.includes(mcp.id)}
-          onchange={() => toggleMCP(mcp.id)}
+          checked={selectedMCPServers.some((selected) => selected.id === mcp.id)}
+          onCheckedChange={() => toggleMCP(mcp.id)}
         />
         <div class="flex-1">
           <div class="flex items-center gap-2">

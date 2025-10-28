@@ -43,19 +43,6 @@
 
   let cancelUploadsAndClearQueue: () => void;
 
-  // Initialize MCP servers from loaded data
-  if (!$update.mcp_servers) {
-    $update.mcp_servers = data.mcpServers.map((mcp: any) => ({ id: mcp.mcp_server_id }));
-  }
-
-  // Helper to convert between MCP server ID list and object list for the component
-  let selectedMCPServerIds = $state($update.mcp_servers?.map((mcp: any) => mcp.id) || []);
-
-  $effect(() => {
-    // Sync changes from the component back to the editor
-    $update.mcp_servers = selectedMCPServerIds.map((id: string) => ({ id }));
-  });
-
   // Behavior-specific change detection for models with model-specific parameters
   let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
@@ -343,10 +330,9 @@
           hasChanges={$currentChanges.diff.mcp_servers !== undefined}
           revertFn={() => {
             discardChanges("mcp_servers");
-            selectedMCPServerIds = $update.mcp_servers?.map((mcp: any) => mcp.id) || [];
           }}
         >
-          <SelectMCPServers bind:selectedMCPServers={selectedMCPServerIds} />
+          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} />
         </Settings.Row>
       </Settings.Group>
 

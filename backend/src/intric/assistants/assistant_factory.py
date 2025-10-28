@@ -127,6 +127,7 @@ class AssistantFactory:
             websites=[],
             collections=[],
             integration_knowledge_list=[],
+            mcp_servers=[],
             created_at=assistant_in_db.created_at,
             updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,
