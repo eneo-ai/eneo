@@ -9,7 +9,7 @@
   import { Table } from "@intric/ui";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
-  import TemplateRollbackActions from "./TemplateRollbackActions.svelte";
+  import TemplateDeletedActions from "./TemplateDeletedActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
   import TemplateCategoryBadge from "./TemplateCategoryBadge.svelte";
 
@@ -110,7 +110,7 @@
     table.columnActions({
       cell: (item) => {
         const type = isAppTemplate(item.value) ? "app" : "assistant";
-        return createRender(TemplateRollbackActions, { template: item.value, type });
+        return createRender(TemplateDeletedActions, { template: item.value, type });
       }
     })
   ]);

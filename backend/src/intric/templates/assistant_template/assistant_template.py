@@ -35,6 +35,9 @@ class AssistantTemplate:
         tenant_id: Optional["UUID"] = None,
         deleted_at: Optional["datetime"] = None,
         original_snapshot: Optional[dict] = None,
+        deleted_by_user_id: Optional["UUID"] = None,
+        restored_by_user_id: Optional["UUID"] = None,
+        restored_at: Optional["datetime"] = None,
     ):
         self.id = id
         self.name = name
@@ -51,6 +54,10 @@ class AssistantTemplate:
         self.tenant_id = tenant_id  # NULL = global/system template, NOT NULL = tenant-specific
         self.deleted_at = deleted_at  # NULL = active, NOT NULL = soft-deleted
         self.original_snapshot = original_snapshot  # Snapshot for rollback functionality
+        # Audit trail fields
+        self.deleted_by_user_id = deleted_by_user_id
+        self.restored_by_user_id = restored_by_user_id
+        self.restored_at = restored_at
 
     def validate_assistant_wizard_data(self, template_data: "TemplateCreate") -> None:
         for data in template_data.additional_fields:

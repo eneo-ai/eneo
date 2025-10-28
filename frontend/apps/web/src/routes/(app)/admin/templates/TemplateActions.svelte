@@ -39,26 +39,24 @@
     </Button>
   </Dropdown.Trigger>
 
-  <Dropdown.Content align="end">
-    <Dropdown.Item onclick={handleEdit}>
+  <Dropdown.Menu let:item>
+    <Button is={item} padding="icon-leading" on:click={handleEdit}>
       <Edit size={16} />
       {m.edit()}
-    </Dropdown.Item>
+    </Button>
 
     {#if template.original_snapshot}
-      <Dropdown.Item onclick={() => isRollbackOpen.set(true)}>
+      <Button is={item} padding="icon-leading" on:click={() => isRollbackOpen.set(true)}>
         <RotateCcw size={16} />
         {m.rollback()}
-      </Dropdown.Item>
+      </Button>
     {/if}
 
-    <Dropdown.Separator />
-
-    <Dropdown.Item onclick={() => isDeleteOpen.set(true)} class="text-negative-default">
+    <Button is={item} padding="icon-leading" on:click={() => isDeleteOpen.set(true)} variant="destructive">
       <Trash2 size={16} />
       {m.delete()}
-    </Dropdown.Item>
-  </Dropdown.Content>
+    </Button>
+  </Dropdown.Menu>
 </Dropdown.Root>
 
 <TemplateDeleteDialog openController={isDeleteOpen} {template} {type} />

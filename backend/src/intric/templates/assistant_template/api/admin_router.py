@@ -56,6 +56,9 @@ async def list_templates(
             organization=t.organization,
             tenant_id=t.tenant_id,
             deleted_at=t.deleted_at,
+            deleted_by_user_id=t.deleted_by_user_id,
+            restored_at=t.restored_at,
+            restored_by_user_id=t.restored_by_user_id,
             original_snapshot=t.original_snapshot,
             created_at=t.created_at,
             updated_at=t.updated_at,
@@ -140,6 +143,9 @@ async def create_template(
         organization=template.organization,
         tenant_id=template.tenant_id,
         deleted_at=template.deleted_at,
+        deleted_by_user_id=template.deleted_by_user_id,
+        restored_at=template.restored_at,
+        restored_by_user_id=template.restored_by_user_id,
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -194,6 +200,9 @@ async def update_template(
         organization=template.organization,
         tenant_id=template.tenant_id,
         deleted_at=template.deleted_at,
+        deleted_by_user_id=template.deleted_by_user_id,
+        restored_at=template.restored_at,
+        restored_by_user_id=template.restored_by_user_id,
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -241,6 +250,7 @@ async def delete_template(
     await service.delete_template(
         template_id=template_id,
         tenant_id=user.tenant_id,
+        user_id=user.id,
     )
 
 
@@ -276,9 +286,75 @@ async def rollback_template(
         organization=template.organization,
         tenant_id=template.tenant_id,
         deleted_at=template.deleted_at,
+        deleted_by_user_id=template.deleted_by_user_id,
+        restored_at=template.restored_at,
+        restored_by_user_id=template.restored_by_user_id,
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
+    )
+
+
+@router.post(
+    "/{template_id}/restore",
+    response_model=AssistantTemplateAdminPublic,
+    status_code=200,
+    summary="Restore deleted assistant template",
+    description="Restores a soft-deleted template (admin only)",
+    responses=responses.get_responses([400, 401, 403, 404]),
+)
+async def restore_template(
+    template_id: "UUID",
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Restore a soft-deleted assistant template."""
+    service = container.assistant_template_service()
+    user = container.user()
+
+    template = await service.restore_template(
+        template_id=template_id,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+    )
+
+    return AssistantTemplateAdminPublic(
+        id=template.id,
+        name=template.name,
+        description=template.description,
+        category=template.category,
+        prompt_text=template.prompt_text,
+        completion_model_kwargs=template.completion_model_kwargs or {},
+        wizard=template.wizard,
+        organization=template.organization,
+        tenant_id=template.tenant_id,
+        deleted_at=template.deleted_at,
+        deleted_by_user_id=template.deleted_by_user_id,
+        restored_at=template.restored_at,
+        restored_by_user_id=template.restored_by_user_id,
+        original_snapshot=template.original_snapshot,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+    )
+
+
+@router.delete(
+    "/{template_id}/permanent",
+    status_code=204,
+    summary="Permanently delete assistant template",
+    description="Permanently removes a soft-deleted template from database (admin only)",
+    responses=responses.get_responses([401, 403, 404]),
+)
+async def permanent_delete_template(
+    template_id: "UUID",
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Permanently delete a soft-deleted assistant template (hard delete)."""
+    service = container.assistant_template_service()
+    user = container.user()
+
+    await service.permanent_delete_template(
+        template_id=template_id,
+        tenant_id=user.tenant_id,
     )
 
 
@@ -311,6 +387,9 @@ async def list_deleted_templates(
             organization=t.organization,
             tenant_id=t.tenant_id,
             deleted_at=t.deleted_at,
+            deleted_by_user_id=t.deleted_by_user_id,
+            restored_at=t.restored_at,
+            restored_by_user_id=t.restored_by_user_id,
             original_snapshot=t.original_snapshot,
             created_at=t.created_at,
             updated_at=t.updated_at,

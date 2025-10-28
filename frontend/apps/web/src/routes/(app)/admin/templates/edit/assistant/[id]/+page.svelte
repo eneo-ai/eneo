@@ -17,7 +17,7 @@
   let name = $state(data.template.name || "");
   let description = $state(data.template.description || "");
   let category = $state(data.template.category || "");
-  let promptText = $state(data.template.prompt?.text || "");
+  let promptText = $state(data.template.prompt_text || "");
   let completionModel = $state(
     data.completionModels?.find(m => m.name === data.template.completion_model_name) ||
     data.completionModels?.[0] ||

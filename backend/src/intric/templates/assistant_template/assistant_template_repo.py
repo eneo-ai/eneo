@@ -182,7 +182,7 @@ class AssistantTemplateRepository:
         count = await self.session.scalar(query)
         return count > 0
 
-    async def soft_delete(self, id: "UUID", tenant_id: "UUID") -> "AssistantTemplate":
+    async def soft_delete(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate":
         """Soft-delete template (mark with deleted_at).
 
         Validates: template belongs to tenant
@@ -193,7 +193,10 @@ class AssistantTemplateRepository:
                 self._db_model.id == id,
                 self._db_model.tenant_id == tenant_id
             )
-            .values(deleted_at=datetime.now(timezone.utc))
+            .values(
+                deleted_at=datetime.now(timezone.utc),
+                deleted_by_user_id=user_id
+            )
             .returning(self._db_model)
         )
         result = await self.session.execute(stmt)
@@ -205,7 +208,7 @@ class AssistantTemplateRepository:
 
         return self.factory.create_assistant_template(item=record)
 
-    async def restore(self, id: "UUID", tenant_id: "UUID") -> "AssistantTemplate":
+    async def restore(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate":
         """Restore soft-deleted template (clear deleted_at).
 
         Validates: template belongs to tenant and is deleted
@@ -217,7 +220,11 @@ class AssistantTemplateRepository:
                 self._db_model.tenant_id == tenant_id,
                 self._db_model.deleted_at.is_not(None)
             )
-            .values(deleted_at=None)
+            .values(
+                deleted_at=None,
+                restored_by_user_id=user_id,
+                restored_at=datetime.now(timezone.utc)
+            )
             .returning(self._db_model)
         )
         result = await self.session.execute(stmt)
@@ -228,6 +235,27 @@ class AssistantTemplateRepository:
             return None
 
         return self.factory.create_assistant_template(item=record)
+
+    async def permanent_delete(self, id: "UUID", tenant_id: "UUID") -> bool:
+        """Permanently delete a template from the database (hard delete).
+
+        Validates: template belongs to tenant and is soft-deleted
+        Returns: True if deleted, False if not found
+        """
+        from sqlalchemy import delete
+
+        stmt = (
+            delete(self._db_model)
+            .where(
+                self._db_model.id == id,
+                self._db_model.tenant_id == tenant_id,
+                self._db_model.deleted_at.is_not(None)  # Only hard-delete soft-deleted items
+            )
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+
+        return result.rowcount > 0
 
     async def get_deleted_for_tenant(self, tenant_id: "UUID") -> list["AssistantTemplate"]:
         """Get soft-deleted templates for audit trail view.

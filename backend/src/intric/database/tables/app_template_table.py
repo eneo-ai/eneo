@@ -43,4 +43,20 @@ class AppTemplates(BasePublic):
         nullable=True
     )
 
+    # Audit trail fields for delete/restore operations
+    deleted_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    restored_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    restored_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True
+    )
+
     completion_model: Mapped[CompletionModels] = relationship()

@@ -91,6 +91,9 @@ class AssistantTemplateAdminPublic(BaseModel):
     organization: str
     tenant_id: UUID
     deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[UUID] = None
+    restored_at: Optional[datetime] = None
+    restored_by_user_id: Optional[UUID] = None
     original_snapshot: Optional[dict] = None
     created_at: datetime
     updated_at: datetime

@@ -229,6 +229,7 @@ class AppTemplateService:
         self,
         template_id: "UUID",
         tenant_id: "UUID",
+        user_id: "UUID",
     ) -> None:
         """Soft-delete tenant-scoped template.
 
@@ -236,6 +237,7 @@ class AppTemplateService:
         - Must belong to tenant
         - Cannot delete if in use by apps
         - Sets deleted_at timestamp
+        - Tracks who deleted it (deleted_by_user_id)
         - Admin only (enforced at router level)
 
         Time complexity: O(log n) for ownership + usage check + soft-delete
@@ -257,8 +259,8 @@ class AppTemplateService:
                 f"Cannot delete template '{template.name}'. It is used by {usage_count} app(s)."
             )
 
-        # Soft-delete
-        result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id)
+        # Soft-delete with audit trail
+        result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id, user_id=user_id)
         if not result:
             raise NotFoundException("Template not found")
 
@@ -323,6 +325,59 @@ class AppTemplateService:
         restored_record = result.scalar_one()
 
         return self.factory.create_app_template(item=restored_record)
+
+    async def restore_template(
+        self,
+        template_id: "UUID",
+        tenant_id: "UUID",
+        user_id: "UUID",
+    ) -> "AppTemplate":
+        """Restore a soft-deleted template (clear deleted_at timestamp).
+
+        Business logic:
+        - Must belong to tenant
+        - Must be soft-deleted (deleted_at IS NOT NULL)
+        - Clears deleted_at to restore template
+        - Tracks who restored it (restored_by_user_id, restored_at)
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership check + update
+
+        Raises:
+            NotFoundException: Template not found, doesn't belong to tenant,
+                              or not in deleted state
+        """
+        # Perform restore with audit trail
+        template = await self.repo.restore(id=template_id, tenant_id=tenant_id, user_id=user_id)
+
+        if not template:
+            raise NotFoundException(
+                "Template not found or not in deleted state. "
+                "It may have already been restored or permanently deleted."
+            )
+
+        return template
+
+    async def permanent_delete_template(
+        self,
+        template_id: "UUID",
+        tenant_id: "UUID",
+    ) -> None:
+        """Permanently delete a soft-deleted template from database (hard delete).
+
+        Business logic:
+        - Must belong to tenant
+        - Must be soft-deleted (deleted_at IS NOT NULL)
+        - Cannot be undone - permanently removes from database
+        - Admin only (enforced at router level)
+
+        Time complexity: O(log n) for ownership check + delete
+        """
+        result = await self.repo.permanent_delete(id=template_id, tenant_id=tenant_id)
+        if not result:
+            raise NotFoundException(
+                "Template not found or not in deleted state"
+            )
 
     async def get_templates_for_tenant(
         self,

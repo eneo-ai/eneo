@@ -713,6 +713,20 @@ export interface paths {
      */
     post: operations["rollback_template_api_v1_admin_templates_assistants__template_id__rollback_post"];
   };
+  "/api/v1/admin/templates/assistants/{template_id}/restore": {
+    /**
+     * Restore deleted assistant template
+     * @description Restores a soft-deleted template (admin only)
+     */
+    post: operations["restore_template_api_v1_admin_templates_assistants__template_id__restore_post"];
+  };
+  "/api/v1/admin/templates/assistants/{template_id}/permanent": {
+    /**
+     * Permanently delete assistant template
+     * @description Permanently removes a soft-deleted template from database (admin only)
+     */
+    delete: operations["permanent_delete_template_api_v1_admin_templates_assistants__template_id__permanent_delete"];
+  };
   "/api/v1/admin/templates/assistants/deleted": {
     /**
      * List deleted assistant templates
@@ -778,6 +792,20 @@ export interface paths {
      * @description Restores template to original snapshot (admin only)
      */
     post: operations["rollback_template_api_v1_admin_templates_apps__template_id__rollback_post"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/restore": {
+    /**
+     * Restore deleted app template
+     * @description Restores a soft-deleted template (admin only)
+     */
+    post: operations["restore_template_api_v1_admin_templates_apps__template_id__restore_post"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/permanent": {
+    /**
+     * Permanently delete app template
+     * @description Permanently removes a soft-deleted template from database (admin only)
+     */
+    delete: operations["permanent_delete_template_api_v1_admin_templates_apps__template_id__permanent_delete"];
   };
   "/api/v1/admin/templates/apps/deleted": {
     /**
@@ -1908,6 +1936,12 @@ export interface components {
       tenant_id: string;
       /** Deleted At */
       deleted_at?: string | null;
+      /** Deleted By User Id */
+      deleted_by_user_id?: string | null;
+      /** Restored At */
+      restored_at?: string | null;
+      /** Restored By User Id */
+      restored_by_user_id?: string | null;
       /** Original Snapshot */
       original_snapshot?: {
         [key: string]: unknown;
@@ -2362,6 +2396,12 @@ export interface components {
       tenant_id: string;
       /** Deleted At */
       deleted_at?: string | null;
+      /** Deleted By User Id */
+      deleted_by_user_id?: string | null;
+      /** Restored At */
+      restored_at?: string | null;
+      /** Restored By User Id */
+      restored_by_user_id?: string | null;
       /** Original Snapshot */
       original_snapshot?: {
         [key: string]: unknown;
@@ -11620,6 +11660,96 @@ export interface operations {
     };
   };
   /**
+   * Restore deleted assistant template
+   * @description Restores a soft-deleted template (admin only)
+   */
+  restore_template_api_v1_admin_templates_assistants__template_id__restore_post: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Permanently delete assistant template
+   * @description Permanently removes a soft-deleted template from database (admin only)
+   */
+  permanent_delete_template_api_v1_admin_templates_assistants__template_id__permanent_delete: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * List deleted assistant templates
    * @description Returns soft-deleted templates for audit trail (admin only)
    */
@@ -11889,6 +12019,96 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Restore deleted app template
+   * @description Restores a soft-deleted template (admin only)
+   */
+  restore_template_api_v1_admin_templates_apps__template_id__restore_post: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Permanently delete app template
+   * @description Permanently removes a soft-deleted template from database (admin only)
+   */
+  permanent_delete_template_api_v1_admin_templates_apps__template_id__permanent_delete: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
       };
       /** @description Unauthorized */
       401: {

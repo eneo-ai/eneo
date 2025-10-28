@@ -200,6 +200,54 @@ export function initTemplates(client) {
           method: "post"
         });
         return res;
+      },
+
+      /**
+       * Restore a soft-deleted assistant template
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      restoreAssistant: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/restore`, {
+          method: "post"
+        });
+        return res;
+      },
+
+      /**
+       * Restore a soft-deleted app template
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      restoreApp: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/restore`, {
+          method: "post"
+        });
+        return res;
+      },
+
+      /**
+       * Permanently delete an assistant template (hard delete)
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      permanentDeleteAssistant: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/permanent`, {
+          method: "delete"
+        });
+        return res;
+      },
+
+      /**
+       * Permanently delete an app template (hard delete)
+       * @param {string} id Template ID
+       * @throws {IntricError}
+       */
+      permanentDeleteApp: async (id) => {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/permanent`, {
+          method: "delete"
+        });
+        return res;
       }
     }
   };

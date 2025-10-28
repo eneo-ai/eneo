@@ -23,7 +23,7 @@
   let name = $state(data.template.name || "");
   let description = $state(data.template.description || "");
   let category = $state(data.template.category || "");
-  let promptText = $state(data.template.prompt?.text || "");
+  let promptText = $state(data.template.prompt_text || "");
   let completionModel = $state(
     data.completionModels?.find(m => m.name === data.template.completion_model_name) ||
     data.completionModels?.[0] ||
@@ -33,9 +33,8 @@
   let isSaving = $state(false);
 
   // Input field configuration from template
-  const firstInputField = data.template.input_fields?.[0] || { type: "text-field", description: "" };
-  let inputDescription = $state(firstInputField.description || "");
-  let inputType = $state<"text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload">(firstInputField.type || "text-field");
+  let inputDescription = $state(data.template.input_description || "");
+  let inputType = $state<"text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload">(data.template.input_type || "text-field");
 
   const inputTypes = {
     "text-upload": { icon: IconFileText, label: m.upload_text_document() },
