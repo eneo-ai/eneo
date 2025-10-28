@@ -63,11 +63,11 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-positive-default bg-positive-default/10 px-4 py-3">
+        <div class="rounded-lg border border-positive-default bg-positive-default/15 px-4 py-3">
           <div class="flex items-start gap-3">
-            <Undo class="text-positive-default mt-0.5 shrink-0" size={20} />
-            <div class="flex flex-col gap-2">
-              <div class="font-medium text-default">{template.name}</div>
+            <Undo class="text-positive-default shrink-0" size={20} />
+            <div class="flex flex-col gap-1">
+              <div class="font-semibold text-default">{template.name}</div>
               <div class="text-sm text-dimmer">{m.template_will_be_restored()}</div>
             </div>
           </div>

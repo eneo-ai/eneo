@@ -236,12 +236,12 @@ class AssistantTemplateService:
 
         Business logic:
         - Must belong to tenant
-        - Cannot delete if in use by assistants
         - Sets deleted_at timestamp
         - Tracks who deleted it (deleted_by_user_id)
         - Admin only (enforced at router level)
+        - Assistants using this template continue to work (FK has ondelete="SET NULL")
 
-        Time complexity: O(log n) for ownership + usage check + soft-delete
+        Time complexity: O(log n) for ownership check + soft-delete
         """
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
@@ -253,14 +253,7 @@ class AssistantTemplateService:
                 "Template not found or does not belong to this tenant"
             )
 
-        # Check if template is in use
-        usage_count = await self._count_template_usage(template_id)
-        if usage_count > 0:
-            raise BadRequestException(
-                f"Cannot delete template '{template.name}'. It is used by {usage_count} assistant(s)."
-            )
-
-        # Soft-delete with audit trail
+        # Soft-delete with audit trail (no usage blocking)
         result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id, user_id=user_id)
         if not result:
             raise NotFoundException("Template not found")
@@ -381,28 +374,99 @@ class AssistantTemplateService:
     async def get_templates_for_tenant(
         self,
         tenant_id: "UUID",
-    ) -> list["AssistantTemplate"]:
-        """Get tenant-specific templates only (admin view).
+    ) -> list[tuple["AssistantTemplate", int]]:
+        """Get tenant-specific templates only (admin view) with usage counts.
 
         Returns only templates where tenant_id matches (NOT global templates).
         Used for admin management page.
+        Each template is returned with its usage count (number of assistants created from it).
 
         Time complexity: O(k log n) where k is number of tenant templates
         """
-        return await self.repo.get_for_tenant(tenant_id=tenant_id)
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+        from intric.database.tables.assistant_table import Assistants
+        import sqlalchemy as sa
+
+        # Query with LEFT JOIN to get usage count
+        # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)
+        # Tenant isolation is guaranteed by template filtering in WHERE clause
+        stmt = (
+            select(
+                AssistantTemplates,
+                func.count(Assistants.id).label("usage_count")
+            )
+            .outerjoin(
+                Assistants,
+                AssistantTemplates.id == Assistants.template_id
+            )
+            .where(
+                AssistantTemplates.tenant_id == tenant_id,
+                AssistantTemplates.deleted_at.is_(None)
+            )
+            .group_by(AssistantTemplates.id)
+        )
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        # Convert to (AssistantTemplate, usage_count) tuples
+        templates_with_usage = []
+        for row in rows:
+            template_record = row[0]
+            usage_count = row[1]
+            template = self.factory.create_assistant_template(item=template_record)
+            templates_with_usage.append((template, usage_count))
+
+        return templates_with_usage
 
     async def get_deleted_templates_for_tenant(
         self,
         tenant_id: "UUID",
-    ) -> list["AssistantTemplate"]:
-        """Get soft-deleted templates for audit trail.
+    ) -> list[tuple["AssistantTemplate", int]]:
+        """Get soft-deleted templates for audit trail with usage counts.
 
         Returns deleted templates ordered by deleted_at DESC.
+        Each template is returned with its usage count.
         Admin only (enforced at router level).
 
         Time complexity: O(k log n) where k is number of deleted templates
         """
-        return await self.repo.get_deleted_for_tenant(tenant_id=tenant_id)
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+        from intric.database.tables.assistant_table import Assistants
+        import sqlalchemy as sa
+
+        # Query with LEFT JOIN to get usage count for deleted templates
+        # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)
+        # Tenant isolation is guaranteed by template filtering in WHERE clause
+        stmt = (
+            select(
+                AssistantTemplates,
+                func.count(Assistants.id).label("usage_count")
+            )
+            .outerjoin(
+                Assistants,
+                AssistantTemplates.id == Assistants.template_id
+            )
+            .where(
+                AssistantTemplates.tenant_id == tenant_id,
+                AssistantTemplates.deleted_at.is_not(None)
+            )
+            .group_by(AssistantTemplates.id)
+            .order_by(AssistantTemplates.deleted_at.desc())
+        )
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        # Convert to (AssistantTemplate, usage_count) tuples
+        templates_with_usage = []
+        for row in rows:
+            template_record = row[0]
+            usage_count = row[1]
+            template = self.factory.create_assistant_template(item=template_record)
+            templates_with_usage.append((template, usage_count))
+
+        return templates_with_usage
 
     async def _count_template_usage(self, template_id: "UUID") -> int:
         """Count how many assistants use this template.

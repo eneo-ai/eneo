@@ -47,8 +47,12 @@
       openController.set(false);
     } catch (error: any) {
       console.error("Error deleting template:", error);
-      if (error.status === 409) {
-        errorMessage = m.template_in_use();
+      if (error.status === 400 && error.message?.includes("used by")) {
+        // Extract usage count from error message like "used by 3 app(s)" or "used by 1 assistant(s)"
+        const match = error.message.match(/used by (\d+)/);
+        const count = match ? parseInt(match[1]) : 0;
+        const resource = type === "assistant" ? m.assistants().toLowerCase() : m.apps().toLowerCase();
+        errorMessage = m.template_in_use_count({ count, resource });
       } else {
         errorMessage = error.message || "Failed to delete template";
       }
@@ -67,11 +71,11 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-warning-default bg-warning-default/10 px-4 py-3">
+        <div class="rounded-lg border border-warning-default bg-warning-default/15 px-4 py-3">
           <div class="flex items-start gap-3">
-            <AlertTriangle class="text-warning-default mt-0.5 shrink-0" size={20} />
-            <div class="flex flex-col gap-2">
-              <div class="font-medium text-default">{template.name}</div>
+            <AlertTriangle class="text-warning-default shrink-0" size={20} />
+            <div class="flex flex-col gap-1">
+              <div class="font-semibold text-default">{template.name}</div>
               <div class="text-sm text-dimmer">{m.permanent_action()}</div>
             </div>
           </div>

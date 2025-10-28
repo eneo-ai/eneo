@@ -120,6 +120,7 @@ class AppTemplateAdminPublic(BaseModel):
     original_snapshot: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+    usage_count: int = 0  # Number of apps created from this template
 
 
 class AppTemplateAdminListPublic(BaseModel):

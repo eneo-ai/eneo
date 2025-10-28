@@ -26,11 +26,11 @@ router = APIRouter(prefix="/admin/templates/apps", tags=["admin-templates"])
 async def list_templates(
     container: Container = Depends(get_container(with_user=True))
 ):
-    """List all active app templates for the tenant."""
+    """List all active app templates for the tenant with usage counts."""
     service = container.app_template_service()
     user = container.user()
 
-    templates = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
 
     items = [
         AppTemplateAdminPublic(
@@ -52,8 +52,9 @@ async def list_templates(
             original_snapshot=t.original_snapshot,
             created_at=t.created_at,
             updated_at=t.updated_at,
+            usage_count=usage_count,
         )
-        for t in templates
+        for t, usage_count in templates_with_usage
     ]
 
     return AppTemplateAdminListPublic(items=items)
@@ -344,11 +345,11 @@ async def permanent_delete_template(
 async def list_deleted_templates(
     container: Container = Depends(get_container(with_user=True))
 ):
-    """List all deleted app templates for audit purposes."""
+    """List all deleted app templates for audit purposes with usage counts."""
     service = container.app_template_service()
     user = container.user()
 
-    templates = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
 
     items = [
         AppTemplateAdminPublic(
@@ -370,8 +371,9 @@ async def list_deleted_templates(
             original_snapshot=t.original_snapshot,
             created_at=t.created_at,
             updated_at=t.updated_at,
+            usage_count=usage_count,
         )
-        for t in templates
+        for t, usage_count in templates_with_usage
     ]
 
     return AppTemplateAdminListPublic(items=items)

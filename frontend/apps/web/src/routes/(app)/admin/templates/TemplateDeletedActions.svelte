@@ -6,8 +6,8 @@
 
 <script lang="ts">
   import type { components } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
-  import { Undo, Trash2 } from "lucide-svelte";
+  import { Button, Dropdown } from "@intric/ui";
+  import { MoreVertical, Undo, Trash2 } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
   import TemplateRestoreDialog from "$lib/features/templates/components/admin/TemplateRestoreDialog.svelte";
@@ -23,27 +23,38 @@
   let isPermanentDeleteOpen = writable(false);
 </script>
 
-<div class="flex items-center gap-2">
-  <Button
-    variant="positive-outlined"
-    padding="icon-text"
-    onclick={() => isRestoreOpen.set(true)}
-    aria-label={m.restore()}
-  >
-    <Undo size={16} />
-    {m.restore()}
-  </Button>
+<Dropdown.Root>
+  <Dropdown.Trigger asFragment let:trigger>
+    <Button
+      is={trigger}
+      padding="icon"
+      aria-label={m.actions()}
+    >
+      <MoreVertical size={16} />
+    </Button>
+  </Dropdown.Trigger>
 
-  <Button
-    variant="destructive"
-    padding="icon-text"
-    onclick={() => isPermanentDeleteOpen.set(true)}
-    aria-label={m.permanent_delete()}
-  >
-    <Trash2 size={16} />
-    {m.permanent_delete()}
-  </Button>
-</div>
+  <Dropdown.Menu let:item>
+    <Button
+      is={item}
+      padding="icon-leading"
+      onclick={() => isRestoreOpen.set(true)}
+    >
+      <Undo size={16} />
+      {m.restore()}
+    </Button>
+
+    <Button
+      is={item}
+      padding="icon-leading"
+      variant="destructive"
+      onclick={() => isPermanentDeleteOpen.set(true)}
+    >
+      <Trash2 size={16} />
+      {m.permanent_delete()}
+    </Button>
+  </Dropdown.Menu>
+</Dropdown.Root>
 
 <TemplateRestoreDialog openController={isRestoreOpen} {template} {type} />
 <TemplatePermanentDeleteDialog openController={isPermanentDeleteOpen} {template} {type} />

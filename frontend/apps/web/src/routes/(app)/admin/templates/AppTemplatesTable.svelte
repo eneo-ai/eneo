@@ -84,7 +84,7 @@
     }),
 
     table.column({
-      accessor: (row) => 0,
+      accessor: (row) => row.usage_count,
       id: "usage_count",
       header: m.usage(),
       cell: (item) => {

@@ -97,6 +97,7 @@ class AssistantTemplateAdminPublic(BaseModel):
     original_snapshot: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+    usage_count: int = 0  # Number of assistants created from this template
 
 
 class AssistantTemplateAdminListPublic(BaseModel):

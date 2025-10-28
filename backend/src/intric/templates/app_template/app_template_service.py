@@ -235,12 +235,12 @@ class AppTemplateService:
 
         Business logic:
         - Must belong to tenant
-        - Cannot delete if in use by apps
         - Sets deleted_at timestamp
         - Tracks who deleted it (deleted_by_user_id)
         - Admin only (enforced at router level)
+        - Apps using this template continue to work (FK has ondelete="SET NULL")
 
-        Time complexity: O(log n) for ownership + usage check + soft-delete
+        Time complexity: O(log n) for ownership check + soft-delete
         """
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
@@ -252,14 +252,7 @@ class AppTemplateService:
                 "Template not found or does not belong to this tenant"
             )
 
-        # Check if template is in use
-        usage_count = await self._count_template_usage(template_id)
-        if usage_count > 0:
-            raise BadRequestException(
-                f"Cannot delete template '{template.name}'. It is used by {usage_count} app(s)."
-            )
-
-        # Soft-delete with audit trail
+        # Soft-delete with audit trail (no usage blocking)
         result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id, user_id=user_id)
         if not result:
             raise NotFoundException("Template not found")
@@ -382,28 +375,101 @@ class AppTemplateService:
     async def get_templates_for_tenant(
         self,
         tenant_id: "UUID",
-    ) -> list["AppTemplate"]:
-        """Get tenant-specific templates only (admin view).
+    ) -> list[tuple["AppTemplate", int]]:
+        """Get tenant-specific templates only (admin view) with usage counts.
 
         Returns only templates where tenant_id matches (NOT global templates).
         Used for admin management page.
+        Each template is returned with its usage count (number of apps created from it).
 
         Time complexity: O(k log n) where k is number of tenant templates
         """
-        return await self.repo.get_for_tenant(tenant_id=tenant_id)
+        from intric.database.tables.app_template_table import AppTemplates
+        from intric.database.tables.app_table import Apps
+        import sqlalchemy as sa
+
+        # Query with LEFT JOIN to get usage count
+        stmt = (
+            select(
+                AppTemplates,
+                func.count(Apps.id).label("usage_count")
+            )
+            .outerjoin(
+                Apps,
+                sa.and_(
+                    AppTemplates.id == Apps.template_id,
+                    AppTemplates.tenant_id == Apps.tenant_id
+                )
+            )
+            .where(
+                AppTemplates.tenant_id == tenant_id,
+                AppTemplates.deleted_at.is_(None)
+            )
+            .group_by(AppTemplates.id)
+        )
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        # Convert to (AppTemplate, usage_count) tuples
+        templates_with_usage = []
+        for row in rows:
+            template_record = row[0]
+            usage_count = row[1]
+            template = self.factory.create_app_template(item=template_record)
+            templates_with_usage.append((template, usage_count))
+
+        return templates_with_usage
 
     async def get_deleted_templates_for_tenant(
         self,
         tenant_id: "UUID",
-    ) -> list["AppTemplate"]:
-        """Get soft-deleted templates for audit trail.
+    ) -> list[tuple["AppTemplate", int]]:
+        """Get soft-deleted templates for audit trail with usage counts.
 
         Returns deleted templates ordered by deleted_at DESC.
+        Each template is returned with its usage count.
         Admin only (enforced at router level).
 
         Time complexity: O(k log n) where k is number of deleted templates
         """
-        return await self.repo.get_deleted_for_tenant(tenant_id=tenant_id)
+        from intric.database.tables.app_template_table import AppTemplates
+        from intric.database.tables.app_table import Apps
+        import sqlalchemy as sa
+
+        # Query with LEFT JOIN to get usage count for deleted templates
+        stmt = (
+            select(
+                AppTemplates,
+                func.count(Apps.id).label("usage_count")
+            )
+            .outerjoin(
+                Apps,
+                sa.and_(
+                    AppTemplates.id == Apps.template_id,
+                    AppTemplates.tenant_id == Apps.tenant_id
+                )
+            )
+            .where(
+                AppTemplates.tenant_id == tenant_id,
+                AppTemplates.deleted_at.is_not(None)
+            )
+            .group_by(AppTemplates.id)
+            .order_by(AppTemplates.deleted_at.desc())
+        )
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        # Convert to (AppTemplate, usage_count) tuples
+        templates_with_usage = []
+        for row in rows:
+            template_record = row[0]
+            usage_count = row[1]
+            template = self.factory.create_app_template(item=template_record)
+            templates_with_usage.append((template, usage_count))
+
+        return templates_with_usage
 
     async def _count_template_usage(self, template_id: "UUID") -> int:
         """Count how many apps use this template.

@@ -1956,6 +1956,11 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+      /**
+       * Usage Count
+       * @default 0
+       */
+      usage_count?: number;
     };
     /**
      * AppTemplateAdminUpdate
@@ -2416,6 +2421,11 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+      /**
+       * Usage Count
+       * @default 0
+       */
+      usage_count?: number;
     };
     /**
      * AssistantTemplateAdminUpdate

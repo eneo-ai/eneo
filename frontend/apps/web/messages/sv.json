@@ -1308,6 +1308,7 @@
   "delete_template_confirmation": "Är du säker på att du vill ta bort denna mall?",
   "permanent_action": "Detta kan inte ångras",
   "template_in_use": "Mallen används för närvarande",
+  "template_in_use_count": "Denna mall används för närvarande av {count} {resource}",
   "rollback_template_confirmation": "Återställ mallen till dess ursprungliga tillstånd?",
   "rollback_template_description": "Detta återställer mallen till versionen som fångades när den senast ändrades",
   "template_created_successfully": "Mall skapad",

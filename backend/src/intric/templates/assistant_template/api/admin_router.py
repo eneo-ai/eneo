@@ -37,11 +37,11 @@ Use this endpoint for the admin template management page.
 async def list_templates(
     container: Container = Depends(get_container(with_user=True))
 ):
-    """List all active assistant templates for the tenant."""
+    """List all active assistant templates for the tenant with usage counts."""
     service = container.assistant_template_service()
     user = container.user()
 
-    templates = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
 
     # Convert to admin response model
     items = [
@@ -62,8 +62,9 @@ async def list_templates(
             original_snapshot=t.original_snapshot,
             created_at=t.created_at,
             updated_at=t.updated_at,
+            usage_count=usage_count,
         )
-        for t in templates
+        for t, usage_count in templates_with_usage
     ]
 
     return AssistantTemplateAdminListPublic(items=items)
@@ -369,11 +370,11 @@ async def permanent_delete_template(
 async def list_deleted_templates(
     container: Container = Depends(get_container(with_user=True))
 ):
-    """List all deleted assistant templates for audit purposes."""
+    """List all deleted assistant templates for audit purposes with usage counts."""
     service = container.assistant_template_service()
     user = container.user()
 
-    templates = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
 
     items = [
         AssistantTemplateAdminPublic(
@@ -393,8 +394,9 @@ async def list_deleted_templates(
             original_snapshot=t.original_snapshot,
             created_at=t.created_at,
             updated_at=t.updated_at,
+            usage_count=usage_count,
         )
-        for t in templates
+        for t, usage_count in templates_with_usage
     ]
 
     return AssistantTemplateAdminListPublic(items=items)

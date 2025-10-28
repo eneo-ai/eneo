@@ -11,15 +11,11 @@
   import AssistantTemplatesTable from "./AssistantTemplatesTable.svelte";
   import AppTemplatesTable from "./AppTemplatesTable.svelte";
   import DeletedTemplatesTable from "./DeletedTemplatesTable.svelte";
-  import CategoryManagerDialog from "$lib/features/templates/components/admin/CategoryManagerDialog.svelte";
-  import { LayoutTemplate, FolderOpen } from "lucide-svelte";
-  import { writable } from "svelte/store";
+  import { LayoutTemplate } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
 
   let { data } = $props();
-
-  let categoryManagerOpen = writable(false);
 
   // Get active tab from URL or default to assistant_templates
   let activeTab = $derived(page.url.hash ? page.url.hash.slice(1) : "assistant_templates");
@@ -41,25 +37,14 @@
   <Page.Header>
     <Page.Title title={m.templates()}></Page.Title>
 
-    <div class="flex items-center gap-3">
-      <Button
-        variant="outlined"
-        padding="icon-leading"
-        onclick={() => $categoryManagerOpen = true}
-      >
-        <FolderOpen size={16} />
-        {m.manage_categories()}
-      </Button>
-
-      <Button
-        variant="primary"
-        padding="icon-leading"
-        onclick={handleCreateTemplate}
-      >
-        <LayoutTemplate size={16} />
-        {m.create_template()}
-      </Button>
-    </div>
+    <Button
+      variant="primary"
+      padding="icon-leading"
+      onclick={handleCreateTemplate}
+    >
+      <LayoutTemplate size={16} />
+      {m.create_template()}
+    </Button>
 
     <Page.Tabbar>
       <Page.TabTrigger tab="assistant_templates">{m.assistant_templates()}</Page.TabTrigger>
@@ -148,5 +133,3 @@
     </Page.Tab>
   </Page.Main>
 </Page.Root>
-
-<CategoryManagerDialog openController={categoryManagerOpen} />

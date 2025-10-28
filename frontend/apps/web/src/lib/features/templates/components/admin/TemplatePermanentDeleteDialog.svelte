@@ -32,9 +32,33 @@
   let isLoading = $state(false);
   let errorMessage = $state("");
   let confirmationText = $state("");
+  let inputElement: HTMLInputElement | undefined = $state();
 
-  const CONFIRMATION_WORD = "DELETE";
-  let isConfirmed = $derived(confirmationText === CONFIRMATION_WORD);
+  // Validate against template name (case-sensitive, whitespace-trimmed)
+  let isConfirmed = $derived(confirmationText.trim() === template.name);
+
+  // Auto-focus input when modal opens
+  $effect(() => {
+    const isOpen = openController && typeof openController.subscribe === 'function'
+      ? $state.snapshot(openController)
+      : false;
+
+    if (isOpen && inputElement) {
+      setTimeout(() => inputElement?.focus(), 100);
+    }
+  });
+
+  // Reset confirmation text when modal closes
+  $effect(() => {
+    const isOpen = openController && typeof openController.subscribe === 'function'
+      ? $state.snapshot(openController)
+      : false;
+
+    if (!isOpen) {
+      confirmationText = "";
+      errorMessage = "";
+    }
+  });
 
   async function handlePermanentDelete() {
     if (!isConfirmed) return;
@@ -51,7 +75,6 @@
 
       await invalidate("admin:templates:load");
       openController.set(false);
-      confirmationText = ""; // Reset for next time
     } catch (error: any) {
       console.error("Error permanently deleting template:", error);
       errorMessage = error.message || "Failed to permanently delete template";
@@ -69,26 +92,42 @@
     </Dialog.Description>
 
     <Dialog.Section>
-      <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-negative-default bg-negative-default/10 px-4 py-3">
+      <div class="flex flex-col gap-6 py-4">
+        <!-- Warning box with template name -->
+        <div class="rounded-lg border border-negative-default bg-negative-default/15 px-4 py-3">
           <div class="flex items-start gap-3">
-            <AlertTriangle class="text-negative-default mt-0.5 shrink-0" size={20} />
-            <div class="flex flex-col gap-2">
-              <div class="font-medium text-default">{template.name}</div>
-              <div class="text-sm text-dimmer">{m.permanent_delete_cannot_undo()}</div>
+            <AlertTriangle class="text-negative-default shrink-0" size={20} />
+            <div class="flex flex-col gap-1.5">
+              <div class="font-semibold text-default">{template.name}</div>
+              <div class="text-sm text-dimmer">
+                {m.permanent_delete_cannot_undo()}
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-default">
-            {m.permanent_delete_type_to_confirm({ word: CONFIRMATION_WORD })}
-          </label>
+        <!-- Confirmation input with prominent template name display -->
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-col gap-2">
+            <label for="template-name-confirm" class="text-sm font-medium text-default">
+              To confirm this action, type the template name below:
+            </label>
+            <code class="select-all rounded-md bg-muted px-4 py-2.5 font-mono text-base font-semibold text-default border border-default">
+              {template.name}
+            </code>
+          </div>
+
           <input
+            id="template-name-confirm"
+            bind:this={inputElement}
             type="text"
             bind:value={confirmationText}
-            placeholder={CONFIRMATION_WORD}
-            class="border-default bg-primary ring-default rounded-lg border px-3 py-2 font-mono shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            placeholder={template.name}
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck={false}
+            class="border-default bg-primary ring-accent-default rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 hover:ring-1 hover:ring-accent-dimmer transition-shadow"
+            aria-describedby="template-name-display"
           />
         </div>
 
