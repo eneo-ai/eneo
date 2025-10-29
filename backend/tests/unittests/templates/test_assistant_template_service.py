@@ -3,12 +3,10 @@
 import pytest
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
-from datetime import datetime, timezone
 
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from intric.templates.assistant_template.assistant_template import AssistantTemplate
 from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateCreate,
     AssistantTemplateUpdate,

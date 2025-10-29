@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     )
     from intric.templates.app_template.api.app_template_models import AppTemplateUpdate
     from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.users.user import UserInDB
 
 
 class AppTemplateService:
