@@ -393,6 +393,7 @@ class ContextBuilder:
         version: int = 1,
         use_image_generation: bool = False,
         web_search_results: list["WebSearchResult"] = [],
+        mcp_tools: list[FunctionDefinition] = [],
     ):
         tokens_used = 0
         max_tokens_usable = max_tokens - CONTEXT_SIZE_BUFFER  # Leave some room.
@@ -444,7 +445,11 @@ class ContextBuilder:
         prompt_text = str(_prompt)
         tokens_used += _prompt.get_tokens_of_knowledge()
 
-        functions = self._functions() if use_image_generation else []
+        # Combine image generation tools with MCP tools
+        functions = []
+        if use_image_generation:
+            functions.extend(self._functions())
+        functions.extend(mcp_tools)
 
         return Context(
             input=_input_string,

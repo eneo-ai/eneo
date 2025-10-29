@@ -20,8 +20,9 @@ class MCPServerPublic(BaseModel):
     id: UUID
     name: str
     description: Optional[str]
-    server_type: str  # "npm", "docker", "http"
+    server_type: str  # "npm", "uvx", "docker", "http"
     npm_package: Optional[str]
+    uvx_package: Optional[str]
     docker_image: Optional[str]
     http_url: Optional[str]
     config_schema: Optional[dict]
@@ -38,9 +39,10 @@ class MCPServerCreate(BaseModel):
     """DTO for creating an MCP server (admin only)."""
 
     name: str
-    server_type: Literal["npm", "docker", "http"]
+    server_type: Literal["npm", "uvx", "docker", "http"]
     description: Optional[str] = None
     npm_package: Optional[str] = None
+    uvx_package: Optional[str] = None
     docker_image: Optional[str] = None
     http_url: Optional[str] = None
     config_schema: Optional[dict] = None
@@ -53,9 +55,10 @@ class MCPServerUpdate(BaseModel):
     """DTO for updating an MCP server (admin only)."""
 
     name: Optional[str] = None
-    server_type: Optional[Literal["npm", "docker", "http"]] = None
+    server_type: Optional[Literal["npm", "uvx", "docker", "http"]] = None
     description: Optional[str] = None
     npm_package: Optional[str] = None
+    uvx_package: Optional[str] = None
     docker_image: Optional[str] = None
     http_url: Optional[str] = None
     config_schema: Optional[dict] = None

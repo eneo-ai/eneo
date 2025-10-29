@@ -196,6 +196,7 @@ class CompletionService:
         extended_logging: bool = False,
         version: int = 1,
         use_image_generation: bool = False,
+        mcp_servers: list = [],
     ):
         model_adapter = self._get_adapter(model)
 
@@ -231,6 +232,7 @@ class CompletionService:
             completion = await model_adapter.get_response(
                 context=context,
                 model_kwargs=model_kwargs,
+                mcp_servers=mcp_servers,
             )
         else:
             # Two-phase streaming pattern:
@@ -239,6 +241,7 @@ class CompletionService:
             stream_obj = await model_adapter.prepare_streaming(
                 context=context,
                 model_kwargs=model_kwargs,
+                mcp_servers=mcp_servers,
             )
 
             # Phase 2: Create generator that iterates the pre-created stream

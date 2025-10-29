@@ -1303,5 +1303,11 @@
   "http_servers": "HTTP-servrar:",
   "http_servers_description": "Fjärrtjänster som nås via HTTP",
   "select_mcp_servers_description": "Aktivera MCP-servrar för att ge denna assistent tillgång till externa verktyg och datakällor.",
-  "enable_mcp_servers_in_admin": "Aktivera MCP-servrar i admininställningarna först."
+  "enable_mcp_servers_in_admin": "Aktivera MCP-servrar i admininställningarna först.",
+  "server_type": "Servertyp",
+  "npm_package": "NPM-paket",
+  "uvx_package": "UVX-paket",
+  "docker_image": "Docker-image",
+  "http_url": "HTTP-URL",
+  "documentation_url": "Dokumentations-URL"
 }

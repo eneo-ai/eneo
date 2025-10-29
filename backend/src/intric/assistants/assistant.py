@@ -346,6 +346,7 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=web_search_results,
+            mcp_servers=self.mcp_servers,
         )
 
         return response, datastore_result

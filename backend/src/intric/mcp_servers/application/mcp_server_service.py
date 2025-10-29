@@ -37,6 +37,7 @@ class MCPServerService:
         server_type: str,
         description: str | None = None,
         npm_package: str | None = None,
+        uvx_package: str | None = None,
         docker_image: str | None = None,
         http_url: str | None = None,
         config_schema: dict | None = None,
@@ -50,6 +51,7 @@ class MCPServerService:
             server_type=server_type,
             description=description,
             npm_package=npm_package,
+            uvx_package=uvx_package,
             docker_image=docker_image,
             http_url=http_url,
             config_schema=config_schema,
@@ -67,6 +69,7 @@ class MCPServerService:
         description: str | None = None,
         server_type: str | None = None,
         npm_package: str | None = None,
+        uvx_package: str | None = None,
         docker_image: str | None = None,
         http_url: str | None = None,
         config_schema: dict | None = None,
@@ -85,6 +88,8 @@ class MCPServerService:
             mcp_server.server_type = server_type
         if npm_package is not None:
             mcp_server.npm_package = npm_package
+        if uvx_package is not None:
+            mcp_server.uvx_package = uvx_package
         if docker_image is not None:
             mcp_server.docker_image = docker_image
         if http_url is not None:

@@ -14,6 +14,7 @@ class MCPServer(Entity):
         server_type: str,
         description: Optional[str] = None,
         npm_package: Optional[str] = None,
+        uvx_package: Optional[str] = None,
         docker_image: Optional[str] = None,
         http_url: Optional[str] = None,
         config_schema: Optional[dict] = None,
@@ -29,6 +30,7 @@ class MCPServer(Entity):
         self.description = description
         self.server_type = server_type
         self.npm_package = npm_package
+        self.uvx_package = uvx_package
         self.docker_image = docker_image
         self.http_url = http_url
         self.config_schema = config_schema

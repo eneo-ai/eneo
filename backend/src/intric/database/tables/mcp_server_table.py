@@ -19,6 +19,7 @@ class MCPServers(BasePublic):
 
     # Connection info (one of these will be set based on server_type)
     npm_package: Mapped[Optional[str]] = mapped_column(String)  # e.g., "@upstash/context7-mcp"
+    uvx_package: Mapped[Optional[str]] = mapped_column(String)  # e.g., "mcp-server-time"
     docker_image: Mapped[Optional[str]] = mapped_column(String)  # e.g., "myorg/custom-mcp:latest"
     http_url: Mapped[Optional[str]] = mapped_column(String)  # e.g., "https://mcp.example.com"
 

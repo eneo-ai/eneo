@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Optional
 
 import litellm
 from litellm import AuthenticationError, APIError, RateLimitError
-from litellm.experimental_mcp_client import load_mcp_tools, call_openai_tool
+from litellm.experimental_mcp_client import load_mcp_tools
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -212,35 +212,81 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         return messages
 
-    async def setup_mcp_tools(self):
-        """Setup MCP tools from context7 server using stdio."""
+    async def setup_mcp_tools(self, mcp_servers: list):
+        """Setup MCP tools from configured MCP servers.
+
+        Args:
+            mcp_servers: List of MCPServer domain entities from assistant
+
+        Returns:
+            Tuple of (tools, server_params_list) where server_params_list contains
+            connection info for each server for later tool execution
+        """
         tools = []
+        server_params_list = []
 
-        try:
-            # Connect to context7 MCP server via stdio
-            logger.info("[MCP] Connecting to context7 server via stdio")
-            server_params = StdioServerParameters(
-                command="npx",
-                args=["-y", "@upstash/context7-mcp"],
-            )
+        for mcp_server in mcp_servers:
+            try:
+                # Determine command and args based on server type
+                # Get package values with fallback for None
+                npm_pkg = getattr(mcp_server, 'npm_package', None)
+                uvx_pkg = getattr(mcp_server, 'uvx_package', None)
+                docker_img = getattr(mcp_server, 'docker_image', None)
 
-            async with stdio_client(server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    logger.info("[MCP] Successfully connected to context7 server")
+                logger.debug(f"[MCP] Processing server: {mcp_server.name}, type={mcp_server.server_type}, npm={npm_pkg}, uvx={uvx_pkg}, docker={docker_img}")
 
-                    # Load tools in OpenAI format
-                    context7_tools = await load_mcp_tools(session=session, format="openai")
-                    tools.extend(context7_tools)
-                    logger.info(f"[MCP] Loaded {len(context7_tools)} tools from context7")
-        except Exception:
-            logger.exception("[MCP] Failed to connect to context7 server")
-            # Continue without MCP tools rather than failing completely
+                if mcp_server.server_type == "npm" and npm_pkg:
+                    command = "npx"
+                    args = ["-y", npm_pkg]
+                elif mcp_server.server_type == "uvx" and uvx_pkg:
+                    command = "uvx"
+                    args = [uvx_pkg]
+                elif mcp_server.server_type == "docker" and docker_img:
+                    command = "docker"
+                    args = ["run", "-i", "--rm", docker_img]
+                elif mcp_server.server_type == "http":
+                    logger.warning(f"[MCP] HTTP MCP servers not yet supported: {mcp_server.name}")
+                    continue
+                else:
+                    logger.warning(f"[MCP] Invalid MCP server configuration: {mcp_server.name} - server_type={mcp_server.server_type}, has packages: npm={bool(npm_pkg)}, uvx={bool(uvx_pkg)}, docker={bool(docker_img)}")
+                    continue
 
-        return tools
+                logger.info(f"[MCP] Connecting to {mcp_server.name} ({mcp_server.server_type}) via stdio")
+
+                server_params = StdioServerParameters(
+                    command=command,
+                    args=args,
+                    # TODO: Add env_vars from tenant settings
+                )
+
+                # Connect and load tools
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        logger.info(f"[MCP] Successfully connected to {mcp_server.name}")
+
+                        # Load tools in OpenAI format
+                        mcp_tools = await load_mcp_tools(session=session, format="openai")
+
+                        # Add metadata to each tool for display purposes
+                        for tool in mcp_tools:
+                            tool['mcp_server_name'] = mcp_server.name
+                            tool['original_tool_name'] = tool['function']['name']
+
+                        tools.extend(mcp_tools)
+                        logger.info(f"[MCP] Loaded {len(mcp_tools)} tools from {mcp_server.name}")
+
+                        # Store server params for tool execution later
+                        server_params_list.append(server_params)
+
+            except Exception as e:
+                logger.exception(f"[MCP] Failed to connect to {mcp_server.name}: {e}")
+                # Continue with other servers rather than failing completely
+
+        return tools, server_params_list
 
     async def get_response(
-        self, context: Context, model_kwargs: ModelKwargs | None = None
+        self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_servers: list = []
     ):
         messages = self.create_query_from_context(context=context)
         kwargs = self._get_kwargs(model_kwargs)
@@ -284,20 +330,17 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                 )
 
-        # Load MCP tools from context7
-        tools = await self.setup_mcp_tools()
-        mcp_session = None
+        # Load MCP tools from configured servers
+        tools = []
+        server_params_list = []
+        if mcp_servers:
+            tools, server_params_list = await self.setup_mcp_tools(mcp_servers)
+
         if tools:
             kwargs['tools'] = tools
-            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools to request")
+            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools from {len(server_params_list)} server(s)")
 
-            # Keep MCP session for tool execution
-            server_params = StdioServerParameters(
-                command="npx",
-                args=["-y", "@upstash/context7-mcp"],
-            )
-            # Store session for tool execution
-            mcp_session = (server_params, tools)
+        mcp_session = (server_params_list, tools) if server_params_list else None
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making completion request with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
@@ -318,22 +361,53 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             if hasattr(message, 'tool_calls') and message.tool_calls and mcp_session:
                 logger.info(f"[LiteLLM] {self.litellm_model}: Model requested {len(message.tool_calls)} tool call(s), executing...")
 
-                # Build informational message about tool execution
-                tool_info = "\n\n🔧 **Fetching up-to-date documentation...**\n"
+                # Extract tools metadata from mcp_session
+                _, tools_metadata = mcp_session
+
+                # Create a lookup map for tool metadata by tool name
+                tool_lookup = {}
+                for tool in tools_metadata:
+                    tool_name = tool['function']['name']
+                    # The tool metadata includes mcp_server_name from MCPManager
+                    tool_lookup[tool_name] = tool
+
+                # Collect unique server names for the header
+                server_names = set()
+                for tc in message.tool_calls:
+                    tool_meta = tool_lookup.get(tc.function.name, {})
+                    if 'mcp_server_name' in tool_meta:
+                        server_names.add(tool_meta['mcp_server_name'])
+
+                # Build header with server names
+                if len(server_names) == 1:
+                    server_list = next(iter(server_names))
+                    tool_info = f"\n\n🔧 **Using {server_list} MCP server**\n"
+                elif len(server_names) > 1:
+                    server_list = ", ".join(sorted(server_names))
+                    tool_info = f"\n\n🔧 **Using MCP servers: {server_list}**\n"
+                else:
+                    tool_info = "\n\n🔧 **Executing MCP tools...**\n"
+
+                # Build informational message about each tool execution
                 for i, tc in enumerate(message.tool_calls, 1):
-                    tool_name = tc.function.name.replace('-', ' ').title()
+                    tool_meta = tool_lookup.get(tc.function.name, {})
+                    server_display = tool_meta.get('mcp_server_name', 'Unknown')
+                    original_tool_name = tool_meta.get('original_tool_name', tc.function.name)
+                    tool_display = original_tool_name.replace('-', ' ').replace('_', ' ').title()
+
                     try:
                         args = json.loads(tc.function.arguments)
+                        # Special formatting for context7 documentation tools
                         if 'libraryName' in args:
-                            tool_info += f"{i}. Searching for library: **{args['libraryName']}**\n"
+                            tool_info += f"{i}. **{server_display}**: Searching for library **{args['libraryName']}**\n"
                         elif 'context7CompatibleLibraryID' in args:
                             lib_id = args['context7CompatibleLibraryID'].split('/')[-1]
                             topic = args.get('topic', 'documentation')
-                            tool_info += f"{i}. Fetching **{lib_id}** docs (topic: {topic})\n"
+                            tool_info += f"{i}. **{server_display}**: Fetching **{lib_id}** docs (topic: {topic})\n"
                         else:
-                            tool_info += f"{i}. Executing: {tool_name}\n"
+                            tool_info += f"{i}. **{server_display}**: {tool_display}\n"
                     except Exception:
-                        tool_info += f"{i}. Executing: {tool_name}\n"
+                        tool_info += f"{i}. **{server_display}**: {tool_display}\n"
 
                 # Add assistant message with tool calls to conversation
                 messages.append({
@@ -352,37 +426,63 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 })
 
                 # Execute each tool call
-                server_params, _ = mcp_session
-                async with stdio_client(server_params) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
+                # Try each MCP server in sequence until tool executes successfully
+                server_params_list, _ = mcp_session
 
-                        for tool_call in message.tool_calls:
-                            logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
-                            try:
-                                # Execute the tool using litellm's helper
-                                tool_result = await call_openai_tool(
-                                    session=session,
-                                    tool_call=tool_call
-                                )
-                                logger.info(f"[MCP] Tool {tool_call.function.name} executed successfully")
+                for tool_call in message.tool_calls:
+                    logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
+                    tool_executed = False
 
-                                # Add tool result to messages
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps(tool_result)
-                                })
-                            except Exception as e:
-                                logger.error(f"[MCP] Tool {tool_call.function.name} failed: {e}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps({"error": str(e)})
-                                })
+                    # Try each MCP server
+                    for server_params in server_params_list:
+                        try:
+                            async with stdio_client(server_params) as (read, write):
+                                async with ClientSession(read, write) as session:
+                                    await session.initialize()
+
+                                    # Parse tool arguments from JSON string
+                                    tool_name = tool_call.function.name
+                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+
+                                    # Execute the tool using native MCP method
+                                    result = await session.call_tool(tool_name, arguments=arguments)
+
+                                    # Extract text content from MCP result
+                                    # MCP returns CallToolResult with content list
+                                    result_text = ""
+                                    if hasattr(result, 'content') and result.content:
+                                        for content_item in result.content:
+                                            if hasattr(content_item, 'text'):
+                                                result_text += content_item.text
+
+                                    logger.info(f"[MCP] Tool {tool_name} executed successfully. Result: {result_text}")
+
+                                    # Add tool result to messages
+                                    tool_message = {
+                                        "role": "tool",
+                                        "tool_call_id": tool_call.id,
+                                        "content": result_text
+                                    }
+                                    logger.info(f"[MCP] Adding tool result to messages: {tool_message}")
+                                    messages.append(tool_message)
+                                    tool_executed = True
+                                    break  # Success, don't try other servers
+                        except Exception as e:
+                            logger.error(f"[MCP] Server {server_params.command} couldn't execute tool {tool_call.function.name}: {e}")
+                            continue  # Try next server
+
+                    if not tool_executed:
+                        # No server could execute the tool
+                        logger.error(f"[MCP] No MCP server could execute tool: {tool_call.function.name}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": f"Tool {tool_call.function.name} not available"})
+                        })
 
                 # Make second completion request with tool results
                 logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up request with tool results")
+                logger.debug(f"[MCP] Follow-up messages: {json.dumps(messages, indent=2)}")
                 # Remove tools from kwargs for follow-up request
                 follow_up_kwargs = {k: v for k, v in kwargs.items() if k != 'tools'}
                 response = await litellm.acompletion(
@@ -391,6 +491,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     **follow_up_kwargs
                 )
                 message = response.choices[0].message
+                logger.info(f"[MCP] Follow-up response: {message.content}")
 
                 # Prepend tool info to the response
                 content = tool_info + (message.content or "")
@@ -460,7 +561,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unexpected error")
             raise OpenAIException("Unknown error occurred") from exc
 
-    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None):
+    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_servers: list = []):
         """
         Phase 1: Create stream connection before EventSourceResponse.
         Can raise exceptions for authentication, firewall, rate limit errors.
@@ -507,8 +608,12 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for streaming {provider}: {endpoint}"
                 )
 
-        # Load MCP tools from context7
-        tools = await self.setup_mcp_tools()
+        # Load MCP tools from configured servers
+        tools = []
+        server_params_list = []
+        if mcp_servers:
+            tools, server_params_list = await self.setup_mcp_tools(mcp_servers)
+
         if tools:
             kwargs['tools'] = tools
             logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools to streaming request")
@@ -523,11 +628,13 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 model=self.litellm_model, messages=messages, stream=True, **kwargs
             )
             logger.info(f"[LiteLLM] {self.litellm_model}: Stream connection created successfully")
-            # Store messages and kwargs for potential tool execution
+            # Store messages, kwargs, and MCP server params for potential tool execution
             stream._eneo_context = {
                 'messages': messages,
                 'kwargs': kwargs,
-                'has_tools': bool(tools)
+                'has_tools': bool(tools),
+                'server_params_list': server_params_list,  # Store MCP server params for tool execution
+                'tools_metadata': tools  # Store tool metadata for display purposes
             }
             return stream
 
@@ -652,22 +759,52 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                             })()
                     tool_calls.append(ToolCall(tc['id'], tc['function']['name'], tc['function']['arguments']))
 
-                # Yield informational message about tool execution
-                tool_info = "\n\n🔧 **Fetching up-to-date documentation...**\n"
+                # Get tool metadata from context
+                tools_metadata = stream._eneo_context.get('tools_metadata', [])
+
+                # Create a lookup map for tool metadata by tool name
+                tool_lookup = {}
+                for tool in tools_metadata:
+                    tool_name = tool['function']['name']
+                    tool_lookup[tool_name] = tool
+
+                # Collect unique server names for the header
+                server_names = set()
+                for tc in tool_calls:
+                    tool_meta = tool_lookup.get(tc.function.name, {})
+                    if 'mcp_server_name' in tool_meta:
+                        server_names.add(tool_meta['mcp_server_name'])
+
+                # Build header with server names
+                if len(server_names) == 1:
+                    server_list = next(iter(server_names))
+                    tool_info = f"\n\n🔧 **Using {server_list} MCP server**\n"
+                elif len(server_names) > 1:
+                    server_list = ", ".join(sorted(server_names))
+                    tool_info = f"\n\n🔧 **Using MCP servers: {server_list}**\n"
+                else:
+                    tool_info = "\n\n🔧 **Executing MCP tools...**\n"
+
+                # Build informational message about each tool execution
                 for i, tc in enumerate(tool_calls, 1):
-                    tool_name = tc.function.name.replace('-', ' ').title()
+                    tool_meta = tool_lookup.get(tc.function.name, {})
+                    server_display = tool_meta.get('mcp_server_name', 'Unknown')
+                    original_tool_name = tool_meta.get('original_tool_name', tc.function.name)
+                    tool_display = original_tool_name.replace('-', ' ').replace('_', ' ').title()
+
                     try:
                         args = json.loads(tc.function.arguments)
+                        # Special formatting for context7 documentation tools
                         if 'libraryName' in args:
-                            tool_info += f"{i}. Searching for library: **{args['libraryName']}**\n"
+                            tool_info += f"{i}. **{server_display}**: Searching for library **{args['libraryName']}**\n"
                         elif 'context7CompatibleLibraryID' in args:
                             lib_id = args['context7CompatibleLibraryID'].split('/')[-1]
                             topic = args.get('topic', 'documentation')
-                            tool_info += f"{i}. Fetching **{lib_id}** docs (topic: {topic})\n"
+                            tool_info += f"{i}. **{server_display}**: Fetching **{lib_id}** docs (topic: {topic})\n"
                         else:
-                            tool_info += f"{i}. Executing: {tool_name}\n"
+                            tool_info += f"{i}. **{server_display}**: {tool_display}\n"
                     except Exception:
-                        tool_info += f"{i}. Executing: {tool_name}\n"
+                        tool_info += f"{i}. **{server_display}**: {tool_display}\n"
 
                 yield Completion(text=tool_info)
 
@@ -691,36 +828,56 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     ]
                 })
 
-                # Execute tools
-                server_params = StdioServerParameters(
-                    command="npx",
-                    args=["-y", "@upstash/context7-mcp"],
-                )
-                async with stdio_client(server_params) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
+                # Execute tools using dynamic MCP servers
+                server_params_list = stream._eneo_context.get('server_params_list', [])
 
-                        for tool_call in tool_calls:
-                            logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
-                            try:
-                                tool_result = await call_openai_tool(
-                                    session=session,
-                                    tool_call=tool_call
-                                )
-                                logger.info(f"[MCP] Tool {tool_call.function.name} executed successfully")
+                for tool_call in tool_calls:
+                    logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
+                    tool_executed = False
 
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps(tool_result)
-                                })
-                            except Exception as e:
-                                logger.error(f"[MCP] Tool {tool_call.function.name} failed: {e}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps({"error": str(e)})
-                                })
+                    # Try each MCP server until one successfully executes the tool
+                    for server_params in server_params_list:
+                        try:
+                            async with stdio_client(server_params) as (read, write):
+                                async with ClientSession(read, write) as session:
+                                    await session.initialize()
+
+                                    # Parse tool arguments from JSON string
+                                    tool_name = tool_call.function.name
+                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+
+                                    # Execute the tool using native MCP method
+                                    result = await session.call_tool(tool_name, arguments=arguments)
+
+                                    # Extract text content from MCP result
+                                    result_text = ""
+                                    if hasattr(result, 'content') and result.content:
+                                        for content_item in result.content:
+                                            if hasattr(content_item, 'text'):
+                                                result_text += content_item.text
+
+                                    logger.info(f"[MCP] Tool {tool_name} executed successfully. Result: {result_text}")
+
+                                    # Add tool result to messages
+                                    messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": tool_call.id,
+                                        "content": result_text
+                                    })
+                                    tool_executed = True
+                                    break  # Success, don't try other servers
+                        except Exception as e:
+                            logger.error(f"[MCP] Server {server_params.command} couldn't execute tool {tool_call.function.name}: {e}")
+                            continue  # Try next server
+
+                    if not tool_executed:
+                        # No server could execute the tool
+                        logger.error(f"[MCP] No MCP server could execute tool: {tool_call.function.name}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": f"Tool {tool_call.function.name} not available"})
+                        })
 
                 # Make follow-up streaming request with tool results
                 logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up streaming request with tool results")

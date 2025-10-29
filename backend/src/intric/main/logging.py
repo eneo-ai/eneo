@@ -5,6 +5,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
+from rich.logging import RichHandler
+
 from intric.main.config import get_loglevel
 from intric.main.request_context import get_request_context
 
@@ -133,7 +135,14 @@ class SimpleLogger(logging.Logger):
             self.addHandler(handler)
 
         if console is True:
-            _add_stream(logging.StreamHandler, stream=sys.stdout)
+            if JSON_LOGS_ENABLED:
+                _add_stream(logging.StreamHandler, stream=sys.stdout)
+            else:
+                # Use Rich for prettier console output when not using JSON logs
+                rich_handler = RichHandler(rich_tracebacks=True, markup=True, show_path=True)
+                rich_handler.setLevel(level)
+                # RichHandler has its own formatting, so only use custom formatter for JSON
+                self.addHandler(rich_handler)
 
         for filepath in files:
             _add_stream(logging.FileHandler, filename=filepath)

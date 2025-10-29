@@ -10,8 +10,12 @@
   import { invalidate } from "$app/navigation";
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import AddMCPDialog from "./AddMCPDialog.svelte";
+  import { writable } from "svelte/store";
 
   const { data } = $props();
+
+  let showAddDialog = writable(false);
 
   async function toggleMCPEnabled(mcpServer: any) {
     const isCurrentlyEnabled = mcpServer.is_org_enabled;
@@ -35,9 +39,21 @@
     }
   }
 
+  async function handleAddMCP(mcpData: any) {
+    try {
+      await data.intric.mcpServers.create(mcpData);
+      // Refresh data
+      await invalidate('admin:layout');
+    } catch (error) {
+      console.error('Failed to create MCP:', error);
+      throw error;
+    }
+  }
+
   function getServerTypeColor(type: string) {
     switch (type) {
       case 'npm': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+      case 'uvx': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
       case 'docker': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
       case 'http': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
@@ -53,7 +69,7 @@
   <Page.Header>
     <Page.Title title={m.mcp_servers()}></Page.Title>
     <div class="flex gap-2">
-      <Button variant="primary" size="sm">
+      <Button variant="primary" size="sm" onclick={() => ($showAddDialog = true)}>
         <Plus class="mr-2 h-4 w-4" />
         {m.add_mcp_server()}
       </Button>
@@ -85,6 +101,11 @@
                     {#if mcpServer.npm_package}
                       <span class="text-xs text-muted">
                         <strong>{m.npm()}:</strong> {mcpServer.npm_package}
+                      </span>
+                    {/if}
+                    {#if mcpServer.uvx_package}
+                      <span class="text-xs text-muted">
+                        <strong>UVX:</strong> {mcpServer.uvx_package}
                       </span>
                     {/if}
                     {#if mcpServer.docker_image}
@@ -150,3 +171,5 @@
     </Settings.Page>
   </Page.Main>
 </Page.Root>
+
+<AddMCPDialog openController={showAddDialog} onSubmit={handleAddMCP} />
