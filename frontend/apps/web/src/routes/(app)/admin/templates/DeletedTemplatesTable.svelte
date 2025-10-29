@@ -32,7 +32,8 @@
       cell: (item) => {
         return createRender(TemplateNameCell, {
           name: item.value,
-          description: item.row.original.description
+          description: item.row.original.description,
+          iconName: item.row.original.icon_name
         });
       },
       plugins: {

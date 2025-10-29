@@ -27,7 +27,8 @@
         return createRender(TemplateNameCell, {
           name: item.value,
           description: item.row.original.description,
-          isDefault: item.row.original.is_default
+          isDefault: item.row.original.is_default,
+          iconName: item.row.original.icon_name
         });
       },
       plugins: {

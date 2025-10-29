@@ -47,6 +47,7 @@ class AssistantTemplatePublic(BaseModel):
     wizard: AssistantTemplateWizard
     organization: AssistantTemplateOrganization
     is_default: bool = False
+    icon_name: Optional[str] = None
 
 
 class AssistantTemplateListPublic(BaseModel):
@@ -66,6 +67,7 @@ class AssistantTemplateCreate(BaseModel):
     organization: Optional[str] = None
     completion_model_kwargs: Optional[dict] = {}
     wizard: AssistantTemplateWizard
+    icon_name: Optional[str] = None
 
 
 class AssistantTemplateUpdate(BaseModel):
@@ -76,6 +78,7 @@ class AssistantTemplateUpdate(BaseModel):
     organization: Optional[str] = None
     completion_model_kwargs: Optional[dict] = None
     wizard: Optional[AssistantTemplateWizard] = None
+    icon_name: Optional[str] = None
 
 
 # Admin-specific models for tenant-scoped templates
@@ -100,6 +103,7 @@ class AssistantTemplateAdminPublic(BaseModel):
     updated_at: datetime
     usage_count: int = 0  # Number of assistants created from this template
     is_default: bool = False
+    icon_name: Optional[str] = None
 
 
 class AssistantTemplateAdminListPublic(BaseModel):
@@ -120,6 +124,7 @@ class AssistantTemplateAdminCreate(BaseModel):
     prompt: Optional[str] = None
     completion_model_kwargs: Optional[dict] = Field(default={})
     wizard: Optional[AssistantTemplateWizard] = None
+    icon_name: Optional[str] = Field(None, max_length=100)
 
 
 class AssistantTemplateAdminUpdate(BaseModel):
@@ -130,6 +135,7 @@ class AssistantTemplateAdminUpdate(BaseModel):
     prompt: Optional[str] = None
     completion_model_kwargs: Optional[dict] = None
     wizard: Optional[AssistantTemplateWizard] = None
+    icon_name: Optional[str] = Field(None, max_length=100)
 
 
 class AssistantTemplateToggleDefaultRequest(BaseModel):

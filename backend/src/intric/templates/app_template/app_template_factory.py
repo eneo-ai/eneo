@@ -33,6 +33,7 @@ class AppTemplateFactory:
             restored_by_user_id=item.restored_by_user_id,
             restored_at=item.restored_at,
             is_default=item.is_default,
+            icon_name=item.icon_name,
         )
 
     @staticmethod

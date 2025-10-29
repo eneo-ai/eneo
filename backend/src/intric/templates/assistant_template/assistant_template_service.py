@@ -146,6 +146,7 @@ class AssistantTemplateService:
                 tenant_id=tenant_id,
                 deleted_at=None,
                 original_snapshot=snapshot,
+                icon_name=data.icon_name,
             )
             .returning(AssistantTemplates)
         )
@@ -217,6 +218,8 @@ class AssistantTemplateService:
             update_values["wizard"] = data.wizard.model_dump() if data.wizard else None
         if data.completion_model_kwargs is not None:
             update_values["completion_model_kwargs"] = data.completion_model_kwargs
+        if data.icon_name is not None:
+            update_values["icon_name"] = data.icon_name
 
         stmt = (
             sa.update(AssistantTemplates)

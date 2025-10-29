@@ -1938,6 +1938,8 @@ export interface components {
       input_type: string;
       /** Input Description */
       input_description?: string | null;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /**
      * AppTemplateAdminListPublic
@@ -2018,6 +2020,8 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /**
      * AppTemplateAdminUpdate
@@ -2041,6 +2045,8 @@ export interface components {
       input_type?: string | null;
       /** Input Description */
       input_description?: string | null;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /** AppTemplateListPublic */
     AppTemplateListPublic: {
@@ -2093,6 +2099,8 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /**
      * AppTemplateToggleDefaultRequest
@@ -2425,6 +2433,8 @@ export interface components {
         [key: string]: unknown;
       } | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /**
      * AssistantTemplateAdminListPublic
@@ -2501,6 +2511,8 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /**
      * AssistantTemplateAdminUpdate
@@ -2520,6 +2532,8 @@ export interface components {
         [key: string]: unknown;
       } | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /** AssistantTemplateListPublic */
     AssistantTemplateListPublic: {
@@ -2572,6 +2586,8 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /**
      * AssistantTemplateToggleDefaultRequest

@@ -39,6 +39,7 @@ class AssistantTemplate:
         restored_by_user_id: Optional["UUID"] = None,
         restored_at: Optional["datetime"] = None,
         is_default: bool = False,
+        icon_name: Optional[str] = None,
     ):
         self.id = id
         self.name = name
@@ -61,6 +62,8 @@ class AssistantTemplate:
         self.restored_at = restored_at
         # Featured template configuration
         self.is_default = is_default  # True = featured/default template
+        # Icon support
+        self.icon_name = icon_name  # NULL = no custom icon (first letter fallback), e.g., "rocket", "building"
 
     def validate_assistant_wizard_data(self, template_data: "TemplateCreate") -> None:
         for data in template_data.additional_fields:

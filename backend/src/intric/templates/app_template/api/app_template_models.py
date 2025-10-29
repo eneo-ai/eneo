@@ -58,6 +58,7 @@ class AppTemplatePublic(BaseModel):
     wizard: AppTemplateWizard
     organization: AppTemplateOrganization
     is_default: bool = False
+    icon_name: Optional[str] = None
 
 
 class AppTemplateListPublic(BaseModel):
@@ -79,6 +80,7 @@ class AppTemplateCreate(BaseModel):
     wizard: AppTemplateWizard
     input_type: str
     input_description: Optional[str]
+    icon_name: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_input_type(self):
@@ -97,6 +99,7 @@ class AppTemplateUpdate(BaseModel):
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
     input_description: Optional[str] = None
+    icon_name: Optional[str] = None
 
 
 # Admin-specific models for tenant-scoped templates
@@ -123,6 +126,7 @@ class AppTemplateAdminPublic(BaseModel):
     updated_at: datetime
     usage_count: int = 0  # Number of apps created from this template
     is_default: bool = False
+    icon_name: Optional[str] = None
 
 
 class AppTemplateAdminListPublic(BaseModel):
@@ -145,6 +149,7 @@ class AppTemplateAdminCreate(BaseModel):
     wizard: Optional[AppTemplateWizard] = None
     input_type: str
     input_description: Optional[str] = None
+    icon_name: Optional[str] = None
 
 
 class AppTemplateAdminUpdate(BaseModel):
@@ -157,6 +162,7 @@ class AppTemplateAdminUpdate(BaseModel):
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
     input_description: Optional[str] = None
+    icon_name: Optional[str] = None
 
 
 class AppTemplateToggleDefaultRequest(BaseModel):

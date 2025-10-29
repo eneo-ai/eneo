@@ -54,6 +54,7 @@ async def list_templates(
             updated_at=t.updated_at,
             usage_count=usage_count,
             is_default=t.is_default,
+            icon_name=t.icon_name,
         )
         for t, usage_count in templates_with_usage
     ]
@@ -118,6 +119,7 @@ async def create_template(
         wizard=data.wizard,
         input_type=data.input_type,
         input_description=data.input_description,
+        icon_name=data.icon_name,
     )
 
     template = await service.create_template(
@@ -144,6 +146,7 @@ async def create_template(
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
+        icon_name=template.icon_name,
     )
 
 
@@ -175,6 +178,7 @@ async def update_template(
         wizard=data.wizard,
         input_type=data.input_type,
         input_description=data.input_description,
+        icon_name=data.icon_name,
     )
 
     template = await service.update_template(
@@ -202,6 +206,7 @@ async def update_template(
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
+        icon_name=template.icon_name,
     )
 
 
@@ -269,6 +274,7 @@ async def toggle_default(
         created_at=template.created_at,
         updated_at=template.updated_at,
         is_default=template.is_default,
+        icon_name=template.icon_name,
     )
 
 
@@ -334,6 +340,7 @@ async def rollback_template(
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
+        icon_name=template.icon_name,
     )
 
 
@@ -378,6 +385,7 @@ async def restore_template(
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
+        icon_name=template.icon_name,
     )
 
 
@@ -441,6 +449,7 @@ async def list_deleted_templates(
             updated_at=t.updated_at,
             usage_count=usage_count,
             is_default=t.is_default,
+            icon_name=t.icon_name,
         )
         for t, usage_count in templates_with_usage
     ]

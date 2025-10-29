@@ -7,6 +7,7 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
+  import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import { createSelect } from "@melt-ui/svelte";
   import { IconCheck } from "@intric/icons/check";
   import { IconChevronDown } from "@intric/icons/chevron-down";
@@ -24,6 +25,7 @@
   let name = $state("");
   let description = $state("");
   let category = $state("");
+  let iconName = $state<string | null>(null);
   let promptText = $state("");
   let completionModel = $state(data.completionModels?.[0] || null);
   let completionModelKwargs = $state({});
@@ -109,7 +111,8 @@
         completion_model_kwargs: completionModelKwargs,
         input_type: inputType,  // Single string, not array
         input_description: inputDescription || undefined,
-        wizard  // Always send wizard object, never undefined
+        wizard,  // Always send wizard object, never undefined
+        icon_name: iconName || undefined  // Include icon if selected
       };
 
       await intric.templates.admin.createApp(templateData);
@@ -156,12 +159,15 @@
           hasChanges={false}
           let:aria
         >
-          <input
-            type="text"
-            {...aria}
-            bind:value={name}
-            class="border-default bg-primary ring-default rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-          />
+          <div class="flex items-center gap-3">
+            <LucideIconPicker bind:value={iconName} compact />
+            <input
+              type="text"
+              {...aria}
+              bind:value={name}
+              class="border-default bg-primary ring-default flex-1 rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            />
+          </div>
         </Settings.Row>
 
         <Settings.Row

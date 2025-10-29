@@ -71,7 +71,7 @@
         {m.unset_default_status()}
       {:else}
         <ArrowUpToLine size={16} />
-        {m.set_as_default_model()}
+        {m.set_as_default_template()}
       {/if}
     </Button>
 

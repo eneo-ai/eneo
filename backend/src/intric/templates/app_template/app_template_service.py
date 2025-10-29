@@ -140,6 +140,7 @@ class AppTemplateService:
                 tenant_id=tenant_id,
                 deleted_at=None,
                 original_snapshot=snapshot,
+                icon_name=data.icon_name,
             )
             .returning(AppTemplates)
         )
@@ -215,6 +216,8 @@ class AppTemplateService:
             update_values["input_type"] = data.input_type
         if data.input_description is not None:
             update_values["input_description"] = data.input_description
+        if data.icon_name is not None:
+            update_values["icon_name"] = data.icon_name
 
         stmt = (
             sa.update(AppTemplates)

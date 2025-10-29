@@ -7,6 +7,7 @@
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
+  import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
@@ -17,6 +18,7 @@
   let name = $state(data.template.name || "");
   let description = $state(data.template.description || "");
   let category = $state(data.template.category || "");
+  let iconName = $state<string | null>(data.template.icon_name || null);
   let promptText = $state(data.template.prompt_text || "");
   let completionModel = $state(
     data.completionModels?.find(m => m.name === data.template.completion_model_name) ||
@@ -82,7 +84,8 @@
         category,
         prompt: promptText,  // Backend expects string, not object
         completion_model_kwargs: completionModelKwargs,
-        wizard  // Always send wizard object, never undefined
+        wizard,  // Always send wizard object, never undefined
+        icon_name: iconName || undefined  // Include icon if selected
       };
 
       await intric.templates.admin.updateAssistant(data.template.id, templateData);
@@ -129,12 +132,15 @@
           hasChanges={false}
           let:aria
         >
-          <input
-            type="text"
-            {...aria}
-            bind:value={name}
-            class="border-default bg-primary ring-default rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-          />
+          <div class="flex items-center gap-3">
+            <LucideIconPicker bind:value={iconName} compact />
+            <input
+              type="text"
+              {...aria}
+              bind:value={name}
+              class="border-default bg-primary ring-default flex-1 rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            />
+          </div>
         </Settings.Row>
 
         <Settings.Row

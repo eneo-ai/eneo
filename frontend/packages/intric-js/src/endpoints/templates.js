@@ -133,7 +133,7 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       updateAssistant: async (id, data) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/`, {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}`, {
           method: "patch",
           requestBody: { "application/json": data }
         });
@@ -147,7 +147,7 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       updateApp: async (id, data) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/`, {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}`, {
           method: "patch",
           requestBody: { "application/json": data }
         });
@@ -160,7 +160,7 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       deleteAssistant: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/`, {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}`, {
           method: "delete"
         });
         return res;
@@ -172,7 +172,7 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       deleteApp: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/`, {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}`, {
           method: "delete"
         });
         return res;

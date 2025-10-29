@@ -66,4 +66,10 @@ class AppTemplates(BasePublic):
         index=True
     )
 
+    # Icon support - Lucide icon name (e.g., "rocket", "building")
+    icon_name: Mapped[Optional[str]] = mapped_column(
+        nullable=True,
+        index=True
+    )
+
     completion_model: Mapped[CompletionModels] = relationship()
