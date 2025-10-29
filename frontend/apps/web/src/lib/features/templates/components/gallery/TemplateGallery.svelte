@@ -65,8 +65,15 @@
                 data-selected={isSelected}
               >
                 <div
-                  class="tile-bg border-default flex h-full min-h-[180px] flex-col gap-4 overflow-clip rounded-2xl border p-6 transition-all"
+                  class="tile-bg border-default flex h-full min-h-[180px] flex-col gap-4 overflow-clip rounded-2xl border p-6 transition-all relative"
                 >
+                  {#if template.is_default}
+                    <span
+                      class="absolute top-2 right-2 px-2 py-0.5 text-xs font-medium rounded-full bg-positive-stronger/10 text-positive-stronger border border-positive-stronger/20"
+                    >
+                      {m.default_model()}
+                    </span>
+                  {/if}
                   <div class="flex w-full items-center gap-3">
                     <TemplateIcon {template}></TemplateIcon>
                     <h4 class="text-dynamic-stronger text-left text-base font-medium line-clamp-2">

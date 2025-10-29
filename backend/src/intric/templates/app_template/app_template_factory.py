@@ -32,6 +32,7 @@ class AppTemplateFactory:
             deleted_by_user_id=item.deleted_by_user_id,
             restored_by_user_id=item.restored_by_user_id,
             restored_at=item.restored_at,
+            is_default=item.is_default,
         )
 
     @staticmethod

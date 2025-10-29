@@ -46,6 +46,7 @@ class AssistantTemplatePublic(BaseModel):
     type: Literal["assistant"]
     wizard: AssistantTemplateWizard
     organization: AssistantTemplateOrganization
+    is_default: bool = False
 
 
 class AssistantTemplateListPublic(BaseModel):
@@ -98,6 +99,7 @@ class AssistantTemplateAdminPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
     usage_count: int = 0  # Number of assistants created from this template
+    is_default: bool = False
 
 
 class AssistantTemplateAdminListPublic(BaseModel):
@@ -128,3 +130,8 @@ class AssistantTemplateAdminUpdate(BaseModel):
     prompt: Optional[str] = None
     completion_model_kwargs: Optional[dict] = None
     wizard: Optional[AssistantTemplateWizard] = None
+
+
+class AssistantTemplateToggleDefaultRequest(BaseModel):
+    """Request to toggle template as default/featured."""
+    is_default: bool

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.main.container.container import Container
@@ -10,6 +9,7 @@ from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateAdminListPublic,
     AssistantTemplateAdminCreate,
     AssistantTemplateAdminUpdate,
+    AssistantTemplateToggleDefaultRequest,
 )
 
 router = APIRouter(prefix="/admin/templates/assistants", tags=["admin-templates"])
@@ -63,6 +63,7 @@ async def list_templates(
             created_at=t.created_at,
             updated_at=t.updated_at,
             usage_count=usage_count,
+            is_default=t.is_default,
         )
         for t, usage_count in templates_with_usage
     ]
@@ -207,6 +208,71 @@ async def update_template(
         original_snapshot=template.original_snapshot,
         created_at=template.created_at,
         updated_at=template.updated_at,
+    )
+
+
+@router.patch(
+    "/{template_id}/default",
+    response_model=AssistantTemplateAdminPublic,
+    status_code=200,
+    summary="Toggle assistant template as featured",
+    description="""
+Toggle an assistant template as featured/default.
+
+**Admin Only:** Requires admin permissions.
+
+**Validation:**
+- Template must belong to your tenant
+- Maximum 5 featured templates per tenant
+- Returns 400 if limit exceeded
+
+**Behavior:**
+- Featured templates appear first in the template gallery
+- Featured templates are sorted alphabetically by name
+- Non-featured templates appear below, sorted by creation date
+
+**Example Request:**
+```json
+{
+  "is_default": true
+}
+```
+    """,
+    responses=responses.get_responses([400, 401, 403, 404]),
+)
+async def toggle_default(
+    template_id: UUID,
+    data: AssistantTemplateToggleDefaultRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Toggle template as featured/default."""
+    service = container.assistant_template_service()
+    user = container.user()
+
+    template = await service.toggle_default(
+        template_id=template_id,
+        is_default=data.is_default,
+        tenant_id=user.tenant_id,
+    )
+
+    return AssistantTemplateAdminPublic(
+        id=template.id,
+        name=template.name,
+        description=template.description,
+        category=template.category,
+        prompt_text=template.prompt_text,
+        completion_model_kwargs=template.completion_model_kwargs or {},
+        wizard=template.wizard,
+        organization=template.organization,
+        tenant_id=template.tenant_id,
+        deleted_at=template.deleted_at,
+        deleted_by_user_id=template.deleted_by_user_id,
+        restored_at=template.restored_at,
+        restored_by_user_id=template.restored_by_user_id,
+        original_snapshot=template.original_snapshot,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+        is_default=template.is_default,
     )
 
 
@@ -395,6 +461,7 @@ async def list_deleted_templates(
             created_at=t.created_at,
             updated_at=t.updated_at,
             usage_count=usage_count,
+            is_default=t.is_default,
         )
         for t, usage_count in templates_with_usage
     ]

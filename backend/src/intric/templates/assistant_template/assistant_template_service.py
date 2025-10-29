@@ -233,6 +233,72 @@ class AssistantTemplateService:
         return self.factory.create_assistant_template(item=updated_record)
 
     @validate_permissions(Permission.ADMIN)
+    async def toggle_default(
+        self,
+        template_id: "UUID",
+        is_default: bool,
+        tenant_id: "UUID",
+    ) -> "AssistantTemplate":
+        """Toggle template as default/featured.
+
+        Business logic:
+        - Must belong to tenant
+        - Max 5 defaults per tenant (enforced with SELECT FOR UPDATE)
+        - Admin only (enforced via decorator)
+        - Concurrency-safe with row locking
+
+        Time complexity: O(log n) for ownership + count check + update
+        """
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+        import sqlalchemy as sa
+
+        # Verify template belongs to tenant
+        template = await self.repo.get_by_id(
+            assistant_template_id=template_id,
+            tenant_id=tenant_id
+        )
+        if not template:
+            raise NotFoundException(
+                "Template not found or does not belong to this tenant"
+            )
+
+        # If setting to true, check limit with locking
+        if is_default:
+            # Lock current default template rows, then count (prevent race conditions)
+            lock_stmt = (
+                select(AssistantTemplates.id)
+                .where(
+                    AssistantTemplates.tenant_id == tenant_id,
+                    AssistantTemplates.is_default == True,
+                    AssistantTemplates.id != template_id  # Exclude current template
+                )
+                .with_for_update()
+            )
+            result = await self.session.execute(lock_stmt)
+            current_count = len(result.scalars().all())
+
+            if current_count >= 5:
+                raise BadRequestException(
+                    "Maximum of 5 featured templates reached. Remove one to add another."
+                )
+
+            # Update is_default field
+        stmt = (
+            sa.update(AssistantTemplates)
+            .where(
+                AssistantTemplates.id == template_id,
+                AssistantTemplates.tenant_id == tenant_id
+            )
+            .values(is_default=is_default)
+            .returning(AssistantTemplates)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        updated_record = result.scalar_one()
+
+        return self.factory.create_assistant_template(item=updated_record)
+
+    @validate_permissions(Permission.ADMIN)
     async def delete_template(
         self,
         template_id: "UUID",
@@ -397,7 +463,6 @@ class AssistantTemplateService:
         """
         from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.database.tables.assistant_table import Assistants
-        import sqlalchemy as sa
 
         # Query with LEFT JOIN to get usage count
         # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)
@@ -446,7 +511,6 @@ class AssistantTemplateService:
         """
         from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.database.tables.assistant_table import Assistants
-        import sqlalchemy as sa
 
         # Query with LEFT JOIN to get usage count for deleted templates
         # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)

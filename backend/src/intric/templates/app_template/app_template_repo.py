@@ -92,6 +92,8 @@ class AppTemplateRepository:
         else:
             query = query.where(self._db_model.tenant_id.is_(None))
 
+        query = query.order_by(self._db_model.is_default.desc(), self._db_model.name)
+
         results = await self.session.scalars(query)
 
         return self.factory.create_app_template_list(items=results.all())

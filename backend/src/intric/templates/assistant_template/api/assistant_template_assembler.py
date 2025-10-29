@@ -50,6 +50,7 @@ class AssistantTemplateAssembler:
             wizard=assistant_template.wizard,
             type="assistant",
             organization=organization,
+            is_default=assistant_template.is_default,
         )
 
     @staticmethod

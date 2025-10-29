@@ -57,6 +57,7 @@ class AppTemplatePublic(BaseModel):
     type: Literal["app"]
     wizard: AppTemplateWizard
     organization: AppTemplateOrganization
+    is_default: bool = False
 
 
 class AppTemplateListPublic(BaseModel):
@@ -121,6 +122,7 @@ class AppTemplateAdminPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
     usage_count: int = 0  # Number of apps created from this template
+    is_default: bool = False
 
 
 class AppTemplateAdminListPublic(BaseModel):
@@ -155,3 +157,8 @@ class AppTemplateAdminUpdate(BaseModel):
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
     input_description: Optional[str] = None
+
+
+class AppTemplateToggleDefaultRequest(BaseModel):
+    """Request to toggle template as default/featured."""
+    is_default: bool

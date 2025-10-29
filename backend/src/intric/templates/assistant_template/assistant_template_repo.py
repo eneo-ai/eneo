@@ -95,6 +95,7 @@ class AssistantTemplateRepository:
             base_query = base_query.where(self._db_model.tenant_id.is_(None))
 
         query = self._apply_options(query=base_query)
+        query = query.order_by(self._db_model.is_default.desc(), self._db_model.name)
 
         results = await self.session.scalars(query)
 

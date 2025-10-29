@@ -706,6 +706,32 @@ export interface paths {
      */
     patch: operations["update_template_api_v1_admin_templates_assistants__template_id__patch"];
   };
+  "/api/v1/admin/templates/assistants/{template_id}/default": {
+    /**
+     * Toggle assistant template as featured
+     * @description Toggle an assistant template as featured/default.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Validation:**
+     * - Template must belong to your tenant
+     * - Maximum 5 featured templates per tenant
+     * - Returns 400 if limit exceeded
+     *
+     * **Behavior:**
+     * - Featured templates appear first in the template gallery
+     * - Featured templates are sorted alphabetically by name
+     * - Non-featured templates appear below, sorted by creation date
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "is_default": true
+     * }
+     * ```
+     */
+    patch: operations["toggle_default_api_v1_admin_templates_assistants__template_id__default_patch"];
+  };
   "/api/v1/admin/templates/assistants/{template_id}/rollback": {
     /**
      * Rollback assistant template
@@ -785,6 +811,32 @@ export interface paths {
      * @description Updates an existing app template (admin only)
      */
     patch: operations["update_template_api_v1_admin_templates_apps__template_id__patch"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/default": {
+    /**
+     * Toggle app template as featured
+     * @description Toggle an app template as featured/default.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Validation:**
+     * - Template must belong to your tenant
+     * - Maximum 5 featured templates per tenant
+     * - Returns 400 if limit exceeded
+     *
+     * **Behavior:**
+     * - Featured templates appear first in the template gallery
+     * - Featured templates are sorted alphabetically by name
+     * - Non-featured templates appear below, sorted by creation date
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "is_default": true
+     * }
+     * ```
+     */
+    patch: operations["toggle_default_api_v1_admin_templates_apps__template_id__default_patch"];
   };
   "/api/v1/admin/templates/apps/{template_id}/rollback": {
     /**
@@ -1961,6 +2013,11 @@ export interface components {
        * @default 0
        */
       usage_count?: number;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
     };
     /**
      * AppTemplateAdminUpdate
@@ -2031,6 +2088,19 @@ export interface components {
       type: "app";
       wizard: components["schemas"]["AppTemplateWizard"];
       organization: components["schemas"]["AppTemplateOrganization"];
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /**
+     * AppTemplateToggleDefaultRequest
+     * @description Request to toggle template as default/featured.
+     */
+    AppTemplateToggleDefaultRequest: {
+      /** Is Default */
+      is_default: boolean;
     };
     /** AppTemplateWizard */
     AppTemplateWizard: {
@@ -2426,6 +2496,11 @@ export interface components {
        * @default 0
        */
       usage_count?: number;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
     };
     /**
      * AssistantTemplateAdminUpdate
@@ -2492,6 +2567,19 @@ export interface components {
       type: "assistant";
       wizard: components["schemas"]["AssistantTemplateWizard"];
       organization: components["schemas"]["AssistantTemplateOrganization"];
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /**
+     * AssistantTemplateToggleDefaultRequest
+     * @description Request to toggle template as default/featured.
+     */
+    AssistantTemplateToggleDefaultRequest: {
+      /** Is Default */
+      is_default: boolean;
     };
     /** AssistantTemplateWizard */
     AssistantTemplateWizard: {
@@ -11621,6 +11709,79 @@ export interface operations {
     };
   };
   /**
+   * Toggle assistant template as featured
+   * @description Toggle an assistant template as featured/default.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Validation:**
+   * - Template must belong to your tenant
+   * - Maximum 5 featured templates per tenant
+   * - Returns 400 if limit exceeded
+   *
+   * **Behavior:**
+   * - Featured templates appear first in the template gallery
+   * - Featured templates are sorted alphabetically by name
+   * - Non-featured templates appear below, sorted by creation date
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "is_default": true
+   * }
+   * ```
+   */
+  toggle_default_api_v1_admin_templates_assistants__template_id__default_patch: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantTemplateToggleDefaultRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Rollback assistant template
    * @description Restores template to original snapshot (admin only)
    */
@@ -11995,6 +12156,79 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle app template as featured
+   * @description Toggle an app template as featured/default.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Validation:**
+   * - Template must belong to your tenant
+   * - Maximum 5 featured templates per tenant
+   * - Returns 400 if limit exceeded
+   *
+   * **Behavior:**
+   * - Featured templates appear first in the template gallery
+   * - Featured templates are sorted alphabetically by name
+   * - Non-featured templates appear below, sorted by creation date
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "is_default": true
+   * }
+   * ```
+   */
+  toggle_default_api_v1_admin_templates_apps__template_id__default_patch: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppTemplateToggleDefaultRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };

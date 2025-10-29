@@ -48,6 +48,7 @@ class AppTemplateAssembler:
             wizard=app_template.wizard,
             type="app",
             organization=organization,
+            is_default=app_template.is_default,
         )
 
     @staticmethod

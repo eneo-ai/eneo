@@ -248,6 +248,34 @@ export function initTemplates(client) {
           method: "delete"
         });
         return res;
+      },
+
+      /**
+       * Toggle assistant template as featured/default
+       * @param {string} id Template ID
+       * @param {boolean} isDefault Whether to mark as featured
+       * @throws {IntricError}
+       */
+      toggleDefaultAssistant: async (id, isDefault) => {
+        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/default`, {
+          method: "patch",
+          requestBody: { "application/json": { is_default: isDefault } }
+        });
+        return res;
+      },
+
+      /**
+       * Toggle app template as featured/default
+       * @param {string} id Template ID
+       * @param {boolean} isDefault Whether to mark as featured
+       * @throws {IntricError}
+       */
+      toggleDefaultApp: async (id, isDefault) => {
+        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/default`, {
+          method: "patch",
+          requestBody: { "application/json": { is_default: isDefault } }
+        });
+        return res;
       }
     }
   };

@@ -39,9 +39,7 @@
 
   // Auto-focus input when modal opens
   $effect(() => {
-    const isOpen = openController && typeof openController.subscribe === 'function'
-      ? $state.snapshot(openController)
-      : false;
+    const isOpen = $openController;
 
     if (isOpen && inputElement) {
       setTimeout(() => inputElement?.focus(), 100);
@@ -50,9 +48,7 @@
 
   // Reset confirmation text when modal closes
   $effect(() => {
-    const isOpen = openController && typeof openController.subscribe === 'function'
-      ? $state.snapshot(openController)
-      : false;
+    const isOpen = $openController;
 
     if (!isOpen) {
       confirmationText = "";

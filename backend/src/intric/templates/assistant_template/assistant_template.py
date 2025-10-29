@@ -38,6 +38,7 @@ class AssistantTemplate:
         deleted_by_user_id: Optional["UUID"] = None,
         restored_by_user_id: Optional["UUID"] = None,
         restored_at: Optional["datetime"] = None,
+        is_default: bool = False,
     ):
         self.id = id
         self.name = name
@@ -58,6 +59,8 @@ class AssistantTemplate:
         self.deleted_by_user_id = deleted_by_user_id
         self.restored_by_user_id = restored_by_user_id
         self.restored_at = restored_at
+        # Featured template configuration
+        self.is_default = is_default  # True = featured/default template
 
     def validate_assistant_wizard_data(self, template_data: "TemplateCreate") -> None:
         for data in template_data.additional_fields:

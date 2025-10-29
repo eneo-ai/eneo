@@ -43,7 +43,7 @@
       <div class="grid grid-cols-2 gap-4">
         <button
           data-selected={$creationMode === "blank"}
-          on:click|preventDefault={() => ($creationMode = "blank")}
+          onclick={(e) => { e.preventDefault(); $creationMode = "blank"; }}
           class="selector"
         >
           <div class="flex w-full items-center justify-start gap-2 text-left">
@@ -54,7 +54,8 @@
         <div class="relative flex">
           <button
             data-selected={$creationMode === "template"}
-            on:click|preventDefault={() => {
+            onclick={(e) => {
+              e.preventDefault();
               if ($creationMode === "template" || $selectedTemplate === null) {
                 $showTemplateGallery = true;
               }
@@ -77,7 +78,8 @@
           </button>
           <button
             class="border-default text-secondary hover:bg-hover-default absolute top-[50%] right-2 -translate-y-[50%] rounded border p-1"
-            on:click|preventDefault={() => {
+            onclick={(e) => {
+              e.preventDefault();
               $showTemplateGallery = true;
             }}
           >

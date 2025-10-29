@@ -59,4 +59,11 @@ class AppTemplates(BasePublic):
         nullable=True
     )
 
+    # Default template configuration field
+    is_default: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        index=True
+    )
+
     completion_model: Mapped[CompletionModels] = relationship()

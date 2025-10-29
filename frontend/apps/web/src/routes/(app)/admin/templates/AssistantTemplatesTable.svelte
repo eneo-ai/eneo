@@ -26,7 +26,8 @@
       cell: (item) => {
         return createRender(TemplateNameCell, {
           name: item.value,
-          description: item.row.original.description
+          description: item.row.original.description,
+          isDefault: item.row.original.is_default
         });
       },
       plugins: {
