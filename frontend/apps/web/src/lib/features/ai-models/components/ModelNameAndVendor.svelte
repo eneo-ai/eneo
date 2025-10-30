@@ -44,6 +44,10 @@
     Berget: {
       logo: "",
       chartColour: "chart-blue"
+    },
+    GDM: {
+      logo: "",
+      chartColour: "chart-blue"
     }
   };
 </script>

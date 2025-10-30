@@ -25,6 +25,7 @@ PROVIDER_REQUIRED_FIELDS = {
     "anthropic": {"api_key"},
     "azure": {"api_key", "endpoint", "api_version", "deployment_name"},
     "berget": {"api_key"},
+    "gdm": {"api_key"},
     "mistral": {"api_key"},
     "ovhcloud": {"api_key"},
     "vllm": {"api_key", "endpoint"},
@@ -92,7 +93,7 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "berget", "mistral", "ovhcloud", "vllm"]
+Provider = Literal["openai", "anthropic", "azure", "berget", "gdm", "mistral", "ovhcloud", "vllm"]
 
 
 class SetCredentialRequest(BaseModel):
@@ -100,7 +101,7 @@ class SetCredentialRequest(BaseModel):
     Request model for setting tenant API credentials.
 
     Provider-specific field requirements:
-    - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+    - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
     - vLLM: api_key + endpoint (required)
     - Azure: api_key + endpoint + api_version (required)
 

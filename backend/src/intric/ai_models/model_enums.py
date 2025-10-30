@@ -31,3 +31,4 @@ class ModelOrg(str, Enum):
     KBLAB = "KBLab"
     GOOGLE = "Google"
     BERGET = "Berget"
+    GDM = "GDM"
