@@ -1030,10 +1030,23 @@ class SpaceRepository:
         q = sa.select(Spaces).where(
             Spaces.name == name,
             Spaces.tenant_id == tenant_id,
-            Spaces.user_id.is_(None),  
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
         )
         return await self._get_from_query(q)
     
+    async def create_org_space_for_tenant(self, name: str, description: str, tenant_id: UUID) -> Space:
+        """Create organization space for a tenant. Called when tenant is created."""
+        space = self.factory.create_space(
+            name=name,
+            tenant_id=tenant_id,
+            user_id=None,
+            tenant_space_id=None,
+            description=description,
+        )
+        # Use repo.add to ensure all relationships are properly set up
+        return await self.add(space)
+
     async def hard_delete_website(self, website_id: UUID, owner_space_id: UUID):
         ws = WebsitesTable
         wss = WebsitesSpaces

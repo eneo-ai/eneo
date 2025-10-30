@@ -37,6 +37,7 @@ def upgrade() -> None:
                 FROM spaces
                 WHERE tenant_id = :tenant_id
                   AND user_id IS NULL
+                  AND tenant_space_id IS NULL
                   AND name = :hub_name
                 ORDER BY created_at ASC
                 LIMIT 1

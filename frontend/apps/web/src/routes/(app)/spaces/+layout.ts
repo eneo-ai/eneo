@@ -5,14 +5,19 @@
 */
 
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { intric, user } = await event.parent();
 
-  const orgPromise = intric.spaces
-    .getOrganizationSpace()
-    .catch((e) => {
-      if (e?.status === 403 || e?.response?.status === 403) return null;
-      throw e;
-    });
+  // Only fetch org space if user has admin permission
+  const orgPromise = user?.predefined_roles?.some((role) =>
+    role.permissions?.includes('admin')
+  )
+    ? intric.spaces
+        .getOrganizationSpace()
+        .catch((e) => {
+          if (e?.status === 403 || e?.response?.status === 403) return null;
+          throw e;
+        })
+    : Promise.resolve(null);
 
   const [spaces, currentSpace, organizationSpace] = await Promise.all([
     intric.spaces.list(),
@@ -23,7 +28,7 @@ export const load = async (event) => {
   return {
     spaces,
     currentSpace,
-    organizationSpace, 
+    organizationSpace,
     loadedAt: new Date().toUTCString(),
   };
 };
