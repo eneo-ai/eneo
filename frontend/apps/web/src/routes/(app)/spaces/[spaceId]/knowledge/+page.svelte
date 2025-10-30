@@ -85,7 +85,7 @@
       {#if userCanSeeWebsites && !isPersonalSpace}
         <Page.TabTrigger tab="websites">{m.websites()}</Page.TabTrigger>
       {/if}
-      {#if isOrgSpace && userCanSeeIntegrations}
+      {#if userCanSeeIntegrations}
         <Page.TabTrigger tab="integrations">{m.integrations()}</Page.TabTrigger>
       {/if}
     </Page.Tabbar>

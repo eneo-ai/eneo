@@ -55,6 +55,7 @@ from intric.spaces.api.space_models import SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.database.tables.websites_spaces_table import WebsitesSpaces
+from intric.database.tables.integration_knowledge_spaces_table import IntegrationKnowledgesSpaces
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -1012,16 +1013,35 @@ class SpaceRepository:
             return await self.get_space_by_group_chat(group_chat_id=session.group_chat_id)
 
     async def _get_integration_knowledge_union(self, space_ids: list[UUID]):
+        """Fetch integration knowledge both directly owned and distributed via org space.
+
+        A space can access integration knowledge in two ways:
+        1. Direct ownership: integration_knowledge.space_id = space.id
+        2. Distribution: integration_knowledge is in org space and shared via junction table
+        """
+        ik = IntegrationKnowledge
+        iks = IntegrationKnowledgesSpaces
+
         stmt = (
-            sa.select(IntegrationKnowledge)
-            .where(IntegrationKnowledge.space_id.in_(space_ids))
+            sa.select(ik)
+            .where(
+                sa.or_(
+                    ik.space_id.in_(space_ids),  # Direct ownership
+                    sa.exists(
+                        sa.select(sa.literal(1))
+                        .select_from(iks)
+                        .where(iks.integration_knowledge_id == ik.id)
+                        .where(iks.space_id.in_(space_ids))  # Distributed to this space
+                    ),
+                )
+            )
             .options(
-                selectinload(IntegrationKnowledge.embedding_model),
-                selectinload(IntegrationKnowledge.user_integration)
+                selectinload(ik.embedding_model),
+                selectinload(ik.user_integration)
                     .selectinload(UserIntegrationDBModel.tenant_integration)
                     .selectinload(TenantIntegrationDBModel.integration),
             )
-            .order_by(IntegrationKnowledge.created_at)
+            .order_by(ik.created_at)
         )
         rows = await self.session.execute(stmt)
         return list(rows.scalars().all())
