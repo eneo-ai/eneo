@@ -227,9 +227,11 @@ class AssistantService:
             space_id=space.id,
             prompt=prompt,
             completion_model=completion_model,
+            completion_model_kwargs=ModelKwargs(**(template.completion_model_kwargs or {})),
             attachments=attachments,
             collections=collections,
             template=template,
+            description=template.description,
         )
 
         space.add_assistant(assistant)

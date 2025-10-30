@@ -7,6 +7,7 @@
   import CreateAssistantBackdrop from "./CreateAssistantBackdrop.svelte";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
+  import type { Settings } from "@intric/intric-js";
 
   const {
     state: { currentSpace },
@@ -19,15 +20,19 @@
     state: { currentStep, createButtonLabel, creationMode, showCreateDialog }
   } = getTemplateController();
 
-  let openAssistantAfterCreation = true;
-  let userTouchedToggle = false;
+  let { settings }: { settings: Settings } = $props();
+
+  let openAssistantAfterCreation = $state(true);
+  let userTouchedToggle = $state(false);
 
   function disableEditorOnTemplate(creationMode: "blank" | "template") {
     if (userTouchedToggle) return;
     openAssistantAfterCreation = creationMode === "blank";
   }
 
-  $: disableEditorOnTemplate($creationMode);
+  $effect(() => {
+    disableEditorOnTemplate($creationMode);
+  });
 </script>
 
 <Dialog.Root openController={showCreateDialog} on:close={resetForm}>
@@ -54,7 +59,7 @@
       {#if $currentStep === "wizard"}
         <TemplateWizard></TemplateWizard>
       {:else}
-        <TemplateSelector></TemplateSelector>
+        <TemplateSelector {settings}></TemplateSelector>
         <div class="absolute top-0 right-0 h-52 w-72 overflow-hidden">
           <CreateAssistantBackdrop></CreateAssistantBackdrop>
         </div>

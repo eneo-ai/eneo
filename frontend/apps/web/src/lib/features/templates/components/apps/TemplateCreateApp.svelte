@@ -7,6 +7,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import CreateAppBackdrop from "./CreateAppBackdrop.svelte";
   import { m } from "$lib/paraglide/messages";
+  import type { Settings } from "@intric/intric-js";
 
   const {
     state: { currentSpace },
@@ -19,15 +20,19 @@
     resetForm
   } = getTemplateController();
 
-  let openAppAfterCreation = false;
-  let userTouchedToggle = false;
+  let { settings }: { settings: Settings } = $props();
+
+  let openAppAfterCreation = $state(false);
+  let userTouchedToggle = $state(false);
 
   function disableEditorOnTemplate(creationMode: "blank" | "template") {
     if (userTouchedToggle) return;
     openAppAfterCreation = creationMode === "blank";
   }
 
-  $: disableEditorOnTemplate($creationMode);
+  $effect(() => {
+    disableEditorOnTemplate($creationMode);
+  });
 </script>
 
 <Dialog.Root openController={showCreateDialog} on:close={resetForm}>
@@ -54,7 +59,7 @@
       {#if $currentStep === "wizard"}
         <TemplateWizard></TemplateWizard>
       {:else}
-        <TemplateSelector></TemplateSelector>
+        <TemplateSelector {settings}></TemplateSelector>
 
         <div class="absolute top-0 right-0 h-52 w-72 overflow-hidden">
           <CreateAppBackdrop></CreateAppBackdrop>

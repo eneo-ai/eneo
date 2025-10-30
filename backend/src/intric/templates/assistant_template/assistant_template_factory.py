@@ -17,7 +17,7 @@ class AssistantTemplateFactory:
     def create_assistant_template(
         item: "AssistantTemplateDBModel",
     ) -> AssistantTemplate:
-        wizard = AssistantTemplateWizard(**item.wizard)
+        wizard = AssistantTemplateWizard.model_validate(item.wizard) if item.wizard else None
         return AssistantTemplate(
             id=item.id,
             name=item.name,
@@ -30,6 +30,14 @@ class AssistantTemplateFactory:
             updated_at=item.updated_at,
             created_at=item.created_at,
             organization=item.organization,
+            tenant_id=item.tenant_id,
+            deleted_at=item.deleted_at,
+            original_snapshot=item.original_snapshot,
+            deleted_by_user_id=item.deleted_by_user_id,
+            restored_by_user_id=item.restored_by_user_id,
+            restored_at=item.restored_at,
+            is_default=item.is_default,
+            icon_name=item.icon_name,
         )
 
     @staticmethod

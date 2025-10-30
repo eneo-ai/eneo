@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 class TemplateWizard(BaseModel):
@@ -31,7 +31,7 @@ class AssistantTemplateOrganization(BaseModel):
 class AssistantInTemplatePublic(BaseModel):
     name: str
     completion_model: Optional[CompletionModelPublicAssistantTemplate]
-    completion_model_kwargs: dict = Field(default={})
+    completion_model_kwargs: dict = Field(default_factory=dict)
     prompt: Optional[PromptPublicAssistantTemplate]
 
 
@@ -46,6 +46,8 @@ class AssistantTemplatePublic(BaseModel):
     type: Literal["assistant"]
     wizard: AssistantTemplateWizard
     organization: AssistantTemplateOrganization
+    is_default: bool = False
+    icon_name: Optional[str] = None
 
 
 class AssistantTemplateListPublic(BaseModel):
@@ -65,7 +67,89 @@ class AssistantTemplateCreate(BaseModel):
     organization: Optional[str] = None
     completion_model_kwargs: Optional[dict] = {}
     wizard: AssistantTemplateWizard
+    icon_name: Optional[str] = None
 
 
-class AssistantTemplateUpdate(AssistantTemplateCreate):
-    pass
+class AssistantTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    prompt: Optional[str] = None
+    organization: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    completion_model_id: Optional[UUID] = None
+    wizard: Optional[AssistantTemplateWizard] = None
+    icon_name: Optional[str] = None
+
+
+# Admin-specific models for tenant-scoped templates
+
+class AssistantTemplateAdminPublic(BaseModel):
+    """Admin view of template with tenant fields."""
+    id: UUID
+    name: str
+    description: str
+    category: str
+    prompt_text: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
+    completion_model_id: Optional[UUID] = None
+    completion_model_name: Optional[str] = None
+    wizard: Optional[AssistantTemplateWizard] = None
+    organization: str
+    tenant_id: UUID
+    deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[UUID] = None
+    restored_at: Optional[datetime] = None
+    restored_by_user_id: Optional[UUID] = None
+    original_snapshot: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+    usage_count: int = 0  # Number of assistants created from this template
+    is_default: bool = False
+    icon_name: Optional[str] = None
+
+
+class AssistantTemplateAdminListPublic(BaseModel):
+    """Admin list response."""
+    items: list[AssistantTemplateAdminPublic]
+
+    @computed_field
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+class AssistantTemplateAdminCreate(BaseModel):
+    """Admin template creation request."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
+    category: str = Field(..., min_length=1, max_length=100)
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
+    wizard: Optional[AssistantTemplateWizard] = None
+    icon_name: Optional[str] = Field(None, max_length=100)
+
+
+class AssistantTemplateAdminUpdate(BaseModel):
+    """Admin template update request (PATCH semantics)."""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, min_length=1, max_length=2000)
+    category: Optional[str] = Field(None, min_length=1, max_length=100)
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    completion_model_id: Optional[UUID] = None
+    wizard: Optional[AssistantTemplateWizard] = None
+    icon_name: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("name", "description", "category", "icon_name", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        """Convert empty strings to None to allow clearing optional fields."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
+
+class AssistantTemplateToggleDefaultRequest(BaseModel):
+    """Request to toggle template as default/featured."""
+    is_default: bool

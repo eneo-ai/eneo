@@ -11,7 +11,7 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
-from intric.settings.settings import GetModelsResponse, SettingsPublic
+from intric.settings.settings import GetModelsResponse, SettingsPublic, TemplateSettingUpdate
 
 logger = get_logger(__name__)
 
@@ -66,3 +66,48 @@ def get_formats():
     return to_paginated_response(
         TextMimeTypes.values() + AudioMimeTypes.values() + ImageMimeTypes.values()
     )
+
+
+@router.patch(
+    "/templates",
+    response_model=SettingsPublic,
+    summary="Toggle template feature",
+    description="""
+Enable or disable the template management feature for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `using_templates` feature flag for your tenant
+- When disabled: Template gallery returns empty list (not error)
+- When enabled: Users can see and use tenant templates
+- Change takes effect immediately (no reload required)
+
+**Example Request:**
+```json
+{
+  "enabled": true
+}
+```
+
+**Example Response:**
+```json
+{
+  "chatbot_widget": {},
+  "using_templates": true
+}
+```
+    """,
+)
+async def update_template_setting(
+    data: TemplateSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Toggle template feature for tenant.
+
+    Enables or disables the template management feature for the entire tenant.
+    Only admin users can modify this setting.
+    """
+    service = container.settings_service()
+    return await service.update_template_setting(enabled=data.enabled)

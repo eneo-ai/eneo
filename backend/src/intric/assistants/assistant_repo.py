@@ -15,6 +15,7 @@ from intric.database.tables.assistant_table import (
     AssistantsGroups,
     AssistantsWebsites,
 )
+from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.integration_table import IntegrationKnowledge
@@ -60,7 +61,7 @@ class AssistantRepository:
             .selectinload(CrawlRuns.job),
             selectinload(Assistants.websites).selectinload(Websites.embedding_model),
             selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
-            selectinload(Assistants.template),
+            selectinload(Assistants.template).selectinload(AssistantTemplates.completion_model),
             selectinload(Assistants.integration_knowledge_list).selectinload(
                 IntegrationKnowledge.embedding_model
             ),

@@ -1,6 +1,10 @@
 import type { AppTemplate, AssistantTemplate, Intric, JSONRequestBody } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
-import { appTemplateCategories, assistantTemplateCategories } from "./TemplateCategories";
+import {
+  appTemplateCategories,
+  assistantTemplateCategories,
+  getCategoryInfo
+} from "./TemplateCategories";
 
 export type GenericTemplate = {
   [K in keyof AssistantTemplate & keyof AppTemplate]: AssistantTemplate[K] | AppTemplate[K];
@@ -46,10 +50,23 @@ export function createAssistantTemplateAdapter(params: {
       };
     },
     getCategorisedTemplates(templates) {
-      return Object.entries(assistantTemplateCategories).map(([category, info]) => {
+      // Group templates by category dynamically (no filtering)
+      const templatesByCategory = new Map<string, GenericTemplate[]>();
+
+      for (const template of templates) {
+        const category = template.category || "misc";
+        if (!templatesByCategory.has(category)) {
+          templatesByCategory.set(category, []);
+        }
+        templatesByCategory.get(category)!.push(template);
+      }
+
+      // Convert to category sections with titles and descriptions
+      return Array.from(templatesByCategory.entries()).map(([category, categoryTemplates]) => {
+        const info = getCategoryInfo(category, assistantTemplateCategories);
         return {
           ...info,
-          templates: templates.filter((template) => template.category === category)
+          templates: categoryTemplates
         };
       });
     }
@@ -78,10 +95,23 @@ export function createAppTemplateAdapter(params: {
       };
     },
     getCategorisedTemplates(templates) {
-      return Object.entries(appTemplateCategories).map(([category, info]) => {
+      // Group templates by category dynamically (no filtering)
+      const templatesByCategory = new Map<string, GenericTemplate[]>();
+
+      for (const template of templates) {
+        const category = template.category || "misc";
+        if (!templatesByCategory.has(category)) {
+          templatesByCategory.set(category, []);
+        }
+        templatesByCategory.get(category)!.push(template);
+      }
+
+      // Convert to category sections with titles and descriptions
+      return Array.from(templatesByCategory.entries()).map(([category, categoryTemplates]) => {
+        const info = getCategoryInfo(category, appTemplateCategories);
         return {
           ...info,
-          templates: templates.filter((template) => template.category === category)
+          templates: categoryTemplates
         };
       });
     }
