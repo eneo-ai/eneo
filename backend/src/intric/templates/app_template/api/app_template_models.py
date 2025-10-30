@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from intric.apps.apps.api.app_models import InputFieldType
 
@@ -76,7 +76,7 @@ class AppTemplateCreate(BaseModel):
     category: str
     prompt: str
     organization: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = {}
+    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
     wizard: AppTemplateWizard
     input_type: str
     input_description: Optional[str]
@@ -96,6 +96,7 @@ class AppTemplateUpdate(BaseModel):
     prompt: Optional[str] = None
     organization: Optional[str] = None
     completion_model_kwargs: Optional[dict] = None
+    completion_model_id: Optional[UUID] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
     input_description: Optional[str] = None
@@ -111,7 +112,9 @@ class AppTemplateAdminPublic(BaseModel):
     description: str
     category: str
     prompt_text: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = {}
+    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
+    completion_model_id: Optional[UUID] = None
+    completion_model_name: Optional[str] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: str
     input_description: Optional[str] = None
@@ -142,10 +145,10 @@ class AppTemplateAdminListPublic(BaseModel):
 class AppTemplateAdminCreate(BaseModel):
     """Admin template creation request."""
     name: str
-    description: str
+    description: Optional[str] = None
     category: str
     prompt: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = {}
+    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
     wizard: Optional[AppTemplateWizard] = None
     input_type: str
     input_description: Optional[str] = None
@@ -159,10 +162,19 @@ class AppTemplateAdminUpdate(BaseModel):
     category: Optional[str] = None
     prompt: Optional[str] = None
     completion_model_kwargs: Optional[dict] = None
+    completion_model_id: Optional[UUID] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
     input_description: Optional[str] = None
     icon_name: Optional[str] = None
+
+    @field_validator("name", "description", "category", "icon_name", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        """Convert empty strings to None to allow clearing optional fields."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 
 class AppTemplateToggleDefaultRequest(BaseModel):

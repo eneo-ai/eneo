@@ -28,9 +28,10 @@
   let iconName = $state<string | null>(data.template.icon_name || null);
   let promptText = $state(data.template.prompt_text || "");
   let completionModel = $state(
-    data.completionModels?.find(m => m.name === data.template.completion_model_name) ||
-    data.completionModels?.[0] ||
-    null
+    data.completionModels?.find(m =>
+      m.id === data.template.completion_model_id ||
+      m.name === data.template.completion_model_name
+    ) || data.completionModels?.[0] || null
   );
   let completionModelKwargs = $state(data.template.completion_model_kwargs || {});
   let isSaving = $state(false);
@@ -116,6 +117,7 @@
         description,
         category,
         prompt: promptText,  // Backend expects string, not object
+        completion_model_id: completionModel?.id,
         completion_model_kwargs: completionModelKwargs,
         input_type: inputType,  // Single string, not array
         input_description: inputDescription || undefined,

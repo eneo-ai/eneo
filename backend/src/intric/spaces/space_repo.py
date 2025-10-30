@@ -17,7 +17,9 @@ from intric.database.tables.ai_models_table import (
     TranscriptionModelSettings,
 )
 from intric.database.tables.app_table import Apps, AppsFiles, AppsPrompts
+from intric.database.tables.app_template_table import AppTemplates
 from intric.database.tables.assistant_table import Assistants, AssistantsFiles
+from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
@@ -533,7 +535,7 @@ class SpaceRepository:
                 selectinload(Assistants.assistant_groups),
                 selectinload(Assistants.assistant_integration_knowledge),
                 selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
-                selectinload(Assistants.template),
+                selectinload(Assistants.template).selectinload(AssistantTemplates.completion_model),
             )
             .order_by(Assistants.created_at)
         )
@@ -568,6 +570,7 @@ class SpaceRepository:
             .options(
                 selectinload(Services.service_groups),
                 selectinload(Services.user),
+                selectinload(Services.completion_model),
             )
         )
 
@@ -655,7 +658,7 @@ class SpaceRepository:
             .options(
                 selectinload(Apps.input_fields),
                 selectinload(Apps.attachments).selectinload(AppsFiles.file),
-                selectinload(Apps.template),
+                selectinload(Apps.template).selectinload(AppTemplates.completion_model),
             )
             .order_by(Apps.created_at)
         )

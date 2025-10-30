@@ -1921,15 +1921,12 @@ export interface components {
       /** Name */
       name: string;
       /** Description */
-      description: string;
+      description?: string | null;
       /** Category */
       category: string;
       /** Prompt */
       prompt?: string | null;
-      /**
-       * Completion Model Kwargs
-       * @default {}
-       */
+      /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
       } | null;
@@ -1969,13 +1966,14 @@ export interface components {
       category: string;
       /** Prompt Text */
       prompt_text?: string | null;
-      /**
-       * Completion Model Kwargs
-       * @default {}
-       */
+      /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
       } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      /** Completion Model Name */
+      completion_model_name?: string | null;
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -2040,6 +2038,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type?: string | null;
@@ -2274,10 +2274,7 @@ export interface components {
       /** Name */
       name: string;
       completion_model: components["schemas"]["CompletionModelPublicAssistantTemplate"] | null;
-      /**
-       * Completion Model Kwargs
-       * @default {}
-       */
+      /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
@@ -2379,7 +2376,6 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      /** @default {} */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Logging Enabled
@@ -2420,15 +2416,12 @@ export interface components {
       /** Name */
       name: string;
       /** Description */
-      description: string;
+      description?: string | null;
       /** Category */
       category: string;
       /** Prompt */
       prompt?: string | null;
-      /**
-       * Completion Model Kwargs
-       * @default {}
-       */
+      /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
       } | null;
@@ -2464,13 +2457,14 @@ export interface components {
       category: string;
       /** Prompt Text */
       prompt_text?: string | null;
-      /**
-       * Completion Model Kwargs
-       * @default {}
-       */
+      /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
       } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      /** Completion Model Name */
+      completion_model_name?: string | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Organization */
       organization: string;
@@ -2531,6 +2525,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -5744,7 +5740,6 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      /** @default {} */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Groups
@@ -5844,7 +5839,6 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      /** @default {} */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Permissions

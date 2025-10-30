@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 from intric.main.exceptions import (
     NotFoundException,
@@ -156,6 +157,9 @@ class AppTemplateService:
                 )
             raise
 
+        # Eagerly load relationship to prevent lazy-load I/O in async context
+        await self.session.refresh(template_record, ["completion_model"])
+
         return self.factory.create_app_template(item=template_record)
 
     @validate_permissions(Permission.ADMIN)
@@ -213,6 +217,8 @@ class AppTemplateService:
             update_values["wizard"] = data.wizard.model_dump() if data.wizard else None
         if data.completion_model_kwargs is not None:
             update_values["completion_model_kwargs"] = data.completion_model_kwargs
+        if data.completion_model_id is not None:
+            update_values["completion_model_id"] = data.completion_model_id
         if data.input_type is not None:
             update_values["input_type"] = data.input_type
         if data.input_description is not None:
@@ -231,6 +237,9 @@ class AppTemplateService:
         )
         result = await self.session.execute(stmt)
         updated_record = result.scalar_one()
+
+        # Eagerly load relationship to prevent lazy-load I/O in async context
+        await self.session.refresh(updated_record, ["completion_model"])
 
         return self.factory.create_app_template(item=updated_record)
 
@@ -297,6 +306,9 @@ class AppTemplateService:
         result = await self.session.execute(stmt)
         await self.session.flush()
         updated_record = result.scalar_one()
+
+        # Eagerly load relationship to prevent lazy-load I/O in async context
+        await self.session.refresh(updated_record, ["completion_model"])
 
         return self.factory.create_app_template(item=updated_record)
 
@@ -396,6 +408,9 @@ class AppTemplateService:
         result = await self.session.execute(stmt)
         restored_record = result.scalar_one()
 
+        # Eagerly load relationship to prevent lazy-load I/O in async context
+        await self.session.refresh(restored_record, ["completion_model"])
+
         return self.factory.create_app_template(item=restored_record)
 
     @validate_permissions(Permission.ADMIN)
@@ -491,6 +506,7 @@ class AppTemplateService:
                 AppTemplates.deleted_at.is_(None)
             )
             .group_by(AppTemplates.id)
+            .options(selectinload(AppTemplates.completion_model))
         )
 
         result = await self.session.execute(stmt)
@@ -543,6 +559,7 @@ class AppTemplateService:
             )
             .group_by(AppTemplates.id)
             .order_by(AppTemplates.deleted_at.desc())
+            .options(selectinload(AppTemplates.completion_model))
         )
 
         result = await self.session.execute(stmt)
