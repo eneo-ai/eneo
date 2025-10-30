@@ -103,3 +103,16 @@ async def delete_info_blob(
         await group_service.update_group_size(info_blob_deleted.group_id)
 
     return to_info_blob_public(info_blob_deleted)
+
+
+@router.get(
+    "/spaces/{space_id}/info-blobs/",
+    response_model=PaginatedResponse[InfoBlobPublicNoText],
+)
+async def get_space_info_blobs(
+    space_id: str = Path(...),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.info_blob_service()
+    blobs = await service.get_for_space(space_id)
+    return protocol.to_paginated_response([to_info_blob_public_no_text(b) for b in blobs])

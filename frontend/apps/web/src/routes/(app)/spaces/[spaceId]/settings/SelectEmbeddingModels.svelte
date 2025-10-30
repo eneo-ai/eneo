@@ -30,6 +30,8 @@
   );
 
   let loading = new Set<string>();
+  let isOrgSpace = $currentSpace.organization;
+
   async function toggleModel(model: EmbeddingModel) {
     loading.add(model.id);
     loading = loading;
@@ -68,7 +70,11 @@
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
+      {#if isOrgSpace}
+        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning_organization()}
+      {:else}
         <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning()}
+      {/if}
       </p>
     {/if}
   </svelte:fragment>

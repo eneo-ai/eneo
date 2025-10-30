@@ -37,6 +37,18 @@ function SpacesManager(data: SpacesManagerParams) {
 
   const userSpaces = writable(data.spaces);
   const currentSpace = writable(data.currentSpace);
+  const organizationSpaceIdFromList = derived(userSpaces, ($spaces) => {
+    return $spaces.find((s) => isOrganizationSpace(s))?.id ?? null;
+  });
+
+  const organizationSpaceId = derived(
+    [organizationSpaceIdFromList],
+    ([$listId]) => $listId
+  );
+
+  const nonOrgSpaces = derived(userSpaces, ($spaces) =>
+    $spaces.filter((s) => !isOrganizationSpace(s))
+  );
 
   // Function definitions --------------------------------------------------------
   /** Will update the current space if a new space is passed in via page data */
@@ -154,10 +166,10 @@ function SpacesManager(data: SpacesManagerParams) {
 
   return Object.freeze({
     state: {
-      accessibleSpaces: {
-        subscribe: userSpaces.subscribe
-      },
-      currentSpace: derivedCurrentSpace(currentSpace)
+      accessibleSpaces: { subscribe: nonOrgSpaces.subscribe },
+      nonOrgSpaces,
+      currentSpace: derivedCurrentSpace(currentSpace),
+      organizationSpaceId,
     },
     refreshSpaces,
     refreshCurrentSpace,
@@ -167,6 +179,10 @@ function SpacesManager(data: SpacesManagerParams) {
     watchPageData,
     updateDefaultAssistant
   });
+}
+
+function isOrganizationSpace(space: SpaceSparse) {
+  return space.organization === true;
 }
 
 export { initSpacesManager, getSpacesManager };
@@ -181,7 +197,13 @@ function derivedCurrentSpace(space: Readable<Space>) {
 
     return {
       ...$space,
-      routeId: $space.personal ? "personal" : $space.id,
+      organization: isOrganizationSpace($space),
+      routeId: 
+        $space.personal 
+          ? "personal" 
+          : isOrganizationSpace($space) 
+            ? "organization"
+            : $space.id,
       members: $space.members.items,
       applications: {
         assistants: $space.applications.assistants.items,
