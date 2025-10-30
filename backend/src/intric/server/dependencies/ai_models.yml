@@ -325,7 +325,7 @@ completion_models:
   - name: 'gemma3-27b-it'
     nickname: 'Gemma 3 27B'
     family: 'openai'
-    token_limit: 8192
+    token_limit: 128000
     stability: 'stable'
     is_deprecated: false
     hosting: 'swe'
