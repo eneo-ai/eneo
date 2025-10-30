@@ -3870,7 +3870,8 @@ export interface components {
       | "Mistral"
       | "KBLab"
       | "Google"
-      | "Berget";
+      | "Berget"
+      | "GDM";
     /**
      * ModelStability
      * @enum {string}
@@ -5340,7 +5341,7 @@ export interface components {
      * @description Request model for setting tenant API credentials.
      *
      * Provider-specific field requirements:
-     * - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
      * - vLLM: api_key + endpoint (required)
      * - Azure: api_key + endpoint + api_version (required)
      *
@@ -8651,7 +8652,8 @@ export interface operations {
                 | "Mistral"
                 | "KBLab"
                 | "Google"
-                | "Berget";
+                | "Berget"
+                | "GDM";
               /**
                * ModelStability
                * @enum {string}
@@ -8951,7 +8953,8 @@ export interface operations {
                 | "Mistral"
                 | "KBLab"
                 | "Google"
-                | "Berget";
+                | "Berget"
+                | "GDM";
               /**
                * ModelStability
                * @enum {string}
@@ -14249,7 +14252,15 @@ export interface operations {
     parameters: {
       path: {
         tenant_id: string;
-        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
       };
     };
     requestBody: {
@@ -14280,7 +14291,15 @@ export interface operations {
     parameters: {
       path: {
         tenant_id: string;
-        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
       };
     };
     responses: {

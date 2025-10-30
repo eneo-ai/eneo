@@ -43,6 +43,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
+        # Store the original model name for provider detection (before any transformation)
+        # This is critical for correct credential resolution with custom providers
+        self._original_model_name = model.litellm_model_name
+
         # Get provider configuration based on litellm_model_name
         provider = LiteLLMProviderRegistry.get_provider_for_model(model.litellm_model_name)
 
@@ -66,7 +70,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             litellm_model_name: The LiteLLM model name (e.g., 'azure/text-embedding-ada-002', 'vllm/e5-mistral-7b')
 
         Returns:
-            Provider name (openai, azure, anthropic, berget, mistral, ovhcloud, vllm)
+            Provider name (openai, azure, anthropic, berget, gdm, mistral, ovhcloud, vllm)
         """
         if litellm_model_name.startswith("azure/"):
             return "azure"
@@ -74,6 +78,8 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             return "anthropic"
         elif litellm_model_name.startswith("berget/"):
             return "berget"
+        elif litellm_model_name.startswith("gdm/"):
+            return "gdm"
         elif litellm_model_name.startswith("mistral/"):
             return "mistral"
         elif litellm_model_name.startswith("ovhcloud/"):
@@ -118,6 +124,11 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     )
     async def _get_embeddings(self, texts: list[str]):
         try:
+            # Guard against empty input - GDM API requires non-empty input
+            if not texts or len(texts) == 0:
+                logger.warning("[LiteLLM] Empty text list provided to embeddings, returning empty result")
+                return []
+
             # Prepare the parameters for the embeddings
             params = {"input": texts, "model": self.litellm_model}
 
@@ -132,7 +143,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
             # Inject tenant-specific API key if credential_resolver is provided
             if self.credential_resolver:
-                provider = self._detect_provider(self.litellm_model)
+                provider = self._detect_provider(self._original_model_name)
                 try:
                     api_key = self.credential_resolver.get_api_key(provider)
                     params['api_key'] = api_key
@@ -189,7 +200,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
         except litellm.AuthenticationError:
             # Strict error handling: NO fallback if tenant credential exists but is invalid
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             tenant_id = self.credential_resolver.tenant.id if self.credential_resolver and self.credential_resolver.tenant else None
             tenant_name = self.credential_resolver.tenant.name if self.credential_resolver and self.credential_resolver.tenant else None
 
