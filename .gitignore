@@ -34,3 +34,4 @@ specs/
 .devcontainer/claude-config/
 .code/
 .mcp.json
+install-claude.sh

@@ -2,6 +2,7 @@ from typing import Optional
 
 from .base_provider import BaseLiteLLMProvider
 from .berget_provider import BergetProvider
+from .gdm_provider import GDMProvider
 
 
 class LiteLLMProviderRegistry:
@@ -30,6 +31,10 @@ class LiteLLMProviderRegistry:
         # Check for Berget models by litellm_model_name prefix
         if litellm_model_name and litellm_model_name.startswith("berget/"):
             return BergetProvider()
-        
+
+        # Check for GDM models by litellm_model_name prefix
+        if litellm_model_name and litellm_model_name.startswith("gdm/"):
+            return GDMProvider()
+
         # Default provider for standard LiteLLM-supported providers
         return cls._default_provider
