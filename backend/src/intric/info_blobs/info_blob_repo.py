@@ -1,5 +1,4 @@
 from uuid import UUID
-from typing import Optional
 
 import sqlalchemy as sa
 from sqlalchemy.orm import defer, selectinload
@@ -29,7 +28,9 @@ class InfoBlobRepository:
             InfoBlobInDB,
             with_options=[
                 selectinload(InfoBlobs.group),
-                selectinload(InfoBlobs.group).selectinload(CollectionsTable.embedding_model),
+                selectinload(InfoBlobs.group).selectinload(
+                    CollectionsTable.embedding_model
+                ),
                 selectinload(InfoBlobs.embedding_model),
                 selectinload(InfoBlobs.website),
             ],
@@ -49,7 +50,9 @@ class InfoBlobRepository:
         return website
 
     async def _get_integration_knowledge(self, knowledge_id: UUID):
-        stmt = sa.select(IntegrationKnowledge).where(IntegrationKnowledge.id == knowledge_id)
+        stmt = sa.select(IntegrationKnowledge).where(
+            IntegrationKnowledge.id == knowledge_id
+        )
         knowledge = await self.session.scalar(stmt)
 
         return knowledge
@@ -98,7 +101,9 @@ class InfoBlobRepository:
 
         stmt = (
             sa.update(InfoBlobs)
-            .values(size=sa.func.coalesce(chunks_size_subquery + current_size_subquery, 0))
+            .values(
+                size=sa.func.coalesce(chunks_size_subquery + current_size_subquery, 0)
+            )
             .where(InfoBlobs.id == info_blob_id)
             .returning(InfoBlobs)
         )
@@ -128,12 +133,16 @@ class InfoBlobRepository:
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
 
-    async def delete_by_title_and_group(self, title: str, group_id: UUID) -> InfoBlobInDB:
+    async def delete_by_title_and_group(
+        self, title: str, group_id: UUID
+    ) -> InfoBlobInDB:
         return await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
 
-    async def delete_by_title_and_website(self, title: str, website_id: UUID) -> InfoBlobInDB:
+    async def delete_by_title_and_website(
+        self, title: str, website_id: UUID
+    ) -> InfoBlobInDB:
         return await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.website_id: website_id}
         )
@@ -152,14 +161,18 @@ class InfoBlobRepository:
         return await self.delegate.get_models_from_query(query)
 
     async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
-        return await self.delegate.filter_by(conditions={InfoBlobs.website_id: website_id})
+        return await self.delegate.filter_by(
+            conditions={InfoBlobs.website_id: website_id}
+        )
 
     async def delete(self, id: int) -> InfoBlobInDB:
         return await self.delegate.delete(id)
 
     async def get_count_of_group(self, group_id: UUID):
         stmt = (
-            sa.select(sa.func.count()).select_from(InfoBlobs).where(InfoBlobs.group_id == group_id)
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.group_id == group_id)
         )
 
         return await self.session.scalar(stmt)
@@ -209,105 +222,48 @@ class InfoBlobRepository:
         result = await self.session.scalars(stmt)
         return list(result)
 
-    def _apply_space_scope(
-        self,
-        stmt: sa.Select,
-        *,
-        space_ids: list[UUID],
-        include_groups: bool = True,
-        include_websites: bool = True,
-        include_integrations: bool = True,
-    ) -> sa.Select:
-        """
-        Begränsa InfoBlobs via källornas space_id. Joina bara det som behövs.
-        """
-        predicates = []
-
-        if include_groups:
-            # LEFT JOIN så att vi kan OR:a flera källtyper samtidigt
-            stmt = stmt.join(
-                CollectionsTable,
-                CollectionsTable.id == InfoBlobs.group_id,
-                isouter=True,
-            )
-            predicates.append(CollectionsTable.space_id.in_(space_ids))
-
-        if include_websites:
-            stmt = stmt.join(
-                Websites,
-                Websites.id == InfoBlobs.website_id,
-                isouter=True,
-            )
-            predicates.append(Websites.space_id.in_(space_ids))
-
-        if include_integrations:
-            stmt = stmt.join(
-                IntegrationKnowledge,
-                IntegrationKnowledge.id == InfoBlobs.integration_knowledge_id,
-                isouter=True,
-            )
-            predicates.append(IntegrationKnowledge.space_id.in_(space_ids))
-
-        if predicates:
-            stmt = stmt.where(sa.or_(*predicates))
-
-        return stmt
-    
-    async def list_by_space_ids(
-        self,
-        space_ids: list[UUID],
-        *,
-        include_groups: bool = True,
-        include_websites: bool = True,
-        include_integrations: bool = True,
-        limit: Optional[int] = None,
-        order_desc: bool = True,
-        load_text: bool = False,
-    ) -> list[InfoBlobInDB]:
-        """
-        Returnerar InfoBlobs vars källa (group/website/integration) ligger i något av space_ids.
-        """
-        stmt = sa.select(InfoBlobs)
-        if order_desc:
-            stmt = stmt.order_by(InfoBlobs.created_at.desc())
-        else:
-            stmt = stmt.order_by(InfoBlobs.created_at.asc())
-
-        stmt = self._apply_space_scope(
-            stmt,
-            space_ids=space_ids,
-            include_groups=include_groups,
-            include_websites=include_websites,
-            include_integrations=include_integrations,
-        )
-
-        stmt = stmt.options(selectinload(InfoBlobs.group))
-        stmt = stmt.options(selectinload(InfoBlobs.embedding_model))
-        stmt = stmt.options(selectinload(InfoBlobs.website))
-        if not load_text:
-            stmt = stmt.options(defer(InfoBlobs.text))
-        if limit:
-            stmt = stmt.limit(limit)
-
-        return await self.delegate.get_models_from_query(stmt)
-
-    async def count_by_space_ids(
-        self,
-        space_ids: list[UUID],
-        *,
-        include_groups: bool = True,
-        include_websites: bool = True,
-        include_integrations: bool = True,
+    async def batch_delete_by_titles_and_website(
+        self, titles: list[str], website_id: UUID
     ) -> int:
+        """Delete multiple info blobs by titles in a single query.
+
+        Why: Reduces N queries to 1 query for better performance during re-crawls.
+        Uses SQLAlchemy's .in_() method for efficient batch deletion.
+
+        Args:
+            titles: List of blob titles to delete
+            website_id: Website UUID for tenant isolation
+
+        Returns:
+            Number of blobs deleted
         """
-        Antal blobs tillgängliga inom de angivna spaces (egen + org).
-        """
-        stmt = sa.select(sa.func.count()).select_from(InfoBlobs)
-        stmt = self._apply_space_scope(
-            stmt,
-            space_ids=space_ids,
-            include_groups=include_groups,
-            include_websites=include_websites,
-            include_integrations=include_integrations,
+        if not titles:
+            return 0
+
+        # Use SQLAlchemy's .in_() method for array-based deletion
+        # This is more efficient than N individual DELETE queries
+        stmt = sa.delete(InfoBlobs).where(
+            InfoBlobs.website_id == website_id, InfoBlobs.title.in_(titles)
         )
-        return int(await self.session.scalar(stmt) or 0)
+
+        result = await self.session.execute(stmt)
+        return result.rowcount
+
+    async def get_content_hash(self, website_id: UUID, title: str) -> bytes | None:
+        """Get content hash for a specific page.
+
+        Why: Enables content-based change detection to skip re-processing unchanged pages.
+        Uses composite index (website_id, title) for efficient lookup.
+
+        Args:
+            website_id: Website UUID
+            title: Page title/URL
+
+        Returns:
+            32-byte SHA-256 hash or None if page doesn't exist or hash not computed
+        """
+        stmt = sa.select(InfoBlobs.content_hash).where(
+            InfoBlobs.website_id == website_id, InfoBlobs.title == title
+        )
+        result = await self.session.scalar(stmt)
+        return result

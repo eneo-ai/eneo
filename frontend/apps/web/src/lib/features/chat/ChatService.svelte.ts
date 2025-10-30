@@ -28,9 +28,49 @@ export class ChatService {
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
 
+  // Track total tokens used in the current conversation
+  historyTokens = $state<number>(0);
+
+  // Track assistant prompt tokens separately so we only count them once
+  promptTokens = $state<number>(0);
+
+  // Track tokens for the message being composed
+  newPromptTokens = $state<number>(0);
+
+  // Separate tracking for text and file tokens to prevent race conditions
+  #textTokensApprox = $state<number>(0);
+  #fileTokensCache = $state<number>(0);
+  #lastCalculatedText = "";
+  #lastCalculatedAttachmentIds = new Set<string>();
+
+  // Track current state to avoid closure issues
+  #currentText = "";
+  #currentAttachmentIdString = "";
+
+  // Learn token density from API responses for better approximations
+  #learnedCharsPerToken = 4.0; // Default approximation, will be refined by API responses
+
+  // Cache token counts per file ID to avoid resets when adding/removing files
+  #fileTokenMap = new Map<string, number>();
+
+  // Debounce timer for token calculations
+  #tokenCalculationTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Debounce timer for new prompt token calculations
+  #newPromptTokenTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(data: Parameters<typeof this.init>[0]) {
     this.#intric = data.intric;
     this.init(data);
+
+    // Automatically calculate history tokens when conversation changes
+    $effect(() => {
+      // This will automatically run whenever currentConversation or its messages change.
+      // The calculateHistoryTokens method is already debounced, so this is safe.
+      if (this.currentConversation?.messages?.length > 0) {
+        this.calculateHistoryTokens();
+      }
+    });
   }
 
   init(data: {
@@ -52,15 +92,29 @@ export class ChatService {
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
         this.currentConversation = initialConversation;
+
+        // Initialize token count if the conversation has a total_history_tokens field
+        // This would come from backend when loading existing conversations
+        if ((initialConversation as any)?.total_history_tokens) {
+          this.historyTokens = (initialConversation as any).total_history_tokens;
+        } else {
+          // Calculate tokens for the loaded conversation
+          this.calculateHistoryTokens();
+        }
       },
       onNull: () => {
         this.currentConversation = emptyConversation();
+        this.historyTokens = 0;
       }
     });
   }
 
   newConversation() {
     this.currentConversation = emptyConversation();
+    // Reset token counters for new conversation
+    this.historyTokens = 0;
+    this.newPromptTokens = 0;
+    this.promptTokens = 0;
   }
 
   async loadConversations(args?: { limit?: number; reset?: boolean }) {
@@ -117,6 +171,15 @@ export class ChatService {
     try {
       const loaded = await this.#intric.conversations.get(conversation);
       this.currentConversation = loaded;
+
+      // Initialize token count if the conversation has a total_history_tokens field
+      // This would come from backend when loading existing conversations
+      if ((loaded as any)?.total_history_tokens) {
+        this.historyTokens = (loaded as any).total_history_tokens;
+      } else {
+        // Calculate tokens for the loaded conversation using the token-estimate endpoint
+        this.calculateHistoryTokens();
+      }
       return loaded;
     } catch (e) {
       if (browser) alert(`Error while loading conversation with id ${conversation.id}`);
@@ -131,6 +194,9 @@ export class ChatService {
     if (oldPartner !== newPartner) {
       this.newConversation();
       this.reloadHistory();
+      // Also reset new prompt tokens when partner changes
+      this.newPromptTokens = 0;
+      this.promptTokens = 0;
     }
   }
 
@@ -189,8 +255,35 @@ export class ChatService {
             },
             onIntricEvent: (event) => {
               ensureCurrentSession(event);
+
+              // Debug logging for token-related events only
+              if ((event as any).usage || event.intric_event_type === "token_usage") {
+                console.log('[ChatService] Received potential token event:', {
+                  eventType: event.intric_event_type,
+                  hasUsage: !!(event as any).usage,
+                  turnTokens: (event as any).usage?.turn_tokens,
+                  fullEvent: event
+                });
+              }
+
               if (event.intric_event_type === "generating_image") {
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
+              }
+
+              // Handle token usage events from backend
+              // The backend should send token count for this conversational turn
+              if ((event as any).usage?.turn_tokens) {
+                const turnTokens = (event as any).usage.turn_tokens;
+                const oldTokens = this.historyTokens;
+                this.historyTokens += turnTokens;
+                console.log('[ChatService] ✅ TOKEN UPDATE RECEIVED:', {
+                  turnTokens,
+                  oldTotal: oldTokens,
+                  newTotal: this.historyTokens
+                });
+              } else if (event.intric_event_type === "token_usage") {
+                // Also check for a dedicated token_usage event type
+                console.log('[ChatService] Received token_usage event but no turn_tokens found:', event);
               }
             }
           }
@@ -215,8 +308,255 @@ export class ChatService {
       }
 
       this.reloadHistory();
+
+      // The $effect in constructor now handles automatic token calculation
     }
   );
+
+  // New method to calculate tokens for the entire conversation history
+  async calculateHistoryTokens() {
+    // Don't calculate if no partner or messages
+    if (!this.#chatPartner?.id || !this.currentConversation?.messages?.length) {
+      return;
+    }
+
+    // Cancel any pending calculation
+    if (this.#tokenCalculationTimer) {
+      clearTimeout(this.#tokenCalculationTimer);
+    }
+
+    // Debounce the calculation
+    this.#tokenCalculationTimer = setTimeout(async () => {
+      try {
+        // Combine all message content (questions and answers)
+        const fullText = this.currentConversation.messages
+          .map(msg => {
+            let text = '';
+            if (msg.question) text += msg.question + '\n';
+            if (msg.answer) text += msg.answer + '\n';
+            return text;
+          })
+          .join('\n');
+
+        // Get file IDs from all messages
+        const fileIds = this.currentConversation.messages
+          .flatMap(msg => msg.files || [])
+          .filter(file => file.id)
+          .map(file => file.id);
+
+
+        // Use the token-estimate endpoint
+        const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
+          method: "post",
+          params: {
+            path: { id: this.#chatPartner.id }
+          },
+          requestBody: {
+            "application/json": {
+              text: fullText,
+              file_ids: fileIds
+            }
+          }
+        });
+
+        if (response) {
+          const breakdown = response.breakdown || {};
+          const promptTokens = breakdown.prompt ?? this.promptTokens;
+          const historyTokens = (breakdown.text || 0) + (breakdown.files || 0);
+
+          this.promptTokens = promptTokens;
+          this.historyTokens = historyTokens;
+
+          console.log(
+            `[ChatService] Token usage: ${(promptTokens + historyTokens).toLocaleString()} tokens ` +
+            `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${promptTokens})`
+          );
+        }
+      } catch (error) {
+        console.error('[ChatService] Token calculation failed, using fallback');
+        // Fallback to character-based approximation
+        const fallbackTokens = Math.ceil(
+          this.currentConversation.messages
+            .map(msg => (msg.question || '').length + (msg.answer || '').length)
+            .reduce((a, b) => a + b, 0) / 4
+        );
+        this.historyTokens = fallbackTokens;
+      }
+    }, 500); // 500ms debounce
+  }
+
+  // New method to calculate tokens for the message being composed
+  async calculateNewPromptTokens(text: string, attachments: { id: string; size?: number }[]) {
+    if (!this.#chatPartner?.id) {
+      this.newPromptTokens = 0;
+      this.#textTokensApprox = 0;
+      this.#fileTokensCache = 0;
+      return;
+    }
+
+    // Store current text to avoid closure issues
+    this.#currentText = text;
+
+    // --- IMMEDIATE UPDATE FOR RESPONSIVE UI ---
+    // Use learned token density for better approximations
+    this.#textTokensApprox = Math.ceil(text.length / this.#learnedCharsPerToken);
+
+    // Create a stable string representation of attachment IDs for comparison
+    const attachmentIds = attachments.map(a => a.id).filter(Boolean);
+    const attachmentIdString = attachmentIds.sort().join(',');
+
+    // Check if attachments have actually changed based on ID string
+    const attachmentsChanged = attachmentIdString !== this.#currentAttachmentIdString;
+
+    // If attachments changed, recalculate file tokens from cached values
+    if (attachmentsChanged) {
+      const estimateTokensFromSize = (fileSize?: number | null) => {
+        const fallbackSize = 100_000; // ~250 tokens fallback when size is unknown
+        const size = fileSize && fileSize > 0 ? fileSize : fallbackSize;
+        const bytesPerToken = 400; // generous average across supported formats
+        return Math.ceil(size / bytesPerToken);
+      };
+
+      // Calculate total file tokens from cached per-file values
+      let totalFileTokens = 0;
+      for (const fileId of attachmentIds) {
+        if (this.#fileTokenMap.has(fileId)) {
+          // Use cached value for files we've seen before
+          totalFileTokens += this.#fileTokenMap.get(fileId)!;
+        } else {
+          // Rough estimate for new files (will be updated by API)
+          const attachment = attachments.find(file => file.id === fileId);
+          const roughEstimate = estimateTokensFromSize(attachment?.size);
+          this.#fileTokenMap.set(fileId, roughEstimate);
+          totalFileTokens += roughEstimate;
+        }
+      }
+
+      // Remove cached tokens for files that are no longer present
+      const currentFileIdSet = new Set(attachmentIds);
+      for (const cachedFileId of this.#fileTokenMap.keys()) {
+        if (!currentFileIdSet.has(cachedFileId)) {
+          this.#fileTokenMap.delete(cachedFileId);
+        }
+      }
+
+      this.#fileTokensCache = totalFileTokens;
+      this.#currentAttachmentIdString = attachmentIdString;
+      this.#lastCalculatedAttachmentIds = new Set(attachmentIds);
+    }
+
+    // Immediately update with text approximation + cached file tokens
+    this.newPromptTokens = this.#textTokensApprox + this.#fileTokensCache;
+
+    // If no input at all, reset everything
+    if (text.trim().length === 0 && attachments.length === 0) {
+      this.newPromptTokens = 0;
+      this.#textTokensApprox = 0;
+      this.#fileTokensCache = 0;
+      this.#fileTokenMap.clear();
+      this.#lastCalculatedText = "";
+      this.#lastCalculatedAttachmentIds.clear();
+      return;
+    }
+
+    // --- DEBOUNCED API CALL FOR ACCURACY ---
+    if (this.#newPromptTokenTimer) {
+      clearTimeout(this.#newPromptTokenTimer);
+    }
+
+    // Store the request identifiers to check for staleness later
+    const requestText = text;
+    const requestAttachmentIdString = attachmentIdString;
+
+    this.#newPromptTokenTimer = setTimeout(async () => {
+      try {
+        // Check if this request is stale by comparing with CURRENT state (not closure)
+        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
+          return; // Silently skip stale requests
+        }
+
+        // Use the request attachment IDs that were captured at the time of the request
+        const fileIds = requestAttachmentIdString.split(',').filter(Boolean);
+
+        const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
+          method: "post",
+          params: {
+            path: { id: this.#chatPartner.id }
+          },
+          requestBody: {
+            "application/json": {
+              text,
+              file_ids: fileIds
+            }
+          }
+        });
+
+        if (response?.breakdown) {
+          const apiTextTokens = response.breakdown.text || 0;
+          const apiTextLength = text.length;
+
+          if (apiTextTokens > 0 && apiTextLength > 0) {
+            const newCharsPerToken = apiTextLength / apiTextTokens;
+            this.#learnedCharsPerToken = this.#learnedCharsPerToken * 0.8 + newCharsPerToken * 0.2;
+          }
+        }
+
+        // Double-check staleness after API returns using CURRENT state
+        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
+          return; // Silently skip stale responses
+        }
+
+        const breakdown = response?.breakdown;
+        if (breakdown) {
+
+          // Update per-file token cache with accurate values from API
+          if (response?.breakdown?.file_details) {
+            for (const [fileId, tokenCount] of Object.entries(response.breakdown.file_details)) {
+              this.#fileTokenMap.set(fileId, tokenCount as number);
+            }
+          }
+
+          // Update cached file tokens total
+          this.#fileTokensCache = breakdown.files || 0;
+
+          // Persist prompt tokens separately so we only count them once
+          const promptTokens = breakdown.prompt ?? this.promptTokens;
+          this.promptTokens = promptTokens;
+
+          // Calculate total tokens from breakdown without the assistant prompt
+          const totalNewTokens = (breakdown.text || 0) + (breakdown.files || 0);
+
+          // Update the total with accurate API result
+          this.newPromptTokens = totalNewTokens;
+
+          // Store the text that was calculated
+          this.#lastCalculatedText = requestText;
+        }
+      } catch (error) {
+        console.error('[ChatService] Token calculation failed, keeping approximation:', error);
+        // Keep the current approximation on error
+      }
+    }, 300); // 300ms debounce for API accuracy
+  }
+
+  // Method to cleanly reset all token tracking
+  resetNewPromptTokens() {
+    this.newPromptTokens = 0;
+    this.#textTokensApprox = 0;
+    this.#fileTokensCache = 0;
+    this.#fileTokenMap.clear();
+    this.#lastCalculatedText = "";
+    this.#lastCalculatedAttachmentIds.clear();
+    this.#currentText = "";
+    this.#currentAttachmentIdString = "";
+    // Keep learned ratio - it's useful across messages
+
+    // Cancel any pending API calls
+    if (this.#newPromptTokenTimer) {
+      clearTimeout(this.#newPromptTokenTimer);
+      this.#newPromptTokenTimer = null;
+    }
+  }
 }
 
 export const [getChatService, initChatService] = createClassContext("Chat service", ChatService);

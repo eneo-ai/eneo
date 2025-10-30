@@ -325,6 +325,29 @@ async def create_space_groups(
     response_model=WebsitePublic,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
+    summary="Create a website crawler",
+    description="""
+    Create a new website crawler that will extract content and make it available to assistants in this space.
+
+    **Update Intervals:**
+    - `never` (default): Manual crawls only
+    - `daily`: Automatic recrawl every day at 3 AM Swedish time
+    - `every_other_day`: Recrawl every 2 days
+    - `weekly`: Recrawl every Friday
+
+    **Example Request Body:**
+    ```json
+    {
+      "name": "Company Documentation",
+      "url": "https://docs.example.com",
+      "crawl_type": "crawl",
+      "download_files": true,
+      "update_interval": "daily"
+    }
+    ```
+
+    The crawl will start immediately upon creation.
+    """,
 )
 async def create_space_websites(
     id: UUID,
@@ -341,6 +364,8 @@ async def create_space_websites(
         crawl_type=website.crawl_type,
         update_interval=website.update_interval,
         embedding_model_id=(website.embedding_model.id if website.embedding_model else None),
+        http_auth_username=website.http_auth_username,
+        http_auth_password=website.http_auth_password,
     )
 
     return WebsitePublic.from_domain(website)

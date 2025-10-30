@@ -3,7 +3,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from intric.libs.clients import AsyncClient
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 
 if TYPE_CHECKING:
     pass
@@ -22,7 +22,7 @@ class FluxAdapter:
     def __init__(self):
         self.client = AsyncClient(base_url=self.BASE_URL)
         self.headers = {
-            "x-key": SETTINGS.flux_api_key,
+            "x-key": get_settings().flux_api_key,
             "Content-Type": "application/json",
         }
 

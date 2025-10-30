@@ -80,8 +80,7 @@
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
     >
       <a href="/">
-        <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"
-        ></EneoWordMark>
+        <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
         <IconEneo class="text-brand-intric -ml-0.5 block md:hidden" viewBox="0 0 330 330"
         ></IconEneo>
       </a>
@@ -113,7 +112,7 @@
 
       <JobManagerDropdown></JobManagerDropdown>
       <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu></ProfileMenu>
+      <ProfileMenu tenantFederationEnabled={data.featureFlags?.tenantFederationEnabled ?? false}></ProfileMenu>
     </nav>
   </header>
 

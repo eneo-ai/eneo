@@ -105,7 +105,8 @@
   <Dialog.Content width="medium">
     <Dialog.Title>{m.change_security_classification()}</Dialog.Title>
     <Dialog.Description
-      >{m.you_are_about_to_change_security_classification()}<br />{m.do_you_want_to_proceed()}</Dialog.Description
+      >{m.you_are_about_to_change_security_classification()}<br
+      />{m.do_you_want_to_proceed()}</Dialog.Description
     >
     <Dialog.Section class="flex flex-col gap-4 p-4">
       <div class="border-default flex flex-col gap-2 border-b">
@@ -132,7 +133,8 @@
           <div
             class="bg-positive-dimmer border-positive-default text-positive-stronger flex items-center gap-2 border-l-4 p-2"
           >
-            <IconCheck></IconCheck> {m.no_changes_in_functionality()}
+            <IconCheck></IconCheck>
+            {m.no_changes_in_functionality()}
           </div>
         {/if}
       </div>

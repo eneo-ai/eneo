@@ -58,8 +58,10 @@
 {#snippet defaultAssistantWelcomeMessage()}
   <div class="max-w-[640px]">
     <div class="relative">
-      <h3 class="b-1 text-2xl font-extrabold">{m.hi_firstname({ firstName: $userInfo.firstName })}</h3>
-      <p class="text-secondary max-w-[50ch] pr-20 pt-2">
+      <h3 class="b-1 text-2xl font-extrabold">
+        {m.hi_firstname({ firstName: $userInfo.firstName })}
+      </h3>
+      <p class="text-secondary max-w-[50ch] pt-2 pr-20">
         {m.personal_assistant_welcome()}
       </p>
     </div>
@@ -163,7 +165,10 @@
               {m.load_more_conversations()}</Button
             >
             <p role="status" aria-live="polite">
-              {m.loaded_conversations_count({ loaded: chat.loadedConversations.length, total: chat.totalConversations })}
+              {m.loaded_conversations_count({
+                loaded: chat.loadedConversations.length,
+                total: chat.totalConversations
+              })}
             </p>
           {:else if chat.totalConversations > 0}
             <p role="status" aria-live="polite">

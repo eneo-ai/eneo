@@ -1,3 +1,21 @@
+# ============================================================================
+# ENEO PRODUCTION DEPLOYMENT - Docker Compose Configuration
+# ============================================================================
+# Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
+#
+# BEFORE DEPLOYING:
+#   1. Replace "your-email@domain.com" (line 23) with your email
+#   2. Replace "your-domain.com" (lines 47, 50, 73, 76) with your domain
+#   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
+#   4. Create external network: docker network create proxy_tier
+#
+# CUSTOMIZATION NOTE:
+#   This is a reference configuration. Customize for your organization's
+#   security requirements, network topology, and infrastructure needs.
+#
+# Full documentation: ../DEPLOYMENT.md
+# ============================================================================
+
 version: '3.8'
 
 services:
@@ -78,10 +96,14 @@ services:
       - db-init
 
   worker:
+    # Background task processor (crawls, uploads, integrations)
+    # Uses same image as backend but runs ARQ worker instead of HTTP server
+    # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_worker
     restart: unless-stopped
-    command: ["poetry", "run", "arq", "src.intric.worker.arq.WorkerSettings"]
+    environment:
+      - RUN_AS_WORKER=true  # Runs ARQ worker instead of HTTP server
     env_file:
       - env_backend.env
     volumes:

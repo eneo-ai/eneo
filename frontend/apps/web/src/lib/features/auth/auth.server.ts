@@ -12,15 +12,29 @@ export const setFrontendAuthCookie = async (tokens: {
   const { cookies } = getRequestEvent();
 
   // Decode token to get expiry
-  const token_info = (await parseJwt(tokens.id_token)) as { exp?: number };
-  // Expires 10 min prior to server token
-  const expires = new Date((token_info.exp ?? 600 - 600) * 1000);
+  const token_info = (await parseJwt(tokens.id_token)) as { exp?: number | string };
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // Robust exp extraction with type guarding (handles string exp from JWT parsing)
+  const expSecCandidate = token_info?.exp;
+  const expSec = Number.isFinite(Number(expSecCandidate))
+    ? Number(expSecCandidate)
+    : (() => {
+        console.warn("[Auth] JWT exp missing/invalid – using 2h fallback", {
+          hasExp: Boolean(expSecCandidate),
+          expType: typeof expSecCandidate
+        });
+        return nowSec + 7200; // fallback: now + 2 hours
+      })();
+
+  // Calculate maxAge with 10-minute buffer (expires before server token)
+  const maxAge = Math.max(0, expSec - nowSec - 600);
 
   cookies.set(IntricIdTokenCookie, tokens.id_token, {
     path: "/",
     httpOnly: true,
-    expires,
-    secure: dev ? false : true,
+    maxAge,
+    secure: !dev,
     sameSite: "lax"
   });
 
@@ -28,8 +42,8 @@ export const setFrontendAuthCookie = async (tokens: {
     cookies.set(IntricAccessTokenCookie, tokens.access_token, {
       path: "/",
       httpOnly: true,
-      expires,
-      secure: dev ? false : true,
+      maxAge,
+      secure: !dev,
       sameSite: "lax"
     });
   }

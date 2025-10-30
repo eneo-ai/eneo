@@ -56,7 +56,8 @@
   <Dialog.Content>
     <Dialog.Title>{m.disable_name_integration({ name: integration.name })}</Dialog.Title>
     <Dialog.Description>
-      {m.do_you_really_want_to_disable_integration_for_name({ name: integration.name })}<br /><br />{m.disabling_integration_will_disconnect()}
+      {m.do_you_really_want_to_disable_integration_for_name({ name: integration.name })}<br /><br
+      />{m.disabling_integration_will_disconnect()}
     </Dialog.Description>
 
     <Dialog.Controls let:close>

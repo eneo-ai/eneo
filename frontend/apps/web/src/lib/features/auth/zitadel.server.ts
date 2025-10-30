@@ -13,6 +13,36 @@ const ZitadelVerifierCookie = "zitadel-verifier" as const;
 /** Scopes that always will be requested from Zitadel */
 const basicScopes = ["openid", "email", "urn:zitadel:iam:org:project:id:zitadel:aud"] as const;
 
+/**
+ * Get the configured public origin for OIDC redirect URIs.
+ *
+ * SECURITY: Uses explicit PUBLIC_ORIGIN configuration instead of
+ * event.url.origin to prevent redirect_uri mismatches behind reverse proxies.
+ *
+ * @returns The configured public origin (e.g., "https://eneo.sundsvall.se")
+ * @throws Error if PUBLIC_ORIGIN is not configured
+ */
+function getPublicOrigin(): string {
+  if (!env.PUBLIC_ORIGIN) {
+    throw new Error(
+      '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
+      'Set it to the externally-reachable URL for this application. ' +
+      'Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se'
+    );
+  }
+
+  // Validate format (basic check)
+  if (!env.PUBLIC_ORIGIN.startsWith('https://')) {
+    throw new Error(
+      '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
+      `Got: ${env.PUBLIC_ORIGIN}`
+    );
+  }
+
+  // Remove trailing slash if present
+  return env.PUBLIC_ORIGIN.replace(/\/$/, '');
+}
+
 /** Function to get all scopes based on a origin (e.g. when using a subdomain) */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function getScopeByOrigin(origin?: string) {
@@ -86,7 +116,7 @@ export async function getZitadelLink(
     scope: scopes.join(" "),
     client_id: env.ZITADEL_PROJECT_CLIENT_ID,
     response_type: "code",
-    redirect_uri: `${origin}/login/callback`,
+    redirect_uri: `${getPublicOrigin()}/login/callback`,
     state: encodeState({ loginMethod: "zitadel", next: searchParams.get("next") }),
     code_challenge: codeChallenge,
     code_challenge_method: "S256"
@@ -119,7 +149,7 @@ export async function loginWithZitadel(code: string): Promise<boolean> {
     code,
     code_verifier,
     grant_type: "authorization_code",
-    redirect_uri: `${event.url.origin}/login/callback`
+    redirect_uri: `${getPublicOrigin()}/login/callback`
   });
 
   const tokenUrl = env.ZITADEL_INSTANCE_URL + "/oauth/v2/token?" + searchParams.toString();

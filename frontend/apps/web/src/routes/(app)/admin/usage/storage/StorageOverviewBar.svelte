@@ -41,10 +41,7 @@
   ];
 </script>
 
-<Settings.Row
-  title={m.storage_summary()}
-  description={m.storage_summary_description()}
->
+<Settings.Row title={m.storage_summary()} description={m.storage_summary_description()}>
   <div class="flex flex-col gap-4">
     <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full lg:mt-2">
       {#each items.filter((item) => item.size > 0) as item (item)}

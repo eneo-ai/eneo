@@ -1,6 +1,7 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import litellm
+from fastapi import HTTPException
 from tenacity import (
     retry,
     retry_if_not_exception_type,
@@ -12,20 +13,35 @@ from intric.ai_models.litellm_providers.provider_registry import LiteLLMProvider
 from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.info_blobs.info_blob import InfoBlobChunk
+    from intric.settings.credential_resolver import CredentialResolver
 
 
 logger = get_logger(__name__)
 
 
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
-    def __init__(self, model: "EmbeddingModel"):
+    def _mask_sensitive_params(self, params: dict) -> dict:
+        """Return copy of params with masked API key for safe logging."""
+        safe_params = params.copy()
+        if "api_key" in safe_params:
+            key = safe_params["api_key"]
+            safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
+        return safe_params
+
+    def __init__(
+        self,
+        model: "EmbeddingModel",
+        credential_resolver: Optional["CredentialResolver"] = None
+    ):
         super().__init__(model)
+        self.credential_resolver = credential_resolver
 
         # Get provider configuration based on litellm_model_name
         provider = LiteLLMProviderRegistry.get_provider_for_model(model.litellm_model_name)
@@ -41,6 +57,32 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             self.api_config = {}
 
         logger.info(f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}")
+
+    def _detect_provider(self, litellm_model_name: str) -> str:
+        """
+        Detect provider from model name.
+
+        Args:
+            litellm_model_name: The LiteLLM model name (e.g., 'azure/text-embedding-ada-002', 'vllm/e5-mistral-7b')
+
+        Returns:
+            Provider name (openai, azure, anthropic, berget, mistral, ovhcloud, vllm)
+        """
+        if litellm_model_name.startswith("azure/"):
+            return "azure"
+        elif litellm_model_name.startswith("anthropic/"):
+            return "anthropic"
+        elif litellm_model_name.startswith("berget/"):
+            return "berget"
+        elif litellm_model_name.startswith("mistral/"):
+            return "mistral"
+        elif litellm_model_name.startswith("ovhcloud/"):
+            return "ovhcloud"
+        elif litellm_model_name.startswith("vllm/"):
+            return "vllm"
+        else:
+            # Default to OpenAI for unprefixed models
+            return "openai"
 
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
@@ -88,13 +130,85 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 params.update(self.api_config)
                 logger.info(f"[LiteLLM] {self.litellm_model}: Adding provider config for embeddings: {list(self.api_config.keys())}")
 
-            logger.info(f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: {params}")
+            # Inject tenant-specific API key if credential_resolver is provided
+            if self.credential_resolver:
+                provider = self._detect_provider(self.litellm_model)
+                try:
+                    api_key = self.credential_resolver.get_api_key(provider)
+                    params['api_key'] = api_key
+                    logger.info(f"[LiteLLM] {self.litellm_model}: Injecting tenant API key for {provider}")
+                except ValueError as e:
+                    logger.error(f"[LiteLLM] {self.litellm_model}: Credential resolution failed: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Embedding service unavailable: {str(e)}"
+                    )
+
+                # Inject endpoint for VLLM and other providers with custom endpoints
+                # VLLM requires endpoint - fallback to global VLLM_MODEL_URL for single-tenant deployments
+                settings = get_settings()
+                endpoint_fallback = settings.vllm_model_url if provider == "vllm" else None
+                endpoint = self.credential_resolver.get_credential_field(
+                    provider=provider,
+                    field="endpoint",
+                    fallback=endpoint_fallback,
+                    required=(provider in {"vllm", "azure"})  # endpoint is required for vLLM and Azure
+                )
+
+                if endpoint:
+                    params['api_base'] = endpoint
+                    logger.info(f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}")
+
+                # Inject api_version for Azure embeddings
+                if provider == "azure":
+                    # In strict mode, each tenant must configure their own api_version
+                    # In single-tenant mode, can fallback to global default
+                    api_version = self.credential_resolver.get_credential_field(
+                        "azure",
+                        "api_version",
+                        settings.azure_api_version,
+                        required=(
+                            self.credential_resolver.tenant is not None and
+                            self.credential_resolver.settings.tenant_credentials_enabled
+                        ),
+                    )
+                    if api_version:
+                        params["api_version"] = api_version
+                        logger.info(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")
+
+            safe_params = {k: v for k, v in params.items() if k != "input"}
+            logger.info(
+                f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
+                f"{self._mask_sensitive_params(safe_params)}"
+            )
 
             # Call LiteLLM API to get the embeddings
             response = await litellm.aembedding(**params)
 
             logger.info(f"[LiteLLM] {self.litellm_model}: Embedding request successful")
 
+        except litellm.AuthenticationError:
+            # Strict error handling: NO fallback if tenant credential exists but is invalid
+            provider = self._detect_provider(self.litellm_model)
+            tenant_id = self.credential_resolver.tenant.id if self.credential_resolver and self.credential_resolver.tenant else None
+            tenant_name = self.credential_resolver.tenant.name if self.credential_resolver and self.credential_resolver.tenant else None
+
+            logger.error(
+                "Tenant API credential authentication failed",
+                extra={
+                    "tenant_id": str(tenant_id) if tenant_id else None,
+                    "tenant_name": tenant_name,
+                    "provider": provider,
+                    "error_type": "AuthenticationError",
+                    "model": self.litellm_model
+                }
+            )
+
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid API credentials for provider {provider}. "
+                       f"Please verify your API key configuration."
+            )
         except litellm.BadRequestError as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Bad request error:")
             raise BadRequestException("Invalid input") from e

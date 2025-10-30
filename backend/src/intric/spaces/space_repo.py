@@ -55,6 +55,9 @@ from intric.spaces.api.space_models import SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.database.tables.websites_spaces_table import WebsitesSpaces
+from intric.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from intric.apps import AppRepository
@@ -73,6 +76,7 @@ if TYPE_CHECKING:
     )
     from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
+    from intric.websites.infrastructure.http_auth_encryption import HttpAuthEncryptionService
 
 
 class SpaceRepository:
@@ -86,6 +90,7 @@ class SpaceRepository:
         completion_model_repo: "CompletionModelRepository",
         transcription_model_repo: "TranscriptionModelRepository",
         embedding_model_repo: "EmbeddingModelRepository",
+        http_auth_encryption: "HttpAuthEncryptionService",
     ):
         self.session = session
         self.user = user
@@ -95,6 +100,7 @@ class SpaceRepository:
         self.transcription_model_repo = transcription_model_repo
         self.embedding_model_repo = embedding_model_repo
         self.assistant_repo = assistant_repo
+        self.http_auth_encryption = http_auth_encryption
 
     def _options(self):
         return [
@@ -480,6 +486,11 @@ class SpaceRepository:
             )
             
     async def _set_websites(self, space_in_db: Spaces, websites: list["Website"]):
+        """Persist websites with encrypted auth credentials.
+
+        Why: Repository is the encryption boundary. Domain entities have plaintext
+        credentials, but database gets encrypted values.
+        """
         def _set_size_subquery(website: "Website"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
@@ -487,41 +498,63 @@ class SpaceRepository:
                 .scalar_subquery()
             )
 
-        new_websites = [w for w in websites if w.is_new]
-        existing     = [w for w in websites if not w.is_new]
+        def _prepare_auth_fields(website: "Website") -> dict:
+            """Encrypt HTTP auth credentials if present."""
+            if website.http_auth:
+                username, encrypted_password, auth_domain = \
+                    self.http_auth_encryption.encrypt_credentials(website.http_auth)
+                return {
+                    'http_auth_username': username,
+                    'encrypted_auth_password': encrypted_password,
+                    'http_auth_domain': auth_domain,
+                }
+            else:
+                return {
+                    'http_auth_username': None,
+                    'encrypted_auth_password': None,
+                    'http_auth_domain': None,
+                }
+
+        new_websites = [website for website in websites if website.is_new]
+        existing_websites = [website for website in websites if not website.is_new]
 
         if new_websites:
-            stmt = sa.insert(WebsitesTable).values([
-                dict(
-                    id=w.id,
-                    name=w.name,
-                    url=w.url,
-                    download_files=w.download_files,
-                    crawl_type=w.crawl_type,
-                    update_interval=w.update_interval,
-                    size=_set_size_subquery(w),
-                    tenant_id=w.tenant_id,
-                    user_id=w.user_id,
-                    embedding_model_id=w.embedding_model.id,
-                    space_id=w.space_id, 
-                )
-                for w in new_websites
-            ])
+            values = []
+            for website in new_websites:
+                auth_fields = _prepare_auth_fields(website)
+                values.append(dict(
+                    id=website.id,
+                    name=website.name,
+                    url=website.url,
+                    download_files=website.download_files,
+                    crawl_type=website.crawl_type,
+                    update_interval=website.update_interval,
+                    size=_set_size_subquery(website),
+                    tenant_id=website.tenant_id,
+                    user_id=website.user_id,
+                    embedding_model_id=website.embedding_model.id,
+                    space_id=space_in_db.id,
+                    **auth_fields,
+                ))
+            stmt = sa.insert(WebsitesTable).values(values)
             await self.session.execute(stmt)
 
-        for w in existing:
+        for website in existing_websites:
+            auth_fields = _prepare_auth_fields(website)
             stmt = (
                 sa.update(WebsitesTable)
                 .values(
-                    name=w.name,
-                    url=w.url,
-                    download_files=w.download_files,
-                    crawl_type=w.crawl_type,
-                    update_interval=w.update_interval,
-                    size=_set_size_subquery(w),
-                    embedding_model_id=w.embedding_model.id,
+                    name=website.name,
+                    url=website.url,
+                    download_files=website.download_files,
+                    crawl_type=website.crawl_type,
+                    update_interval=website.update_interval,
+                    size=_set_size_subquery(website),
+                    embedding_model_id=website.embedding_model.id,
+                    space_id=space_in_db.id,
+                    **auth_fields,
                 )
-                .where(WebsitesTable.id == w.id)
+                .where(WebsitesTable.id == website.id)
             )
             await self.session.execute(stmt)
 
@@ -617,7 +650,52 @@ class SpaceRepository:
 
         return group_chats_db
 
-    async def _get_websites(self, space_ids: list[UUID]):
+    def _decrypt_website_auth(self, website_record: WebsitesTable) -> Optional:
+        """Decrypt HTTP auth credentials from database record.
+
+        Why: Repository is the encryption boundary - domain gets clean objects.
+
+        Returns:
+            HttpAuthCredentials if auth present and decryption succeeds, None otherwise.
+        """
+
+        if not (website_record.http_auth_username and
+                website_record.encrypted_auth_password and
+                website_record.http_auth_domain):
+            return None
+
+        try:
+            return self.http_auth_encryption.decrypt_credentials(
+                username=website_record.http_auth_username,
+                encrypted_password=website_record.encrypted_auth_password,
+                auth_domain=website_record.http_auth_domain
+            )
+        except ValueError as e:
+            # Log decryption failure but don't fail entire website load
+            logger.error(
+                f"Failed to decrypt auth for website {website_record.id}: {str(e)}. "
+                "Website will be loaded without auth.",
+                extra={
+                    "website_id": str(website_record.id),
+                    "tenant_id": str(website_record.tenant_id),
+                }
+            )
+            # Set transient flag for crawl task to detect
+            # Why: Enables fail-fast behavior in crawler with clear error message
+            website_record._auth_decrypt_failed = True
+            return None
+
+    async def _get_websites(self, space_ids: list[UUID] | UUID):
+        """Fetch websites and decrypt their auth credentials.
+
+        Why: Repository is the encryption boundary. We decrypt here and attach
+        the plaintext credentials as a transient attribute on the record object.
+        The factory then extracts this and passes it to Website.to_domain().
+        """
+        # Handle both single UUID and list of UUIDs for backwards compatibility
+        if isinstance(space_ids, UUID):
+            space_ids = [space_ids]
+
         ws = WebsitesTable
         wss = WebsitesSpaces
 
@@ -640,8 +718,14 @@ class SpaceRepository:
             .order_by(ws.created_at)
         )
 
-        result = await self.session.execute(stmt)
-        return result.unique().scalars().all()
+        website_records = await self.session.execute(stmt)
+        websites_db = list(website_records.scalars())
+
+        # Decrypt auth credentials and attach as transient attribute
+        for website_record in websites_db:
+            website_record._decrypted_http_auth = self._decrypt_website_auth(website_record)
+
+        return websites_db
 
     async def _get_apps(self, space_id: UUID):
         stmt = (

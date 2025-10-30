@@ -47,15 +47,15 @@
     if (!$currentChanges.diff.completion_model_kwargs) return false;
 
     // For reasoning models or LiteLLM models, only show behavior changes if behavior-relevant fields changed
-    const hasModelSpecificParams = $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name;
+    const hasModelSpecificParams =
+      $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name;
     if (hasModelSpecificParams) {
       const original = $resource.completion_model_kwargs || {};
       const updated = $update.completion_model_kwargs || {};
 
       // Only check temperature and top_p for behavior changes
       const behaviorFieldsChanged =
-        original.temperature !== updated.temperature ||
-        original.top_p !== updated.top_p;
+        original.temperature !== updated.temperature || original.top_p !== updated.top_p;
 
       return behaviorFieldsChanged;
     }
@@ -65,10 +65,7 @@
   })();
 
   beforeNavigate((navigate) => {
-    if (
-      $currentChanges.hasUnsavedChanges &&
-      !confirm(m.unsaved_changes_warning())
-    ) {
+    if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
       navigate.cancel();
       return;
     }
@@ -115,43 +112,43 @@
 
         <Button
           variant="positive"
-          class="w-32 h-8 whitespace-nowrap"
+          class="h-8 w-32 whitespace-nowrap"
           on:click={async () => {
             cancelUploadsAndClearQueue();
-            
+
             // Clean up incompatible parameters when switching models
             if ($update.completion_model_kwargs && $currentChanges.diff.completion_model) {
               const cleanedKwargs = { ...$update.completion_model_kwargs };
-              
+
               // If model changed, reset to safe defaults for the new model
               const newModel = $update.completion_model;
               const originalModel = $resource.completion_model;
-              
+
               // Check if we switched between different model families/types
               const modelChanged = newModel?.id !== originalModel?.id;
-              
+
               if (modelChanged) {
                 // Reset model-specific parameters that may not be compatible
-                
+
                 // Remove reasoning_effort if new model doesn't support reasoning
                 if (!newModel?.reasoning) {
                   delete cleanedKwargs.reasoning_effort;
                 }
-                
+
                 // Remove verbosity if new model doesn't support it
-                const supportsVerbosity = newModel?.litellm_model_name || 
-                                         newModel?.name?.toLowerCase().includes('gpt-5');
+                const supportsVerbosity =
+                  newModel?.litellm_model_name || newModel?.name?.toLowerCase().includes("gpt-5");
                 if (!supportsVerbosity) {
                   delete cleanedKwargs.verbosity;
                 }
-                
+
                 // Note: Behavior parameter reset is now handled by SelectBehaviourV2 component
                 // when models are switched, so we don't need to reset them here during save
               }
-              
+
               $update.completion_model_kwargs = cleanedKwargs;
             }
-            
+
             await saveChanges();
             showSavesChangedNotice = true;
             setTimeout(() => {
@@ -219,7 +216,7 @@
         >
           <div slot="toolbar" class="text-secondary">
             <PromptVersionDialog
-              title="{m.prompt_history_for({ name: $resource.name })}"
+              title={m.prompt_history_for({ name: $resource.name })}
               loadPromptVersionHistory={() => {
                 return data.intric.assistants.listPrompts({ id: data.assistant.id });
               }}
@@ -330,29 +327,26 @@
         </Settings.Row>
 
         {#if $update.completion_model?.reasoning || $update.completion_model?.litellm_model_name}
-        <Settings.Row
-          title="Model settings"
-          description="Configure model-specific parameters for advanced control over the response."
-          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
-          revertFn={() => {
-            discardChanges("completion_model_kwargs");
-          }}
-        >
-          <SelectModelSpecificSettings
-            bind:kwArgs={$update.completion_model_kwargs}
-            selectedModel={$update.completion_model}
-          ></SelectModelSpecificSettings>
-        </Settings.Row>
+          <Settings.Row
+            title="Model settings"
+            description="Configure model-specific parameters for advanced control over the response."
+            hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+            revertFn={() => {
+              discardChanges("completion_model_kwargs");
+            }}
+          >
+            <SelectModelSpecificSettings
+              bind:kwArgs={$update.completion_model_kwargs}
+              selectedModel={$update.completion_model}
+            ></SelectModelSpecificSettings>
+          </Settings.Row>
         {/if}
       </Settings.Group>
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}
         <Settings.Group title={m.publishing()}>
           {#if data.assistant.permissions?.includes("publish")}
-            <Settings.Row
-              title={m.status()}
-              description={m.publishing_description()}
-            >
+            <Settings.Row title={m.status()} description={m.publishing_description()}>
               <PublishingSetting
                 endpoints={data.intric.assistants}
                 resource={data.assistant}

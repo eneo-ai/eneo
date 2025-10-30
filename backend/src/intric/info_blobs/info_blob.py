@@ -29,6 +29,7 @@ class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
     website_id: Optional[UUID] = None
     tenant_id: UUID
     integration_knowledge_id: Optional[UUID] = None
+    content_hash: Optional[bytes] = None  # SHA-256 hash for change detection
 
     @model_validator(mode="after")
     def require_one_of_group_id_and_website_id(self) -> "InfoBlobAdd":

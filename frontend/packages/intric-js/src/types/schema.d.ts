@@ -55,7 +55,7 @@ export interface paths {
   "/api/v1/users/login/openid-connect/mobilityguard/": {
     /**
      * Login With Mobilityguard
-     * @description OpenID Connect Login with mobilityguard.
+     * @description OpenID Connect Login (generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
   };
@@ -258,6 +258,17 @@ export interface paths {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
   };
+  "/api/v1/assistants/{id}/token-estimate": {
+    /**
+     * Estimate token usage for text and files
+     * @description Estimate token usage for the given text and files for this assistant.
+     *
+     * The Space Actor + FileService stack already enforces tenant and ownership
+     * boundaries; this endpoint adds lightweight guardrails to keep the operation
+     * responsive while supporting large-context models.
+     */
+    post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
+  };
   "/api/v1/group-chats/{id}/": {
     /**
      * Get Group Chat
@@ -314,6 +325,7 @@ export interface paths {
      * - SSEIntricEvent: Internal events like generating an image
      * - SSEFiles: Generated files/images responses
      * - SSEFirstChunk: Initial response with metadata
+     * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
      */
     post: operations["chat_api_v1_conversations__post"];
   };
@@ -628,6 +640,55 @@ export interface paths {
     /** Update Completion Model */
     post: operations["update_completion_model_api_v1_completion_models__id___post"];
   };
+  "/api/v1/completion-models/{model_id}/usage": {
+    /**
+     * Get Model Usage
+     * @description Get usage statistics for a specific model (pre-aggregated for performance)
+     */
+    get: operations["get_model_usage_api_v1_completion_models__model_id__usage_get"];
+  };
+  "/api/v1/completion-models/{model_id}/usage/details": {
+    /**
+     * Get Model Usage Details
+     * @description Get detailed list of entities using this model with cursor pagination
+     */
+    get: operations["get_model_usage_details_api_v1_completion_models__model_id__usage_details_get"];
+  };
+  "/api/v1/completion-models/{model_id}/migrate": {
+    /**
+     * Migrate Model Usage
+     * @description Migrate all usage from one model to another with safety checks
+     */
+    post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
+  };
+  "/api/v1/completion-models/usage-summary": {
+    /**
+     * Get All Models Usage Summary
+     * @description Get usage summary for all models (optimized with pre-aggregation)
+     */
+    get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
+  };
+  "/api/v1/completion-models/{model_id}/migration-history": {
+    /**
+     * Get Model Migration History
+     * @description Get migration history for a specific model (from or to this model)
+     */
+    get: operations["get_model_migration_history_api_v1_completion_models__model_id__migration_history_get"];
+  };
+  "/api/v1/completion-models/migration-history": {
+    /**
+     * Get All Migration History
+     * @description Get all migration history for the tenant
+     */
+    get: operations["get_all_migration_history_api_v1_completion_models_migration_history_get"];
+  };
+  "/api/v1/completion-models/migration-history/{migration_id}": {
+    /**
+     * Get Migration History By Id
+     * @description Get a specific migration history record by ID
+     */
+    get: operations["get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get"];
+  };
   "/api/v1/embedding-models/": {
     /** Get Embedding Models */
     get: operations["get_embedding_models_api_v1_embedding_models__get"];
@@ -733,7 +794,29 @@ export interface paths {
     post: operations["create_space_groups_api_v1_spaces__id__knowledge_groups__post"];
   };
   "/api/v1/spaces/{id}/knowledge/websites/": {
-    /** Create Space Websites */
+    /**
+     * Create a website crawler
+     * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+     *
+     *     **Update Intervals:**
+     *     - `never` (default): Manual crawls only
+     *     - `daily`: Automatic recrawl every day at 3 AM Swedish time
+     *     - `every_other_day`: Recrawl every 2 days
+     *     - `weekly`: Recrawl every Friday
+     *
+     *     **Example Request Body:**
+     *     ```json
+     *     {
+     *       "name": "Company Documentation",
+     *       "url": "https://docs.example.com",
+     *       "crawl_type": "crawl",
+     *       "download_files": true,
+     *       "update_interval": "daily"
+     *     }
+     *     ```
+     *
+     *     The crawl will start immediately upon creation.
+     */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
   };
   "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/": {
@@ -778,6 +861,47 @@ export interface paths {
      */
     post: operations["create_website_api_v1_websites__post"];
   };
+  "/api/v1/websites/bulk/run/": {
+    /**
+     * Trigger bulk crawl
+     * @description Trigger crawls for multiple websites at once. Useful for:
+     *     - Batch recrawling selected websites
+     *     - Refreshing multiple knowledge sources simultaneously
+     *     - Recovering from failed crawls across multiple sites
+     *
+     *     **Features:**
+     *     - Maximum 50 websites per request (safety limit)
+     *     - Individual failures don't stop the batch
+     *     - Returns detailed status for each website
+     *
+     *     **Example Request:**
+     *     ```json
+     *     {
+     *       "website_ids": [
+     *         "123e4567-e89b-12d3-a456-426614174000",
+     *         "123e4567-e89b-12d3-a456-426614174001"
+     *       ]
+     *     }
+     *     ```
+     *
+     *     **Example Response:**
+     *     ```json
+     *     {
+     *       "total": 2,
+     *       "queued": 1,
+     *       "failed": 1,
+     *       "crawl_runs": [...],
+     *       "errors": [
+     *         {
+     *           "website_id": "123e4567-e89b-12d3-a456-426614174001",
+     *           "error": "Crawl already in progress for this website"
+     *         }
+     *       ]
+     *     }
+     *     ```
+     */
+    post: operations["bulk_run_crawl_api_v1_websites_bulk_run__post"];
+  };
   "/api/v1/websites/{id}/": {
     /** Get Website */
     get: operations["get_website_api_v1_websites__id___get"];
@@ -787,7 +911,23 @@ export interface paths {
     delete: operations["delete_website_api_v1_websites__id___delete"];
   };
   "/api/v1/websites/{id}/run/": {
-    /** Run Crawl */
+    /**
+     * Trigger a crawl
+     * @description Manually trigger a crawl for a specific website. This can be used to:
+     *     - Recrawl a website to update its content
+     *     - Force a crawl outside the automatic update schedule
+     *     - Retry a failed crawl
+     *
+     *     The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+     *
+     *     **Status Flow:**
+     *     1. `queued` - Crawl is waiting to start
+     *     2. `in progress` - Crawl is actively running
+     *     3. `complete` - Crawl finished successfully
+     *     4. `failed` - Crawl encountered an error
+     *
+     *     Returns the new crawl run with status information.
+     */
     post: operations["run_crawl_api_v1_websites__id__run__post"];
   };
   "/api/v1/websites/{id}/runs/": {
@@ -1036,7 +1176,20 @@ export interface paths {
     delete: operations["delete_user_api_v1_sysadmin_users__user_id___delete"];
   };
   "/api/v1/sysadmin/tenants/": {
-    /** Get Tenants */
+    /**
+     * Get Tenants
+     * @description Get all tenants with masked API credentials.
+     *
+     * Returns tenant information with API keys masked to show only last 4 characters.
+     * This prevents exposing full API keys through the API endpoint.
+     *
+     * Args:
+     *     domain: Optional domain filter
+     *     container: Dependency injection container
+     *
+     * Returns:
+     *     Paginated list of tenants with masked credentials
+     */
     get: operations["get_tenants_api_v1_sysadmin_tenants__get"];
     /** Create Tenant */
     post: operations["create_tenant_api_v1_sysadmin_tenants__post"];
@@ -1054,6 +1207,18 @@ export interface paths {
   "/api/v1/sysadmin/crawl-all-weekly-websites/": {
     /** Crawl All Weekly Websites */
     post: operations["crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post"];
+  };
+  "/api/v1/sysadmin/observability/oidc-debug/": {
+    /**
+     * Get current OIDC debug toggle status
+     * @description Returns whether OIDC debug logging is currently enabled and when it expires.
+     */
+    get: operations["get_oidc_debug_status_api_v1_sysadmin_observability_oidc_debug__get"];
+    /**
+     * Enable or disable OIDC debug logging
+     * @description Turns verbose OIDC diagnostics on or off for a limited window. Requires super API key.
+     */
+    post: operations["toggle_oidc_debug_api_v1_sysadmin_observability_oidc_debug__post"];
   };
   "/api/v1/sysadmin/embedding-models/": {
     /** Get Embedding Models */
@@ -1081,6 +1246,104 @@ export interface paths {
     /** Delete Origin */
     delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/usage-stats/recalculate": {
+    /**
+     * Recalculate Tenant Usage Statistics
+     * @description Recalculate usage statistics for a specific tenant.
+     *
+     * This endpoint is intended for tenant-specific administrative operations,
+     * such as fixing usage statistics for a particular tenant.
+     */
+    post: operations["recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post"];
+  };
+  "/api/v1/sysadmin/system/usage-stats/recalculate-all": {
+    /**
+     * Recalculate All Tenants Usage Statistics
+     * @description Recalculate usage statistics for all active tenants.
+     *
+     * This endpoint is intended for system-wide administrative operations,
+     * such as bulk recalculation of usage statistics across all tenants.
+     */
+    post: operations["recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/completion-models/{model_id}/migrate": {
+    /**
+     * Migrate Completion Model For Tenant
+     * @description Migrate completion model usage for a specific tenant.
+     *
+     * This endpoint allows system administrators to migrate all usage from one
+     * completion model to another for a specific tenant. This is useful for:
+     * - Migrating tenants away from deprecated models
+     * - Consolidating model usage
+     * - Fixing model configurations for specific tenants
+     *
+     * Args:
+     *     tenant_id: UUID of the tenant to migrate
+     *     model_id: UUID of the source model to migrate from
+     *     migration_request: Details of the migration (target model, entity types, etc.)
+     */
+    post: operations["migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post"];
+  };
+  "/api/v1/sysadmin/system/completion-models/{model_id}/migrate-all-tenants": {
+    /**
+     * Migrate Completion Model For All Tenants
+     * @description Migrate completion model usage for all active tenants.
+     *
+     * This endpoint allows system administrators to migrate all usage from one
+     * completion model to another across all active tenants. This is useful for:
+     * - Deprecating models system-wide
+     * - Migrating to newer model versions
+     * - Consolidating model usage across the entire system
+     *
+     * Args:
+     *     model_id: UUID of the source model to migrate from
+     *     migration_request: Details of the migration (target model, entity types, etc.)
+     */
+    post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
+    /**
+     * Set tenant API credential
+     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
+     */
+    put: operations["set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put"];
+    /**
+     * Delete tenant API credential
+     * @description Delete API credentials for a specific LLM provider for a tenant. System admin only.
+     */
+    delete: operations["delete_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/credentials": {
+    /**
+     * List tenant API credentials
+     * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
+     */
+    get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/federation": {
+    /**
+     * Get tenant federation config
+     * @description View federation config with masked secrets. System admin only.
+     */
+    get: operations["get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get"];
+    /**
+     * Set tenant federation config
+     * @description Configure custom identity provider for tenant. System admin only.
+     */
+    put: operations["set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put"];
+    /**
+     * Delete tenant federation config
+     * @description Remove custom identity provider for tenant. System admin only.
+     */
+    delete: operations["delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/federation/test": {
+    /**
+     * Test tenant federation config
+     * @description Test connection to tenant's IdP. System admin only.
+     */
+    post: operations["test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post"];
+  };
   "/api/v1/modules/": {
     /** Get Modules */
     get: operations["get_modules_api_v1_modules__get"];
@@ -1093,6 +1356,27 @@ export interface paths {
      * @description Value is a list of module `id`'s to add to the `tenant_id`.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+  };
+  "/api/v1/auth/tenants": {
+    /**
+     * List tenants for selector
+     * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+     */
+    get: operations["list_tenants_api_v1_auth_tenants_get"];
+  };
+  "/api/v1/auth/initiate": {
+    /**
+     * Initiate OIDC authentication
+     * @description Get authorization URL for tenant's identity provider. No authentication required. Returns URL to redirect user to IdP login page.
+     */
+    get: operations["initiate_auth_api_v1_auth_initiate_get"];
+  };
+  "/api/v1/auth/callback": {
+    /**
+     * OIDC callback handler
+     * @description Handle OIDC callback, validate token, lookup user. No authentication required (public endpoint). Returns JWT token for authenticated user.
+     */
+    post: operations["auth_callback_api_v1_auth_callback_post"];
   };
   "/api/v1/api-docs": {
     /**
@@ -1623,6 +1907,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -1805,6 +2090,48 @@ export interface components {
        * Format: binary
        */
       file: string;
+    };
+    /**
+     * BulkCrawlRequest
+     * @description Request model for triggering crawls on multiple websites.
+     */
+    BulkCrawlRequest: {
+      /** Website Ids */
+      website_ids: string[];
+    };
+    /**
+     * BulkCrawlResponse
+     * @description Response model for bulk crawl operations.
+     */
+    BulkCrawlResponse: {
+      /** Total */
+      total: number;
+      /** Queued */
+      queued: number;
+      /** Failed */
+      failed: number;
+      /** Crawl Runs */
+      crawl_runs: components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"][];
+      /** Errors */
+      errors: {
+        [key: string]: string;
+      }[];
+    };
+    /**
+     * CallbackRequest
+     * @description OIDC callback with authorization code.
+     * @example {
+     *   "code": "authorization_code_from_idp",
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     * }
+     */
+    CallbackRequest: {
+      /** Code */
+      code: string;
+      /** State */
+      state: string;
+      /** Code Verifier */
+      code_verifier?: string | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -2239,6 +2566,52 @@ export interface components {
       published?: boolean;
       user: components["schemas"]["UserSparse"];
     };
+    /**
+     * CredentialInfo
+     * @description Information about a configured credential.
+     *
+     * Example:
+     *     {
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "configured_at": "2025-10-07T12:34:56.789Z",
+     *         "encryption_status": "encrypted",
+     *         "config": {
+     *             "endpoint": "https://my-resource.openai.azure.com",
+     *             "api_version": "2024-02-15-preview"
+     *         }
+     *     }
+     */
+    CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -2330,6 +2703,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2353,6 +2727,41 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+    };
+    /**
+     * DeleteCredentialResponse
+     * @description Response model for deleting tenant API credentials.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "anthropic",
+     *         "message": "API credential for anthropic deleted successfully"
+     *     }
+     */
+    DeleteCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Message */
+      message: string;
+    };
+    /**
+     * DeleteFederationResponse
+     * @description Response model for deleting federation config.
+     */
+    DeleteFederationResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Message */
+      message: string;
     };
     /** DeleteResponse */
     DeleteResponse: {
@@ -2593,7 +3002,34 @@ export interface components {
       | 9022
       | 9023
       | 9024
-      | 9025;
+      | 9025
+      | 9026;
+    /**
+     * FederationInfo
+     * @description Information about configured federation.
+     */
+    FederationInfo: {
+      /** Provider */
+      provider: string;
+      /** Client Id */
+      client_id: string;
+      /** Masked Secret */
+      masked_secret: string;
+      /** Issuer */
+      issuer?: string | null;
+      /** Allowed Domains */
+      allowed_domains: string[];
+      /**
+       * Configured At
+       * Format: date-time
+       */
+      configured_at: string;
+      /**
+       * Encryption Status
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -2613,6 +3049,8 @@ export interface components {
       size: number;
       /** Transcription */
       transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -2983,6 +3421,20 @@ export interface components {
       /** Info Blobs */
       info_blobs: components["schemas"]["InfoBlobAddPublic"][];
     };
+    /**
+     * InitiateAuthResponse
+     * @description Response with IdP authorization URL.
+     * @example {
+     *   "authorization_url": "https://idp.example.com/authorize?client_id=abc123&...",
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     * }
+     */
+    InitiateAuthResponse: {
+      /** Authorization Url */
+      authorization_url: string;
+      /** State */
+      state: string;
+    };
     /** InputField */
     InputField: {
       type: components["schemas"]["InputFieldType"];
@@ -3174,6 +3626,38 @@ export interface components {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
     };
+    /**
+     * ListCredentialsResponse
+     * @description Response model for listing tenant credentials.
+     *
+     * Example:
+     *     {
+     *         "credentials": [
+     *             {
+     *                 "provider": "openai",
+     *                 "masked_key": "...xyz9",
+     *                 "configured_at": "2025-10-07T12:34:56.789Z",
+     *                 "encryption_status": "encrypted",
+     *                 "config": {}
+     *             },
+     *             {
+     *                 "provider": "azure",
+     *                 "masked_key": "...abc3",
+     *                 "configured_at": "2025-10-07T12:45:00.123Z",
+     *                 "encryption_status": "plaintext",
+     *                 "config": {
+     *                     "endpoint": "https://my-resource.openai.azure.com",
+     *                     "api_version": "2024-02-15-preview",
+     *                     "deployment_name": "gpt-4"
+     *                 }
+     *             }
+     *         ]
+     *     }
+     */
+    ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["CredentialInfo"][];
+    };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
       /** Context */
@@ -3242,6 +3726,44 @@ export interface components {
       questions: components["schemas"]["QuestionMetadata"][];
     };
     /**
+     * MigrationResult
+     * @description Result of a model migration operation.
+     */
+    MigrationResult: {
+      /** Success */
+      success: boolean;
+      /** Migrated Count */
+      migrated_count: number;
+      /** Failed Count */
+      failed_count: number;
+      /** Details */
+      details: {
+        [key: string]: number;
+      };
+      /** Duration */
+      duration: number;
+      /**
+       * Migration Id
+       * Format: uuid
+       */
+      migration_id: string;
+      /**
+       * Warnings
+       * @default []
+       */
+      warnings?: string[];
+      /**
+       * Auto Recalculated
+       * @default false
+       */
+      auto_recalculated?: boolean;
+      /**
+       * Requires Manual Recalculation
+       * @default false
+       */
+      requires_manual_recalculation?: boolean;
+    };
+    /**
      * ModelFamily
      * @enum {string}
      */
@@ -3258,6 +3780,18 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /**
+     * ModelInfo
+     * @description Information about the model used by the assistant.
+     */
+    ModelInfo: {
+      /** Name */
+      name: string;
+      /** Token Limit */
+      token_limit: number;
+      /** Prompt Tokens */
+      prompt_tokens?: number | null;
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -3279,6 +3813,68 @@ export interface components {
       frequency_penalty?: number | null;
       /** Top K */
       top_k?: number | null;
+    };
+    /**
+     * ModelMigrationHistory
+     * @description Historical record of a model migration.
+     */
+    ModelMigrationHistory: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * From Model Id
+       * Format: uuid
+       */
+      from_model_id: string;
+      /** From Model Name */
+      from_model_name: string;
+      /**
+       * To Model Id
+       * Format: uuid
+       */
+      to_model_id: string;
+      /** To Model Name */
+      to_model_name: string;
+      /** Migrated Count */
+      migrated_count: number;
+      /** Status */
+      status: string;
+      /**
+       * Initiated By Id
+       * Format: uuid
+       */
+      initiated_by_id: string;
+      /** Initiated By Name */
+      initiated_by_name: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /** Duration */
+      duration?: number | null;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /**
+     * ModelMigrationRequest
+     * @description Request to migrate usage from one model to another.
+     */
+    ModelMigrationRequest: {
+      /**
+       * To Model Id
+       * Format: uuid
+       */
+      to_model_id: string;
+      /** Entity Types */
+      entity_types?: string[] | null;
+      /**
+       * Confirm Migration
+       * @default false
+       */
+      confirm_migration?: boolean;
     };
     /**
      * ModelOrg
@@ -3339,6 +3935,94 @@ export interface components {
       request_count: number;
     };
     /**
+     * ModelUsageDetail
+     * @description Detailed information about a specific entity using a completion model.
+     */
+    ModelUsageDetail: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /** Entity Type */
+      entity_type: string;
+      /** Space Id */
+      space_id?: string | null;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Id */
+      owner_id?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Last Used */
+      last_used?: string | null;
+      /** Usage Count */
+      usage_count?: number | null;
+    };
+    /**
+     * ModelUsageStatistics
+     * @description Pre-aggregated usage statistics for a completion model.
+     */
+    ModelUsageStatistics: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /** Total Usage */
+      total_usage: number;
+      /** Assistants Count */
+      assistants_count: number;
+      /** Apps Count */
+      apps_count: number;
+      /** Services Count */
+      services_count: number;
+      /** Questions Count */
+      questions_count: number;
+      /** Assistant Templates Count */
+      assistant_templates_count: number;
+      /** App Templates Count */
+      app_templates_count: number;
+      /** Spaces Count */
+      spaces_count: number;
+      /**
+       * Last Updated
+       * Format: date-time
+       */
+      last_updated: string;
+    };
+    /**
+     * ModelUsageSummary
+     * @description Summary of usage for a single model.
+     */
+    ModelUsageSummary: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /** Model Name */
+      model_name: string;
+      /** Model Nickname */
+      model_nickname: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Total Usage */
+      total_usage: number;
+      /**
+       * Last Updated
+       * Format: date-time
+       */
+      last_updated: string;
+    };
+    /**
      * ModelsPresentation
      * @description Presentation model for all types of AI models.
      */
@@ -3375,6 +4059,40 @@ export interface components {
      * @enum {string}
      */
     Modules: "eu_hosting" | "intric-applications" | "SWE Models";
+    /** OIDCDebugToggleRequest */
+    OIDCDebugToggleRequest: {
+      /**
+       * Enabled
+       * @description Enable or disable OIDC debug logging
+       */
+      enabled: boolean;
+      /**
+       * Duration Minutes
+       * @description Duration in minutes before the toggle auto-expires (max 120)
+       * @default 30
+       */
+      duration_minutes?: number | null;
+      /**
+       * Reason
+       * @description Optional note for audit trail
+       */
+      reason?: string | null;
+    };
+    /** OIDCDebugToggleResponse */
+    OIDCDebugToggleResponse: {
+      /** Enabled */
+      enabled: boolean;
+      /** Enabled At */
+      enabled_at: string | null;
+      /** Enabled By */
+      enabled_by: string | null;
+      /** Expires At */
+      expires_at: string | null;
+      /** Reason */
+      reason: string | null;
+      /** Backend */
+      backend: string;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -3541,6 +4259,22 @@ export interface components {
        * @description Number of items returned in the response
        */
       count: number;
+    };
+    /**
+     * PaginatedResponse
+     * @description Generic paginated response with cursor-based pagination.
+     */
+    PaginatedResponse: {
+      /** Items */
+      items: components["schemas"]["ModelUsageDetail"][];
+      /** Total */
+      total: number;
+      /** Has More */
+      has_more: boolean;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Prev Cursor */
+      prev_cursor?: string | null;
     };
     /** PaginatedResponse[AllowedOriginInDB] */
     PaginatedResponse_AllowedOriginInDB_: {
@@ -3815,13 +4549,13 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[TenantInDB] */
-    PaginatedResponse_TenantInDB_: {
+    /** PaginatedResponse[TenantWithMaskedCredentials] */
+    PaginatedResponse_TenantWithMaskedCredentials_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["TenantInDB"][];
+      items: components["schemas"]["TenantWithMaskedCredentials"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -4605,6 +5339,148 @@ export interface components {
       messages: components["schemas"]["Message"][];
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
+    /**
+     * SetCredentialRequest
+     * @description Request model for setting tenant API credentials.
+     *
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
+     *
+     * Example for OpenAI:
+     *     {
+     *         "api_key": "sk-proj-abc123..."
+     *     }
+     *
+     * Example for Azure:
+     *     {
+     *         "api_key": "abc123...",
+     *         "endpoint": "https://my-resource.openai.azure.com",
+     *         "api_version": "2024-02-15-preview"
+     *     }
+     *
+     * Example for vLLM:
+     *     {
+     *         "api_key": "vllm-secret-key",
+     *         "endpoint": "http://tenant-vllm:8000"
+     *     }
+     */
+    SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /**
+     * SetCredentialResponse
+     * @description Response model for setting tenant API credentials.
+     *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    SetCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
+    /**
+     * SetFederationRequest
+     * @description Request model for setting tenant federation config.
+     */
+    SetFederationRequest: {
+      /**
+       * Provider
+       * @description Identity provider label (e.g., 'mobilityguard', 'entra_id', 'okta', 'auth0')
+       */
+      provider: string;
+      /**
+       * Discovery Endpoint
+       * @description OIDC discovery endpoint URL
+       */
+      discovery_endpoint: string;
+      /**
+       * Client Id
+       * @description OAuth client ID
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description OAuth client secret
+       */
+      client_secret: string;
+      /**
+       * Allowed Domains
+       * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
+       */
+      allowed_domains?: string[];
+      /**
+       * Canonical Public Origin
+       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required for multi-tenant federation to construct redirect_uri
+       */
+      canonical_public_origin?: string | null;
+      /**
+       * Redirect Path
+       * @description Optional custom redirect path starting with /
+       */
+      redirect_path?: string | null;
+    };
+    /**
+     * SetFederationResponse
+     * @description Response model for setting federation config.
+     */
+    SetFederationResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Secret */
+      masked_secret: string;
+      /** Message */
+      message: string;
+    };
     /** SettingsPublic */
     SettingsPublic: {
       /**
@@ -4833,7 +5709,8 @@ export interface components {
       | "crawl_all_websites"
       | "run_app"
       | "pull_confluence_content"
-      | "pull_sharepoint_content";
+      | "pull_sharepoint_content"
+      | "update_model_usage_stats";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -4912,6 +5789,8 @@ export interface components {
       name: string;
       /** Display Name */
       display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
       /** Quota Limit */
       quota_limit: number;
       /** Domain */
@@ -4935,6 +5814,31 @@ export interface components {
        * @default []
        */
       modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
+      /** Federation Config */
+      federation_config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * TenantInfo
+     * @description Public tenant information for selector grid.
+     * @example {
+     *   "display_name": "Stockholm",
+     *   "name": "Stockholm Municipality",
+     *   "slug": "stockholm"
+     * }
+     */
+    TenantInfo: {
+      /** Slug */
+      slug: string;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name: string;
     };
     /** TenantIntegration */
     TenantIntegration: {
@@ -4964,6 +5868,28 @@ export interface components {
       items: components["schemas"]["TenantIntegration"][];
       /** Count */
       count: number;
+    };
+    /**
+     * TenantListResponse
+     * @description List of tenants for selector.
+     * @example {
+     *   "tenants": [
+     *     {
+     *       "display_name": "Stockholm",
+     *       "name": "Stockholm Municipality",
+     *       "slug": "stockholm"
+     *     },
+     *     {
+     *       "display_name": "Gothenburg",
+     *       "name": "Gothenburg Municipality",
+     *       "slug": "goteborg"
+     *     }
+     *   ]
+     * }
+     */
+    TenantListResponse: {
+      /** Tenants */
+      tenants: components["schemas"]["TenantInfo"][];
     };
     /** TenantPublic */
     TenantPublic: {
@@ -5016,6 +5942,136 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+    };
+    /**
+     * TenantWithMaskedCredentials
+     * @description TenantInDB with masked API credentials for safe API responses.
+     *
+     * This model is used when returning tenant data through API endpoints
+     * to prevent exposing full API keys. The api_credentials field is
+     * automatically masked to show only the last 4 characters of each key.
+     *
+     * Example:
+     *     Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
+     *     Masked: {"openai": "...xyz"}
+     */
+    TenantWithMaskedCredentials: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Privacy Policy */
+      privacy_policy?: string | null;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
+      /** Quota Limit */
+      quota_limit: number;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /** @default active */
+      state?: components["schemas"]["TenantState"];
+      /**
+       * Security Enabled
+       * @default false
+       */
+      security_enabled?: boolean;
+      /**
+       * Modules
+       * @default []
+       */
+      modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
+      /** Federation Config */
+      federation_config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
+     */
+    TokenEstimateBreakdown: {
+      /**
+       * Prompt
+       * @description Tokens used by assistant prompt
+       */
+      prompt: number;
+      /**
+       * Text
+       * @description Tokens used by user input text
+       */
+      text: number;
+      /**
+       * Files
+       * @description Total tokens used by all files
+       */
+      files: number;
+      /**
+       * File Details
+       * @description Per-file token counts
+       */
+      file_details?: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * TokenEstimateRequest
+     * @description Request payload for estimating tokens.
+     */
+    TokenEstimateRequest: {
+      /**
+       * Text
+       * @description User input text to evaluate
+       * @default
+       */
+      text?: string;
+      /**
+       * File Ids
+       * @description List of file IDs to include in the estimate
+       */
+      file_ids?: string[];
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -5184,9 +6240,12 @@ export interface components {
     };
     /**
      * UpdateInterval
+     * @description Defines how frequently a website should be crawled.
+     *
+     * Why: Provides flexible scheduling options for automated crawling.
      * @enum {string}
      */
-    UpdateInterval: "never" | "weekly";
+    UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Assistants */
@@ -5944,6 +7003,16 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model?: components["schemas"]["ModelId"] | null;
+      /**
+       * Http Auth Username
+       * @description Username for HTTP Basic Authentication (optional)
+       */
+      http_auth_username?: string | null;
+      /**
+       * Http Auth Password
+       * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
+       */
+      http_auth_password?: string | null;
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -6006,6 +7075,27 @@ export interface components {
         | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
+      /**
+       * Requires Http Auth
+       * @description Whether this website requires HTTP Basic Authentication. Credentials are never exposed via API.
+       */
+      requires_http_auth: boolean;
+      /**
+       * Consecutive Failures
+       * @description Number of consecutive crawl failures. Resets to 0 on successful crawl.
+       * @default 0
+       */
+      consecutive_failures?: number;
+      /**
+       * Next Retry At
+       * @description When to retry after failures (null = no backoff). Uses exponential backoff: 1h → 2h → 4h → 8h → 16h → 24h max.
+       */
+      next_retry_at?: string | null;
+      /**
+       * Is Auto Disabled
+       * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
+       */
+      is_auto_disabled: boolean;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -6034,6 +7124,18 @@ export interface components {
        * @default NOT_PROVIDED
        */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /**
+       * Http Auth Username
+       * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.
+       * @default NOT_PROVIDED
+       */
+      http_auth_username?: string | null;
+      /**
+       * Http Auth Password
+       * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
+       * @default NOT_PROVIDED
+       */
+      http_auth_password?: string | null;
     };
     /**
      * WizardType
@@ -6494,7 +7596,7 @@ export interface operations {
   };
   /**
    * Login With Mobilityguard
-   * @description OpenID Connect Login with mobilityguard.
+   * @description OpenID Connect Login (generic OIDC provider).
    */
   login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
     requestBody: {
@@ -7523,6 +8625,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -7821,6 +8925,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -8121,6 +9227,52 @@ export interface operations {
     };
   };
   /**
+   * Estimate token usage for text and files
+   * @description Estimate token usage for the given text and files for this assistant.
+   *
+   * The Space Actor + FileService stack already enforces tenant and ownership
+   * boundaries; this endpoint adds lightweight guardrails to keep the operation
+   * responsive while supporting large-context models.
+   */
+  estimate_tokens_api_v1_assistants__id__token_estimate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TokenEstimateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Group Chat
    * @description Get an existing group chat by its ID.
    */
@@ -8343,6 +9495,7 @@ export interface operations {
    * - SSEIntricEvent: Internal events like generating an image
    * - SSEFiles: Generated files/images responses
    * - SSEFirstChunk: Initial response with metadata
+   * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
    */
   chat_api_v1_conversations__post: {
     parameters: {
@@ -8451,6 +9604,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                 };
               },
@@ -8493,6 +9648,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -8555,6 +9712,17 @@ export interface operations {
                     url: string;
                   };
                 };
+              },
+              {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Error */
+                error: string;
+                /** Error Code */
+                error_code?: number | null;
               }
             ]
           >;
@@ -9968,6 +11136,234 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Model Usage
+   * @description Get usage statistics for a specific model (pre-aggregated for performance)
+   */
+  get_model_usage_api_v1_completion_models__model_id__usage_get: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelUsageStatistics"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Usage Details
+   * @description Get detailed list of entities using this model with cursor pagination
+   */
+  get_model_usage_details_api_v1_completion_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by entity type */
+        entity_type?: string | null;
+        /** @description Cursor for pagination */
+        cursor?: string | null;
+        /** @description Number of results per page */
+        limit?: number;
+      };
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Model Usage
+   * @description Migrate all usage from one model to another with safety checks
+   */
+  migrate_model_usage_api_v1_completion_models__model_id__migrate_post: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get All Models Usage Summary
+   * @description Get usage summary for all models (optimized with pre-aggregation)
+   */
+  get_all_models_usage_summary_api_v1_completion_models_usage_summary_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelUsageSummary"][];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Migration History
+   * @description Get migration history for a specific model (from or to this model)
+   */
+  get_model_migration_history_api_v1_completion_models__model_id__migration_history_get: {
+    parameters: {
+      query?: {
+        /** @description Number of results per page */
+        limit?: number;
+        /** @description Offset for pagination */
+        offset?: number;
+      };
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get All Migration History
+   * @description Get all migration history for the tenant
+   */
+  get_all_migration_history_api_v1_completion_models_migration_history_get: {
+    parameters: {
+      query?: {
+        /** @description Number of results per page */
+        limit?: number;
+        /** @description Offset for pagination */
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Migration History By Id
+   * @description Get a specific migration history record by ID
+   */
+  get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get: {
+    parameters: {
+      path: {
+        migration_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Embedding Models */
   get_embedding_models_api_v1_embedding_models__get: {
     responses: {
@@ -10718,7 +12114,29 @@ export interface operations {
       };
     };
   };
-  /** Create Space Websites */
+  /**
+   * Create a website crawler
+   * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+   *
+   *     **Update Intervals:**
+   *     - `never` (default): Manual crawls only
+   *     - `daily`: Automatic recrawl every day at 3 AM Swedish time
+   *     - `every_other_day`: Recrawl every 2 days
+   *     - `weekly`: Recrawl every Friday
+   *
+   *     **Example Request Body:**
+   *     ```json
+   *     {
+   *       "name": "Company Documentation",
+   *       "url": "https://docs.example.com",
+   *       "crawl_type": "crawl",
+   *       "download_files": true,
+   *       "update_interval": "daily"
+   *     }
+   *     ```
+   *
+   *     The crawl will start immediately upon creation.
+   */
   create_space_websites_api_v1_spaces__id__knowledge_websites__post: {
     parameters: {
       path: {
@@ -11030,6 +12448,77 @@ export interface operations {
       };
     };
   };
+  /**
+   * Trigger bulk crawl
+   * @description Trigger crawls for multiple websites at once. Useful for:
+   *     - Batch recrawling selected websites
+   *     - Refreshing multiple knowledge sources simultaneously
+   *     - Recovering from failed crawls across multiple sites
+   *
+   *     **Features:**
+   *     - Maximum 50 websites per request (safety limit)
+   *     - Individual failures don't stop the batch
+   *     - Returns detailed status for each website
+   *
+   *     **Example Request:**
+   *     ```json
+   *     {
+   *       "website_ids": [
+   *         "123e4567-e89b-12d3-a456-426614174000",
+   *         "123e4567-e89b-12d3-a456-426614174001"
+   *       ]
+   *     }
+   *     ```
+   *
+   *     **Example Response:**
+   *     ```json
+   *     {
+   *       "total": 2,
+   *       "queued": 1,
+   *       "failed": 1,
+   *       "crawl_runs": [...],
+   *       "errors": [
+   *         {
+   *           "website_id": "123e4567-e89b-12d3-a456-426614174001",
+   *           "error": "Crawl already in progress for this website"
+   *         }
+   *       ]
+   *     }
+   *     ```
+   */
+  bulk_run_crawl_api_v1_websites_bulk_run__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BulkCrawlResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Website */
   get_website_api_v1_websites__id___get: {
     parameters: {
@@ -11117,7 +12606,23 @@ export interface operations {
       };
     };
   };
-  /** Run Crawl */
+  /**
+   * Trigger a crawl
+   * @description Manually trigger a crawl for a specific website. This can be used to:
+   *     - Recrawl a website to update its content
+   *     - Force a crawl outside the automatic update schedule
+   *     - Retry a failed crawl
+   *
+   *     The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
+   *
+   *     **Status Flow:**
+   *     1. `queued` - Crawl is waiting to start
+   *     2. `in progress` - Crawl is actively running
+   *     3. `complete` - Crawl finished successfully
+   *     4. `failed` - Crawl encountered an error
+   *
+   *     Returns the new crawl run with status information.
+   */
   run_crawl_api_v1_websites__id__run__post: {
     parameters: {
       path: {
@@ -12231,7 +13736,20 @@ export interface operations {
       };
     };
   };
-  /** Get Tenants */
+  /**
+   * Get Tenants
+   * @description Get all tenants with masked API credentials.
+   *
+   * Returns tenant information with API keys masked to show only last 4 characters.
+   * This prevents exposing full API keys through the API endpoint.
+   *
+   * Args:
+   *     domain: Optional domain filter
+   *     container: Dependency injection container
+   *
+   * Returns:
+   *     Paginated list of tenants with masked credentials
+   */
   get_tenants_api_v1_sysadmin_tenants__get: {
     parameters: {
       query?: {
@@ -12242,7 +13760,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_TenantInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_TenantWithMaskedCredentials_"];
         };
       };
       /** @description Validation Error */
@@ -12264,7 +13782,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Bad Request */
@@ -12297,7 +13815,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Not Found */
@@ -12325,7 +13843,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Not Found */
@@ -12360,6 +13878,53 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Get current OIDC debug toggle status
+   * @description Returns whether OIDC debug logging is currently enabled and when it expires.
+   */
+  get_oidc_debug_status_api_v1_sysadmin_observability_oidc_debug__get: {
+    responses: {
+      /** @description Current state of the OIDC debug toggle. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OIDCDebugToggleResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key. */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Enable or disable OIDC debug logging
+   * @description Turns verbose OIDC diagnostics on or off for a limited window. Requires super API key.
+   */
+  toggle_oidc_debug_api_v1_sysadmin_observability_oidc_debug__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OIDCDebugToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Debug flag state updated. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OIDCDebugToggleResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -12530,6 +14095,382 @@ export interface operations {
       };
     };
   };
+  /**
+   * Recalculate Tenant Usage Statistics
+   * @description Recalculate usage statistics for a specific tenant.
+   *
+   * This endpoint is intended for tenant-specific administrative operations,
+   * such as fixing usage statistics for a particular tenant.
+   */
+  recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Recalculate All Tenants Usage Statistics
+   * @description Recalculate usage statistics for all active tenants.
+   *
+   * This endpoint is intended for system-wide administrative operations,
+   * such as bulk recalculation of usage statistics across all tenants.
+   */
+  recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Completion Model For Tenant
+   * @description Migrate completion model usage for a specific tenant.
+   *
+   * This endpoint allows system administrators to migrate all usage from one
+   * completion model to another for a specific tenant. This is useful for:
+   * - Migrating tenants away from deprecated models
+   * - Consolidating model usage
+   * - Fixing model configurations for specific tenants
+   *
+   * Args:
+   *     tenant_id: UUID of the tenant to migrate
+   *     model_id: UUID of the source model to migrate from
+   *     migration_request: Details of the migration (target model, entity types, etc.)
+   */
+  migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Migrate Completion Model For All Tenants
+   * @description Migrate completion model usage for all active tenants.
+   *
+   * This endpoint allows system administrators to migrate all usage from one
+   * completion model to another across all active tenants. This is useful for:
+   * - Deprecating models system-wide
+   * - Migrating to newer model versions
+   * - Consolidating model usage across the entire system
+   *
+   * Args:
+   *     model_id: UUID of the source model to migrate from
+   *     migration_request: Details of the migration (target model, entity types, etc.)
+   */
+  migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set tenant API credential
+   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
+   */
+  set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete tenant API credential
+   * @description Delete API credentials for a specific LLM provider for a tenant. System admin only.
+   */
+  delete_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant API credentials
+   * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
+   */
+  list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ListCredentialsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant federation config
+   * @description View federation config with masked secrets. System admin only.
+   */
+  get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set tenant federation config
+   * @description Configure custom identity provider for tenant. System admin only.
+   */
+  set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetFederationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete tenant federation config
+   * @description Remove custom identity provider for tenant. System admin only.
+   */
+  delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Test tenant federation config
+   * @description Test connection to tenant's IdP. System admin only.
+   */
+  test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Modules */
   get_modules_api_v1_modules__get: {
     responses: {
@@ -12584,6 +14525,97 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["TenantInDB"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenants for selector
+   * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+   */
+  list_tenants_api_v1_auth_tenants_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantListResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Initiate OIDC authentication
+   * @description Get authorization URL for tenant's identity provider. No authentication required. Returns URL to redirect user to IdP login page.
+   */
+  initiate_auth_api_v1_auth_initiate_get: {
+    parameters: {
+      query?: {
+        /** @description Tenant slug (required for multi-tenant, optional for single-tenant) */
+        tenant?: string | null;
+        /** @description Optional frontend-generated CSRF state */
+        state?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["InitiateAuthResponse"];
+        };
+      };
+      /** @description Tenant is not active */
+      403: {
+        content: never;
+      };
+      /** @description Tenant not found or not configured */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Federation or redirect configuration missing */
+      500: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * OIDC callback handler
+   * @description Handle OIDC callback, validate token, lookup user. No authentication required (public endpoint). Returns JWT token for authenticated user.
+   */
+  auth_callback_api_v1_auth_callback_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CallbackRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Invalid or expired state */
+      400: {
+        content: never;
+      };
+      /** @description Token validation failed */
+      401: {
+        content: never;
+      };
+      /** @description Domain not allowed, inactive tenant, or user missing */
+      403: {
+        content: never;
       };
       /** @description Validation Error */
       422: {

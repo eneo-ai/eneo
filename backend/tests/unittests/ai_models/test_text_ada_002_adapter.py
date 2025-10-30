@@ -1,3 +1,4 @@
+import pytest
 from uuid import uuid4
 
 from intric.ai_models.embedding_models.embedding_model import (
@@ -11,6 +12,15 @@ from intric.embedding_models.infrastructure.adapters.openai_embeddings import (
 )
 from intric.info_blobs.info_blob import InfoBlobChunk
 from tests.fixtures import TEST_UUID
+
+
+@pytest.fixture(autouse=True)
+def mock_openai_key(monkeypatch):
+    """Mock OPENAI_API_KEY for adapter instantiation.
+
+    These tests only test chunking logic and don't make real API calls.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-test-key-for-chunking")
 
 
 def _get_adapter_with_max_limit(max_limit: int):

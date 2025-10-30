@@ -5,12 +5,12 @@ dotenv: [".env"]
 tasks:
   run:
     cmds:
-      - poetry run start
+      - uv run start
     dir: ./backend
 
   worker:
     cmds:
-      - LOGLEVEL=DEBUG arq src.intric.worker.arq.WorkerSettings
+      - uv run arq src.intric.worker.arq.WorkerSettings
     dir: ./backend
 
   frontend:
@@ -20,5 +20,5 @@ tasks:
 
   migrate:
     cmds:
-      - alembic upgrade head
+      - uv run alembic upgrade head
     dir: ./backend

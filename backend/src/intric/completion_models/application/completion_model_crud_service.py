@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.completion_models.domain import ModelFamily
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
 from intric.roles.permissions import Permission, validate_permissions
@@ -32,7 +32,7 @@ class CompletionModelCRUDService:
 
         available_models = []
         for model in models:
-            if model.family == ModelFamily.AZURE and not SETTINGS.using_azure_models:
+            if model.family == ModelFamily.AZURE and not get_settings().using_azure_models:
                 continue
 
             available_models.append(model)

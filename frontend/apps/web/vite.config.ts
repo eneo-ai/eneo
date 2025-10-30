@@ -33,7 +33,7 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{js,ts}"]
   },
   server: {
-    host: process.env.HOST ? "0.0.0.0" : undefined, // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
+    host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
     port: 3000,
     strictPort: true
   },

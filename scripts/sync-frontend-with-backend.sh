@@ -79,26 +79,26 @@ update_intric_js() {
     cd "$intric_js_dir"
 
     # Generate types from backend
-    if ! command -v pnpm >/dev/null 2>&1; then
-        echo "Error: pnpm is required but not found"
+    if ! command -v bun >/dev/null 2>&1; then
+        echo "Error: bun is required but not found"
         exit 1
     fi
 
-    echo "Installing dependencies with pnpm..."
-    if ! pnpm install --force --silent; then
-        echo "ERROR: pnpm install failed"
+    echo "Installing dependencies with bun..."
+    if ! bun install; then
+        echo "ERROR: bun install failed"
         exit 1
     fi
 
     echo "Generating types from backend..."
-    if ! INTRIC_BACKEND_URL="http://localhost:$backend_port" pnpm run update; then
+    if ! INTRIC_BACKEND_URL="http://localhost:$backend_port" bun run update; then
         echo "ERROR: Failed to generate types from backend"
         echo "Checking if container is still healthy..."
         # Use global container name that should be available
         if [[ -n "$CONTAINER_NAME_FOR_LOGS" ]]; then
             check_container_health "$CONTAINER_NAME_FOR_LOGS" "$backend_port"
         fi
-        echo "pnpm run update failed, this may be due to container issues"
+        echo "bun run update failed, this may be due to container issues"
         exit 1
     fi
 
@@ -188,6 +188,7 @@ main() {
         -e JWT_SECRET=dummy \
         -e JWT_TOKEN_PREFIX=dummy \
         -e URL_SIGNING_KEY=dummy \
+        -e ENCRYPTION_KEY=yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs= \
         -e NUM_WORKERS=1 \
         "$BACKEND_IMAGE" > /dev/null
 

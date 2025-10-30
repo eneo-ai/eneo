@@ -46,6 +46,39 @@ class AssistantType(str, Enum):
     DEFAULT_ASSISTANT = "default-assistant"
 
 
+class ModelInfo(BaseModel):
+    """Information about the model used by the assistant."""
+    name: str
+    token_limit: int
+    prompt_tokens: Optional[int] = None
+
+
+class TokenEstimateRequest(BaseModel):
+    """Request payload for estimating tokens."""
+
+    text: str = Field(default="", description="User input text to evaluate")
+    file_ids: list[UUID] = Field(
+        default_factory=list, description="List of file IDs to include in the estimate"
+    )
+
+
+class TokenEstimateBreakdown(BaseModel):
+    """Breakdown of token usage by source."""
+
+    prompt: int = Field(description="Tokens used by assistant prompt")
+    text: int = Field(description="Tokens used by user input text")
+    files: int = Field(description="Total tokens used by all files")
+    file_details: dict[str, int] = Field(default_factory=dict, description="Per-file token counts")
+
+
+class TokenEstimateResponse(BaseModel):
+    """Response model for token usage estimation."""
+    tokens: int = Field(description="Total token count")
+    percentage: float = Field(description="Percentage of context window used")
+    limit: int = Field(description="Model's context window limit")
+    breakdown: TokenEstimateBreakdown = Field(description="Token usage breakdown by source")
+
+
 # Relationship models
 class GroupWithEmbeddingModel(GroupInDBBase):
     embedding_model: Optional[EmbeddingModelLegacy] = None
@@ -202,6 +235,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     user: UserSparse
     tools: UseTools
     type: AssistantType
+    model_info: Optional[ModelInfo] = None
     description: Optional[str] = Field(
         default=None,
         description=(

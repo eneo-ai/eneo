@@ -10,8 +10,57 @@ from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelFamily,
     EmbeddingModelLegacy,
 )
+from intric.main.config import Settings, reset_settings
 from intric.tenants.tenant import TenantInDB
 from intric.users.user import UserInDB
+
+
+@pytest.fixture(scope="session")
+def test_settings() -> Settings:
+    """Create test settings with explicit values for unit tests.
+
+    Similar to integration tests, this provides a clean, isolated configuration
+    that doesn't depend on .env file or environment variables.
+    """
+    return Settings(
+        # Fake API key for unit tests that instantiate OpenAI clients
+        openai_api_key="sk-fake-unit-test-key-for-adapter-instantiation",
+        anthropic_api_key=None,
+        azure_api_key=None,
+        berget_api_key=None,
+        mistral_api_key=None,
+        ovhcloud_api_key=None,
+        vllm_api_key=None,
+
+        # Minimal database settings (not used in unit tests)
+        postgres_user="unit_test_user",
+        postgres_host="localhost",
+        postgres_password="unit_test_password",
+        postgres_port=5432,
+        postgres_db="unit_test_db",
+
+        # Redis settings (not used in unit tests)
+        redis_host="localhost",
+        redis_port=6379,
+
+        # Security
+        encryption_key="yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
+
+        # Feature flags - default to single-tenant mode for unit tests
+        tenant_credentials_enabled=False,
+        federation_per_tenant_enabled=False,
+
+        # Testing mode
+        testing=True,
+        dev=True,
+    )
+
+
+@pytest.fixture(autouse=True)
+def reset_settings_after_test():
+    """Reset settings after each test to prevent state leakage."""
+    yield
+    reset_settings()
 
 
 @pytest.fixture

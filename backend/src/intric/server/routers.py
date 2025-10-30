@@ -31,7 +31,7 @@ from intric.integration.presentation.integration_router import (
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
-from intric.main.config import SETTINGS
+from intric.main.config import get_settings
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -59,6 +59,13 @@ from intric.users.user_router import router as users_router
 from intric.websites.presentation.website_router import router as website_router
 from intric.modules.module_router import router as module_router
 from intric.sysadmin.sysadmin_router import router as sysadmin_router
+from intric.tenants.presentation.tenant_credentials_router import (
+    router as tenant_credentials_router,
+)
+from intric.tenants.presentation.tenant_federation_router import (
+    router as tenant_federation_router,
+)
+from intric.authentication.federation_router import router as federation_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
 
 router = APIRouter()
@@ -122,10 +129,13 @@ router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 router.include_router(integration_auth_router, prefix="/integrations/auth", tags=["integrations"])
 
 router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
+router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
+router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
+router.include_router(federation_router, prefix="", tags=["authentication"])  # Public auth endpoints (no prefix)
 router.include_router(documentation_router, prefix="")
 
-if SETTINGS.using_access_management:
+if get_settings().using_access_management:
     from intric.roles.roles_router import router as roles_router
 
     router.include_router(roles_router, prefix="/roles", tags=["roles"])

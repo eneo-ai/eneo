@@ -101,6 +101,39 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🚀 Installation & Setup Issues
 
+### SSR login immediately returns HTTP 401 after deployment
+
+This usually means the backend could not seed the `allowed_origins` table with
+your public URL.
+
+1. **Check backend logs** – look for messages such as
+   `Allowed-origins seeding skipped` or
+   `Allowed origin '<url>' already registered`.
+   These indicate whether `PUBLIC_ORIGIN` was read from the environment.
+
+2. **Verify environment configuration** – ensure `PUBLIC_ORIGIN` (or its
+   fallback `ORIGIN` / `INTRIC_BACKEND_URL`) is set in the backend `.env` file
+   to the externally reachable URL (the one your users see in their browser).
+
+3. **Inspect the allowlist manually**:
+
+   ```bash
+   docker compose exec db \
+     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+     -c 'SELECT url, tenant_id FROM allowed_origins;'
+   ```
+
+4. **Backfill manually (optional)** – if the table is empty, insert the URL
+   explicitly (idempotent):
+
+   ```sql
+   INSERT INTO allowed_origins (url, tenant_id)
+   VALUES ('https://your-domain.com', '<tenant-uuid>')
+   ON CONFLICT (url) DO NOTHING;
+   ```
+
+   Replace `<tenant-uuid>` with the ID from `SELECT id FROM tenants;`.
+
 ### DevContainer Problems
 
 <details>
@@ -164,38 +197,30 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 </details>
 
 <details>
-<summary>🐍 Python/Poetry dependency issues</summary>
+<summary>🐍 Python/uv dependency issues</summary>
 
-**Problem**: Poetry installation fails or dependencies conflict.
+**Problem**: uv installation fails or dependencies conflict.
 
 **Solutions**:
-1. **Clear Poetry cache**:
+1. **Clear uv cache and reinstall**:
    ```bash
-   poetry cache clear pypi --all
-   poetry env remove --all
-   poetry install
+   uv cache clean
+   uv sync
    ```
 
-2. **Update Poetry**:
-   ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
-   ```
-
-3. **Python version mismatch**:
+2. **Python version check**:
    ```bash
    # Check Python version
    python3 --version  # Should be 3.11+
-   
-   # Set specific Python version
-   poetry env use python3.11
-   poetry install
+
+   # uv uses system Python - ensure correct version is installed
    ```
 
-4. **Lock file issues**:
+3. **Lock file issues**:
    ```bash
-   # Delete lock file and reinstall
-   rm poetry.lock
-   poetry install
+   # Delete lock file and regenerate
+   rm uv.lock
+   uv sync
    ```
 
 **Prevention**: Use the provided DevContainer for consistent environment.
@@ -203,22 +228,22 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 </details>
 
 <details>
-<summary>📦 Node.js/pnpm dependency issues</summary>
+<summary>📦 Node.js/bun dependency issues</summary>
 
-**Problem**: pnpm installation fails or packages conflict.
+**Problem**: bun installation fails or packages conflict.
 
 **Solutions**:
-1. **Update pnpm**:
+1. **Update bun**:
    ```bash
-   npm install -g pnpm@9.12.3
+   npm install -g bun
    ```
 
-2. **Clear pnpm cache**:
+2. **Clear bun cache**:
    ```bash
-   pnpm store prune
+   bun pm cache rm
    rm -rf node_modules
-   rm pnpm-lock.yaml
-   pnpm install
+   rm bun.lock
+   bun install
    ```
 
 3. **Node version issues**:
@@ -233,10 +258,10 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 4. **Workspace issues**:
    ```bash
    # Reinstall all workspace dependencies
-   pnpm install -r
+   bun install
    ```
 
-**Prevention**: Use specified Node.js and pnpm versions.
+**Prevention**: Use specified Node.js and bun versions.
 
 </details>
 
@@ -271,7 +296,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 4. **Manual database initialization**:
    ```bash
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 5. **Verify environment variables**:
@@ -299,7 +324,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    docker compose down -v
    docker compose up -d db
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 2. **Check password in environment**:
@@ -354,6 +379,28 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🔑 Authentication & Authorization Issues
 
+### OIDC login fails for a specific tenant
+
+**Symptoms**
+- Frontend displays `LoginError` along with a `correlationId`
+- Backend logs only show a 4xx/5xx status without context
+
+**Resolution**
+1. Enable the OIDC debug toggle temporarily:
+   ```bash
+   curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
+     -H "X-API-Key: {SUPER_API_KEY}" \
+     -H "Content-Type: application/json" \
+     -d '{"enabled": true, "duration_minutes": 10, "reason": "tenant-login-incident"}'
+   ```
+2. Ask the tenant to retry or reproduce the login. Copy the `correlationId` surfaced in the UI.
+3. Filter server logs for that ID:
+   ```bash
+   journalctl -u backend.service -o cat | jq 'select(.correlation_id=="<ID>")'
+   ```
+4. Match the `[OIDC DEBUG] …` breadcrumb with the table in the [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#32-trace-the-correlation-id) to pinpoint the exact misconfiguration (domain, user, tenant mismatch, etc.).
+5. Update the tenant federation config or user data, then disable the toggle with a second POST (`{"enabled": false, ...}`).
+
 ### JWT Token Problems
 
 <details>
@@ -402,7 +449,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 1. **Verify default user creation**:
    ```bash
    cd backend
-   poetry run python init_db.py  # This creates default user
+   uv run python init_db.py  # This creates default user
    ```
 
 2. **Check default credentials**:
@@ -413,7 +460,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```bash
    docker compose exec db psql -U postgres -d eneo -c "DELETE FROM users WHERE email = 'user@example.com';"
    cd backend
-   poetry run python init_db.py
+   uv run python init_db.py
    ```
 
 4. **Create user manually**:
@@ -558,7 +605,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```bash
    # Frontend development
    cd frontend
-   PORT=3001 pnpm run dev
+   PORT=3001 bun run dev
    ```
 
 **Prevention**: Check for running services before starting Eneo.
@@ -749,7 +796,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
    ```python
    # In backend container
    cd backend
-   poetry run python -c "
+   uv run python -c "
    from src.intric.embedding_models.infrastructure.create_embeddings_service import create_embeddings
    print('Testing embeddings...')
    "
@@ -875,7 +922,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 2. **Verify development server**:
    ```bash
    cd frontend
-   pnpm run dev --host 0.0.0.0 --port 3000
+   bun run dev --host 0.0.0.0 --port 3000
    ```
 
 3. **Check file permissions**:
@@ -904,7 +951,7 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 1. **Verify development mode**:
    ```bash
    cd backend
-   poetry run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
+   uv run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 2. **Check file watching**:

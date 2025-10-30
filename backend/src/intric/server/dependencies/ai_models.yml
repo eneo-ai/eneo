@@ -396,7 +396,7 @@ embedding_models:
   - name: 'multilingual-e5-large'
     family: 'e5'
     open_source: true
-    max_input: 8191
+    max_input: 1400  # Model has 512 token limit; ~1400 chars = ~400 tokens (conservative for multilingual)
     is_deprecated: false
     stability: 'experimental'
     hosting: 'swe'
@@ -407,6 +407,7 @@ embedding_models:
 
   - name: 'text-embedding-3-large-azure'
     family: 'openai'
+    litellm_model_name: 'azure/text-embedding-3-large'
     open_source: false
     dimensions: 3072
     max_input: 8191

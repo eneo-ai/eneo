@@ -52,10 +52,6 @@ export function getEnvironmentConfig() {
     "https://www.intric.ai/en/external-support-assistant"
   );
 
-  // Contact emails
-  const supportEmail = getEnvValue("SUPPORT_EMAIL", "support@intric.ai");
-  const salesEmail = getEnvValue("SALES_EMAIL", "sales@intric.ai");
-
   return Object.freeze({
     baseUrl,
     authUrl,
@@ -64,7 +60,5 @@ export function getEnvironmentConfig() {
     helpCenterUrl,
     frontendVersion,
     gitInfo,
-    supportEmail,
-    salesEmail
   });
 }

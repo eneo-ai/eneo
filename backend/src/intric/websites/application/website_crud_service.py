@@ -45,6 +45,8 @@ class WebsiteCRUDService:
         crawl_type: "CrawlType",
         update_interval: UpdateInterval,
         embedding_model_id: Optional["UUID"] = None,
+        http_auth_username: Optional[str] = None,
+        http_auth_password: Optional[str] = None,
     ) -> Website:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -68,6 +70,8 @@ class WebsiteCRUDService:
             crawl_type=crawl_type,
             update_interval=update_interval,
             embedding_model=embedding_model,
+            http_auth_username=http_auth_username,
+            http_auth_password=http_auth_password,
         )
 
         space.add_website(website)
@@ -96,6 +100,8 @@ class WebsiteCRUDService:
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union["CrawlType", NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
+        http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
+        http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> Website:
         space = await self.space_service.get_space_by_website(id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -111,6 +117,8 @@ class WebsiteCRUDService:
             download_files=download_files,
             crawl_type=crawl_type,
             update_interval=update_interval,
+            http_auth_username=http_auth_username,
+            http_auth_password=http_auth_password,
         )
 
         await self.space_repo.update(space=space)
@@ -159,3 +167,51 @@ class WebsiteCRUDService:
             raise UnauthorizedException()
 
         return await self.crawl_run_repo.get_crawl_runs(website_id=website_id)
+
+    async def bulk_crawl_websites(
+        self, website_ids: list[UUID]
+    ) -> tuple[list["CrawlRun"], list[dict[str, str]]]:
+        """Trigger crawls for multiple websites in bulk.
+
+        Why: Enables efficient batch operations for users managing many websites.
+        Each website is processed independently - failures don't stop the batch.
+
+        Args:
+            website_ids: List of website IDs to crawl
+
+        Returns:
+            Tuple of (successful_crawl_runs, errors)
+            - successful_crawl_runs: List of CrawlRun objects that were queued
+            - errors: List of dicts with website_id and error message for failures
+
+        Raises:
+            BadRequestException: If more than 50 websites requested (safety limit)
+        """
+        if len(website_ids) > 50:
+            raise BadRequestException("Cannot crawl more than 50 websites at once")
+
+        successful_runs = []
+        errors = []
+
+        for website_id in website_ids:
+            try:
+                # Reuse existing crawl_website method for consistent behavior
+                crawl_run = await self.crawl_website(website_id)
+                successful_runs.append(crawl_run)
+            except CrawlAlreadyRunningException:
+                errors.append({
+                    "website_id": str(website_id),
+                    "error": "Crawl already in progress for this website"
+                })
+            except UnauthorizedException:
+                errors.append({
+                    "website_id": str(website_id),
+                    "error": "Not authorized to crawl this website"
+                })
+            except Exception as e:
+                errors.append({
+                    "website_id": str(website_id),
+                    "error": str(e)
+                })
+
+        return successful_runs, errors

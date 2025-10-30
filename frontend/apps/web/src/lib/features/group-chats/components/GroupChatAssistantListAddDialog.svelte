@@ -26,7 +26,9 @@
 
 <Dialog.Root openController={isOpen}>
   <Dialog.Trigger let:trigger asFragment>
-    <Button variant="outlined" is={trigger} class="h-12"><IconPlus></IconPlus>{m.add_assistant()}</Button>
+    <Button variant="outlined" is={trigger} class="h-12"
+      ><IconPlus></IconPlus>{m.add_assistant()}</Button
+    >
   </Dialog.Trigger>
 
   <Dialog.Content width="medium">

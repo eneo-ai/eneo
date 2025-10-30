@@ -1,122 +1,140 @@
 # Architecture Guide
 
-This guide provides a comprehensive overview of Eneo's technical architecture, design patterns, and system components.
+This guide covers Eneo's technical architecture, design patterns, and system components.
 
 ---
 
-## 🏗️ System Overview
+## System Overview
 
-Eneo follows a **microservices architecture** with **domain-driven design** principles, built for scalability, maintainability, and democratic AI governance.
+Eneo uses a microservices architecture with domain-driven design principles for scalability, maintainability, and democratic AI governance.
 
 ### Core Principles
 
-- **🏛️ Domain-Driven Design**: Business logic organized by domain boundaries
-- **🔄 Event-Driven Architecture**: Asynchronous processing via Redis pub/sub
-- **🔌 API-First Design**: OpenAPI specification with auto-generated documentation
-- **🎯 Multi-Tenancy**: Secure isolation between organizations
-- **🚀 Real-Time Communication**: WebSockets and Server-Sent Events
-- **🔒 Security by Design**: Built-in compliance and access control
+- **Domain-Driven Design** - Business logic organized by domain boundaries
+- **Event-Driven Architecture** - Asynchronous processing via Redis pub/sub
+- **API-First Design** - OpenAPI specification with auto-generated documentation
+- **Multi-Tenancy** - Secure isolation between organizations
+- **Real-Time Communication** - WebSockets and Server-Sent Events
+- **Security by Design** - Built-in compliance and access control
 
 ---
 
-## 🗄️ High-Level Architecture
+## System Context (C4 Level 1)
 
-<details>
-<summary>🔍 Click to view complete system architecture</summary>
+The Eneo system serves public sector organizations by providing AI-powered collaborative workspaces. This diagram shows how Eneo interacts with its users and external systems.
 
 ```mermaid
-graph TB
-    subgraph "Client Layer"
+%%{init: {'theme': 'base'}}%%
+graph LR
+    classDef user fill:#bfdbfe,stroke:#1e40af,stroke-width:2px,color:#1e3a8a
+    classDef system fill:#d1fae5,stroke:#15803d,stroke-width:2px,color:#14532d
+    classDef adapter fill:#fed7aa,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+    classDef external fill:#f5d0fe,stroke:#a21caf,stroke-width:2px,color:#701a75
+
+    Users["End Users<br/>(Employees, Analysts)"]
+    Admins["System Administrators<br/>(IT, Operations)"]
+
+    Eneo["Eneo Platform<br/>AI Workspaces & Document Processing"]
+
+    LiteLLM["LiteLLM Adapter<br/>Unified AI Interface"]
+
+    AI["AI Providers<br/>(OpenAI, Anthropic, Azure,<br/>vLLM, Berget, Local Models)"]
+    IdP["Identity Providers<br/>(Optional: Entra ID,<br/>Auth0, MobilityGuard)"]
+
+    Users -->|Create spaces,<br/>ask questions| Eneo
+    Admins -->|Configure tenants,<br/>manage credentials| Eneo
+
+    Eneo -->|Route requests| LiteLLM
+    LiteLLM -->|Provider-specific APIs| AI
+    Eneo -.->|Authenticate users| IdP
+
+    class Users,Admins user
+    class Eneo system
+    class LiteLLM adapter
+    class AI,IdP external
+```
+
+---
+
+## High-Level Architecture (C4 Level 2)
+
+This diagram shows the core deployable containers and their interactions. Note: Traefik reverse proxy shown here is part of the production deployment example (see [DEPLOYMENT.md](./DEPLOYMENT.md)) and can be replaced with other solutions like Nginx, Kubernetes Ingress, etc.
+
+<details>
+<summary>View complete system architecture</summary>
+
+```mermaid
+%%{init: {'theme': 'base'}}%%
+graph TD
+    classDef userFacing fill:#bfdbfe,stroke:#1e40af,stroke-width:2px,color:#1e3a8a
+    classDef appLogic fill:#d1fae5,stroke:#15803d,stroke-width:2px,color:#14532d
+    classDef dataStore fill:#fecaca,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+    classDef caching fill:#fef08a,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef external fill:#f5d0fe,stroke:#a21caf,stroke-width:2px,color:#701a75
+    classDef workers fill:#fed7aa,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+
+    subgraph "User Clients"
         WEB[Web Browser]
-        MOB[Mobile Apps]
-        API_CLIENT[API Clients]
+        API[API Clients]
     end
-    
-    subgraph "Edge Layer"
-        CDN[CDN/CloudFlare]
-        LB[Load Balancer]
-    end
-    
-    subgraph "Gateway Layer"
-        TR[Traefik<br/>Reverse Proxy<br/>SSL Termination]
-    end
-    
+
     subgraph "Application Layer"
-        FE[SvelteKit Frontend<br/>Node.js Server<br/>Port 3000]
-        BE[FastAPI Backend<br/>Python/Uvicorn<br/>Port 8000]
-        WK[ARQ Workers<br/>Background Tasks]
+        FE[Frontend Container<br/>SvelteKit on Node.js<br/>Port 3000]
+        BE[Backend Container<br/>FastAPI on Uvicorn<br/>Port 8000]
+        WK[Worker Container<br/>ARQ Background Tasks]
     end
-    
-    subgraph "Domain Services"
-        AUTH[Authentication<br/>Service]
-        SPACES[Spaces<br/>Management]
-        ASSIST[Assistants<br/>Service]
-        FILES[File Processing<br/>Service]
-        AI[AI Integration<br/>Service]
-    end
-    
+
     subgraph "Data Layer"
-        DB[(PostgreSQL 16<br/>+ pgvector<br/>Vector Search)]
+        DB[(PostgreSQL 16<br/>+ pgvector)]
         REDIS[(Redis<br/>Cache/Queue/PubSub)]
-        FS[File Storage<br/>Local/Cloud]
+        FS[File Storage<br/>Volume Mounts]
     end
-    
-    subgraph "External Services"
-        OPENAI[OpenAI API]
-        ANTHROPIC[Anthropic API]
+
+    subgraph "External AI Providers"
+        OPENAI[OpenAI]
+        ANTHROPIC[Anthropic]
         AZURE[Azure OpenAI]
-        LOCAL[Local AI Models]
-        OAUTH[OAuth Providers]
+        LOCAL[Local Models]
     end
-    
-    WEB --> CDN
-    MOB --> CDN
-    API_CLIENT --> CDN
-    CDN --> LB
-    LB --> TR
-    
-    TR --> FE
-    TR --> BE
-    
-    FE --> BE
-    BE --> AUTH
-    BE --> SPACES
-    BE --> ASSIST
-    BE --> FILES
-    BE --> AI
-    
-    WK --> REDIS
-    WK --> DB
-    WK --> FS
-    
-    AUTH --> DB
-    SPACES --> DB
-    ASSIST --> DB
-    FILES --> DB
-    AI --> OPENAI
-    AI --> ANTHROPIC
-    AI --> AZURE
-    AI --> LOCAL
-    
+
+    WEB --> FE
+    API --> BE
+
+    FE -->|HTTP/SSE/WebSocket| BE
+
     BE --> DB
     BE --> REDIS
     BE --> FS
-    
-    AUTH --> OAUTH
-    
-    style FE fill:#f3e5f5
-    style BE fill:#e8f5e8
-    style WK fill:#fff3e0
-    style DB fill:#fce4ec
-    style REDIS fill:#f1f8e9
-    style TR fill:#e1f5fe
+    BE --> OPENAI
+    BE --> ANTHROPIC
+    BE --> AZURE
+    BE --> LOCAL
+
+    WK -.->|Dequeue jobs| REDIS
+    WK --> DB
+    WK --> FS
+
+    class WEB,API userFacing
+    class FE userFacing
+    class BE appLogic
+    class WK workers
+    class DB,FS dataStore
+    class REDIS caching
+    class OPENAI,ANTHROPIC,AZURE,LOCAL external
 ```
+
+**Key Components:**
+- **Frontend**: Serves the web UI and proxies API requests
+- **Backend**: FastAPI application with domain services (authentication, spaces, assistants, files, AI integration)
+- **Worker**: ARQ processes background tasks (file processing, web crawling, transcription, document embedding)
+- **PostgreSQL**: Primary database with pgvector for semantic search
+- **Redis**: Caching, job queue, and pub/sub messaging
 
 </details>
 
 ---
 
-## 🏢 Domain-Driven Design Structure
+## Domain-Driven Design Structure
 
 Eneo implements DDD patterns with clear domain boundaries and consistent architectural patterns.
 
@@ -142,7 +160,7 @@ backend/src/intric/
 Each domain follows a consistent layered architecture:
 
 <details>
-<summary>📁 Click to view domain structure pattern</summary>
+<summary>View domain structure pattern</summary>
 
 ```
 domain_name/
@@ -171,13 +189,19 @@ domain_name/
 
 ---
 
-## 🖥️ Frontend Architecture
+## Frontend Architecture (C4 Level 3)
+
+Deep dive into the SvelteKit frontend container showing components, state management, and data flow. This diagram illustrates how the frontend is organized using Svelte 5's reactive patterns and how it communicates with backend services.
 
 <details>
-<summary>🔍 Click to view SvelteKit application structure</summary>
+<summary>View SvelteKit application structure</summary>
 
 ```mermaid
+%%{init: {'theme': 'base'}}%%
 graph LR
+    classDef userFacing fill:#bfdbfe,stroke:#1e40af,stroke-width:2px,color:#1e3a8a
+    classDef appLogic fill:#d1fae5,stroke:#15803d,stroke-width:2px,color:#14532d
+
     subgraph "SvelteKit Frontend"
         ROUTES[File-based Routing<br/>src/routes/]
         COMPONENTS[Reusable Components<br/>src/lib/components/]
@@ -185,20 +209,20 @@ graph LR
         SERVICES[API Services<br/>@intric/intric-js]
         I18N[Internationalization<br/>Paraglide-JS]
     end
-    
+
     subgraph "UI Layer"
         PAGES[Pages/Routes]
         LAYOUTS[Layout Components]
         WIDGETS[UI Widgets]
     end
-    
+
     subgraph "State Layer"
         AUTH_STORE[Authentication Store]
         SPACE_STORE[Space Store]
         CHAT_STORE[Chat Store]
         THEME_STORE[Theme Store]
     end
-    
+
     ROUTES --> PAGES
     COMPONENTS --> LAYOUTS
     COMPONENTS --> WIDGETS
@@ -206,9 +230,12 @@ graph LR
     STORES --> SPACE_STORE
     STORES --> CHAT_STORE
     STORES --> THEME_STORE
-    
+
     SERVICES --> PAGES
     I18N --> PAGES
+
+    class PAGES,LAYOUTS,WIDGETS,ROUTES,COMPONENTS,SERVICES,I18N userFacing
+    class STORES,AUTH_STORE,SPACE_STORE,CHAT_STORE,THEME_STORE appLogic
 ```
 
 </details>
@@ -216,7 +243,7 @@ graph LR
 ### Key Frontend Technologies
 
 - **Framework**: SvelteKit with TypeScript
-- **Package Manager**: pnpm with workspace support
+- **Package Manager**: bun with workspace support
 - **UI Components**: Custom component library (@intric/ui)
 - **Styling**: Tailwind CSS v4
 - **API Client**: Type-safe client (@intric/intric-js)
@@ -226,34 +253,43 @@ graph LR
 
 ---
 
-## ⚙️ Backend Architecture
+## Backend Architecture (C4 Level 3)
+
+Deep dive into the FastAPI backend container showing the layered architecture with HTTP handling, domain services, domain entities, and infrastructure components. This demonstrates how Eneo implements domain-driven design principles with clear separation of concerns across layers.
 
 ### FastAPI Application Structure
 
 <details>
-<summary>🔍 Click to view backend architecture diagram</summary>
+<summary>View backend architecture diagram</summary>
 
 ```mermaid
+%%{init: {'theme': 'base'}}%%
 graph TB
+    classDef infra fill:#e5e7eb,stroke:#374151,stroke-width:2px,color:#1f2937
+    classDef appLogic fill:#d1fae5,stroke:#15803d,stroke-width:2px,color:#14532d
+    classDef domain fill:#fed7aa,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+    classDef dataStore fill:#fecaca,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+    classDef caching fill:#fef08a,stroke:#ca8a04,stroke-width:2px,color:#713f12
+
     subgraph "HTTP Layer"
         ROUTES[FastAPI Routers]
         MIDDLEWARE[Middleware Stack]
         DEPS[Dependency Injection]
     end
-    
+
     subgraph "Application Layer"
         SERVICES[Domain Services]
         FACTORIES[Domain Factories]
         REPOS[Repository Layer]
     end
-    
+
     subgraph "Domain Layer"
         ENTITIES[Domain Entities]
         VALUE_OBJECTS[Value Objects]
         DOMAIN_SERVICES[Domain Services]
         EVENTS[Domain Events]
     end
-    
+
     subgraph "Infrastructure Layer"
         ORM[SQLAlchemy ORM]
         MIGRATIONS[Alembic Migrations]
@@ -262,28 +298,30 @@ graph TB
         STORAGE[File Storage]
         AI_CLIENTS[AI Provider Clients]
     end
-    
+
     ROUTES --> SERVICES
     MIDDLEWARE --> ROUTES
     DEPS --> SERVICES
-    
+
     SERVICES --> FACTORIES
     SERVICES --> REPOS
     FACTORIES --> ENTITIES
     REPOS --> ORM
-    
+
     ENTITIES --> VALUE_OBJECTS
     ENTITIES --> DOMAIN_SERVICES
     DOMAIN_SERVICES --> EVENTS
-    
+
     ORM --> MIGRATIONS
     CACHE --> QUEUE
     STORAGE --> AI_CLIENTS
-    
-    style ROUTES fill:#e8f5e8
-    style SERVICES fill:#f3e5f5
-    style ENTITIES fill:#fff3e0
-    style ORM fill:#fce4ec
+
+    class ROUTES,MIDDLEWARE,DEPS infra
+    class SERVICES,FACTORIES,REPOS appLogic
+    class ENTITIES,VALUE_OBJECTS,DOMAIN_SERVICES,EVENTS domain
+    class ORM,MIGRATIONS dataStore
+    class CACHE caching
+    class QUEUE,STORAGE,AI_CLIENTS infra
 ```
 
 </details>
@@ -306,43 +344,49 @@ graph TB
 
 ---
 
-## 💾 Data Architecture
+## Data Architecture
+
+This section describes how Eneo manages data across PostgreSQL, Redis, and file storage, with particular emphasis on multi-tenancy and vector search capabilities.
 
 ### Database Design
 
+The entity relationship diagram shows the core entities and their relationships. The database is organized around tenant isolation, ensuring complete data separation between organizations while maintaining referential integrity.
+
 <details>
-<summary>🗄️ Click to view database schema overview</summary>
+<summary>View database schema overview</summary>
 
 ```mermaid
+%%{init: {'theme': 'base'}}%%
 erDiagram
+    %% Note: FILES table has a 'transcription' TEXT column for storing transcription results
+    %% TRANSCRIPTION_MODELS table exists separately for available AI transcription models
+
     TENANTS ||--o{ USERS : contains
     TENANTS ||--o{ SPACES : contains
     TENANTS ||--o{ ROLES : defines
-    
+
     USERS ||--o{ SESSIONS : creates
     USERS }o--o{ USER_GROUPS : belongs_to
     USERS ||--o{ API_KEYS : owns
-    
+
     SPACES ||--o{ ASSISTANTS : contains
     SPACES ||--o{ INFO_BLOBS : stores
     SPACES }o--o{ USER_GROUPS : accessible_by
-    
+
     ASSISTANTS ||--o{ SESSIONS : powers
     ASSISTANTS }o--|| COMPLETION_MODELS : uses
     ASSISTANTS }o--o{ PROMPTS : configured_with
-    
+
     SESSIONS ||--o{ QUESTIONS : contains
     QUESTIONS }o--o{ INFO_BLOBS : references
     QUESTIONS }o--|| FILES : may_include
-    
+
     INFO_BLOBS ||--o{ INFO_BLOB_CHUNKS : split_into
     INFO_BLOB_CHUNKS }o--|| EMBEDDING_MODELS : embedded_by
-    
+
     COMPLETION_MODELS }o--o{ USER_GROUPS : available_to
     EMBEDDING_MODELS }o--o{ USER_GROUPS : available_to
-    
-    FILES ||--o{ TRANSCRIPTIONS : may_have
-    
+
     TENANTS {
         uuid id PK
         string name
@@ -351,7 +395,7 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
-    
+
     USERS {
         uuid id PK
         uuid tenant_id FK
@@ -363,7 +407,7 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
-    
+
     SPACES {
         uuid id PK
         uuid tenant_id FK
@@ -374,7 +418,7 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
-    
+
     ASSISTANTS {
         uuid id PK
         uuid space_id FK
@@ -412,52 +456,135 @@ erDiagram
 
 ---
 
-## 🔄 Real-Time Communication
+## Multi-Tenancy Architecture
+
+Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant identity providers, and encrypted credential management.
+
+### Tenant Isolation
+
+**Database Level:**
+- All entities include `tenant_id` for row-level security
+- PostgreSQL policies enforce tenant separation
+- UUID primary keys prevent enumeration
+
+**Authentication Modes:**
+
+- **Single-Tenant (Default)** - Shared IdP via `OIDC_DISCOVERY_ENDPOINT`
+- **Multi-Tenant Federation** - Per-tenant IdPs (Entra ID, MobilityGuard, Auth0, Okta), encrypted with Fernet, enabled via `FEDERATION_PER_TENANT_ENABLED=true`
+
+**Federation Configuration:**
+```bash
+# Example: Entra ID for a municipality
+PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+{
+  "provider": "entra_id",
+  "discovery_endpoint": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration",
+  "client_id": "...",
+  "client_secret": "...",  # Encrypted at rest
+  "allowed_domains": ["municipality.gov"]
+}
+
+# Example: MobilityGuard
+PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+{
+  "provider": "mobilityguard",
+  "discovery_endpoint": "https://login.mobilityguard.com/.well-known/openid-configuration",
+  "client_id": "...",
+  "client_secret": "...",
+  "allowed_domains": ["municipality.se"]
+}
+```
+
+**Credential Management:**
+
+- **Shared Mode** (`TENANT_CREDENTIALS_ENABLED=false`) - All tenants use global API keys
+- **Strict Mode** (`TENANT_CREDENTIALS_ENABLED=true`) - Each tenant configures encrypted credentials
+
+Supported providers: OpenAI, Anthropic, Azure, vLLM, Berget, Mistral. All credentials encrypted with Fernet using `ENCRYPTION_KEY`. Additional encrypted data includes crawler HTTP auth and custom integration secrets.
+
+Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
+
+**See Also:**
+- [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - IdP architecture
+- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) - Detailed credential management
+- [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Provisioning guide
+
+### Observability & Debugging
+
+**OIDC Debug Toggle:**
+
+Enable verbose authentication logging without redeployment for troubleshooting:
+
+```bash
+POST /api/v1/sysadmin/observability/oidc-debug/
+{
+  "enabled": true,
+  "duration_minutes": 10,
+  "reason": "Investigating login issue #452"
+}
+```
+
+**Workflow:** Enable toggle → Reproduce issue → Capture `correlationId` from UI → Filter logs: `journalctl | jq 'select(.correlation_id=="abc123")'` → Identify misconfiguration → Disable toggle
+
+**See Also:** [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
+
+---
+
+## Real-Time Communication
+
+Eneo uses Server-Sent Events (SSE) for streaming AI responses and WebSockets for general-purpose real-time updates.
 
 ### Communication Patterns
 
+The sequence diagram below illustrates two key flows: (1) synchronous AI chat with streaming responses via SSE, and (2) asynchronous file processing with status updates via WebSocket.
+
 <details>
-<summary>🔍 Click to view real-time architecture</summary>
+<summary>View real-time architecture</summary>
 
 ```mermaid
+%%{init: {'theme': 'base', 'primaryColor': '#bfdbfe', 'secondBkgColor': '#d1fae5', 'textColor': '#1f2937'}}%%
 sequenceDiagram
     participant C as Client
     participant F as Frontend
     participant B as Backend
+    participant AI as AI Provider
     participant R as Redis
     participant W as Worker
-    participant AI as AI Provider
-    
-    Note over C,AI: Chat Message Flow
-    C->>F: Send message
-    F->>B: POST /api/v1/questions
-    B->>R: Queue background task
-    B-->>F: SSE stream start
-    F-->>C: Stream response start
-    
-    par Background Processing
-        W->>R: Get task
-        W->>AI: Send to AI provider
-        AI-->>W: Stream response
-        W->>R: Publish chunks
-    and Real-time Delivery
-        R->>B: Notify new chunks
-        B-->>F: SSE stream chunks
-        F-->>C: Update UI real-time
+
+    rect rgb(191, 219, 254)
+        Note over C,AI: Chat Streaming (SSE)
     end
-    
-    Note over C,AI: File Upload Flow
-    C->>F: Upload file
-    F->>B: POST /api/v1/files
-    B->>R: Queue processing task
-    B-->>F: WebSocket status
-    F-->>C: Show upload progress
-    
-    W->>R: Get file task
-    W->>W: Process & chunk file
-    W->>R: Update status
-    R->>B: Status notification
-    B-->>F: WebSocket update
+
+    C->>F: Send message
+    F->>B: POST /api/v1/assistants/{id}/sessions/<br/>(stream=true)
+    B->>AI: Request completion (streaming)
+    AI-->>B: Stream response chunks
+    B-->>F: SSE stream chunks
+    F-->>C: Display message real-time
+
+    rect rgb(254, 215, 170)
+        Note over C,W: Knowledge Base File Processing (ARQ + WebSocket)
+    end
+
+    C->>F: Upload file to collection
+    F->>B: POST /api/v1/groups/{id}/info-blobs/upload/
+    B->>B: Save file to /tmp disk
+    B->>R: Enqueue job (job_manager)
+    B-->>F: 202 Accepted (JobPublic with job_id)
+    F-->>C: Processing queued...
+
+    W->>R: Dequeue transcription_task or<br/>upload_info_blob_task
+    activate W
+    W->>W: Transcribe/Parse/Chunk/Embed file
+    W->>R: Publish status to Pub/Sub channel
+    deactivate W
+    R-->>B: Notify via Pub/Sub listener
+    B-->>F: WebSocket push (job status update)
+    F-->>C: UI shows progress
+
+    W->>R: Publish "complete" to Pub/Sub
+    R-->>B: Notify completion
+    B-->>F: WebSocket push (final status)
     F-->>C: Processing complete
 ```
 
@@ -485,7 +612,7 @@ sequenceDiagram
 
 ---
 
-## 🔌 AI Integration
+## AI Integration
 
 ### Multi-Provider Architecture
 
@@ -505,7 +632,7 @@ Eneo supports multiple AI providers through a unified interface, allowing organi
 
 ---
 
-## 🏭 Background Processing
+## Background Processing
 
 ### ARQ Task System
 
@@ -525,7 +652,7 @@ Eneo uses ARQ (Async Redis Queue) for handling time-intensive operations that sh
 
 ---
 
-## 🔒 Security
+## Security
 
 ### Security by Design
 
@@ -539,21 +666,27 @@ Eneo implements security at every layer to protect sensitive public sector data 
 
 **Data Protection:**
 - **Encryption**: AES-256 for data at rest, TLS 1.3 in transit
+- **Tenant Data Encryption**: Fernet encryption for tenant credentials and federation configs
 - **Password Security**: Bcrypt hashing with secure salts
 - **Audit Trails**: All actions logged for compliance
 - **Data Retention**: Automatic deletion per policy
+
+**Multi-Tenant Security:**
+- Database isolation with row-level security
+- Encrypted credentials (Fernet) for LLM keys and IdP secrets
+- Per-tenant federation support
+- Masked credential responses
 
 **Compliance Ready:**
 - **GDPR**: Built-in data subject rights and privacy controls
 - **EU AI Act**: Transparency and accountability features
 - **Public Sector**: Designed for government security requirements
 
+**See Also:** [Multi-Tenancy Architecture](#multi-tenancy-architecture) for detailed security implementation
+
 ---
 
-<details>
-<summary>📊 Click to view monitoring and observability</summary>
-
-## 📊 Monitoring and Observability
+## Monitoring and Observability
 
 ### Built-in Monitoring
 
@@ -577,78 +710,93 @@ Eneo includes comprehensive monitoring capabilities for production deployments.
 - Data access patterns and compliance audits
 - System resource anomalies
 
-</details>
-
 ---
 
-## 🚀 Deployment Architecture
+## Deployment Architecture
+
+Eneo is designed to be deployed across multiple environments and orchestration platforms, from local Docker Compose development to Kubernetes production deployments.
 
 ### Container Architecture
 
+This diagram shows how Eneo's components are containerized and deployed. Current deployment uses Docker Compose or Podman. Kubernetes support is planned via Helm charts.
+
 <details>
-<summary>📦 Click to view container deployment architecture</summary>
+<summary>View container deployment architecture</summary>
 
 ```mermaid
-graph TB
-    subgraph "Container Registry"
-        FRONTEND_IMG[eneo-frontend:latest]
-        BACKEND_IMG[eneo-backend:latest]
-        BASE_IMGS[Base Images<br/>Node.js, Python, PostgreSQL, Redis]
+%%{init: {'theme': 'base'}}%%
+graph TD
+    classDef userFacing fill:#bfdbfe,stroke:#1e40af,stroke-width:2px,color:#1e3a8a
+    classDef appLogic fill:#d1fae5,stroke:#15803d,stroke-width:2px,color:#14532d
+    classDef dataStore fill:#fecaca,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+    classDef caching fill:#fef08a,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef infra fill:#e5e7eb,stroke:#374151,stroke-width:2px,color:#1f2937
+    classDef workers fill:#fed7aa,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+
+    EXT[External Traffic<br/>HTTPS]
+
+    subgraph "Gateway Layer (Optional)"
+        TRAEFIK[Traefik Container<br/>Reverse Proxy & SSL]
     end
-    
-    subgraph "Deployment Environment"
-        COMPOSE[Docker Compose]
-        K8S[Kubernetes]
-        PODMAN[Podman/RHEL]
+
+    subgraph "Application Containers"
+        FE[Frontend<br/>SvelteKit Server<br/>Port 3000]
+        BE[Backend<br/>FastAPI Server<br/>Port 8000]
+        WK[Worker<br/>ARQ Tasks]
+        INIT[DB Init<br/>Migrations]
     end
-    
-    subgraph "Runtime Containers"
-        TRAEFIK_C[Traefik Container<br/>Reverse Proxy]
-        FRONTEND_C[Frontend Container<br/>SvelteKit Server]
-        BACKEND_C[Backend Container<br/>FastAPI Server]
-        WORKER_C[Worker Container<br/>ARQ Tasks]
-        DB_C[Database Container<br/>PostgreSQL + pgvector]
-        REDIS_C[Redis Container<br/>Cache/Queue]
+
+    subgraph "Data Containers"
+        DB[(PostgreSQL 16<br/>pgvector)]
+        REDIS[(Redis 7<br/>Alpine)]
     end
-    
-    subgraph "Persistent Storage"
-        DB_VOL[Database Volume]
-        REDIS_VOL[Redis Volume]
-        BACKEND_VOL[Backend Data Volume]
-        CERT_VOL[Certificate Volume]
+
+    subgraph "Persistent Volumes"
+        DB_VOL[postgres_data]
+        REDIS_VOL[redis_data]
+        BACKEND_VOL[backend_data]
+        CERT_VOL[letsencrypt]
     end
-    
-    FRONTEND_IMG --> COMPOSE
-    BACKEND_IMG --> COMPOSE
-    BASE_IMGS --> COMPOSE
-    
-    COMPOSE --> FRONTEND_C
-    COMPOSE --> BACKEND_C
-    COMPOSE --> WORKER_C
-    
-    K8S --> FRONTEND_C
-    K8S --> BACKEND_C
-    K8S --> WORKER_C
-    
-    PODMAN --> FRONTEND_C
-    PODMAN --> BACKEND_C
-    PODMAN --> WORKER_C
-    
-    TRAEFIK_C --> FRONTEND_C
-    TRAEFIK_C --> BACKEND_C
-    
-    DB_C --> DB_VOL
-    REDIS_C --> REDIS_VOL
-    BACKEND_C --> BACKEND_VOL
-    TRAEFIK_C --> CERT_VOL
-    
-    style COMPOSE fill:#e1f5fe
-    style FRONTEND_C fill:#f3e5f5
-    style BACKEND_C fill:#e8f5e8
-    style WORKER_C fill:#fff3e0
-    style DB_C fill:#fce4ec
-    style REDIS_C fill:#f1f8e9
+
+    EXT --> TRAEFIK
+    TRAEFIK --> FE
+    TRAEFIK --> BE
+
+    FE --> BE
+    BE --> DB
+    BE --> REDIS
+
+    WK --> REDIS
+    WK --> DB
+
+    INIT --> DB
+
+    DB --> DB_VOL
+    REDIS --> REDIS_VOL
+    BE --> BACKEND_VOL
+    TRAEFIK --> CERT_VOL
+
+    class EXT infra
+    class TRAEFIK infra
+    class FE userFacing
+    class BE appLogic
+    class WK workers
+    class INIT infra
+    class DB dataStore
+    class REDIS caching
+    class DB_VOL,REDIS_VOL,BACKEND_VOL,CERT_VOL dataStore
 ```
+
+**Deployment Methods:**
+- **Docker Compose** (Primary): Orchestrates all containers with networking and volumes
+- **Podman**: Docker-compatible alternative, common in RHEL/enterprise environments
+- **Kubernetes** (Planned): Helm charts for production-grade orchestration
+
+**Container Images:**
+- Frontend: `ghcr.io/eneo-ai/eneo-frontend:latest`
+- Backend/Worker: `ghcr.io/eneo-ai/eneo-backend:latest`
+- PostgreSQL: `pgvector/pgvector:pg16`
+- Redis: `redis:7-alpine`
 
 </details>
 
@@ -673,7 +821,7 @@ graph TB
 
 ---
 
-## 📈 Scalability Considerations
+## Scalability Considerations
 
 ### Horizontal Scaling
 
@@ -711,7 +859,7 @@ graph TB
 
 ---
 
-## 📚 Architecture Decision Records
+## Architecture Decision Records
 
 ### Key Architectural Decisions
 

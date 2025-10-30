@@ -167,6 +167,7 @@ class SpaceFactory:
                     ),
                     None,
                 ),
+                http_auth=getattr(website, '_decrypted_http_auth', None),
             )
             for website in websites_in_db
         ]
