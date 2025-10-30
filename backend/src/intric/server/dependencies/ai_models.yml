@@ -423,7 +423,8 @@ embedding_models:
   - name: 'multilingual-e5-large-instruct'
     family: 'e5'
     open_source: true
-    max_input: 512  # Model token limit
+    max_input: 1400  # Per-item character limit (~512 tokens with margin for multilingual text)
+                     # Note: Batching uses count-based strategy (default 32 items/batch)
     is_deprecated: false
     stability: 'experimental'
     hosting: 'swe'

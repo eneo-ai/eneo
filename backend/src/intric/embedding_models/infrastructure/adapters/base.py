@@ -11,17 +11,24 @@ class EmbeddingModelAdapter(abc.ABC):
         self.model = model
 
     def _chunk_chunks(self, chunks: list["InfoBlobChunk"]):
-        cum_len = 0
-        prev_i = 0
-        for i, chunk in enumerate(chunks):
-            cum_len += len(chunk.text)
+        """
+        Group chunks into batches for embedding API requests.
 
-            if cum_len > self.model.max_input:
-                yield chunks[prev_i:i]
-                prev_i = i
-                cum_len = 0
+        Uses max_batch_size (item count limit) instead of cumulative character length.
+        max_input is a per-item limit (enforced during chunking), not a batch limit.
 
-        yield chunks[prev_i:]
+        Args:
+            chunks: List of InfoBlobChunk objects to batch
+
+        Yields:
+            Batches of chunks (up to max_batch_size items each)
+        """
+        # Default to 32 items per batch if not specified
+        # This balances API efficiency with request size limits
+        batch_size = getattr(self.model, "max_batch_size", 32)
+
+        for i in range(0, len(chunks), batch_size):
+            yield chunks[i : i + batch_size]
 
     @abstractmethod
     async def get_embedding_for_query(self, query: str):
