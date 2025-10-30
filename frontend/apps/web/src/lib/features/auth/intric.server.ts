@@ -6,6 +6,7 @@
 import { setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
 import { env } from "$env/dynamic/private";
+import { logger } from "$lib/utils/logger";
 
 /**
  * Try to login an user. If successful, the `auth` cookie will be set and the function returns `true`
@@ -19,8 +20,11 @@ export async function loginWithIntric(username: string, password: string): Promi
   body.append("password", password);
 
   const { fetch } = getRequestEvent();
+  const loginUrl = `${env.INTRIC_BACKEND_URL}/api/v1/users/login/token/`;
+  logger.log("Logging in user %s via Intric backend %s", username, env.INTRIC_BACKEND_URL);
+  logger.log("[LOGIN] Calling URL: %s", loginUrl);
 
-  const response = await fetch(`${env.INTRIC_BACKEND_URL}/api/v1/users/login/token/`, {
+  const response = await fetch(loginUrl, {
     body: body,
     method: "POST",
     headers: {
@@ -29,7 +33,11 @@ export async function loginWithIntric(username: string, password: string): Promi
   });
 
   if (!response.ok) {
-    console.error("Unable to call backend service. Error: %s", response.statusText);
+    logger.error("[LOGIN] ❌ Login failed!");
+    logger.error("[LOGIN] URL: %s", loginUrl);
+    logger.error("[LOGIN] Status: %d", response.status);
+    logger.error("[LOGIN] Status Text: %s", response.statusText);
+    logger.error("[LOGIN] Headers: %s", JSON.stringify(Object.fromEntries(response.headers.entries())));
     return false;
   }
 
@@ -39,7 +47,7 @@ export async function loginWithIntric(username: string, password: string): Promi
     await setFrontendAuthCookie({ id_token: access_token });
     return true;
   } catch (e) {
-    console.error("Failed to decode login response");
+    logger.error("Failed to decode login response");
     return false;
   }
 }

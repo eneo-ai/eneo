@@ -5,6 +5,7 @@
   import { page } from "$app/stores";
   import type { IntricErrorCode } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
+  import { logger } from "$lib/utils/logger";
 
   type Error = {
     message: string;
@@ -24,6 +25,10 @@
       return;
     }
     if (error.status === 401) {
+      logger.error("[ERROR_PAGE] ❌ 401 Unauthorized - Auto-logging out");
+      logger.error("[ERROR_PAGE] Error message:", error.message);
+      logger.error("[ERROR_PAGE] Error code:", error.code);
+      logger.error("[ERROR_PAGE] Current URL:", window.location.href);
       goto("/logout?message=expired");
       return;
     }

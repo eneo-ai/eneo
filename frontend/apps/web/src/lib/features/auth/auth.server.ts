@@ -1,6 +1,7 @@
 import { dev } from "$app/environment";
 import { getRequestEvent } from "$app/server";
 import { type RequestEvent } from "@sveltejs/kit";
+import { logger } from "$lib/utils/logger";
 
 export const IntricIdTokenCookie = "auth";
 export const IntricAccessTokenCookie = "acc";
@@ -20,7 +21,7 @@ export const setFrontendAuthCookie = async (tokens: {
   const expSec = Number.isFinite(Number(expSecCandidate))
     ? Number(expSecCandidate)
     : (() => {
-        console.warn("[Auth] JWT exp missing/invalid – using 2h fallback", {
+        logger.warn("[Auth] JWT exp missing/invalid – using 2h fallback", {
           hasExp: Boolean(expSecCandidate),
           expType: typeof expSecCandidate
         });
@@ -29,6 +30,13 @@ export const setFrontendAuthCookie = async (tokens: {
 
   // Calculate maxAge with 10-minute buffer (expires before server token)
   const maxAge = Math.max(0, expSec - nowSec - 600);
+
+  // DEBUG LOGGING
+  logger.log(`[SET_COOKIE] Setting ${IntricIdTokenCookie} cookie`);
+  logger.log(`[SET_COOKIE] Token exp: ${expSec} (${new Date(expSec * 1000).toISOString()})`);
+  logger.log(`[SET_COOKIE] Now: ${nowSec} (${new Date(nowSec * 1000).toISOString()})`);
+  logger.log(`[SET_COOKIE] maxAge: ${maxAge} seconds (${(maxAge / 60).toFixed(1)} minutes)`);
+  logger.log(`[SET_COOKIE] secure: ${!dev}, httpOnly: true, sameSite: lax, path: /`);
 
   cookies.set(IntricIdTokenCookie, tokens.id_token, {
     path: "/",
@@ -60,6 +68,12 @@ export function authenticateUser(event: RequestEvent): {
   const { cookies } = event;
   const id_token = cookies.get(IntricIdTokenCookie);
   const access_token = cookies.get(IntricAccessTokenCookie);
+
+  // DEBUG LOGGING
+  logger.log(`[AUTH_USER] Looking for cookie: ${IntricIdTokenCookie}`);
+  logger.log(`[AUTH_USER] Found id_token: ${id_token ? 'YES' : 'NO'}`);
+  logger.log(`[AUTH_USER] Found access_token: ${access_token ? 'YES' : 'NO'}`);
+  logger.log(`[AUTH_USER] All available cookies: ${cookies.getAll().map(c => `${c.name}=${c.value.substring(0, 10)}...`).join(', ')}`);
 
   return {
     id_token,
