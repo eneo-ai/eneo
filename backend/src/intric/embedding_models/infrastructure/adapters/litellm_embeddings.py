@@ -54,13 +54,13 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         if provider.needs_custom_config():
             self.litellm_model = provider.get_litellm_model(model.litellm_model_name)
             self.api_config = provider.get_api_config()
-            logger.info(f"[LiteLLM] Using custom provider config for embedding {model.name}: {list(self.api_config.keys())}")
+            logger.debug(f"[LiteLLM] Using custom provider config for embedding {model.name}: {list(self.api_config.keys())}")
         else:
             # Standard LiteLLM behavior for supported providers
             self.litellm_model = model.litellm_model_name
             self.api_config = {}
 
-        logger.info(f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}")
+        logger.debug(f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}")
 
     def _detect_provider(self, litellm_model_name: str) -> str:
         """
@@ -92,14 +92,23 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
+        batch_size = getattr(self.model, "max_batch_size", None) or 32
+        total_chunks = len(chunks)
+        total_batches = (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
+        logger.debug(
+            "[LiteLLM] Model %s batching %s chunks into %s batches (size=%s)",
+            self.model.name,
+            total_chunks,
+            total_batches,
+            batch_size,
+        )
+
         for chunked_chunks in self._chunk_chunks(chunks):
             # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == ModelFamily.E5:
                 texts_for_chunks = [f"passage: {chunk.text}" for chunk in chunked_chunks]
             else:
                 texts_for_chunks = [chunk.text for chunk in chunked_chunks]
-
-            logger.debug(f"[LiteLLM] Embedding a chunk of {len(chunked_chunks)} chunks")
 
             embeddings_for_chunks = await self._get_embeddings(texts=texts_for_chunks)
             chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)
@@ -139,7 +148,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Add provider-specific API configuration
             if self.api_config:
                 params.update(self.api_config)
-                logger.info(f"[LiteLLM] {self.litellm_model}: Adding provider config for embeddings: {list(self.api_config.keys())}")
+                logger.debug(f"[LiteLLM] {self.litellm_model}: Adding provider config for embeddings: {list(self.api_config.keys())}")
 
             # Inject tenant-specific API key if credential_resolver is provided
             if self.credential_resolver:
@@ -147,7 +156,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 try:
                     api_key = self.credential_resolver.get_api_key(provider)
                     params['api_key'] = api_key
-                    logger.info(f"[LiteLLM] {self.litellm_model}: Injecting tenant API key for {provider}")
+                    logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting tenant API key for {provider}")
                 except ValueError as e:
                     logger.error(f"[LiteLLM] {self.litellm_model}: Credential resolution failed: {e}")
                     raise HTTPException(
@@ -168,7 +177,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
                 if endpoint:
                     params['api_base'] = endpoint
-                    logger.info(f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}")
+                    logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}")
 
                 # Inject api_version for Azure embeddings
                 if provider == "azure":
@@ -185,10 +194,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     )
                     if api_version:
                         params["api_version"] = api_version
-                        logger.info(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")
+                        logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")
 
             safe_params = {k: v for k, v in params.items() if k != "input"}
-            logger.info(
+            logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
                 f"{self._mask_sensitive_params(safe_params)}"
             )
@@ -196,7 +205,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Call LiteLLM API to get the embeddings
             response = await litellm.aembedding(**params)
 
-            logger.info(f"[LiteLLM] {self.litellm_model}: Embedding request successful")
+            logger.debug(f"[LiteLLM] {self.litellm_model}: Embedding request successful")
 
         except litellm.AuthenticationError:
             # Strict error handling: NO fallback if tenant credential exists but is invalid

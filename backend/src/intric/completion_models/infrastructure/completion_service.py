@@ -150,7 +150,8 @@ class CompletionService:
         function_called = False
 
         async for chunk in completion:
-            logger.debug(chunk)
+            # Removed per-token logging to reduce log volume in production
+            # logger.debug(chunk)  # This would log 100+ times per response
 
             if chunk.tool_call:
                 if chunk.tool_call.name:

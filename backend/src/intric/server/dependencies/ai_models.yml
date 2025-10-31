@@ -384,12 +384,17 @@ embedding_models:
   # ⚠️ CRITICAL: Embedding models have NO 'nickname' field!
   # The 'name' field is BOTH the sync key AND display name
   # Changing/removing will orphan all collections, groups, and embeddings!
+  #
+  # max_batch_size (optional, default 32)
+  #   Controls how many chunks are grouped into a single embedding API request.
+  #   Tune per provider to respect API limits (e.g., Azure often requires <=16).
 
   - name: 'text-embedding-3-small'  # ⚠️ SYNC KEY + DISPLAY NAME - NEVER CHANGE
     family: 'openai'
     open_source: false
     dimensions: 512
     max_input: 8191
+    max_batch_size: 32
     is_deprecated: false
     stability: 'stable'
     hosting: 'usa'
@@ -400,6 +405,7 @@ embedding_models:
     family: 'openai'
     open_source: false
     max_input: 8191
+    max_batch_size: 32
     is_deprecated: false
     stability: 'stable'
     hosting: 'usa'
@@ -411,6 +417,7 @@ embedding_models:
     family: 'e5'
     open_source: true
     max_input: 1400  # Model has 512 token limit; ~1400 chars = ~400 tokens (conservative for multilingual)
+    max_batch_size: 32
     is_deprecated: false
     stability: 'experimental'
     hosting: 'swe'
@@ -423,7 +430,9 @@ embedding_models:
   - name: 'multilingual-e5-large-instruct'
     family: 'e5'
     open_source: true
-    max_input: 1400  # Model token limit
+    max_input: 1400  # Per-item character limit (~512 tokens with margin for multilingual text)
+                     # Note: Batching uses count-based strategy (default 32 items/batch)
+    max_batch_size: 32
     is_deprecated: false
     stability: 'experimental'
     hosting: 'swe'
@@ -437,6 +446,7 @@ embedding_models:
     open_source: false
     dimensions: 3072
     max_input: 8191
+    max_batch_size: 16
     is_deprecated: false
     stability: 'stable'
     hosting: 'swe'
