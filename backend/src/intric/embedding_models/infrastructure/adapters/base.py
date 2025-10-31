@@ -1,9 +1,14 @@
 import abc
+import math
 from abc import abstractmethod
 
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
+from intric.main.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class EmbeddingModelAdapter(abc.ABC):
@@ -23,12 +28,50 @@ class EmbeddingModelAdapter(abc.ABC):
         Yields:
             Batches of chunks (up to max_batch_size items each)
         """
-        # Default to 32 items per batch if not specified
-        # This balances API efficiency with request size limits
-        batch_size = getattr(self.model, "max_batch_size", 32)
+        configured_batch_size = getattr(self.model, "max_batch_size", None)
+        batch_size = configured_batch_size if configured_batch_size else 32
 
-        for i in range(0, len(chunks), batch_size):
-            yield chunks[i : i + batch_size]
+        if configured_batch_size is not None and configured_batch_size < 1:
+            logger.warning(
+                "[EmbeddingBatch] Invalid batch size %s for model %s; falling back to 32",
+                configured_batch_size,
+                getattr(self.model, "name", "<unknown>"),
+            )
+            batch_size = 32
+
+        total_chunks = len(chunks)
+        if total_chunks == 0:
+            logger.debug(
+                "[EmbeddingBatch] Model %s received no chunks to process",
+                getattr(self.model, "name", "<unknown>"),
+            )
+            return
+
+        total_batches = math.ceil(total_chunks / batch_size)
+        logger.info(
+            "[EmbeddingBatch] Model %s starting batch run: chunks=%s batch_size=%s batches=%s",
+            getattr(self.model, "name", "<unknown>"),
+            total_chunks,
+            batch_size,
+            total_batches,
+        )
+
+        for index, start in enumerate(range(0, total_chunks, batch_size), start=1):
+            batch = chunks[start : start + batch_size]
+            logger.debug(
+                "[EmbeddingBatch] Model %s batch %s/%s size=%s",
+                getattr(self.model, "name", "<unknown>"),
+                index,
+                total_batches,
+                len(batch),
+            )
+            yield batch
+
+        logger.info(
+            "[EmbeddingBatch] Model %s completed batch run: batches=%s",
+            getattr(self.model, "name", "<unknown>"),
+            total_batches,
+        )
 
     @abstractmethod
     async def get_embedding_for_query(self, query: str):
