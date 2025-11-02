@@ -73,6 +73,14 @@
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
   let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.tenantFederationEnabled));
 
+  // Check if user explicitly wants to see login form (e.g., after logout)
+  const hasQueryParams = $derived(
+    message !== null ||
+      oidcErrorCode !== null ||
+      showUsernameAndPassword !== null ||
+      activeTenantSlug !== null
+  );
+
   // Determine which loading message to display
   let loadingMessage = $derived.by(() => {
     // Check for OIDC error directly from URL (don't wait for $effect to set oidcErrorCode)
@@ -97,14 +105,6 @@
     }
     return undefined;
   });
-
-  // Check if user explicitly wants to see login form (e.g., after logout)
-  const hasQueryParams = $derived(
-    message !== null ||
-      oidcErrorCode !== null ||
-      showUsernameAndPassword !== null ||
-      activeTenantSlug !== null
-  );
 
   // Monitor loading state and show warning if taking too long
   $effect(() => {

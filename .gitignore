@@ -35,3 +35,4 @@ specs/
 .code/
 .mcp.json
 install-claude.sh
+.serena/
