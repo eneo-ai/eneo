@@ -28,7 +28,7 @@
         {
             "label": "💻 Start Frontend",
             "type": "shell",
-            "command": "cd frontend && pnpm run dev",
+            "command": "cd frontend && bun run dev",
             "isBackground": true,
             "presentation": {
                 "reveal": "always",
