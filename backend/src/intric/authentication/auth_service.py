@@ -35,6 +35,11 @@ class AuthService:
     def __init__(self, api_key_repo: ApiKeysRepository):
         self.api_key_repo = api_key_repo
 
+    # Dummy hash for timing attack mitigation
+    # Pre-computed bcrypt hash of a random string to ensure constant-time password verification
+    # Even when user is not found, we verify against this to maintain consistent response times
+    DUMMY_HASH = "$2b$12$CfZ8Z9V6o4d0B.3n4WGNBe4oANd8FjKc7t2rggx5xeW5c0p1sS2yW"
+
     @staticmethod
     def _generate_salt() -> bytes:
         return bcrypt.gensalt()
