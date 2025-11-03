@@ -90,6 +90,7 @@ class EmbeddingModels(BasePublic):
     open_source: Mapped[bool] = mapped_column()
     dimensions: Mapped[Optional[int]] = mapped_column()
     max_input: Mapped[Optional[int]] = mapped_column()
+    max_batch_size: Mapped[Optional[int]] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")
     hf_link: Mapped[Optional[str]] = mapped_column()
 

@@ -1,12 +1,13 @@
 from typing import Optional
 from uuid import UUID, uuid4
 import json
+import secrets
 import time
 import traceback
 
 import aiohttp
 import jwt
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException
@@ -14,10 +15,12 @@ from starlette.exceptions import HTTPException
 from intric.authentication import auth_dependencies
 from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
 from intric.main import config
+from intric.main.exceptions import AuthenticationException
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse
+from intric.main.request_context import set_request_context
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.tenants.tenant import TenantPublic
@@ -44,18 +47,109 @@ router = APIRouter()
     responses=responses.get_responses([401]),
 )
 async def user_login_with_email_and_password(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(OAuth2PasswordRequestForm),
     container: Container = Depends(get_container()),
 ) -> AccessToken:
-    """OAuth2 Login"""
+    """OAuth2 Login with comprehensive error handling and logging"""
 
+    # Generate correlation ID for request tracking
+    correlation_id = secrets.token_hex(8)
+    set_request_context(correlation_id=correlation_id)
+
+    # Capture source IP (proxy-aware)
+    source_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else None)
+    
+    email = form_data.username
+    password = form_data.password
+
+    # Log login attempt
+    logger.info(
+        "Username/password login initiated",
+        extra={
+            "correlation_id": correlation_id,
+            "auth_method": "password",
+            "email": email,
+            "source_ip": source_ip,
+        }
+    )
+
+    # Validate input format
     try:
-        UserLogin(email=form_data.username, password=form_data.password)
+        UserLogin(email=email, password=password)
     except ValidationError as e:
-        raise HTTPException(422, e.errors())
+        logger.error(
+            "Login failed: validation error",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "email": email,
+                "source_ip": source_ip,
+                "errors": e.errors(),
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.errors(),
+            headers={"X-Correlation-ID": correlation_id},
+        )
 
+    # Authenticate user
     service = container.user_service()
-    return await service.login(form_data.username, form_data.password)
+    
+    try:
+        result = await service.login(email, password, correlation_id, source_ip)
+        
+        # Log successful authentication
+        logger.info(
+            "Username/password login successful",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "email": email,
+                "source_ip": source_ip,
+            }
+        )
+        
+        return result
+        
+    except AuthenticationException as e:
+        # Expected authentication failure - use warning level (not error)
+        logger.warning(
+            "Login failed: invalid credentials",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "email": email,
+                "source_ip": source_ip,
+                "error": str(e),
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",  # Generic message for security
+            headers={"X-Correlation-ID": correlation_id},
+        )
+        
+    except Exception as e:
+        # Unexpected system error - use error level with full traceback
+        logger.error(
+            "Login failed: unexpected error",
+            exc_info=True,  # Include stack trace
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "email": email,
+                "source_ip": source_ip,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during login",
+            headers={"X-Correlation-ID": correlation_id},
+        )
 
 
 @router.post("/login/openid-connect/mobilityguard/", response_model=AccessToken)

@@ -36,3 +36,4 @@ CLAUDE.md
 install-claude.sh
 devcontainer.json
 specs/
+.serena/

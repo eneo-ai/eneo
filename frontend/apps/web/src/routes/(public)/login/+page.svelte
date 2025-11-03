@@ -61,6 +61,7 @@
   const TENANT_SELECTOR_CACHE_KEY = "eneo:last-tenant";
 
   let loginFailed = $state(false);
+  let upLoginCorrelationId = $state<string | null>(null);
   let isAwaitingLoginResponse = $state(false);
   let showTenantSelector = $state(false);
   let federationError = $state<string | null>(null);
@@ -72,6 +73,14 @@
 
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
   let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.tenantFederationEnabled));
+
+  // Check if user explicitly wants to see login form (e.g., after logout)
+  const hasQueryParams = $derived(
+    message !== null ||
+      oidcErrorCode !== null ||
+      showUsernameAndPassword !== null ||
+      activeTenantSlug !== null
+  );
 
   // Determine which loading message to display
   let loadingMessage = $derived.by(() => {
@@ -97,14 +106,6 @@
     }
     return undefined;
   });
-
-  // Check if user explicitly wants to see login form (e.g., after logout)
-  const hasQueryParams = $derived(
-    message !== null ||
-      oidcErrorCode !== null ||
-      showUsernameAndPassword !== null ||
-      activeTenantSlug !== null
-  );
 
   // Monitor loading state and show warning if taking too long
   $effect(() => {
@@ -521,7 +522,7 @@
                 <button
                   type="button"
                   class="p-2 rounded bg-red-50 text-red-800 hover:bg-red-100 hover:border hover:border-red-300 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-900 focus-visible:ring-offset-2"
-                  on:click={() => copyToClipboard(oidcCorrelationId)}
+                  onclick={() => copyToClipboard(oidcCorrelationId)}
                   aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}>
                   {#if copied}
                     <!-- Check Icon (copied state) -->
@@ -627,6 +628,7 @@
           use:enhance={() => {
             isSubmittingUPLogin = true;
             loginFailed = false;
+            upLoginCorrelationId = null;
 
             return async ({ result }) => {
               if (result.type === "redirect") {
@@ -635,6 +637,10 @@
                 isSubmittingUPLogin = false;
                 message = null;
                 loginFailed = true;
+                // Capture correlation ID from form action result
+                if (result.type === "failure" && result.data) {
+                  upLoginCorrelationId = result.data.correlationId || null;
+                }
               }
             };
           }}
@@ -643,7 +649,56 @@
 
           {#if loginFailed}
             <div class="label-negative bg-label-dimmer text-label-stronger rounded-lg p-4">
-              {m.incorrect_credentials()}
+              <p>{m.incorrect_credentials()}</p>
+
+              <!-- Correlation ID Section for Developer Debugging -->
+              {#if upLoginCorrelationId}
+                <div class="mt-4 pt-3 border-t border-red-300/30">
+                  <div class="flex items-start gap-2">
+                    <div class="flex-1">
+                      <p class="text-xs opacity-75 mb-1">
+                        {m.oidc_correlation_hint()}
+                      </p>
+                      <code class="text-xs font-mono break-all select-all">
+                        {upLoginCorrelationId}
+                      </code>
+                    </div>
+
+                    <!-- Copy to Clipboard Button -->
+                    <button
+                      type="button"
+                      class="p-1.5 rounded bg-red-100 hover:bg-red-200 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+                      onclick={() => copyToClipboard(upLoginCorrelationId)}
+                      aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}>
+                      {#if copied}
+                        <!-- Check Icon (copied state) -->
+                        <svg class="w-4 h-4 text-green-700"
+                             fill="none"
+                             viewBox="0 0 24 24"
+                             stroke="currentColor"
+                             aria-hidden="true">
+                          <path stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M5 13l4 4L19 7" />
+                        </svg>
+                      {:else}
+                        <!-- Copy Icon (default state) -->
+                        <svg class="w-4 h-4"
+                             fill="none"
+                             viewBox="0 0 24 24"
+                             stroke="currentColor"
+                             aria-hidden="true">
+                          <path stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      {/if}
+                    </button>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/if}
 

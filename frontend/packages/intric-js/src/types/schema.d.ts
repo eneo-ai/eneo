@@ -48,7 +48,7 @@ export interface paths {
   "/api/v1/users/login/token/": {
     /**
      * Login
-     * @description OAuth2 Login
+     * @description OAuth2 Login with comprehensive error handling and logging
      */
     post: operations["Login_api_v1_users_login_token__post"];
   };
@@ -3358,6 +3358,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       stability: components["schemas"]["ModelStability"];
@@ -3441,6 +3443,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       stability: components["schemas"]["ModelStability"];
@@ -8140,7 +8144,7 @@ export interface operations {
   };
   /**
    * Login
-   * @description OAuth2 Login
+   * @description OAuth2 Login with comprehensive error handling and logging
    */
   Login_api_v1_users_login_token__post: {
     requestBody: {
