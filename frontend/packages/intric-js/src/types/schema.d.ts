@@ -48,7 +48,7 @@ export interface paths {
   "/api/v1/users/login/token/": {
     /**
      * Login
-     * @description OAuth2 Login
+     * @description OAuth2 Login with comprehensive error handling and logging
      */
     post: operations["Login_api_v1_users_login_token__post"];
   };
@@ -7560,7 +7560,7 @@ export interface operations {
   };
   /**
    * Login
-   * @description OAuth2 Login
+   * @description OAuth2 Login with comprehensive error handling and logging
    */
   Login_api_v1_users_login_token__post: {
     requestBody: {

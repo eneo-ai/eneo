@@ -14,14 +14,17 @@ export const actions: Actions = {
     const redirectUrl = next ? decodeURIComponent(next) : DEFAULT_LANDING_PAGE;
 
     if (username && password) {
-      const success = await loginWithIntric(username, password);
+      const { success, correlationId } = await loginWithIntric(username, password);
 
       if (success) {
         redirect(302, `/${redirectUrl.slice(1)}`);
       }
+
+      // Return correlation ID for error tracking
+      return fail(400, { failed: true, correlationId });
     }
 
-    return fail(400, { failed: true });
+    return fail(400, { failed: true, correlationId: null });
   }
 };
 
