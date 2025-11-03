@@ -46,12 +46,13 @@ export const load = async (event) => {
     return null;
   };
 
-  const [userInfo, user, tenant, backendVersion, limits] = await Promise.all([
+  const [userInfo, user, tenant, backendVersion, limits, settings] = await Promise.all([
     getUserInfo(),
     intric.users.me(),
     intric.users.tenant(),
     intric.version.get(),
-    intric.limits.list()
+    intric.limits.list(),
+    intric.settings.get()
   ]);
 
   const versions = {
@@ -75,6 +76,7 @@ export const load = async (event) => {
     tenant,
     versions,
     limits,
+    settings,
     featureFlags,
     environment
   };
