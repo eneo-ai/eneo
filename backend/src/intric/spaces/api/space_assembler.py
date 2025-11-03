@@ -10,6 +10,9 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
     IntegrationKnowledgeAssembler,
 )
 from intric.integration.presentation.models import IntegrationKnowledgePublic
+from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+    MCPServerAssembler,
+)
 from intric.main.models import PaginatedPermissions, ResourcePermission
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -351,26 +354,7 @@ class SpaceAssembler:
             security_classification = self._get_security_classification_model(space)
 
         mcp_servers = [
-            {
-                "id": str(server.id),
-                "name": server.name,
-                "description": server.description,
-                "http_url": server.http_url,
-                "transport_type": server.transport_type,
-                "http_auth_type": server.http_auth_type,
-                "tags": server.tags,
-                "icon_url": server.icon_url,
-                "tools": [
-                    {
-                        "id": str(tool.id),
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                        "is_enabled": tool.is_enabled_by_default,
-                    }
-                    for tool in server.tools
-                ],
-            }
+            MCPServerAssembler.to_dict_with_tools(server)
             for server in space.mcp_servers
         ]
 

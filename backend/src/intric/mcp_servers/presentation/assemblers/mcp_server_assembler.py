@@ -11,6 +11,30 @@ class MCPServerAssembler:
     """Assembler for converting MCP domain entities to presentation DTOs."""
 
     @staticmethod
+    def to_dict_with_tools(mcp_server: MCPServer) -> dict:
+        """Convert MCPServer with tools to dict format (for assistant/space responses)."""
+        return {
+            "id": str(mcp_server.id),
+            "name": mcp_server.name,
+            "description": mcp_server.description,
+            "http_url": mcp_server.http_url,
+            "transport_type": mcp_server.transport_type,
+            "http_auth_type": mcp_server.http_auth_type,
+            "tags": mcp_server.tags,
+            "icon_url": mcp_server.icon_url,
+            "tools": [
+                {
+                    "id": str(tool.id),
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                    "is_enabled": tool.is_enabled_by_default,
+                }
+                for tool in mcp_server.tools
+            ],
+        }
+
+    @staticmethod
     def from_domain_to_model(mcp_server: MCPServer) -> MCPServerPublic:
         """Convert MCPServer domain entity to DTO."""
         return MCPServerPublic(

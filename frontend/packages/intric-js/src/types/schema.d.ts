@@ -1217,7 +1217,7 @@ export interface paths {
   "/api/v1/mcp-servers/{id}/tools/": {
     /**
      * Get Mcp Server Tools
-     * @description Get all tools for an MCP server.
+     * @description Get all tools for an MCP server with tenant-level settings applied.
      */
     get: operations["get_mcp_server_tools_api_v1_mcp_servers__id__tools__get"];
   };
@@ -1998,7 +1998,11 @@ export interface components {
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
       /** Mcp Servers */
-      mcp_servers: components["schemas"]["ModelId"][];
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model: components["schemas"]["CompletionModelSparse"];
       /**
        * Published
@@ -2791,7 +2795,11 @@ export interface components {
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
       /** Mcp Servers */
-      mcp_servers: components["schemas"]["ModelId"][];
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
@@ -3789,10 +3797,6 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
-      /** Config Schema */
-      config_schema?: {
-        [key: string]: unknown;
-      } | null;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -3822,10 +3826,6 @@ export interface components {
       http_auth_type: string;
       /** Http Auth Config Schema */
       http_auth_config_schema: {
-        [key: string]: unknown;
-      } | null;
-      /** Config Schema */
-      config_schema: {
         [key: string]: unknown;
       } | null;
       /** Tags */
@@ -3867,10 +3867,6 @@ export interface components {
       http_auth_type: string;
       /** Http Auth Config Schema */
       http_auth_config_schema: {
-        [key: string]: unknown;
-      } | null;
-      /** Config Schema */
-      config_schema: {
         [key: string]: unknown;
       } | null;
       /** Tags */
@@ -3964,10 +3960,6 @@ export interface components {
       description?: string | null;
       /** Http Auth Config Schema */
       http_auth_config_schema?: {
-        [key: string]: unknown;
-      } | null;
-      /** Config Schema */
-      config_schema?: {
         [key: string]: unknown;
       } | null;
       /** Tags */
@@ -5067,6 +5059,8 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       /** Attachments */
       attachments?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -14338,7 +14332,7 @@ export interface operations {
   };
   /**
    * Get Mcp Server Tools
-   * @description Get all tools for an MCP server.
+   * @description Get all tools for an MCP server with tenant-level settings applied.
    */
   get_mcp_server_tools_api_v1_mcp_servers__id__tools__get: {
     parameters: {
