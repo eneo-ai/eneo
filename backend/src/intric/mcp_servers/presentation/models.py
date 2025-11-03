@@ -24,7 +24,6 @@ class MCPServerPublic(BaseModel):
     transport_type: str  # "sse", "streamable_http"
     http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
     http_auth_config_schema: Optional[dict]
-    config_schema: Optional[dict]
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
@@ -43,7 +42,6 @@ class MCPServerCreate(BaseModel):
     http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None
-    config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[str] = None
     documentation_url: Optional[str] = None
@@ -58,7 +56,6 @@ class MCPServerUpdate(BaseModel):
     http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None
-    config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[str] = None
     documentation_url: Optional[str] = None

@@ -41,7 +41,6 @@ class MCPServer(Entity):
         http_auth_config_schema: Optional[dict] = None,
         is_enabled: bool = True,
         env_vars: Optional[dict] = None,
-        config_schema: Optional[dict] = None,
         tags: Optional[list[str]] = None,
         icon_url: Optional[str] = None,
         documentation_url: Optional[str] = None,
@@ -60,7 +59,6 @@ class MCPServer(Entity):
         self.http_auth_config_schema = http_auth_config_schema
         self.is_enabled = is_enabled
         self.env_vars = env_vars
-        self.config_schema = config_schema
         self.tags = tags
         self.icon_url = icon_url
         self.documentation_url = documentation_url

@@ -46,7 +46,6 @@ class MCPServerService:
         http_auth_type: str = "none",
         description: str | None = None,
         http_auth_config_schema: dict | None = None,
-        config_schema: dict | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
@@ -60,7 +59,6 @@ class MCPServerService:
             http_auth_type=http_auth_type,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
-            config_schema=config_schema,
             tags=tags,
             icon_url=icon_url,
             documentation_url=documentation_url,
@@ -84,7 +82,6 @@ class MCPServerService:
         http_auth_type: str | None = None,
         description: str | None = None,
         http_auth_config_schema: dict | None = None,
-        config_schema: dict | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
@@ -104,8 +101,6 @@ class MCPServerService:
             mcp_server.description = description
         if http_auth_config_schema is not None:
             mcp_server.http_auth_config_schema = http_auth_config_schema
-        if config_schema is not None:
-            mcp_server.config_schema = config_schema
         if tags is not None:
             mcp_server.tags = tags
         if icon_url is not None:

@@ -33,7 +33,6 @@ class MCPServers(BasePublic):
     env_vars: Mapped[Optional[dict]] = mapped_column(JSONB)  # Encrypted tenant credentials
 
     # Metadata
-    config_schema: Mapped[Optional[dict]] = mapped_column(JSONB)  # JSON schema for configuration
     tags: Mapped[Optional[list]] = mapped_column(JSONB)  # ["documentation", "code-search", etc.]
     icon_url: Mapped[Optional[str]] = mapped_column(String)
     documentation_url: Mapped[Optional[str]] = mapped_column(String)

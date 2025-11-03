@@ -1008,7 +1008,6 @@ class SpaceRepository:
                 http_auth_config_schema=server.http_auth_config_schema,
                 is_enabled=server.is_enabled,
                 env_vars=server.env_vars,
-                config_schema=server.config_schema,
                 tags=server.tags,
                 icon_url=server.icon_url,
                 documentation_url=server.documentation_url,
