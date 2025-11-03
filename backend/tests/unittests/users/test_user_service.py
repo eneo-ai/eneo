@@ -25,7 +25,7 @@ def service_with_mocks():
 async def test_login_user_fails_with_no_user_with_that_email(service: UserService):
     service.repo.get_user_by_email.return_value = None
 
-    with pytest.raises(AuthenticationException, match="No such user"):
+    with pytest.raises(AuthenticationException, match="Invalid credentials"):
         await service.login(email="hacker@notindatabase.com", password="password?")
 
 
@@ -33,7 +33,7 @@ async def test_login_user_fails_if_hashed_passwords_do_not_match(service: UserSe
     service.auth_service.verify_password = MagicMock()
     service.auth_service.verify_password.return_value = False
 
-    with pytest.raises(AuthenticationException, match="Wrong password"):
+    with pytest.raises(AuthenticationException, match="Invalid credentials"):
         await service.login(email="realuser@indatabase.com", password="iamhackeristhisthepassword?")
 
 
