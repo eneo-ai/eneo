@@ -38,10 +38,7 @@
   let cancelUploadsAndClearQueue: () => void;
 
   beforeNavigate((navigate) => {
-    if (
-      $currentChanges.hasUnsavedChanges &&
-      !confirm(m.confirm_discard())
-    ) {
+    if ($currentChanges.hasUnsavedChanges && !confirm(m.confirm_discard())) {
       navigate.cancel();
       return;
     }
@@ -142,10 +139,7 @@
         </Settings.Row>
 
         {#if data.app.permissions?.includes("publish")}
-          <Settings.Row
-            title={m.status()}
-            description={m.publishing_description()}
-          >
+          <Settings.Row title={m.status()} description={m.publishing_description()}>
             <PublishingSetting
               endpoints={data.intric.apps}
               resource={data.app}
@@ -251,10 +245,7 @@
           }}
           let:aria
         >
-          <SelectBehaviourV2
-            bind:kwArgs={$update.completion_model_kwargs}
-            isDisabled={false}
-            {aria}
+          <SelectBehaviourV2 bind:kwArgs={$update.completion_model_kwargs} isDisabled={false} {aria}
           ></SelectBehaviourV2>
         </Settings.Row>
       </Settings.Group>

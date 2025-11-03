@@ -106,11 +106,7 @@
     });
 
     if (duplicateFiles.length > 0) {
-      if (
-        !confirm(
-          m.duplicate_files_warning({ fileList: duplicateFiles.join("\\n- ") })
-        )
-      ) {
+      if (!confirm(m.duplicate_files_warning({ fileList: duplicateFiles.join("\\n- ") }))) {
         return;
       }
     }

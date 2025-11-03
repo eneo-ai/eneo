@@ -1,7 +1,8 @@
+import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intric.assistants.api import assistant_protocol
 from intric.assistants.api.assistant_models import (
@@ -9,6 +10,9 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    TokenEstimateRequest,
+    TokenEstimateResponse,
+    TokenEstimateBreakdown,
 )
 from intric.authentication.auth_models import ApiKey
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -32,6 +36,12 @@ from intric.sessions.session_protocol import (
 from intric.spaces.api.space_models import TransferApplicationRequest
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# These limits keep the endpoint responsive while still supporting large-context models.
+DEFAULT_CHARS_PER_TOKEN = 6  # Generous factor to cover dense languages
+MAX_TOTAL_FILE_SIZE = 50_000_000  # 50 MB
+MAX_ABSOLUTE_TEXT_LENGTH = 2_000_000  # 2 MB safeguard in case of misconfigured models
 
 
 @router.post(
@@ -385,3 +395,108 @@ async def publish_assistant(
     assistant, permissions = await service.publish_assistant(assistant_id=id, publish=published)
 
     return assembler.from_assistant_to_model(assistant=assistant, permissions=permissions)
+
+
+@router.post(
+    "/{id}/token-estimate",
+    response_model=TokenEstimateResponse,
+    responses=responses.get_responses([400, 404]),
+    summary="Estimate token usage for text and files",
+)
+async def estimate_tokens(
+    id: UUID,
+    payload: TokenEstimateRequest,
+    container: Container = Depends(get_container(with_user=True)),
+) -> TokenEstimateResponse:
+    """Estimate token usage for the given text and files for this assistant.
+
+    The Space Actor + FileService stack already enforces tenant and ownership
+    boundaries; this endpoint adds lightweight guardrails to keep the operation
+    responsive while supporting large-context models.
+    """
+
+    from intric.tokens.token_utils import count_tokens, count_assistant_prompt_tokens
+
+    service = container.assistant_service()
+    file_service = container.file_service()
+
+    assistant, _ = await service.get_assistant(assistant_id=id)
+
+    if not assistant.completion_model:
+        raise HTTPException(status_code=400, detail="Assistant has no model configured")
+
+    model_name = assistant.completion_model.name
+    token_limit = assistant.completion_model.token_limit
+
+    max_chars = min(
+        MAX_ABSOLUTE_TEXT_LENGTH,
+        int(token_limit * DEFAULT_CHARS_PER_TOKEN) if token_limit else MAX_ABSOLUTE_TEXT_LENGTH,
+    )
+
+    text = payload.text or ""
+    if len(text) > max_chars:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Text input is too large for this assistant's context window. "
+                f"Reduce the size below {max_chars:,} characters."
+            ),
+        )
+
+    file_ids = payload.file_ids or []
+
+    prompt_tokens = 0
+    if assistant.prompt:
+        prompt_text = getattr(assistant.prompt, "prompt", None) or getattr(
+            assistant.prompt, "text", None
+        )
+        if prompt_text:
+            prompt_tokens = count_assistant_prompt_tokens(prompt_text, model_name)
+
+    text_tokens = count_tokens(text, model_name) if text else 0
+
+    file_tokens = 0
+    file_token_details: dict[str, int] = {}
+    if file_ids:
+        files = await file_service.get_files_for_token_estimate(file_ids)
+        accessible_ids = {file.id for file in files}
+        missing_ids = [str(file_id) for file_id in file_ids if file_id not in accessible_ids]
+        if missing_ids:
+            logger.debug("Skipped token estimate for filtered file IDs: %s", missing_ids)
+
+        total_file_size = sum(file.size for file in files if file.size is not None)
+        if total_file_size > MAX_TOTAL_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Combined file content exceeds 50 MB limit. "
+                    "Remove one or more files and try again."
+                ),
+            )
+
+        for file in files:
+            tokens = 0
+            if file.text:
+                try:
+                    tokens = count_tokens(file.text, model_name)
+                except Exception as exc:  # pragma: no cover - defensive logging path
+                    logger.error("Failed to count tokens for file %s: %s", file.id, exc)
+                    tokens = len(file.text) // 4
+
+            file_tokens += tokens
+            file_token_details[str(file.id)] = tokens
+
+    total_tokens = prompt_tokens + text_tokens + file_tokens
+    percentage = (total_tokens / token_limit) * 100 if token_limit > 0 else 0
+
+    return TokenEstimateResponse(
+        tokens=total_tokens,
+        percentage=round(percentage, 2),
+        limit=token_limit,
+        breakdown=TokenEstimateBreakdown(
+            prompt=prompt_tokens,
+            text=text_tokens,
+            files=file_tokens,
+            file_details=file_token_details,
+        ),
+    )

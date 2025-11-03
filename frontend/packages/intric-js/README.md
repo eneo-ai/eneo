@@ -64,7 +64,7 @@ Intric.js is written as pure JS library with typing provided through TsDoc. Type
 ### Install dev dependencies
 
 ```bash
-pnpm install
+bun install
 ```
 
 ### Update schema
@@ -72,7 +72,7 @@ pnpm install
 To regnerate/update the backend types run
 
 ```bash
-pnpm run update && pnpm run lint
+bun run update && bun run lint
 ```
 
 Update the endpoints accordingly.

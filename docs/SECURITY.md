@@ -4,19 +4,19 @@ Eneo takes security seriously as a platform designed for public sector organizat
 
 ---
 
-## 🛡️ Security Philosophy
+## Security Philosophy
 
-**Security by Design**: Eneo implements security controls at every layer, from the database to the user interface.
+**Security by Design** - Eneo implements security controls at every layer, from the database to the user interface.
 
-**Compliance First**: Built with GDPR and EU AI Act compliance requirements in mind.
+**Compliance First** - Built with GDPR and EU AI Act compliance requirements in mind.
 
-**Transparency**: Open source security allows for community review and verification.
+**Transparency** - Open source security allows for community review and verification.
 
-**Defense in Depth**: Multiple layers of security controls protect against various threat vectors.
+**Defense in Depth** - Multiple layers of security controls protect against various threat vectors.
 
 ---
 
-## 🔒 Security Features
+## Security Features
 
 ### Authentication & Authorization
 
@@ -45,15 +45,100 @@ Content-Security-Policy: default-src 'self'
 
 **Encryption**:
 - **At Rest**: AES-256 encryption for sensitive data fields
+- **Tenant Credentials**: Fernet encryption (AES-128) for tenant-specific secrets
 - **In Transit**: TLS 1.3 for all HTTP communications
 - **Database**: PostgreSQL transparent data encryption support
 - **Secrets**: Environment-based secret management
+
+**Tenant Data Encryption (Fernet):**
+
+Eneo uses Fernet symmetric encryption for tenant-specific sensitive data:
+
+**What Gets Encrypted:**
+- Federation IdP client secrets (`client_secret`)
+- Tenant LLM API keys (OpenAI, Anthropic, Azure, vLLM, etc.)
+- Crawler HTTP authentication credentials
+- Custom integration secrets
+
+**Key Management:**
+```bash
+# Generate encryption key (one-time setup)
+cd backend
+uv run python -m intric.cli.generate_encryption_key
+
+# Add to backend/.env
+ENCRYPTION_KEY=<44-character-base64-key>
+```
+
+**Security Properties:**
+- Keys never appear in logs or API responses
+- Masked display shows only last 4 characters (e.g., `...key9`)
+- Key rotation requires re-encryption of existing secrets
+- Lost keys make encrypted data unrecoverable - backup securely
+
+**Encryption is Required When:**
+- `TENANT_CREDENTIALS_ENABLED=true` - Per-tenant LLM credentials
+- `FEDERATION_PER_TENANT_ENABLED=true` - Per-tenant identity providers
+
+**See Also:**
+- [Multi-Tenant Credentials Guide](./MULTI_TENANT_CREDENTIALS.md) - Credential management
+- [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - Per-tenant IdP setup
+- [Architecture - Multi-Tenancy](./ARCHITECTURE.md#-multi-tenancy-architecture) - System design
 
 **Data Handling**:
 - PII detection and masking in logs
 - Secure file upload validation and processing
 - Automatic data retention policy enforcement
 - Audit trails for all data access and modifications
+
+### Multi-Tenant Security Architecture
+
+**Complete Tenant Isolation:**
+
+Eneo implements multi-layered security for complete tenant data isolation:
+
+**Database Layer:**
+- Row-level security (RLS) policies on all tenant-scoped tables
+- `tenant_id` filtering enforced at PostgreSQL level
+- UUID primary keys prevent enumeration attacks
+- Separate quota tracking per tenant
+
+**Application Layer:**
+- All API requests validate tenant context
+- Service layer enforces tenant boundaries
+- Repository pattern ensures filtered queries
+- Space-based access controls within tenants
+
+**Authentication Layer:**
+- **Single-Tenant Mode**: Shared IdP with tenant assignment
+- **Multi-Tenant Federation**: Each tenant brings their own IdP
+  - Encrypted federation configs per tenant
+  - Domain-based tenant routing
+  - Isolated authentication flows
+
+**Credential Management:**
+- **Shared Mode**: Global credentials with tenant usage tracking
+- **Strict Mode**: Per-tenant credentials, no global fallback
+  - Prevents billing confusion
+  - Enables regional compliance (EU vs US providers)
+  - Fernet encryption for all tenant secrets
+
+**API Security:**
+- Tenant context derived from authenticated user
+- Cross-tenant access blocked at authorization layer
+- Audit logging includes tenant_id for all operations
+- Masked credential responses (last 4 chars only)
+
+**Runtime Debugging:**
+- OIDC debug toggle for incident investigation
+- Correlation-ID tracking for authentication flows
+- Tenant-scoped observability without cross-tenant data exposure
+
+**See Also:**
+- [Architecture - Multi-Tenancy](./ARCHITECTURE.md#-multi-tenancy-architecture) - System design
+- [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Authentication setup
+
+---
 
 ### Infrastructure Security
 
@@ -71,10 +156,10 @@ Content-Security-Policy: default-src 'self'
 
 ---
 
-## 🔍 Security Architecture
+## Security Architecture
 
 <details>
-<summary>🏗️ Click to view security architecture diagram</summary>
+<summary>View security architecture diagram</summary>
 
 ```mermaid
 graph TB
@@ -164,7 +249,7 @@ graph TB
 
 ---
 
-## 🚨 Vulnerability Reporting
+## Vulnerability Reporting
 
 ### Security Issues
 
@@ -225,7 +310,7 @@ Subject: [SECURITY] Vulnerability in Eneo - [Brief Description]
 
 ---
 
-## 🔐 Security Guidelines for Developers
+## Security Guidelines for Developers
 
 ### Secure Coding Practices
 
@@ -312,7 +397,7 @@ async def get_assistant(
 
 ---
 
-## 🏢 Enterprise Security
+## Enterprise Security
 
 ### Compliance Features
 
@@ -413,6 +498,35 @@ services:
 - Large file uploads
 - High API usage
 - Database query performance
+- Cross-tenant access attempts (should be zero)
+
+**Runtime Observability:**
+
+**OIDC Debug Toggle:**
+- Enable verbose authentication logging without redeployment
+- Correlation-ID based incident investigation
+- Endpoint: `POST /api/v1/sysadmin/observability/oidc-debug/`
+- Auto-expires after configured duration (max 2 hours)
+- Helps diagnose:
+  - Federation configuration issues
+  - Domain mismatch problems
+  - User-tenant assignment errors
+  - IdP integration failures
+
+**Example Usage:**
+```bash
+# Enable debug logging for 10 minutes
+curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
+  -H "X-API-Key: ${SUPER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "duration_minutes": 10, "reason": "Support ticket #452"}'
+
+# User reproduces issue, provides correlationId from UI
+# Filter logs for that specific auth flow
+journalctl -u backend.service | jq 'select(.correlation_id=="abc123")'
+```
+
+**See Also:** [Multi-Tenant OIDC Setup - Runtime Debugging](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
 
 **Alerting Thresholds**:
 ```bash
@@ -426,7 +540,7 @@ services:
 
 ---
 
-## 🛠️ Security Tools and Testing
+## Security Tools and Testing
 
 ### Static Analysis
 
@@ -438,19 +552,15 @@ pip install bandit safety
 # Run security scans
 bandit -r src/
 safety check
-
-# Check for known vulnerabilities
-poetry audit
 ```
 
 **Frontend Security Scanning**:
 ```bash
 # Install security tools
-pnpm add -D eslint-plugin-security
+bun add -d eslint-plugin-security
 
 # Run security linting
-pnpm audit
-pnpm run lint:security
+bun run lint:security
 ```
 
 ### Dynamic Testing
@@ -482,7 +592,7 @@ done
 
 ---
 
-## 📚 Security Resources
+## Security Resources
 
 ### Training and Awareness
 
@@ -515,7 +625,7 @@ done
 
 ---
 
-## 🚨 Incident Response
+## Incident Response
 
 ### Security Incident Categories
 
@@ -556,7 +666,7 @@ done
 
 ---
 
-## 📋 Security Compliance
+## Security Compliance
 
 ### Regular Security Tasks
 

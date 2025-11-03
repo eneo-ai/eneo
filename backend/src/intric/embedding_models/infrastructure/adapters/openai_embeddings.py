@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import openai
 from tenacity import (
@@ -17,6 +17,7 @@ from intric.main.logging import get_logger
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.info_blobs.info_blob import InfoBlobChunk
+    from intric.settings.credential_resolver import CredentialResolver
 
 
 logger = get_logger(__name__)
@@ -26,17 +27,33 @@ class OpenAIEmbeddingAdapter(EmbeddingModelAdapter):
     def __init__(
         self,
         model: "EmbeddingModel",
-        client=openai.AsyncOpenAI(api_key=get_settings().openai_api_key),
+        credential_resolver: Optional["CredentialResolver"] = None,
     ):
-        self.client = client
         super().__init__(model)
+
+        # Use tenant credentials if available, otherwise fall back to global settings
+        if credential_resolver:
+            api_key = credential_resolver.get_api_key("openai")
+        else:
+            api_key = get_settings().openai_api_key
+
+        self.client = openai.AsyncOpenAI(api_key=api_key)
 
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
+        batch_size = getattr(self.model, "max_batch_size", None) or 32
+        total_chunks = len(chunks)
+        total_batches = (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
+        logger.debug(
+            "Embedding model %s batching %s chunks into %s batches (size=%s)",
+            self.model.name,
+            total_chunks,
+            total_batches,
+            batch_size,
+        )
+
         for chunked_chunks in self._chunk_chunks(chunks):
             texts_for_chunks = [chunk.text for chunk in chunked_chunks]
-
-            logger.debug(f"Embedding a chunk of {len(chunked_chunks)} chunks")
 
             embeddings_for_chunks = await self._get_embeddings(texts=texts_for_chunks)
             chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)

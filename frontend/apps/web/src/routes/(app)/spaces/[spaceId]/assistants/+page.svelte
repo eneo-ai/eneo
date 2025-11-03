@@ -30,7 +30,9 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.assistants()}</title>
+  <title
+    >Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {m.assistants()}</title
+  >
 </svelte:head>
 
 <Page.Root>

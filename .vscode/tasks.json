@@ -4,7 +4,7 @@
         {
             "label": "🚀 Start Backend",
             "type": "shell",
-            "command": "cd backend && poetry run start",
+            "command": "cd backend && uv run start",
             "isBackground": true,
             "presentation": {
                 "reveal": "always",
@@ -17,7 +17,7 @@
         {
             "label": "🔄 Initialize Backend DB",
             "type": "shell",
-            "command": "cd backend && poetry run python init_db.py",
+            "command": "cd backend && uv run python init_db.py",
             "presentation": {
                 "reveal": "always",
                 "panel": "shared",
@@ -28,7 +28,7 @@
         {
             "label": "💻 Start Frontend",
             "type": "shell",
-            "command": "cd frontend && pnpm run dev",
+            "command": "cd frontend && bun run dev",
             "isBackground": true,
             "presentation": {
                 "reveal": "always",

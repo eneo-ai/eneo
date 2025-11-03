@@ -1,13 +1,33 @@
-<script>
+<script lang="ts">
   import { IconProfile } from "@intric/icons/profile";
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconKey } from "@intric/icons/key";
   import { IconLogout } from "@intric/icons/logout";
+  import { IconBuilding2 } from "@intric/icons/building-2";
   import { Button } from "@intric/ui";
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import SelectLanguage from "$lib/components/SelectLanguage.svelte";
+  import { goto } from "$app/navigation";
+  import { browser } from "$app/environment";
+
+  interface Props {
+    tenantFederationEnabled?: boolean;
+  }
+
+  const { tenantFederationEnabled = false } = $props<Props>();
+
+  function handleSwitchOrganisation() {
+    // Clear client-side tenant storage
+    if (browser) {
+      sessionStorage.removeItem('eneo-last-tenant-slug');
+      localStorage.removeItem('eneo:last-tenant');
+    }
+
+    // Navigate to endpoint
+    goto('/login/switch-organisation');
+  }
 
   const {
     elements: { menu, item, trigger, overlay, arrow },
@@ -72,6 +92,20 @@
       <IconKey />
       {m.my_api_keys()}</Button
     >
+
+    {#if tenantFederationEnabled}
+      <Button
+        is={[$item]}
+        unstyled
+        padding="icon-leading"
+        onclick={handleSwitchOrganisation}
+        class="group border-default text-primary hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[3.5rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
+      >
+        <IconBuilding2 aria-hidden="true" />
+        {m.oidc_choose_another_org()}
+      </Button>
+    {/if}
+
     <Button
       variant="destructive"
       is={[$item]}

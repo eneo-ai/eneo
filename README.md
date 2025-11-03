@@ -37,10 +37,12 @@ Originally developed by Sundsvall Municipality and Ånge Municipality, Eneo embo
 
 - **AI Assistant Management** - Create and customize assistants for specific organizational needs
 - **Collaborative Spaces** - Team workspaces with role-based access control
-- **Knowledge Management** - Process documents, crawl websites, semantic search
-- **Real-time Chat** - Streaming responses with background task processing
+- **Knowledge Management** - Process documents, crawl websites with optional HTTP auth, semantic search
+- **Real-time Chat** - Streaming responses with background task processing and token tracking
 - **Multi-language** - Swedish and English interface with seamless switching
-- **API First** - Full API documentation and type-safe integration
+- **Multi-Tenant Federation** - Per-tenant identity providers with encrypted configuration
+- **Tenant-Specific Credentials** - Isolated LLM API keys per organization with Fernet encryption
+- **API First** - Full API documentation, type-safe integration, and runtime observability
 
 ---
 
@@ -61,6 +63,8 @@ cp env_frontend.template env_frontend.env
 # ... configure your environment ...
 docker compose up -d
 ```
+
+> **Note:** The provided Docker Compose configuration is a reference example. Customize it for your organization's security, networking, and infrastructure requirements.
 
 📖 **[Full Production Guide →](docs/DEPLOYMENT.md)**
 
@@ -118,10 +122,13 @@ Modern microservices architecture with clean separation of concerns:
 | Guide | Description |
 |-------|-------------|
 | **[Installation](docs/INSTALLATION.md)** | Development environment setup |
-| **[Deployment](docs/DEPLOYMENT.md)** | Production deployment guide |
-| **[Architecture](docs/ARCHITECTURE.md)** | Technical architecture details |
+| **[Deployment](docs/DEPLOYMENT.md)** | Production deployment with Docker Compose |
+| **[Architecture](docs/ARCHITECTURE.md)** | Technical architecture and design patterns |
+| **[Multi-Tenant Setup](docs/MULTITENANT_OIDC_SETUP_GUIDE.md)** | Per-tenant identity provider configuration |
+| **[Tenant Credentials](docs/MULTI_TENANT_CREDENTIALS.md)** | Encrypted LLM credential management |
 | **[Contributing](docs/CONTRIBUTING.md)** | Contribution guidelines |
-| **[Security](docs/SECURITY.md)** | Security practices |
+| **[Security](docs/SECURITY.md)** | Security practices and compliance |
+| **[Troubleshooting](docs/TROUBLESHOOTING.md)** | Common issues and solutions |
 
 ---
 
@@ -196,5 +203,5 @@ See [LICENSE](LICENSE) for full license text.
 
 ## 🚀 Development Branch
 
-This branch contains the latest development features and CI/CD enhancements.  
+This branch contains the latest development features and CI/CD enhancements.
 Used for testing new features before merging to production.

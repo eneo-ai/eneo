@@ -28,10 +28,17 @@ JWT_ALGORITHM = get_settings().jwt_algorithm
 JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
 JWT_SECRET = get_settings().jwt_secret
+OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
+
 
 class AuthService:
     def __init__(self, api_key_repo: ApiKeysRepository):
         self.api_key_repo = api_key_repo
+
+    # Dummy hash for timing attack mitigation
+    # Pre-computed bcrypt hash of a random string to ensure constant-time password verification
+    # Even when user is not found, we verify against this to maintain consistent response times
+    DUMMY_HASH = "$2b$12$CfZ8Z9V6o4d0B.3n4WGNBe4oANd8FjKc7t2rggx5xeW5c0p1sS2yW"
 
     @staticmethod
     def _generate_salt() -> bytes:
@@ -39,8 +46,8 @@ class AuthService:
 
     @staticmethod
     def _hash_password(password: str, salt: bytes) -> str:
-        pwd_bytes = password.encode('utf-8')
-        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode('utf-8')
+        pwd_bytes = password.encode("utf-8")
+        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode("utf-8")
 
     @staticmethod
     def hash_api_key(api_key: str):
@@ -49,21 +56,23 @@ class AuthService:
     def create_salt_and_hashed_password(self, plaintext_password: str | None):
         if plaintext_password == None:
             plaintext_password = ""
-        pwd_bytes = plaintext_password.encode('utf-8')
+        pwd_bytes = plaintext_password.encode("utf-8")
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
-        return salt.decode(), hashed_password.decode('utf-8')
+        return salt.decode(), hashed_password.decode("utf-8")
 
     @staticmethod
     def verify_password(password: str, hashed_pw: str) -> bool:
         """Verify that incoming password+salt matches hashed pw"""
-        password_byte_enc = password.encode('utf-8')
-        return bcrypt.checkpw(password = password_byte_enc , hashed_password = hashed_pw.encode('utf-8'))
+        password_byte_enc = password.encode("utf-8")
+        return bcrypt.checkpw(
+            password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
+        )
 
     @staticmethod
     def generate_password(length: int):
         alphabet = string.ascii_letters + string.digits
-        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
 
         return password
 
@@ -187,15 +196,20 @@ class AuthService:
     ):
         correlation_id = correlation_id or "no-correlation-id"
 
+        jwt_options = dict(options or {})
+        clock_leeway = OIDC_CLOCK_LEEWAY_SECONDS or 0
+        leeway_applied = clock_leeway > 0
+
         logger.debug(
             "OIDC: Starting JWT validation",
             extra={
                 "correlation_id": correlation_id,
                 "client_id": client_id,
                 "signing_algos": signing_algos,
-                "options": options,
+                "options": jwt_options or None,
                 "id_token_length": len(id_token) if id_token else 0,
-            }
+                "leeway_seconds": OIDC_CLOCK_LEEWAY_SECONDS if leeway_applied else 0,
+            },
         )
 
         # Decode JWT header without verification to log details
@@ -208,7 +222,7 @@ class AuthService:
                     "alg": unverified_header.get("alg"),
                     "kid": unverified_header.get("kid"),
                     "typ": unverified_header.get("typ"),
-                }
+                },
             )
         except Exception as e:
             logger.error(
@@ -216,7 +230,7 @@ class AuthService:
                 extra={
                     "correlation_id": correlation_id,
                     "error": str(e),
-                }
+                },
             )
 
         try:
@@ -225,7 +239,8 @@ class AuthService:
                 key=key,
                 algorithms=signing_algos,
                 audience=client_id,
-                options=options,
+                options=jwt_options or None,
+                leeway=clock_leeway,
             )
 
             payload = jwt_decoded["payload"]
@@ -242,7 +257,7 @@ class AuthService:
                     "iat": payload.get("iat"),
                     "has_at_hash": "at_hash" in payload,
                     "algorithm": header.get("alg"),
-                }
+                },
             )
 
         except jwt.ExpiredSignatureError as e:
@@ -251,7 +266,7 @@ class AuthService:
                 extra={
                     "correlation_id": correlation_id,
                     "error": str(e),
-                }
+                },
             )
             raise
         except jwt.InvalidAudienceError as e:
@@ -261,7 +276,46 @@ class AuthService:
                     "correlation_id": correlation_id,
                     "expected_audience": client_id,
                     "error": str(e),
-                }
+                },
+            )
+            raise
+        except jwt.ImmatureSignatureError as e:
+            drift_seconds = None
+            iat_claim = None
+            iat_iso = None
+            server_dt = datetime.now(timezone.utc)
+            server_time_iso = server_dt.isoformat()
+            if id_token:
+                try:
+                    unverified_claims = jwt.decode(
+                        id_token,
+                        options={
+                            "verify_signature": False,
+                            "verify_exp": False,
+                            "verify_aud": False,
+                        },
+                        algorithms=signing_algos,
+                    )
+                    iat_claim = unverified_claims.get("iat")
+                    if isinstance(iat_claim, (int, float)):
+                        drift_seconds = iat_claim - server_dt.timestamp()
+                        iat_iso = datetime.fromtimestamp(iat_claim, tz=timezone.utc).isoformat()
+                except Exception:
+                    # Best-effort diagnostics only
+                    pass
+
+            logger.error(
+                "JWT not yet valid",
+                extra={
+                    "correlation_id": correlation_id,
+                    "server_time": server_time_iso,
+                    "server_timezone": "UTC",
+                    "leeway_seconds": clock_leeway if leeway_applied else 0,
+                    "iat_claim": iat_claim,
+                    "iat_claim_iso": iat_iso,
+                    "iat_drift_seconds": drift_seconds,
+                    "error": str(e),
+                },
             )
             raise
         except jwt.InvalidSignatureError as e:
@@ -270,7 +324,7 @@ class AuthService:
                 extra={
                     "correlation_id": correlation_id,
                     "error": str(e),
-                }
+                },
             )
             raise
         except jwt.PyJWTError as e:
@@ -280,58 +334,77 @@ class AuthService:
                     "correlation_id": correlation_id,
                     "error_type": type(e).__name__,
                     "error": str(e),
-                }
+                },
             )
             raise
 
-        # Verify at_hash
-        logger.debug(
-            "Verifying at_hash",
-            extra={
-                "correlation_id": correlation_id,
-                "has_at_hash": "at_hash" in payload,
-                "algorithm": header["alg"],
-            }
-        )
+        # Verify at_hash (OPTIONAL per OIDC spec)
+        # If at_hash present in ID token → MUST validate (fail if mismatch)
+        # If at_hash NOT present → Skip validation (valid per OIDC spec)
+        # This allows compatibility with both MobilityGuard (includes at_hash)
+        # and Entra ID (may omit at_hash in authorization code flow)
+        expected_at_hash = payload.get("at_hash")
 
-        try:
-            # get the pyjwt algorithm object
-            alg_obj = jwt.get_algorithm_by_name(header["alg"])
-
-            # compute at_hash, then validate
-            digest = alg_obj.compute_hash_digest(access_token.encode())
-            computed_at_hash = base64.urlsafe_b64encode(digest[: (len(digest) // 2)]).rstrip(b"=").decode()
-            expected_at_hash = payload.get("at_hash")
-
-            if computed_at_hash != expected_at_hash:
-                logger.error(
-                    "at_hash verification failed",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "computed_at_hash": computed_at_hash,
-                        "expected_at_hash": expected_at_hash,
-                        "algorithm": header["alg"],
-                    }
-                )
-                raise jwt.InvalidTokenError(f"at_hash mismatch: expected {expected_at_hash}, got {computed_at_hash}")
-
+        if expected_at_hash:
+            # at_hash present → MUST validate
             logger.debug(
-                "at_hash verified successfully",
-                extra={"correlation_id": correlation_id}
-            )
-
-        except jwt.InvalidTokenError:
-            raise  # Re-raise the at_hash mismatch error
-        except Exception as e:
-            logger.error(
-                "at_hash verification error",
+                "at_hash present - validating",
                 extra={
                     "correlation_id": correlation_id,
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                }
+                    "algorithm": header["alg"],
+                },
             )
-            raise jwt.InvalidTokenError(f"at_hash verification failed: {str(e)}")
+
+            try:
+                # Get the pyjwt algorithm object
+                alg_obj = jwt.get_algorithm_by_name(header["alg"])
+
+                # Compute at_hash
+                digest = alg_obj.compute_hash_digest(access_token.encode())
+                computed_at_hash = (
+                    base64.urlsafe_b64encode(digest[: (len(digest) // 2)])
+                    .rstrip(b"=")
+                    .decode()
+                )
+
+                # Validate
+                if computed_at_hash != expected_at_hash:
+                    logger.error(
+                        "at_hash validation failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "computed_at_hash": computed_at_hash,
+                            "expected_at_hash": expected_at_hash,
+                            "algorithm": header["alg"],
+                        },
+                    )
+                    raise jwt.InvalidTokenError(
+                        f"at_hash mismatch: expected {expected_at_hash}, got {computed_at_hash}"
+                    )
+
+                logger.debug(
+                    "at_hash validated successfully",
+                    extra={"correlation_id": correlation_id},
+                )
+
+            except jwt.InvalidTokenError:
+                raise  # Re-raise at_hash mismatch
+            except Exception as e:
+                logger.error(
+                    "at_hash verification error",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "error_type": type(e).__name__,
+                        "error": str(e),
+                    },
+                )
+                raise jwt.InvalidTokenError(f"at_hash verification failed: {str(e)}")
+        else:
+            # at_hash NOT present → Skip validation (optional per OIDC spec)
+            logger.debug(
+                "at_hash not present - skipping validation (optional per OIDC spec)",
+                extra={"correlation_id": correlation_id},
+            )
 
         return payload
 
@@ -354,7 +427,7 @@ class AuthService:
                 "correlation_id": correlation_id,
                 "client_id": client_id,
                 "options": options,
-            }
+            },
         )
 
         payload = self.get_payload_from_openid_jwt(
@@ -378,9 +451,11 @@ class AuthService:
                     "has_sub": bool(username),
                     "has_email": bool(email),
                     "payload_keys": list(payload.keys()),
-                }
+                },
             )
-            raise ValueError(f"JWT missing required claims - sub: {bool(username)}, email: {bool(email)}")
+            raise ValueError(
+                f"JWT missing required claims - sub: {bool(username)}, email: {bool(email)}"
+            )
 
         logger.debug(
             "Successfully extracted username and email from JWT",
@@ -388,7 +463,7 @@ class AuthService:
                 "correlation_id": correlation_id,
                 "username": username,
                 "email": email,
-            }
+            },
         )
 
         return username, email

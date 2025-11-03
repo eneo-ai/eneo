@@ -14,7 +14,6 @@
 	"features": {
 		"ghcr.io/devcontainers/features/node:1": {
 			"version": "20",
-			"packageManager": "pnpm"
 		},
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"version": "latest",

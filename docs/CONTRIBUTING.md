@@ -36,12 +36,12 @@ cp frontend/apps/web/.env.example frontend/apps/web/.env
 # Edit .env files with your settings
 
 # Initialize database
-cd backend && poetry run python init_db.py
+cd backend && uv run python init_db.py
 
 # Start development servers (3 terminals)
-cd backend && poetry run start              # Terminal 1
-cd frontend && pnpm run dev                 # Terminal 2  
-cd backend && poetry run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
+cd backend && uv run start              # Terminal 1
+cd frontend && bun run dev                 # Terminal 2
+cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
 ```
 
 ### 2. Make Your First Contribution
@@ -54,8 +54,8 @@ git checkout -b feature/your-feature-name
 # ... your development work ...
 
 # Run tests
-cd backend && poetry run pytest
-cd frontend && pnpm run test
+cd backend && uv run pytest
+cd frontend && bun run test
 
 # Commit changes
 git add .
@@ -177,7 +177,7 @@ frontend/
 ├── packages/            # Shared packages
 │   ├── intric-js/       # Type-safe API client
 │   └── ui/              # Reusable UI components
-└── pnpm-workspace.yaml  # Monorepo configuration
+└── package.json         # Workspace configuration
 ```
 
 ---
@@ -325,16 +325,16 @@ async def test_create_assistant():
 cd backend
 
 # Run all tests
-poetry run pytest
+uv run pytest
 
 # Run specific domain tests
-poetry run pytest tests/unittests/assistants/
+uv run pytest tests/unittests/assistants/
 
 # Run with coverage
-poetry run pytest --cov=src --cov-report=html
+uv run pytest --cov=src --cov-report=html
 
 # Run specific test
-poetry run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
+uv run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
 ```
 
 ### Frontend Testing
@@ -364,16 +364,16 @@ test('displays assistant information', () => {
 cd frontend
 
 # Unit tests
-pnpm run test
+bun run test
 
 # E2E tests
-pnpm run test:integration
+bun run test:integration
 
 # Type checking
-pnpm run check
+bun run check
 
 # Linting
-pnpm run lint
+bun run lint
 ```
 
 ---
@@ -465,17 +465,17 @@ Brief description of changes and motivation.
 cd backend
 
 # Generate migration for model changes
-poetry run alembic revision --autogenerate -m "add assistant categories"
+uv run alembic revision --autogenerate -m "add assistant categories"
 
 # Review generated migration file
 # Edit if necessary for data migrations or complex changes
 
 # Apply migration locally
-poetry run alembic upgrade head
+uv run alembic upgrade head
 
 # Test rollback
-poetry run alembic downgrade -1
-poetry run alembic upgrade head
+uv run alembic downgrade -1
+uv run alembic upgrade head
 ```
 
 **Migration Best Practices:**
@@ -590,13 +590,13 @@ async def get_assistant(
 cd backend
 
 # Add runtime dependency
-poetry add package-name
+uv add package-name
 
 # Add development dependency  
-poetry add --group dev package-name
+uv add --group dev package-name
 
 # Update pyproject.toml with specific version constraints
-# Commit both pyproject.toml and poetry.lock
+# Commit both pyproject.toml and uv.lock
 ```
 
 **Frontend Dependencies:**
@@ -604,13 +604,13 @@ poetry add --group dev package-name
 cd frontend
 
 # Add dependency to specific package
-pnpm add package-name --filter=web
+bun add package-name --filter web
 
 # Add shared dependency to workspace root
-pnpm add package-name -w
+bun add package-name -w
 
 # Add development dependency
-pnpm add -D package-name
+bun add -d package-name
 ```
 
 **Dependency Guidelines:**
@@ -710,6 +710,19 @@ All API endpoints automatically generate OpenAPI documentation. Ensure:
 - Strengthen authentication mechanisms
 - Improve audit logging
 - Enhance GDPR compliance features
+- Multi-tenant security enhancements
+
+**5. Multi-Tenancy & Enterprise Features:**
+- Per-tenant resource quotas and limits
+- Federation provider integrations (new IdPs)
+- Credential management improvements
+- Observability and debugging tools
+
+**6. Knowledge Management:**
+- Website crawler enhancements (pagination, JavaScript rendering)
+- HTTP authentication for protected resources
+- Document processing improvements
+- Semantic search optimization
 
 ### Good First Issues
 

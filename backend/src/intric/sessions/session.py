@@ -115,8 +115,13 @@ class SSEFirstChunk(AskChatResponse):
     pass
 
 
+class SSEError(SSEBase):
+    error: str
+    error_code: Optional[int] = None
+
+
 # Add the SSE models here in order to include them in the openapi schema
-SSE_MODELS = [SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk]
+SSE_MODELS = [SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk, SSEError]
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [IntricEventType]

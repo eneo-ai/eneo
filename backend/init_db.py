@@ -1,4 +1,3 @@
-import logging
 import subprocess
 
 import bcrypt
@@ -29,8 +28,11 @@ settings = Settings()
 # Alembic command
 def run_alembic_migrations():
     try:
-        subprocess.run(["poetry", "run", "alembic", "upgrade", "head"], check=True)
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
         print("Alembic migrations ran successfully.")
+    except FileNotFoundError:
+        print("Error: alembic not found on PATH. Ensure it's installed in /app/.venv and PATH includes /app/.venv/bin")
+        exit(1)
     except subprocess.CalledProcessError as e:
         print(f"Error running alembic migrations: {e}")
         exit(1)
@@ -135,8 +137,8 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             # Add completion model if none exist
             if model is None:
                 add_model_query = sql.SQL(
-                    """INSERT INTO completion_models 
-                    (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning) 
+                    """INSERT INTO completion_models
+                    (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
                 )
                 cur.execute(

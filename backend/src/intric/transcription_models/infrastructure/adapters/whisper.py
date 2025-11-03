@@ -1,6 +1,7 @@
 # MIT License
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 import openai
 from openai import AsyncOpenAI
@@ -12,30 +13,49 @@ from tenacity import (
 )
 
 from intric.files.audio import AudioFile
-from intric.main.config import get_settings
+from intric.main.config import SETTINGS
 from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 from intric.transcription_models.domain import TranscriptionModel
+
+if TYPE_CHECKING:
+    from intric.settings.credential_resolver import CredentialResolver
 
 logger = get_logger(__name__)
 
 
 class OpenAISTTModelAdapter:
-    def __init__(self, model: TranscriptionModel):
+    def __init__(
+        self,
+        model: TranscriptionModel,
+        credential_resolver: Optional["CredentialResolver"] = None,
+    ):
         self.model = model
 
-        # Determine API key based on base URL
-        settings = get_settings()
+        # Determine API key based on base URL and credential resolver
         if "api.berget.ai" in model.base_url:
-            api_key = settings.berget_api_key
-            logger.info(
-                f"Using Berget API for model {model.name} with base URL {model.base_url}"
-            )
+            if credential_resolver:
+                api_key = credential_resolver.get_api_key("berget")
+                logger.info(
+                    f"Using tenant Berget API credentials for model {model.name}"
+                )
+            else:
+                api_key = SETTINGS.berget_api_key
+                logger.info(
+                    f"Using global Berget API for model {model.name} with base URL {model.base_url}"
+                )
         else:
-            api_key = settings.openai_api_key
-            logger.info(
-                f"Using OpenAI API for model {model.name} with base URL {model.base_url}"
-            )
+            if credential_resolver:
+                api_key = credential_resolver.get_api_key("openai")
+                logger.info(
+                    f"Using tenant OpenAI API credentials for model {model.name}"
+                )
+            else:
+                api_key = SETTINGS.openai_api_key
+                logger.info(
+                    f"Using global OpenAI API for model {model.name} with base URL {model.base_url}"
+                )
+
         logger.debug(f"API Key: {'set' if api_key else 'not set'}")
         logger.debug(f"Base URL: {model.base_url}")
         self.client = AsyncOpenAI(api_key=api_key, base_url=model.base_url)

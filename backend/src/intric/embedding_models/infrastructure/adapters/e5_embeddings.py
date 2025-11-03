@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, Optional
+
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 from intric.embedding_models.infrastructure.adapters.base import (
@@ -9,10 +11,22 @@ from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
+if TYPE_CHECKING:
+    from intric.settings.credential_resolver import CredentialResolver
+
 logger = get_logger(__name__)
 
 
 class E5Adapter(EmbeddingModelAdapter):
+    def __init__(
+        self,
+        model,
+        credential_resolver: Optional["CredentialResolver"] = None,
+    ):
+        super().__init__(model)
+        # E5 is a local model (Infinity), doesn't need credentials
+        # credential_resolver accepted for interface consistency
+
     async def get_embedding_for_query(self, query: str):
         truncated_query = query[: self.model.max_input]
         query_prepended = [f"query: {truncated_query}"]

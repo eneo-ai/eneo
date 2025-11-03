@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
@@ -11,6 +11,7 @@ from intric.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from intric.ai_models.model_enums import ModelFamily
+from intric.main.exceptions import APIKeyNotConfiguredException
 from intric.completion_models.infrastructure.adapters import (
     AzureOpenAIModelAdapter,
     ClaudeModelAdapter,
@@ -23,9 +24,10 @@ from intric.completion_models.infrastructure.adapters import (
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from intric.main.config import get_settings
+from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.logging import get_logger
 from intric.sessions.session import SessionInDB
+from intric.settings.credential_resolver import CredentialResolver
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -34,6 +36,8 @@ if TYPE_CHECKING:
     )
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
+    from intric.tenants.tenant import TenantInDB
 
 logger = get_logger(__name__)
 
@@ -48,6 +52,9 @@ class CompletionService:
     def __init__(
         self,
         context_builder: ContextBuilder,
+        tenant: Optional["TenantInDB"] = None,
+        config: Optional[Settings] = None,
+        encryption_service: Optional["EncryptionService"] = None,
     ):
         self._adapters = {
             ModelFamily.OPEN_AI: OpenAIModelAdapter,
@@ -58,18 +65,73 @@ class CompletionService:
             ModelFamily.MISTRAL: MistralModelAdapter,
         }
         self.context_builder = context_builder
+        self.tenant = tenant
+        self.config = config or SETTINGS
+        self.encryption_service = encryption_service
 
     def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
-        # Check for LiteLLM model first
-        if model.litellm_model_name:
-            return LiteLLMModelAdapter(model)
-        
-        # Fall back to existing family-based selection
-        adapter_class = self._adapters.get(model.family.value)
-        if not adapter_class:
-            raise ValueError(f"No adapter found for modelfamily {model.family.value}")
+        # Create credential resolver with tenant context if tenant is available
+        credential_resolver = None
+        if self.tenant:
+            credential_resolver = CredentialResolver(
+                tenant=self.tenant,
+                settings=self.config,
+                encryption_service=self.encryption_service,
+            )
 
-        return adapter_class(model)
+        try:
+            # Check for LiteLLM model first
+            if model.litellm_model_name:
+                return LiteLLMModelAdapter(
+                    model, credential_resolver=credential_resolver
+                )
+
+            # Fall back to existing family-based selection
+            adapter_class = self._adapters.get(model.family.value)
+            if not adapter_class:
+                raise ValueError(
+                    f"No adapter found for modelfamily {model.family.value}"
+                )
+
+            # Inject credential_resolver into family-based adapters
+            return adapter_class(model, credential_resolver=credential_resolver)
+
+        except ValueError as e:
+            error_message = str(e)
+
+            # Check if this is a credential resolution error
+            if "No API key configured" in error_message:
+                # Extract provider from error message if possible
+                # Error format: "No API key configured for provider 'openai'. ..."
+                provider = "unknown"
+                if "provider '" in error_message:
+                    start = error_message.find("provider '") + len("provider '")
+                    end = error_message.find("'", start)
+                    if end > start:
+                        provider = error_message[start:end]
+
+                tenant_name = self.tenant.name if self.tenant else "N/A"
+
+                logger.error(
+                    f"API key not configured for provider {provider}",
+                    extra={
+                        "tenant_id": str(self.tenant.id) if self.tenant else None,
+                        "tenant_name": tenant_name,
+                        "provider": provider,
+                        "model_name": model.name,
+                        "model_family": model.family.value,
+                    },
+                )
+
+                # Raise custom exception with user-friendly message
+                # The exception handler will format this as GeneralError with error code
+                raise APIKeyNotConfiguredException(
+                    f"No API key configured for provider '{provider}'. "
+                    f"Please contact your administrator to configure credentials for this provider."
+                )
+
+            # Re-raise if it's a different ValueError (e.g., unsupported model family)
+            raise
 
     @staticmethod
     def is_valid_arguments(arguments: str):
@@ -88,7 +150,8 @@ class CompletionService:
         function_called = False
 
         async for chunk in completion:
-            logger.debug(chunk)
+            # Removed per-token logging to reduce log volume in production
+            # logger.debug(chunk)  # This would log 100+ times per response
 
             if chunk.tool_call:
                 if chunk.tool_call.name:
@@ -171,13 +234,30 @@ class CompletionService:
                 model_kwargs=model_kwargs,
             )
         else:
-            # Will be an async generator - not awaitable
-            completion = model_adapter.get_response_streaming(
+            # Two-phase streaming pattern:
+            # Phase 1: Create stream connection BEFORE returning (can raise exceptions)
+            # This happens eagerly, so exceptions propagate before HTTP response starts
+            stream_obj = await model_adapter.prepare_streaming(
                 context=context,
                 model_kwargs=model_kwargs,
             )
 
-            completion = self._handle_tool_call(completion)
+            # Phase 2: Create generator that iterates the pre-created stream
+            # This generator yields error events for mid-stream failures
+            async def streaming_wrapper():
+                """
+                Generator that iterates pre-created stream.
+                The stream was already created and validated, so we're past
+                the pre-flight checks. Any errors here are mid-stream failures.
+                """
+                async for chunk in model_adapter.iterate_stream(
+                    stream=stream_obj,
+                    context=context,
+                    model_kwargs=model_kwargs,
+                ):
+                    yield chunk
+
+            completion = self._handle_tool_call(streaming_wrapper())
 
         return CompletionModelResponse(
             completion=completion,

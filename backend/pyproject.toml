@@ -1,87 +1,92 @@
-[tool.poetry]
+[project]
 name = "intric"
 version = "0.1.0"
 description = ""
-authors = ["inooLabs"]
+authors = [{ name = "Sundsvalls Kommun" }]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "fastapi>=0,<1",
+    "uvicorn[standard]>=0.22.0,<0.23",
+    "openai~=1.4",
+    "python-dotenv>=0.21.1,<0.22",
+    "pydantic[email]>=2,<3",
+    "tenacity>=8.2.1,<9",
+    "tiktoken>=0,<1",
+    "numpy>=1.24.2,<2",
+    "python-pptx>=0.6.21,<0.7",
+    "arrow>=1.2.3,<2",
+    "alembic>=1.10.2,<2",
+    "asyncpg>=0.27.0,<0.28",
+    "psycopg2-binary>=2.9.5,<3",
+    "pyjwt>=2.6.0,<3",
+    "black>=24.3.0,<25",
+    "fpdf>=1.7.2,<2",
+    "python-docx>=0.8.11,<0.9",
+    "pycryptodome~=3.17",
+    "sse-starlette>=1.6.1,<2",
+    "gunicorn>=23.0.0,<24",
+    "psutil>=5.9.5,<6",
+    "pypdf>=3.15.3,<4",
+    "langchain>=0.0.329,<0.0.330",
+    "jsonschema>=4.19.2,<5",
+    "pydantic-settings>=2.1.0,<3",
+    "wrapt>=1.16.0,<2",
+    "python-multipart>=0.0.18,<0.0.19",
+    "arq>=0,<1",
+    "soundfile>=0.12.1,<0.13",
+    "audioread>=3.0.1,<4",
+    "pydantic-extra-types>=2.6.0,<3",
+    "bcrypt>=4.1.2,<5",
+    "dependency-injector>=4.41.0,<5",
+    "docx2python>=2.10.1,<3",
+    "jinja2>=3.1.5,<4",
+    "scrapy>=2.11.2,<3",
+    "html2text>=2024.2.26,<2025",
+    "beautifulsoup4>=4.12.3,<5",
+    "crochet>=2.1.1,<3",
+    "pgvector>=0.2.5,<0.3",
+    "anthropic>=0.28.1,<0.29",
+    "sqlalchemy-mixins>=2.0.5,<3",
+    "python-magic>=0.4.27,<0.5",
+    "aiocache>=0.12.2,<0.13",
+    "redis>=5.0.8,<6",
+    "sentry-sdk[fastapi]==2.8.0",
+    "mistralai>=1.5.0,<2",
+    "tavily-python>=0.5.1,<0.6",
+    "greenlet>=3.2.2,<4",
+    "litellm>=1.76.1,<2",
+    "cryptography>=43.0.0,<44", # For Fernet encryption of HTTP auth passwords
+    "httpx~=0.27.0",  # Pin to 0.27.x for compatibility with anthropic 0.28.1
+    "pandas>=2.2.3,<3",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-fastapi = "^0"
-uvicorn = {extras = ["standard"], version = "^0.22.0"}
-openai = "^1.4"
-python-dotenv = "^0.21.1"
-pydantic = {extras = ["email"], version = "^2"}
-tenacity = "^8.2.1"
-tiktoken = "^0"
-numpy = "^1.24.2"
-python-pptx = "^0.6.21"
-arrow = "^1.2.3"
-alembic = "^1.10.2"
-asyncpg = "^0.27.0"
-psycopg2-binary = "^2.9.5"
-pyjwt = "^2.6.0"
-black = "^24.3.0"
-fpdf = "^1.7.2"
-python-docx = "^0.8.11"
-pycryptodome = "^3.17"
-sse-starlette = "^1.6.1"
-gunicorn = "^23.0.0"
-psutil = "^5.9.5"
-pypdf = "^3.15.3"
-langchain = "^0.0.329"
-jsonschema = "^4.19.2"
-pydantic-settings = "^2.1.0"
-wrapt = "^1.16.0"
-python-multipart = "^0.0.18"
-arq = "^0"
-soundfile = "^0.12.1"
-audioread = "^3.0.1"
-pydantic-extra-types = "^2.6.0"
-bcrypt = "^4.1.2"
-dependency-injector = "^4.41.0"
-docx2python = "^2.10.1"
-jinja2 = "^3.1.5"
-scrapy = "^2.11.2"
-html2text = "^2024.2.26"
-beautifulsoup4 = "^4.12.3"
-crochet = "^2.1.1"
-pgvector = "^0.2.5"
-anthropic = "^0.28.1"
-sqlalchemy-mixins = "^2.0.5"
-python-magic = "^0.4.27"
-aiocache = "^0.12.2"
-redis = "^5.0.8"
-sentry-sdk = {version = "2.8.0", extras = ["fastapi"]}
-mistralai = "^1.5.0"
-tavily-python = "^0.5.1"
-greenlet = "^3.2.2"
-litellm = "^1.76.1"
-cryptography = "^43.0.0"  # For Fernet encryption of HTTP auth passwords
-httpx = "~0.27.0"  # Pin to 0.27.x for compatibility with anthropic 0.28.1
+[project.scripts]
+start = "intric.server.main:start"
 
-[tool.poetry.scripts]
-start = "src.intric.server.main:start"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.2.1"
-pytest-cov = "^4.0.0"
-pytest-asyncio = "^0.20.3"
-asgi-lifespan = "^2.1.0"
-ruff = "^0.12.0"
-aioresponses = "^0.7.4"
-freezegun = "^1.2.2"
-pytest-integration = "^0.2.3"
-pytest-vcr = "^1.0.2"
-pytest-env = "^1.1.3"
-vcrpy = "^5"
-testcontainers = "^4.8.1"
-pytest-dotenv = "^0.5.2"
-pandas = "^2.2.3"
-openpyxl = "^3.1.5"
+[dependency-groups]
+dev = [
+    "pytest>=7.2.1,<8",
+    "pytest-cov>=4.0.0,<5",
+    "pytest-asyncio>=0.20.3,<0.21",
+    "asgi-lifespan>=2.1.0,<3",
+    "ruff>=0.12.0,<0.13",
+    "aioresponses>=0.7.4,<0.8",
+    "freezegun>=1.2.2,<2",
+    "pytest-integration>=0.2.3,<0.3",
+    "pytest-vcr>=1.0.2,<2",
+    "pytest-env>=1.1.3,<2",
+    "vcrpy>=5,<6",
+    "testcontainers>=4.8.1,<5",
+    "pytest-dotenv>=0.5.2,<0.6",
+    "openpyxl>=3.1.5,<4",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/intric"]
 
 [tool.ruff]
 line-length = 88

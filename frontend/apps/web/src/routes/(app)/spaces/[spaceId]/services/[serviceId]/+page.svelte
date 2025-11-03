@@ -51,7 +51,9 @@
 
     <Page.Tabbar>
       <Page.Flex>
-        <Page.TabTrigger tab="playground" label={m.test_your_service({ serviceName: data.service.name })}
+        <Page.TabTrigger
+          tab="playground"
+          label={m.test_your_service({ serviceName: data.service.name })}
           >{m.playground()}</Page.TabTrigger
         >
         <Page.TabTrigger tab="edit">{m.settings()}</Page.TabTrigger>

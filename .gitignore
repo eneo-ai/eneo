@@ -26,4 +26,13 @@
 backend/openapi.json
 backend/.release-please-manifest.json
 
-.CLAUDE.md
+# Claude Code configuration
+CLAUDE.md
+.claude/
+.specify/
+specs/
+.devcontainer/claude-config/
+.code/
+.mcp.json
+install-claude.sh
+.serena/

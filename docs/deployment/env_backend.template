@@ -1,201 +1,286 @@
-# Backend Environment Configuration for Eneo
+# ============================================================================
+# ENEO BACKEND ENVIRONMENT CONFIGURATION - PRODUCTION DEPLOYMENT
+# ============================================================================
+# This template is for production Docker deployments using docker-compose.yml
+# Copy values from your development .env or configure for your environment
+# ============================================================================
 
-###############
-# REQUIRED: AI Model API Keys - Add at least ONE
-###############
-# OpenAI Configuration
-OPENAI_API_KEY=
-
-# Anthropic Claude Configuration  
-ANTHROPIC_API_KEY=
-
-# Google Gemini Configuration
-GEMINI_API_KEY=
-
-# Azure OpenAI Configuration (if using Azure)
-AZURE_API_KEY=
-AZURE_ENDPOINT=
-AZURE_API_VERSION=2024-02-15-preview
-AZURE_MODEL_DEPLOYMENT=gpt-4o
-
-###############
-# REQUIRED: Security Settings - MUST BE CHANGED! 
-# Ensure to have it the same in the frontend
-###############
-# Generate with: openssl rand -hex 32
-JWT_SECRET=
-URL_SIGNING_KEY=
-
-###############
-# Database Connection settings (Default for Docker Compose)
-###############
-POSTGRES_HOST=db              # Docker service name
-POSTGRES_PORT=5432
+# ----------------------------------------------------------------------------
+# Infrastructure (REQUIRED)
+# ----------------------------------------------------------------------------
+# PostgreSQL database
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=changeme    # Must match env_db.env
+POSTGRES_PASSWORD=changeme    # CHANGE THIS FOR PRODUCTION!
+POSTGRES_PORT=5432
+POSTGRES_HOST=db              # Docker service name
 POSTGRES_DB=eneo
 
-# Redis connection settings
+# Redis cache
 REDIS_HOST=redis              # Docker service name
 REDIS_PORT=6379
-###############
-# Redis Configuration (Default for Docker Compose)
-###############
-REDIS_HOST=redis
-REDIS_PORT=6379
 
-###############
-# API Configuration
-###############
+# ----------------------------------------------------------------------------
+# Security (REQUIRED)
+# ----------------------------------------------------------------------------
 API_PREFIX=/api/v1
+API_KEY_LENGTH=64
+API_KEY_HEADER_NAME=X-API-Key
 JWT_AUDIENCE=*
 JWT_ISSUER=ENEO
 JWT_EXPIRY_TIME=86400
 JWT_ALGORITHM=HS256
 
-###############
-# Feature Flags
-###############
-USING_ACCESS_MANAGEMENT=True
-USING_CRAWL=True
-#Set this to True if you intend to use azure models.
-USING_AZURE_MODELS=False
+# JWT_SECRET - CRITICAL FOR PRODUCTION
+# Signs OIDC state tokens and user authentication tokens
+# WARNING: MUST be changed from default for production!
+# Minimum strength: 32 characters (256+ bits)
+# Generate strong secret: python -c 'import secrets; print(secrets.token_hex(32))'
+JWT_SECRET=
 
-###############
-# Upload Limits (in bytes)
-###############
-UPLOAD_MAX_FILE_SIZE=10485760          # 10MB
-TRANSCRIPTION_MAX_FILE_SIZE=10485760   # 10MB
-UPLOAD_FILE_TO_SESSION_MAX_SIZE=
-UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=
-MAX_IN_QUESTION=1
+JWT_TOKEN_PREFIX=Bearer
+URL_SIGNING_KEY=
 
-###############
-# Logging
-###############
-LOGLEVEL=INFO
+# ----------------------------------------------------------------------------
+# Authentication Configuration
+# ----------------------------------------------------------------------------
+# Choose ONE of two modes:
+#   1. Single-Tenant OIDC: One shared IdP for all users (recommended for most)
+#   2. Multi-Tenant Federation: Each tenant has their own IdP (enterprise)
+# ----------------------------------------------------------------------------
 
-###############
-# Environment
-###############
-NODE_ENV=production
+# PUBLIC_ORIGIN (REQUIRED for OIDC authentication)
+# The externally-reachable URL where users access Eneo
+# Used to construct OIDC redirect_uri (e.g., {PUBLIC_ORIGIN}/auth/callback)
+# Must match:
+#   1. What users see in their browser address bar
+#   2. What's registered in your OIDC provider (Auth0, Azure AD, etc.)
+#   3. Frontend PUBLIC_ORIGIN setting
+# Examples:
+#   Production: PUBLIC_ORIGIN=https://eneo.yourdomain.com
+PUBLIC_ORIGIN=
 
-###############
-# Optional: Advanced Configuration
-###############
-# Admin API Keys (for system administration)
-# INTRIC_SUPER_API_KEY=
-# INTRIC_SUPER_DUPER_API_KEY=
+# SINGLE-TENANT OIDC MODE (Default - Recommended)
+# Direct login via one identity provider for all users
+# ----------------------------------------------------------------------------
+# OIDC discovery endpoint URL (auto-configures authorization/token/jwks endpoints)
+# Examples:
+#   Auth0: https://{your-domain}.auth0.com/.well-known/openid-configuration
+#   Azure/Entra ID: https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+#   Keycloak: https://{keycloak-url}/realms/{realm-name}/.well-known/openid-configuration
+OIDC_DISCOVERY_ENDPOINT=
 
-# SSO Authentication (if using MobilityGuard)
-# MOBILITYGUARD_DISCOVERY_ENDPOINT=
-# MOBILITYGUARD_CLIENT_ID=
-# MOBILITYGUARD_CLIENT_SECRET=
+# OIDC client credentials (from your IdP application registration)
+OIDC_CLIENT_ID=
+OIDC_CLIENT_SECRET=
 
-# Error Tracking (if using Sentry)
-# SENTRY_DSN=
-# SENTRY_ENVIRONMENT=production
+# [OPTIONAL] OIDC tenant ID (for backward compatibility with user creation)
+OIDC_TENANT_ID=
 
-# Additional AI Providers
-# MISTRAL_API_KEY=
-# VLLM_API_KEY=
-# VLLM_MODEL_URL=
+# MULTI-TENANT FEDERATION MODE (Enterprise Only)
+# Enable per-tenant identity providers (each tenant configures their own IdP)
+# Requires ENCRYPTION_KEY and tenant configuration via sysadmin API
+# ----------------------------------------------------------------------------
+FEDERATION_PER_TENANT_ENABLED=false
 
-# Web Search
-# TAVILY_API_KEY=
+# OIDC Safety Controls
+# ----------------------------------------------------------------------------
+# [OPTIONAL] OIDC state JWT lifetime (default: 600 = 10 minutes)
+OIDC_STATE_TTL_SECONDS=600
 
-# Worker Configuration
-# NUM_WORKERS=3
-API_KEY_HEADER_NAME=
+# [OPTIONAL] Grace period for redirect URI changes (default: 600 = 10 minutes)
+OIDC_REDIRECT_GRACE_PERIOD_SECONDS=600
 
-API_KEY_LENGTH=
+# [OPTIONAL] Strict redirect URI validation (default: true)
+STRICT_OIDC_REDIRECT_VALIDATION=true
 
-# [OPTIONAL] Enable automatic request throttling (default: True)
-AUTOTHROTTLE_ENABLED=
+# [OPTIONAL] Clock drift tolerance for OIDC JWT validation (default: 120 seconds)
+OIDC_CLOCK_LEEWAY_SECONDS=120
 
-# [OPTIONAL] Maximum items to crawl before stopping (default: 20000)
-CLOSESPIDER_ITEMCOUNT=
+# ----------------------------------------------------------------------------
+# Encryption & Multi-Tenant Features
+# ----------------------------------------------------------------------------
+# ENCRYPTION_KEY is REQUIRED when enabling:
+#   - TENANT_CREDENTIALS_ENABLED=true (tenant-specific LLM API keys)
+#   - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+#
+# Generate key:
+#   Development: uv run python -m intric.cli.generate_encryption_key
+#   Production:  docker compose run --rm backend python -m intric.cli.generate_encryption_key
+#   Alternative: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+#
+# Format: 44-character base64-encoded Fernet key
+# Example: FNVdDyfq0lBPAvjz_WS-9PB2UQzkbqCnwuA4KU9UbPU=
+# WARNING: Backup this key securely - cannot decrypt without it
+# ----------------------------------------------------------------------------
+ENCRYPTION_KEY=
 
-# [OPTIONAL] Confluence client ID for integration
-CONFLUENCE_CLIENT_ID=
+# Tenant-specific LLM credentials
+# Enable municipalities to configure their own API keys per tenant
+TENANT_CREDENTIALS_ENABLED=false
 
-# [OPTIONAL] Confluence client secret for integration
-CONFLUENCE_CLIENT_SECRET=
+# ----------------------------------------------------------------------------
+# LLM Provider API Keys (REQUIRED - At least ONE provider)
+# ----------------------------------------------------------------------------
+# Behavior depends on TENANT_CREDENTIALS_ENABLED setting:
+#
+# STRICT MODE (TENANT_CREDENTIALS_ENABLED=true):
+#   - Tenant has configured key → tenant key is used
+#   - Tenant has NO key → ERROR (no fallback to global)
+#   - Tenant key is INVALID → ERROR (no fallback to global)
+#
+# SINGLE-TENANT MODE (TENANT_CREDENTIALS_ENABLED=false):
+#   - Tenant has configured key → tenant key is used
+#   - Tenant has NO key → global key is used (fallback)
+#   - Tenant key is INVALID → ERROR (no fallback to global)
+# ----------------------------------------------------------------------------
 
-# Web crawling settings
-# [OPTIONAL] Maximum crawl duration in seconds (default: 14400 = 4 hours)
-CRAWL_MAX_LENGTH=
+# OpenAI (GPT models)
+# Get from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=
 
-# [OPTIONAL] Enable development mode (default: False)
-DEV=
+# Anthropic (Claude models)
+# Get from: https://console.anthropic.com/
+ANTHROPIC_API_KEY=
 
-# [OPTIONAL] Flux API key for image generation
-FLUX_API_KEY=
+# Google Gemini
+GEMINI_API_KEY=
 
-# [OPTIONAL] Self-hosted embedding service URL
-INFINITY_URL=
+# Azure OpenAI (Requires ALL 4 fields)
+AZURE_API_KEY=
+AZURE_ENDPOINT=
+AZURE_API_BASE=
+AZURE_MODEL_DEPLOYMENT=
+AZURE_API_VERSION=2024-02-15-preview
 
-# Marketplace and internal services
-# [OPTIONAL] Internal marketplace API key
-INTRIC_MARKETPLACE_API_KEY=
-
-# [OPTIONAL] Internal marketplace URL
-INTRIC_MARKETPLACE_URL=
-
-# [OPTIONAL] Internal super API key
-INTRIC_SUPER_API_KEY=
-
-# [OPTIONAL] Internal super duper API key
-INTRIC_SUPER_DUPER_API_KEY=
-
-JWT_TOKEN_PREFIX=
-
-# [OPTIONAL] Mistral AI API key
+# Other LLM Providers
 MISTRAL_API_KEY=
-
-# [CONDITIONAL] Required if using MobilityGuard authentication
-MOBILITYGUARD_CLIENT_ID=
-
-# [CONDITIONAL] Required if using MobilityGuard authentication
-MOBILITYGUARD_CLIENT_SECRET=
-
-# Authentication dependencies
-# [CONDITIONAL] Required if using MobilityGuard authentication
-MOBILITYGUARD_DISCOVERY_ENDPOINT=
-
-# [OPTIONAL] MobilityGuard tenant ID
-MOBILITYGUARD_TENANT_ID=
-
-# Integrations and callbacks
-# [OPTIONAL] OAuth callback URL for integrations
-OAUTH_CALLBACK_URL=
-
-# [OPTIONAL] Respect robots.txt files (default: True)
-OBEY_ROBOTS=
-
-# [OPTIONAL] OVHCloud API key
 OVHCLOUD_API_KEY=
 
-# [OPTIONAL] SharePoint client ID for integration
-SHAREPOINT_CLIENT_ID=
+# Berget.ai (Swedish-hosted models)
+BERGET_API_KEY=
+BERGET_API_BASE=
 
-# [OPTIONAL] SharePoint client secret for integration
-SHAREPOINT_CLIENT_SECRET=
+# Flux (Image generation)
+FLUX_API_KEY=
 
-# [OPTIONAL] Tavily API key for web search
+# Tavily (Web search)
 TAVILY_API_KEY=
 
-# [OPTIONAL] Enable testing mode (default: False)
-TESTING=
+# Self-hosted services
+INFINITY_URL=
 
-# [OPTIONAL] Enable Identity and Access Management (default: False)
-USING_IAM=
-
-# [OPTIONAL] Enable image generation features (default: False)
-USING_IMAGE_GENERATION=
-
-# [OPTIONAL] vLLM API key
+# vLLM (Self-hosted models)
+VLLM_MODEL_URL=
 VLLM_API_KEY=
 
-# [OPTIONAL] vLLM model service URL
-VLLM_MODEL_URL=
+# Internal services
+INTRIC_MARKETPLACE_API_KEY=
+INTRIC_MARKETPLACE_URL=
+INTRIC_SUPER_API_KEY=
+INTRIC_SUPER_DUPER_API_KEY=
+
+# ----------------------------------------------------------------------------
+# Background Worker Configuration
+# ----------------------------------------------------------------------------
+# Controls ARQ worker pool behavior and per-tenant concurrency fairness
+#
+# NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as
+# a background task processor instead of HTTP server. Both backend and worker
+# containers use the same image; run.sh detects RUN_AS_WORKER=true to launch
+# the ARQ worker instead of Gunicorn.
+# ----------------------------------------------------------------------------
+
+# [OPTIONAL] Max concurrent jobs across all tenants (default: 20)
+# Memory impact: Each job uses 100-500MB depending on task type
+# Recommendation: 10-15 for <8GB RAM, 20+ for 16GB+ RAM
+WORKER_MAX_CONCURRENT_JOBS=20
+
+# [OPTIONAL] Max concurrent jobs per tenant (default: 4)
+# Prevents one tenant from monopolizing worker slots
+TENANT_WORKER_CONCURRENCY_LIMIT=4
+
+# [OPTIONAL] Semaphore TTL - auto-cleanup for crashed workers (default: 36000 = 10 hours)
+# Keep >= CRAWL_MAX_LENGTH so long crawls never drop their semaphore key
+TENANT_WORKER_SEMAPHORE_TTL_SECONDS=36000
+
+# [OPTIONAL] Retry delay when tenant hits limit (default: 30 seconds)
+# Base delay for exponential backoff: 30s → 60s → 90s → ...
+TENANT_WORKER_RETRY_DELAY_SECONDS=30
+
+# ----------------------------------------------------------------------------
+# Feature Flags
+# ----------------------------------------------------------------------------
+USING_ACCESS_MANAGEMENT=True
+USING_AZURE_MODELS=False
+USING_IAM=False
+USING_IMAGE_GENERATION=False
+USING_CRAWL=True
+TESTING=False
+DEV=False
+
+# ----------------------------------------------------------------------------
+# File Upload Limits (bytes)
+# ----------------------------------------------------------------------------
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
+UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
+UPLOAD_MAX_FILE_SIZE=10485760
+TRANSCRIPTION_MAX_FILE_SIZE=10485760
+MAX_IN_QUESTION=1
+
+# ----------------------------------------------------------------------------
+# Web Crawling Configuration
+# ----------------------------------------------------------------------------
+# [OPTIONAL] Max crawl duration (default: 14400 = 4 hours)
+CRAWL_MAX_LENGTH=14400
+# [OPTIONAL] Max items before stopping (default: 20000)
+CLOSESPIDER_ITEMCOUNT=20000
+# [OPTIONAL] Respect robots.txt (default: True)
+OBEY_ROBOTS=True
+# [OPTIONAL] Auto-throttle requests (default: True)
+AUTOTHROTTLE_ENABLED=True
+
+# ----------------------------------------------------------------------------
+# Integration OAuth Callbacks
+# ----------------------------------------------------------------------------
+OAUTH_CALLBACK_URL=
+CONFLUENCE_CLIENT_ID=
+CONFLUENCE_CLIENT_SECRET=
+SHAREPOINT_CLIENT_ID=
+SHAREPOINT_CLIENT_SECRET=
+
+# ----------------------------------------------------------------------------
+# Default Tenant & User (OPTIONAL - First-time Bootstrap Only)
+# ----------------------------------------------------------------------------
+# Uncomment these ONLY for initial deployment to create a default tenant/user
+# After first deployment, comment them out or remove them
+# WARNING: If left enabled, uses these values on every init_db run (but skips if already exists)
+# ----------------------------------------------------------------------------
+# DEFAULT_TENANT_NAME=YourOrganization
+# DEFAULT_TENANT_QUOTA_LIMIT=10737418240
+# DEFAULT_USER_NAME=Admin User
+# DEFAULT_USER_EMAIL=admin@yourdomain.com
+# DEFAULT_USER_PASSWORD=ChangeMe123!
+
+# ----------------------------------------------------------------------------
+# Migration & Maintenance
+# ----------------------------------------------------------------------------
+# Auto-recalculate usage stats threshold for model migrations
+MIGRATION_AUTO_RECALC_THRESHOLD=30
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
+# Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Recommended for production: INFO
+LOGLEVEL=INFO
+
+# ----------------------------------------------------------------------------
+# Legacy Authentication (DEPRECATED - Use OIDC_* variables instead)
+# ----------------------------------------------------------------------------
+# MobilityGuard & Zitadel Configuration
+# DEPRECATED: Auto-migrated to OIDC_* on startup (will be removed in v3.0)
+# ----------------------------------------------------------------------------
+MOBILITYGUARD_DISCOVERY_ENDPOINT=
+MOBILITYGUARD_CLIENT_ID=
+MOBILITYGUARD_CLIENT_SECRET=
+MOBILITYGUARD_TENANT_ID=

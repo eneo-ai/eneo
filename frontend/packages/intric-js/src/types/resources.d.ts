@@ -107,3 +107,25 @@ export type UserTokenUsage = components["schemas"]["UserTokenUsage"];
 export type UserSortBy = components["schemas"]["UserSortBy"];
 export type ModelUsage = components["schemas"]["ModelUsage"];
 export type ModelKwargs = components["schemas"]["ModelKwargs"];
+
+// Federation types
+export type TenantInfo = {
+  slug: string;
+  name: string;
+  display_name: string;
+};
+
+export type TenantListResponse = {
+  tenants: TenantInfo[];
+};
+
+export type InitiateAuthResponse = {
+  authorization_url: string;
+  state: string;
+};
+
+export type AccessTokenResponse = {
+  access_token: string;
+  token_type: string;
+  expires_in?: number;
+};

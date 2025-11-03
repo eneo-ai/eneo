@@ -4,6 +4,7 @@
   import { IconDocument } from "@intric/icons/document";
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
+  import * as m from "$lib/paraglide/messages";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;
@@ -101,7 +102,9 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{blob.metadata.title}</Dialog.Title>
-    <Dialog.Description hidden>File contents of {blob.metadata.title}</Dialog.Description>
+    <Dialog.Description hidden
+      >{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description
+    >
 
     <Dialog.Section scrollable>
       <div class="p-4">

@@ -48,14 +48,14 @@ export interface paths {
   "/api/v1/users/login/token/": {
     /**
      * Login
-     * @description OAuth2 Login
+     * @description OAuth2 Login with comprehensive error handling and logging
      */
     post: operations["Login_api_v1_users_login_token__post"];
   };
   "/api/v1/users/login/openid-connect/mobilityguard/": {
     /**
      * Login With Mobilityguard
-     * @description OpenID Connect Login with mobilityguard.
+     * @description OpenID Connect Login (generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
   };
@@ -254,6 +254,17 @@ export interface paths {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
   };
+  "/api/v1/assistants/{id}/token-estimate": {
+    /**
+     * Estimate token usage for text and files
+     * @description Estimate token usage for the given text and files for this assistant.
+     *
+     * The Space Actor + FileService stack already enforces tenant and ownership
+     * boundaries; this endpoint adds lightweight guardrails to keep the operation
+     * responsive while supporting large-context models.
+     */
+    post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
+  };
   "/api/v1/group-chats/{id}/": {
     /**
      * Get Group Chat
@@ -310,6 +321,7 @@ export interface paths {
      * - SSEIntricEvent: Internal events like generating an image
      * - SSEFiles: Generated files/images responses
      * - SSEFirstChunk: Initial response with metadata
+     * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
      */
     post: operations["chat_api_v1_conversations__post"];
   };
@@ -1156,7 +1168,20 @@ export interface paths {
     delete: operations["delete_user_api_v1_sysadmin_users__user_id___delete"];
   };
   "/api/v1/sysadmin/tenants/": {
-    /** Get Tenants */
+    /**
+     * Get Tenants
+     * @description Get all tenants with masked API credentials.
+     *
+     * Returns tenant information with API keys masked to show only last 4 characters.
+     * This prevents exposing full API keys through the API endpoint.
+     *
+     * Args:
+     *     domain: Optional domain filter
+     *     container: Dependency injection container
+     *
+     * Returns:
+     *     Paginated list of tenants with masked credentials
+     */
     get: operations["get_tenants_api_v1_sysadmin_tenants__get"];
     /** Create Tenant */
     post: operations["create_tenant_api_v1_sysadmin_tenants__post"];
@@ -1174,6 +1199,18 @@ export interface paths {
   "/api/v1/sysadmin/crawl-all-weekly-websites/": {
     /** Crawl All Weekly Websites */
     post: operations["crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post"];
+  };
+  "/api/v1/sysadmin/observability/oidc-debug/": {
+    /**
+     * Get current OIDC debug toggle status
+     * @description Returns whether OIDC debug logging is currently enabled and when it expires.
+     */
+    get: operations["get_oidc_debug_status_api_v1_sysadmin_observability_oidc_debug__get"];
+    /**
+     * Enable or disable OIDC debug logging
+     * @description Turns verbose OIDC diagnostics on or off for a limited window. Requires super API key.
+     */
+    post: operations["toggle_oidc_debug_api_v1_sysadmin_observability_oidc_debug__post"];
   };
   "/api/v1/sysadmin/embedding-models/": {
     /** Get Embedding Models */
@@ -1256,6 +1293,49 @@ export interface paths {
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
+    /**
+     * Set tenant API credential
+     * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
+     */
+    put: operations["set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put"];
+    /**
+     * Delete tenant API credential
+     * @description Delete API credentials for a specific LLM provider for a tenant. System admin only.
+     */
+    delete: operations["delete_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/credentials": {
+    /**
+     * List tenant API credentials
+     * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
+     */
+    get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/federation": {
+    /**
+     * Get tenant federation config
+     * @description View federation config with masked secrets. System admin only.
+     */
+    get: operations["get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get"];
+    /**
+     * Set tenant federation config
+     * @description Configure custom identity provider for tenant. System admin only.
+     */
+    put: operations["set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put"];
+    /**
+     * Delete tenant federation config
+     * @description Remove custom identity provider for tenant. System admin only.
+     */
+    delete: operations["delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/federation/test": {
+    /**
+     * Test tenant federation config
+     * @description Test connection to tenant's IdP. System admin only.
+     */
+    post: operations["test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post"];
+  };
   "/api/v1/modules/": {
     /** Get Modules */
     get: operations["get_modules_api_v1_modules__get"];
@@ -1268,6 +1348,27 @@ export interface paths {
      * @description Value is a list of module `id`'s to add to the `tenant_id`.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+  };
+  "/api/v1/auth/tenants": {
+    /**
+     * List tenants for selector
+     * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+     */
+    get: operations["list_tenants_api_v1_auth_tenants_get"];
+  };
+  "/api/v1/auth/initiate": {
+    /**
+     * Initiate OIDC authentication
+     * @description Get authorization URL for tenant's identity provider. No authentication required. Returns URL to redirect user to IdP login page.
+     */
+    get: operations["initiate_auth_api_v1_auth_initiate_get"];
+  };
+  "/api/v1/auth/callback": {
+    /**
+     * OIDC callback handler
+     * @description Handle OIDC callback, validate token, lookup user. No authentication required (public endpoint). Returns JWT token for authenticated user.
+     */
+    post: operations["auth_callback_api_v1_auth_callback_post"];
   };
   "/api/v1/api-docs": {
     /**
@@ -1798,6 +1899,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2006,6 +2108,22 @@ export interface components {
       errors: {
         [key: string]: string;
       }[];
+    };
+    /**
+     * CallbackRequest
+     * @description OIDC callback with authorization code.
+     * @example {
+     *   "code": "authorization_code_from_idp",
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     * }
+     */
+    CallbackRequest: {
+      /** Code */
+      code: string;
+      /** State */
+      state: string;
+      /** Code Verifier */
+      code_verifier?: string | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -2435,6 +2553,52 @@ export interface components {
       published?: boolean;
       user: components["schemas"]["UserSparse"];
     };
+    /**
+     * CredentialInfo
+     * @description Information about a configured credential.
+     *
+     * Example:
+     *     {
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "configured_at": "2025-10-07T12:34:56.789Z",
+     *         "encryption_status": "encrypted",
+     *         "config": {
+     *             "endpoint": "https://my-resource.openai.azure.com",
+     *             "api_version": "2024-02-15-preview"
+     *         }
+     *     }
+     */
+    CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -2526,6 +2690,7 @@ export interface components {
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
       type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -2549,6 +2714,41 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+    };
+    /**
+     * DeleteCredentialResponse
+     * @description Response model for deleting tenant API credentials.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "anthropic",
+     *         "message": "API credential for anthropic deleted successfully"
+     *     }
+     */
+    DeleteCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Message */
+      message: string;
+    };
+    /**
+     * DeleteFederationResponse
+     * @description Response model for deleting federation config.
+     */
+    DeleteFederationResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Message */
+      message: string;
     };
     /** DeleteResponse */
     DeleteResponse: {
@@ -2582,6 +2782,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       stability: components["schemas"]["ModelStability"];
@@ -2665,6 +2867,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       stability: components["schemas"]["ModelStability"];
@@ -2789,7 +2993,34 @@ export interface components {
       | 9022
       | 9023
       | 9024
-      | 9025;
+      | 9025
+      | 9026;
+    /**
+     * FederationInfo
+     * @description Information about configured federation.
+     */
+    FederationInfo: {
+      /** Provider */
+      provider: string;
+      /** Client Id */
+      client_id: string;
+      /** Masked Secret */
+      masked_secret: string;
+      /** Issuer */
+      issuer?: string | null;
+      /** Allowed Domains */
+      allowed_domains: string[];
+      /**
+       * Configured At
+       * Format: date-time
+       */
+      configured_at: string;
+      /**
+       * Encryption Status
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -2809,6 +3040,8 @@ export interface components {
       size: number;
       /** Transcription */
       transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -3174,6 +3407,20 @@ export interface components {
       /** Info Blobs */
       info_blobs: components["schemas"]["InfoBlobAddPublic"][];
     };
+    /**
+     * InitiateAuthResponse
+     * @description Response with IdP authorization URL.
+     * @example {
+     *   "authorization_url": "https://idp.example.com/authorize?client_id=abc123&...",
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     * }
+     */
+    InitiateAuthResponse: {
+      /** Authorization Url */
+      authorization_url: string;
+      /** State */
+      state: string;
+    };
     /** InputField */
     InputField: {
       type: components["schemas"]["InputFieldType"];
@@ -3365,6 +3612,38 @@ export interface components {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
     };
+    /**
+     * ListCredentialsResponse
+     * @description Response model for listing tenant credentials.
+     *
+     * Example:
+     *     {
+     *         "credentials": [
+     *             {
+     *                 "provider": "openai",
+     *                 "masked_key": "...xyz9",
+     *                 "configured_at": "2025-10-07T12:34:56.789Z",
+     *                 "encryption_status": "encrypted",
+     *                 "config": {}
+     *             },
+     *             {
+     *                 "provider": "azure",
+     *                 "masked_key": "...abc3",
+     *                 "configured_at": "2025-10-07T12:45:00.123Z",
+     *                 "encryption_status": "plaintext",
+     *                 "config": {
+     *                     "endpoint": "https://my-resource.openai.azure.com",
+     *                     "api_version": "2024-02-15-preview",
+     *                     "deployment_name": "gpt-4"
+     *                 }
+     *             }
+     *         ]
+     *     }
+     */
+    ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["CredentialInfo"][];
+    };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
       /** Context */
@@ -3488,6 +3767,18 @@ export interface components {
        */
       id: string;
     };
+    /**
+     * ModelInfo
+     * @description Information about the model used by the assistant.
+     */
+    ModelInfo: {
+      /** Name */
+      name: string;
+      /** Token Limit */
+      token_limit: number;
+      /** Prompt Tokens */
+      prompt_tokens?: number | null;
+    };
     /** ModelKwargs */
     ModelKwargs: {
       /** Temperature */
@@ -3583,7 +3874,8 @@ export interface components {
       | "Mistral"
       | "KBLab"
       | "Google"
-      | "Berget";
+      | "Berget"
+      | "GDM";
     /**
      * ModelStability
      * @enum {string}
@@ -3754,6 +4046,40 @@ export interface components {
      * @enum {string}
      */
     Modules: "eu_hosting" | "intric-applications" | "SWE Models";
+    /** OIDCDebugToggleRequest */
+    OIDCDebugToggleRequest: {
+      /**
+       * Enabled
+       * @description Enable or disable OIDC debug logging
+       */
+      enabled: boolean;
+      /**
+       * Duration Minutes
+       * @description Duration in minutes before the toggle auto-expires (max 120)
+       * @default 30
+       */
+      duration_minutes?: number | null;
+      /**
+       * Reason
+       * @description Optional note for audit trail
+       */
+      reason?: string | null;
+    };
+    /** OIDCDebugToggleResponse */
+    OIDCDebugToggleResponse: {
+      /** Enabled */
+      enabled: boolean;
+      /** Enabled At */
+      enabled_at: string | null;
+      /** Enabled By */
+      enabled_by: string | null;
+      /** Expires At */
+      expires_at: string | null;
+      /** Reason */
+      reason: string | null;
+      /** Backend */
+      backend: string;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -4236,13 +4562,13 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[TenantInDB] */
-    PaginatedResponse_TenantInDB_: {
+    /** PaginatedResponse[TenantWithMaskedCredentials] */
+    PaginatedResponse_TenantWithMaskedCredentials_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["TenantInDB"][];
+      items: components["schemas"]["TenantWithMaskedCredentials"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -5014,6 +5340,148 @@ export interface components {
       messages: components["schemas"]["Message"][];
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
+    /**
+     * SetCredentialRequest
+     * @description Request model for setting tenant API credentials.
+     *
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
+     *
+     * Example for OpenAI:
+     *     {
+     *         "api_key": "sk-proj-abc123..."
+     *     }
+     *
+     * Example for Azure:
+     *     {
+     *         "api_key": "abc123...",
+     *         "endpoint": "https://my-resource.openai.azure.com",
+     *         "api_version": "2024-02-15-preview"
+     *     }
+     *
+     * Example for vLLM:
+     *     {
+     *         "api_key": "vllm-secret-key",
+     *         "endpoint": "http://tenant-vllm:8000"
+     *     }
+     */
+    SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /**
+     * SetCredentialResponse
+     * @description Response model for setting tenant API credentials.
+     *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    SetCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
+    /**
+     * SetFederationRequest
+     * @description Request model for setting tenant federation config.
+     */
+    SetFederationRequest: {
+      /**
+       * Provider
+       * @description Identity provider label (e.g., 'mobilityguard', 'entra_id', 'okta', 'auth0')
+       */
+      provider: string;
+      /**
+       * Discovery Endpoint
+       * @description OIDC discovery endpoint URL
+       */
+      discovery_endpoint: string;
+      /**
+       * Client Id
+       * @description OAuth client ID
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description OAuth client secret
+       */
+      client_secret: string;
+      /**
+       * Allowed Domains
+       * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
+       */
+      allowed_domains?: string[];
+      /**
+       * Canonical Public Origin
+       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required for multi-tenant federation to construct redirect_uri
+       */
+      canonical_public_origin?: string | null;
+      /**
+       * Redirect Path
+       * @description Optional custom redirect path starting with /
+       */
+      redirect_path?: string | null;
+    };
+    /**
+     * SetFederationResponse
+     * @description Response model for setting federation config.
+     */
+    SetFederationResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Secret */
+      masked_secret: string;
+      /** Message */
+      message: string;
+    };
     /** SettingsPublic */
     SettingsPublic: {
       /**
@@ -5316,6 +5784,8 @@ export interface components {
       name: string;
       /** Display Name */
       display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
       /** Quota Limit */
       quota_limit: number;
       /** Domain */
@@ -5339,6 +5809,31 @@ export interface components {
        * @default []
        */
       modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
+      /** Federation Config */
+      federation_config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * TenantInfo
+     * @description Public tenant information for selector grid.
+     * @example {
+     *   "display_name": "Stockholm",
+     *   "name": "Stockholm Municipality",
+     *   "slug": "stockholm"
+     * }
+     */
+    TenantInfo: {
+      /** Slug */
+      slug: string;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name: string;
     };
     /** TenantIntegration */
     TenantIntegration: {
@@ -5368,6 +5863,28 @@ export interface components {
       items: components["schemas"]["TenantIntegration"][];
       /** Count */
       count: number;
+    };
+    /**
+     * TenantListResponse
+     * @description List of tenants for selector.
+     * @example {
+     *   "tenants": [
+     *     {
+     *       "display_name": "Stockholm",
+     *       "name": "Stockholm Municipality",
+     *       "slug": "stockholm"
+     *     },
+     *     {
+     *       "display_name": "Gothenburg",
+     *       "name": "Gothenburg Municipality",
+     *       "slug": "goteborg"
+     *     }
+     *   ]
+     * }
+     */
+    TenantListResponse: {
+      /** Tenants */
+      tenants: components["schemas"]["TenantInfo"][];
     };
     /** TenantPublic */
     TenantPublic: {
@@ -5420,6 +5937,136 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+    };
+    /**
+     * TenantWithMaskedCredentials
+     * @description TenantInDB with masked API credentials for safe API responses.
+     *
+     * This model is used when returning tenant data through API endpoints
+     * to prevent exposing full API keys. The api_credentials field is
+     * automatically masked to show only the last 4 characters of each key.
+     *
+     * Example:
+     *     Full credential: {"openai": {"api_key": "sk-proj-abc123xyz"}}
+     *     Masked: {"openai": "...xyz"}
+     */
+    TenantWithMaskedCredentials: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Privacy Policy */
+      privacy_policy?: string | null;
+      /** Name */
+      name: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
+      /** Quota Limit */
+      quota_limit: number;
+      /** Domain */
+      domain?: string | null;
+      /** Zitadel Org Id */
+      zitadel_org_id?: string | null;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /** @default active */
+      state?: components["schemas"]["TenantState"];
+      /**
+       * Security Enabled
+       * @default false
+       */
+      security_enabled?: boolean;
+      /**
+       * Modules
+       * @default []
+       */
+      modules?: components["schemas"]["ModuleInDB"][];
+      /** Api Credentials */
+      api_credentials?: {
+        [key: string]: unknown;
+      };
+      /** Federation Config */
+      federation_config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * TokenEstimateBreakdown
+     * @description Breakdown of token usage by source.
+     */
+    TokenEstimateBreakdown: {
+      /**
+       * Prompt
+       * @description Tokens used by assistant prompt
+       */
+      prompt: number;
+      /**
+       * Text
+       * @description Tokens used by user input text
+       */
+      text: number;
+      /**
+       * Files
+       * @description Total tokens used by all files
+       */
+      files: number;
+      /**
+       * File Details
+       * @description Per-file token counts
+       */
+      file_details?: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * TokenEstimateRequest
+     * @description Request payload for estimating tokens.
+     */
+    TokenEstimateRequest: {
+      /**
+       * Text
+       * @description User input text to evaluate
+       * @default
+       */
+      text?: string;
+      /**
+       * File Ids
+       * @description List of file IDs to include in the estimate
+       */
+      file_ids?: string[];
+    };
+    /**
+     * TokenEstimateResponse
+     * @description Response model for token usage estimation.
+     */
+    TokenEstimateResponse: {
+      /**
+       * Tokens
+       * @description Total token count
+       */
+      tokens: number;
+      /**
+       * Percentage
+       * @description Percentage of context window used
+       */
+      percentage: number;
+      /**
+       * Limit
+       * @description Model's context window limit
+       */
+      limit: number;
+      /** @description Token usage breakdown by source */
+      breakdown: components["schemas"]["TokenEstimateBreakdown"];
     };
     /** TokenUsageSummary */
     TokenUsageSummary: {
@@ -6913,7 +7560,7 @@ export interface operations {
   };
   /**
    * Login
-   * @description OAuth2 Login
+   * @description OAuth2 Login with comprehensive error handling and logging
    */
   Login_api_v1_users_login_token__post: {
     requestBody: {
@@ -6944,7 +7591,7 @@ export interface operations {
   };
   /**
    * Login With Mobilityguard
-   * @description OpenID Connect Login with mobilityguard.
+   * @description OpenID Connect Login (generic OIDC provider).
    */
   login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
     requestBody: {
@@ -7951,6 +8598,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -8007,7 +8656,8 @@ export interface operations {
                 | "Mistral"
                 | "KBLab"
                 | "Google"
-                | "Berget";
+                | "Berget"
+                | "GDM";
               /**
                * ModelStability
                * @enum {string}
@@ -8249,6 +8899,8 @@ export interface operations {
                 size: number;
                 /** Transcription */
                 transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -8305,7 +8957,8 @@ export interface operations {
                 | "Mistral"
                 | "KBLab"
                 | "Google"
-                | "Berget";
+                | "Berget"
+                | "GDM";
               /**
                * ModelStability
                * @enum {string}
@@ -8549,6 +9202,52 @@ export interface operations {
     };
   };
   /**
+   * Estimate token usage for text and files
+   * @description Estimate token usage for the given text and files for this assistant.
+   *
+   * The Space Actor + FileService stack already enforces tenant and ownership
+   * boundaries; this endpoint adds lightweight guardrails to keep the operation
+   * responsive while supporting large-context models.
+   */
+  estimate_tokens_api_v1_assistants__id__token_estimate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TokenEstimateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TokenEstimateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Group Chat
    * @description Get an existing group chat by its ID.
    */
@@ -8771,6 +9470,7 @@ export interface operations {
    * - SSEIntricEvent: Internal events like generating an image
    * - SSEFiles: Generated files/images responses
    * - SSEFirstChunk: Initial response with metadata
+   * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
    */
   chat_api_v1_conversations__post: {
     parameters: {
@@ -8879,6 +9579,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                 };
               },
@@ -8921,6 +9623,8 @@ export interface operations {
                     size: number;
                     /** Transcription */
                     transcription?: string | null;
+                    /** Token Count */
+                    token_count?: number | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -8983,6 +9687,17 @@ export interface operations {
                     url: string;
                   };
                 };
+              },
+              {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Error */
+                error: string;
+                /** Error Code */
+                error_code?: number | null;
               }
             ]
           >;
@@ -12985,7 +13700,20 @@ export interface operations {
       };
     };
   };
-  /** Get Tenants */
+  /**
+   * Get Tenants
+   * @description Get all tenants with masked API credentials.
+   *
+   * Returns tenant information with API keys masked to show only last 4 characters.
+   * This prevents exposing full API keys through the API endpoint.
+   *
+   * Args:
+   *     domain: Optional domain filter
+   *     container: Dependency injection container
+   *
+   * Returns:
+   *     Paginated list of tenants with masked credentials
+   */
   get_tenants_api_v1_sysadmin_tenants__get: {
     parameters: {
       query?: {
@@ -12996,7 +13724,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_TenantInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_TenantWithMaskedCredentials_"];
         };
       };
       /** @description Validation Error */
@@ -13018,7 +13746,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Bad Request */
@@ -13051,7 +13779,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Not Found */
@@ -13079,7 +13807,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
       /** @description Not Found */
@@ -13114,6 +13842,53 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Get current OIDC debug toggle status
+   * @description Returns whether OIDC debug logging is currently enabled and when it expires.
+   */
+  get_oidc_debug_status_api_v1_sysadmin_observability_oidc_debug__get: {
+    responses: {
+      /** @description Current state of the OIDC debug toggle. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OIDCDebugToggleResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key. */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Enable or disable OIDC debug logging
+   * @description Turns verbose OIDC diagnostics on or off for a limited window. Requires super API key.
+   */
+  toggle_oidc_debug_api_v1_sysadmin_observability_oidc_debug__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OIDCDebugToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Debug flag state updated. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OIDCDebugToggleResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -13473,6 +14248,209 @@ export interface operations {
       };
     };
   };
+  /**
+   * Set tenant API credential
+   * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
+   */
+  set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete tenant API credential
+   * @description Delete API credentials for a specific LLM provider for a tenant. System admin only.
+   */
+  delete_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant API credentials
+   * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
+   */
+  list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ListCredentialsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant federation config
+   * @description View federation config with masked secrets. System admin only.
+   */
+  get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set tenant federation config
+   * @description Configure custom identity provider for tenant. System admin only.
+   */
+  set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetFederationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete tenant federation config
+   * @description Remove custom identity provider for tenant. System admin only.
+   */
+  delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Test tenant federation config
+   * @description Test connection to tenant's IdP. System admin only.
+   */
+  test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Modules */
   get_modules_api_v1_modules__get: {
     responses: {
@@ -13527,6 +14505,97 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["TenantInDB"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenants for selector
+   * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+   */
+  list_tenants_api_v1_auth_tenants_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantListResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Initiate OIDC authentication
+   * @description Get authorization URL for tenant's identity provider. No authentication required. Returns URL to redirect user to IdP login page.
+   */
+  initiate_auth_api_v1_auth_initiate_get: {
+    parameters: {
+      query?: {
+        /** @description Tenant slug (required for multi-tenant, optional for single-tenant) */
+        tenant?: string | null;
+        /** @description Optional frontend-generated CSRF state */
+        state?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["InitiateAuthResponse"];
+        };
+      };
+      /** @description Tenant is not active */
+      403: {
+        content: never;
+      };
+      /** @description Tenant not found or not configured */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Federation or redirect configuration missing */
+      500: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * OIDC callback handler
+   * @description Handle OIDC callback, validate token, lookup user. No authentication required (public endpoint). Returns JWT token for authenticated user.
+   */
+  auth_callback_api_v1_auth_callback_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CallbackRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Invalid or expired state */
+      400: {
+        content: never;
+      };
+      /** @description Token validation failed */
+      401: {
+        content: never;
+      };
+      /** @description Domain not allowed, inactive tenant, or user missing */
+      403: {
+        content: never;
       };
       /** @description Validation Error */
       422: {

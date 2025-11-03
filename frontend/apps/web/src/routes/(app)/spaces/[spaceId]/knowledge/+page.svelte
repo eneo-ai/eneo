@@ -67,7 +67,9 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {m.knowledge()}</title>
+  <title
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {m.knowledge()}</title
+  >
 </svelte:head>
 
 <Page.Root tabController={selectedTab}>
@@ -129,7 +131,8 @@
                 <span class="text-xl font-extrabold">{m.integrations()}</span>
               </div>
               <p class="-mt-[0.1rem] max-w-[85ch] pl-6 leading-[1.3rem]">
-                {m.integrations_beta_notice()} <a
+                {m.integrations_beta_notice()}
+                <a
                   target="_blank"
                   rel="noreferrer"
                   class="hover:bg-label-stronger hover:text-label-dimmer inline items-center gap-1 underline"
