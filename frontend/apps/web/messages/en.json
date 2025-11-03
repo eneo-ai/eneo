@@ -1143,6 +1143,7 @@
   "transcription_models": "Transcription models",
   "edit_security_classification": "Edit security classification",
   "error_changing_model_status": "Error changing status of",
+  "error_changing_default_status": "Error changing default status",
   "classify_models_description": "Select a security classification for all of your organisation's models.\nModels will be available in spaces with the same or lower classification.",
   "security_classification": "Security classification",
   "enable_security_description": "Enable security classifications across your organisation's spaces.",

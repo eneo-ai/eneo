@@ -8,6 +8,7 @@
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
   import type { Settings } from "@intric/intric-js";
+  import type { Snippet } from "svelte";
 
   const {
     state: { currentSpace },
@@ -20,7 +21,7 @@
     state: { currentStep, createButtonLabel, creationMode, showCreateDialog }
   } = getTemplateController();
 
-  let { settings }: { settings: Settings } = $props();
+  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } = $props();
 
   let openAssistantAfterCreation = $state(true);
   let userTouchedToggle = $state(false);
@@ -37,8 +38,8 @@
 
 <Dialog.Root openController={showCreateDialog} on:close={resetForm}>
   <Dialog.Trigger asFragment let:trigger>
-    {#if $$slots.default}
-      <slot {trigger}></slot>
+    {#if triggerSnippet}
+      {@render triggerSnippet(trigger)}
     {:else}
       <Button is={trigger} variant="primary">{m.create_assistant()}</Button>
     {/if}

@@ -8,6 +8,7 @@
   import CreateAppBackdrop from "./CreateAppBackdrop.svelte";
   import { m } from "$lib/paraglide/messages";
   import type { Settings } from "@intric/intric-js";
+  import type { Snippet } from "svelte";
 
   const {
     state: { currentSpace },
@@ -20,7 +21,7 @@
     resetForm
   } = getTemplateController();
 
-  let { settings }: { settings: Settings } = $props();
+  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } = $props();
 
   let openAppAfterCreation = $state(false);
   let userTouchedToggle = $state(false);
@@ -37,8 +38,8 @@
 
 <Dialog.Root openController={showCreateDialog} on:close={resetForm}>
   <Dialog.Trigger asFragment let:trigger>
-    {#if $$slots.default}
-      <slot {trigger}></slot>
+    {#if triggerSnippet}
+      {@render triggerSnippet(trigger)}
     {:else}
       <Button is={trigger} variant="primary">{m.create_app()}</Button>
     {/if}

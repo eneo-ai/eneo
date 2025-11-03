@@ -222,8 +222,9 @@
             class="border-default hover:bg-hover-dimmer flex h-16 items-center justify-between border-b px-4"
           >
             {#if $selected}
+              {@const IconComponent = inputTypes[$selected.value].icon}
               <div class="flex items-center gap-3">
-                <svelte:component this={inputTypes[$selected.value].icon}></svelte:component>
+                <IconComponent />
                 <span>{inputTypes[$selected.value].label}</span>
               </div>
             {:else}
@@ -247,14 +248,14 @@
                   {type}
                 </div>
                 {#each inputOptions as inputOption (inputOption)}
-                  {@const { icon, label } = inputTypes[inputOption]}
+                  {@const { icon: IconComponent, label } = inputTypes[inputOption]}
                   <div
                     class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 last-of-type:border-b-0 hover:cursor-pointer"
                     {...$option({ value: inputOption })}
                     use:option
                   >
                     <div class="flex items-center gap-3">
-                      <svelte:component this={icon}></svelte:component>
+                      <IconComponent />
                       <span>{label}</span>
                     </div>
                     <div class="check {$isSelected(inputOption) ? 'block' : 'hidden'}">

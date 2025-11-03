@@ -83,7 +83,7 @@
 {:else}
   <!-- Full mode: With label and description -->
   <div class="flex flex-col gap-2">
-    <label class="text-sm font-medium text-default">{m.choose_icon_optional()}</label>
+    <div class="text-sm font-medium text-default">{m.choose_icon_optional()}</div>
 
     <div class="flex gap-2">
       <button
@@ -127,7 +127,6 @@
             bind:value={searchQuery}
             placeholder={m.search_icons()}
             class="border-default bg-primary ring-default w-full rounded-lg border py-2 pr-3 pl-10 focus-within:ring-2 focus-visible:ring-2"
-            autofocus
           />
           <Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-text-dimmer" />
         </div>

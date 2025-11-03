@@ -260,6 +260,7 @@ class AssistantRepository:
                 published=assistant.published,
                 template_id=template_id,
                 type=assistant.type,
+                description=assistant.description,
             )
             .returning(Assistants)
         )
