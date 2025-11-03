@@ -162,19 +162,22 @@ from intric.mcp_servers.application.mcp_server_service import MCPServerService
 from intric.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
-from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
-from intric.mcp_servers.infrastructure.mappers.mcp_server_settings_mapper import (
-    MCPServerSettingsMapper,
+from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
+    MCPServerMapper,
+    MCPServerToolMapper,
 )
 from intric.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
 )
-from intric.mcp_servers.infrastructure.repo_impl.mcp_server_settings_repo_impl import (
-    MCPServerSettingsRepoImpl,
+from intric.mcp_servers.infrastructure.repo_impl.mcp_server_tool_repo_impl import (
+    MCPServerToolRepoImpl,
 )
 from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
     MCPServerSettingsAssembler,
+)
+from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
+    MCPServerToolAssembler,
 )
 from intric.jobs.job_repo import JobRepository
 from intric.jobs.job_service import JobService
@@ -408,6 +411,7 @@ class Container(containers.DeclarativeContainer):
     # MCP assemblers
     mcp_server_assembler = providers.Factory(MCPServerAssembler)
     mcp_server_settings_assembler = providers.Factory(MCPServerSettingsAssembler)
+    mcp_server_tool_assembler = providers.Factory(MCPServerToolAssembler)
 
     # Mappers for integration domain
     integration_mapper = providers.Factory(IntegrationMapper)
@@ -418,7 +422,7 @@ class Container(containers.DeclarativeContainer):
 
     # MCP mappers
     mcp_server_mapper = providers.Factory(MCPServerMapper)
-    mcp_server_settings_mapper = providers.Factory(MCPServerSettingsMapper)
+    mcp_server_tool_mapper = providers.Factory(MCPServerToolMapper)
 
     # HTTP auth encryption service
     http_auth_encryption_service = providers.Factory(HttpAuthEncryptionService)
@@ -482,8 +486,8 @@ class Container(containers.DeclarativeContainer):
     mcp_server_repo = providers.Factory(
         MCPServerRepoImpl, session=session, mapper=mcp_server_mapper
     )
-    mcp_server_settings_repo = providers.Factory(
-        MCPServerSettingsRepoImpl, session=session, mapper=mcp_server_settings_mapper
+    mcp_server_tool_repo = providers.Factory(
+        MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
     )
 
     transcription_model_enable_service = providers.Factory(
@@ -874,11 +878,11 @@ class Container(containers.DeclarativeContainer):
     mcp_server_service = providers.Factory(
         MCPServerService,
         mcp_server_repo=mcp_server_repo,
+        mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
     )
     mcp_server_settings_service = providers.Factory(
         MCPServerSettingsService,
-        settings_repo=mcp_server_settings_repo,
         mcp_server_repo=mcp_server_repo,
         user=user,
     )

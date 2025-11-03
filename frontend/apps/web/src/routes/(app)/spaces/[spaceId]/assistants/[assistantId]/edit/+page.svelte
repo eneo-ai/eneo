@@ -327,12 +327,13 @@
         <Settings.Row
           title={m.mcp_servers()}
           description={m.select_mcp_servers_description()}
-          hasChanges={$currentChanges.diff.mcp_servers !== undefined}
+          hasChanges={$currentChanges.diff.mcp_servers !== undefined || $currentChanges.diff.mcp_tools !== undefined}
           revertFn={() => {
             discardChanges("mcp_servers");
+            discardChanges("mcp_tools");
           }}
         >
-          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} />
+          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} />
         </Settings.Row>
       </Settings.Group>
 

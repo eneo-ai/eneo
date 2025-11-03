@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.services.service import Service
     from intric.websites.domain.website import Website
 
@@ -52,6 +53,7 @@ class Space:
         embedding_models: list["EmbeddingModel"],
         completion_models: list["CompletionModel"],
         transcription_models: list[TranscriptionModel],
+        mcp_servers: list["MCPServer"],
         default_assistant: "Assistant",
         assistants: list["Assistant"],
         apps: list["App"],
@@ -73,6 +75,7 @@ class Space:
         self._embedding_models = embedding_models
         self._completion_models = completion_models
         self._transcription_models = transcription_models
+        self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
         self.assistants = assistants
         self.group_chats = group_chats
@@ -100,6 +103,9 @@ class Space:
 
     def is_transcription_model_in_space(self, transcription_model_id: UUID | None) -> bool:
         return transcription_model_id in [model.id for model in self.transcription_models]
+
+    def is_mcp_server_in_space(self, mcp_server_id: UUID | None) -> bool:
+        return mcp_server_id in [server.id for server in self.mcp_servers]
 
     def is_completion_model_available(self, completion_model_id: UUID) -> bool:
         return (
@@ -265,6 +271,16 @@ class Space:
 
         self._transcription_models = transcription_models
 
+    @property
+    def mcp_servers(self) -> list["MCPServer"]:
+        return self._mcp_servers
+
+    @mcp_servers.setter
+    def mcp_servers(self, mcp_servers: list["MCPServer"]):
+        # For MCP servers, we may want to add similar validation
+        # For now, just set them directly
+        self._mcp_servers = mcp_servers
+
     def update(
         self,
         name: str = None,
@@ -272,6 +288,7 @@ class Space:
         embedding_models: list["EmbeddingModel"] = None,
         completion_models: list["CompletionModel"] = None,
         transcription_models: list[TranscriptionModel] = None,
+        mcp_servers: list["MCPServer"] = None,
         security_classification: Union[SecurityClassification, NotProvided, None] = NOT_PROVIDED,
     ):
         if name is not None:
@@ -332,6 +349,12 @@ class Space:
                 raise BadRequestException("Can not add transcription models to personal space")
 
             self.transcription_models = transcription_models
+
+        if mcp_servers is not None:
+            if self.is_personal():
+                raise BadRequestException("Can not add MCP servers to personal space")
+
+            self.mcp_servers = mcp_servers
 
     def add_member(self, user: SpaceMember):
         if self.is_personal():
@@ -499,6 +522,9 @@ class Space:
 
     def get_embedding_model(self, embedding_model_id: UUID) -> "EmbeddingModel":
         return self._get_entity(embedding_model_id, self.embedding_models)
+
+    def get_mcp_server(self, mcp_server_id: UUID) -> "MCPServer":
+        return self._get_entity(mcp_server_id, self.mcp_servers)
 
     def get_website(self, website_id: UUID) -> "Website":
         return self._get_entity(website_id, self.websites)

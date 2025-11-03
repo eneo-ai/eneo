@@ -1,11 +1,11 @@
 import json
+import re
 from typing import AsyncGenerator, Optional
 
 import litellm
 from litellm import AuthenticationError, APIError, RateLimitError
-from litellm.experimental_mcp_client import load_mcp_tools
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from litellm.experimental_mcp_client.client import MCPClient
+from mcp.types import CallToolRequestParams as MCPCallToolRequestParams
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
@@ -212,78 +212,109 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         return messages
 
+    def _sanitize_tool_name(self, name: str) -> str:
+        """
+        Sanitize tool/server name to match OpenAI pattern ^[a-zA-Z0-9_-]+$
+
+        Args:
+            name: Raw name that may contain invalid characters
+
+        Returns:
+            Sanitized name with only alphanumeric, underscore, and hyphen characters
+        """
+        # Replace invalid characters with underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+        # Ensure it's not empty
+        return sanitized if sanitized else "tool"
+
+    def _strip_server_prefix(self, tool_name: str) -> str:
+        """
+        Remove server prefix from tool name.
+
+        Args:
+            tool_name: Tool name (may be prefixed like 'context7__resolve_library_id')
+
+        Returns:
+            Original tool name without prefix ('resolve_library_id')
+        """
+        if "__" in tool_name:
+            parts = tool_name.split("__", 1)
+            if len(parts) == 2:
+                return parts[1]
+        return tool_name
+
+    def _add_server_prefix(self, tool_name: str, server_name: str) -> str:
+        """
+        Add server prefix to tool name to avoid collisions.
+
+        Args:
+            tool_name: Original tool name ('resolve-library-id')
+            server_name: MCP server name ('context7')
+
+        Returns:
+            Prefixed tool name ('context7__resolve_library_id')
+        """
+        # Sanitize both names to ensure they match OpenAI pattern
+        sanitized_server = self._sanitize_tool_name(server_name)
+        sanitized_tool = self._sanitize_tool_name(tool_name)
+        # Use double underscore as separator (less likely to conflict than single hyphen)
+        return f"{sanitized_server}__{sanitized_tool}"
+
     async def setup_mcp_tools(self, mcp_servers: list):
-        """Setup MCP tools from configured MCP servers.
+        """Setup MCP tools from database (no server connections during setup).
 
         Args:
             mcp_servers: List of MCPServer domain entities from assistant
+                        (already filtered by tenant→space→assistant hierarchy)
 
         Returns:
-            Tuple of (tools, server_params_list) where server_params_list contains
-            connection info for each server for later tool execution
+            Tuple of (tools, tool_to_server_map) where:
+                - tools: List of OpenAI-formatted tool definitions
+                - tool_to_server_map: Dict mapping sanitized tool names to (server, original_tool_name) tuples
         """
         tools = []
-        server_params_list = []
+        tool_to_server_map = {}
 
         for mcp_server in mcp_servers:
-            try:
-                # Determine command and args based on server type
-                # Get package values with fallback for None
-                npm_pkg = getattr(mcp_server, 'npm_package', None)
-                uvx_pkg = getattr(mcp_server, 'uvx_package', None)
-                docker_img = getattr(mcp_server, 'docker_image', None)
+            # Validate required fields
+            if not hasattr(mcp_server, 'http_url') or not mcp_server.http_url:
+                logger.warning(f"[MCP] Server {mcp_server.name} missing http_url - skipping")
+                continue
 
-                logger.debug(f"[MCP] Processing server: {mcp_server.name}, type={mcp_server.server_type}, npm={npm_pkg}, uvx={uvx_pkg}, docker={docker_img}")
+            # Use DB tools (already filtered and enabled by hierarchy)
+            if not hasattr(mcp_server, 'tools') or not mcp_server.tools:
+                logger.debug(f"[MCP] Server {mcp_server.name} has no tools configured")
+                continue
 
-                if mcp_server.server_type == "npm" and npm_pkg:
-                    command = "npx"
-                    args = ["-y", npm_pkg]
-                elif mcp_server.server_type == "uvx" and uvx_pkg:
-                    command = "uvx"
-                    args = [uvx_pkg]
-                elif mcp_server.server_type == "docker" and docker_img:
-                    command = "docker"
-                    args = ["run", "-i", "--rm", docker_img]
-                elif mcp_server.server_type == "http":
-                    logger.warning(f"[MCP] HTTP MCP servers not yet supported: {mcp_server.name}")
-                    continue
-                else:
-                    logger.warning(f"[MCP] Invalid MCP server configuration: {mcp_server.name} - server_type={mcp_server.server_type}, has packages: npm={bool(npm_pkg)}, uvx={bool(uvx_pkg)}, docker={bool(docker_img)}")
+            enabled_count = 0
+            for db_tool in mcp_server.tools:
+                # Only include enabled tools
+                if not db_tool.is_enabled_by_default:
                     continue
 
-                logger.info(f"[MCP] Connecting to {mcp_server.name} ({mcp_server.server_type}) via stdio")
+                # Prefix tool name to avoid collisions between servers
+                prefixed_name = self._add_server_prefix(db_tool.name, mcp_server.name)
 
-                server_params = StdioServerParameters(
-                    command=command,
-                    args=args,
-                    # TODO: Add env_vars from tenant settings
-                )
+                # Convert DB tool to OpenAI format
+                openai_tool = {
+                    "type": "function",
+                    "function": {
+                        "name": prefixed_name,
+                        "description": db_tool.description or "",
+                        "parameters": db_tool.input_schema or {}
+                    }
+                }
+                tools.append(openai_tool)
+                enabled_count += 1
 
-                # Connect and load tools
-                async with stdio_client(server_params) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        logger.info(f"[MCP] Successfully connected to {mcp_server.name}")
+                # Build routing map: store (server, original_tool_name) tuple
+                # Map prefixed name to (server, original_tool_name) so we can call the server with the correct name
+                tool_to_server_map[prefixed_name] = (mcp_server, db_tool.name)
 
-                        # Load tools in OpenAI format
-                        mcp_tools = await load_mcp_tools(session=session, format="openai")
+            logger.info(f"[MCP] Loaded {enabled_count} enabled tools from {mcp_server.name} (from DB)")
 
-                        # Add metadata to each tool for display purposes
-                        for tool in mcp_tools:
-                            tool['mcp_server_name'] = mcp_server.name
-                            tool['original_tool_name'] = tool['function']['name']
-
-                        tools.extend(mcp_tools)
-                        logger.info(f"[MCP] Loaded {len(mcp_tools)} tools from {mcp_server.name}")
-
-                        # Store server params for tool execution later
-                        server_params_list.append(server_params)
-
-            except Exception as e:
-                logger.exception(f"[MCP] Failed to connect to {mcp_server.name}: {e}")
-                # Continue with other servers rather than failing completely
-
-        return tools, server_params_list
+        logger.info(f"[MCP] Setup complete: {len(tools)} total tools from {len(mcp_servers)} server(s)")
+        return tools, tool_to_server_map
 
     async def get_response(
         self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_servers: list = []
@@ -330,17 +361,17 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                 )
 
-        # Load MCP tools from configured servers
+        # Load MCP tools from database (no server connections during setup)
         tools = []
-        server_params_list = []
+        tool_to_server_map = {}
         if mcp_servers:
-            tools, server_params_list = await self.setup_mcp_tools(mcp_servers)
+            tools, tool_to_server_map = await self.setup_mcp_tools(mcp_servers)
 
         if tools:
             kwargs['tools'] = tools
-            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools from {len(server_params_list)} server(s)")
+            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools from {len(tool_to_server_map) // 2} server(s)")
 
-        mcp_session = (server_params_list, tools) if server_params_list else None
+        mcp_session = (tool_to_server_map, tools) if tool_to_server_map else None
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making completion request with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
@@ -425,59 +456,89 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     ]
                 })
 
-                # Execute each tool call
-                # Try each MCP server in sequence until tool executes successfully
-                server_params_list, _ = mcp_session
+                # Execute each tool call using direct server routing
+                tool_to_server_map, _ = mcp_session
 
                 for tool_call in message.tool_calls:
-                    logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
-                    tool_executed = False
+                    sanitized_tool_name = tool_call.function.name
+                    logger.info(f"[MCP] Executing tool: {sanitized_tool_name}")
 
-                    # Try each MCP server
-                    for server_params in server_params_list:
-                        try:
-                            async with stdio_client(server_params) as (read, write):
-                                async with ClientSession(read, write) as session:
-                                    await session.initialize()
+                    # Look up server and original tool name using routing map
+                    server_info = tool_to_server_map.get(sanitized_tool_name)
 
-                                    # Parse tool arguments from JSON string
-                                    tool_name = tool_call.function.name
-                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-
-                                    # Execute the tool using native MCP method
-                                    result = await session.call_tool(tool_name, arguments=arguments)
-
-                                    # Extract text content from MCP result
-                                    # MCP returns CallToolResult with content list
-                                    result_text = ""
-                                    if hasattr(result, 'content') and result.content:
-                                        for content_item in result.content:
-                                            if hasattr(content_item, 'text'):
-                                                result_text += content_item.text
-
-                                    logger.info(f"[MCP] Tool {tool_name} executed successfully. Result: {result_text}")
-
-                                    # Add tool result to messages
-                                    tool_message = {
-                                        "role": "tool",
-                                        "tool_call_id": tool_call.id,
-                                        "content": result_text
-                                    }
-                                    logger.info(f"[MCP] Adding tool result to messages: {tool_message}")
-                                    messages.append(tool_message)
-                                    tool_executed = True
-                                    break  # Success, don't try other servers
-                        except Exception as e:
-                            logger.error(f"[MCP] Server {server_params.command} couldn't execute tool {tool_call.function.name}: {e}")
-                            continue  # Try next server
-
-                    if not tool_executed:
-                        # No server could execute the tool
-                        logger.error(f"[MCP] No MCP server could execute tool: {tool_call.function.name}")
+                    if not server_info:
+                        logger.error(f"[MCP] No server found for tool: {sanitized_tool_name}")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": f"Tool {tool_call.function.name} not available"})
+                            "content": json.dumps({"error": f"Tool {sanitized_tool_name} not available"})
+                        })
+                        continue
+
+                    # Unpack server and original tool name
+                    mcp_server, original_tool_name = server_info
+
+                    # Get auth value for MCPClient
+                    auth_value = None
+                    if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
+                        auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
+
+                    # Connect directly to the correct server
+                    try:
+                        client = MCPClient(
+                            server_url=mcp_server.http_url,
+                            transport_type=getattr(mcp_server, 'transport_type', 'http'),
+                            auth_type=getattr(mcp_server, 'http_auth_type', None),
+                            auth_value=auth_value,
+                            timeout=10.0
+                        )
+
+                        async with client:
+                            # Parse tool arguments
+                            arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+
+                            # Execute tool (use original name without prefix)
+                            result = await client.call_tool(
+                                MCPCallToolRequestParams(
+                                    name=original_tool_name,
+                                    arguments=arguments
+                                )
+                            )
+
+                            # Handle error results
+                            if result.isError:
+                                error_msg = ""
+                                if hasattr(result, 'content') and result.content:
+                                    for content_item in result.content:
+                                        if hasattr(content_item, 'text'):
+                                            error_msg += content_item.text
+                                logger.warning(f"[MCP] Tool {original_tool_name} returned error: {error_msg}")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps({"error": error_msg or "Tool execution failed"})
+                                })
+                            else:
+                                # Extract text content from successful result
+                                result_text = ""
+                                if hasattr(result, 'content') and result.content:
+                                    for content_item in result.content:
+                                        if hasattr(content_item, 'text'):
+                                            result_text += content_item.text
+
+                                logger.info(f"[MCP] Tool {original_tool_name} executed successfully on {mcp_server.name}")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": result_text
+                                })
+
+                    except Exception as e:
+                        logger.exception(f"[MCP] Failed to execute tool {original_tool_name} on {mcp_server.name}: {e}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
                         })
 
                 # Make second completion request with tool results
@@ -608,11 +669,11 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for streaming {provider}: {endpoint}"
                 )
 
-        # Load MCP tools from configured servers
+        # Load MCP tools from database (no server connections during setup)
         tools = []
-        server_params_list = []
+        tool_to_server_map = {}
         if mcp_servers:
-            tools, server_params_list = await self.setup_mcp_tools(mcp_servers)
+            tools, tool_to_server_map = await self.setup_mcp_tools(mcp_servers)
 
         if tools:
             kwargs['tools'] = tools
@@ -628,12 +689,12 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 model=self.litellm_model, messages=messages, stream=True, **kwargs
             )
             logger.info(f"[LiteLLM] {self.litellm_model}: Stream connection created successfully")
-            # Store messages, kwargs, and MCP server params for potential tool execution
+            # Store messages, kwargs, and MCP routing map for potential tool execution
             stream._eneo_context = {
                 'messages': messages,
                 'kwargs': kwargs,
                 'has_tools': bool(tools),
-                'server_params_list': server_params_list,  # Store MCP server params for tool execution
+                'tool_to_server_map': tool_to_server_map,  # Store routing map for tool execution
                 'tools_metadata': tools  # Store tool metadata for display purposes
             }
             return stream
@@ -828,55 +889,89 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     ]
                 })
 
-                # Execute tools using dynamic MCP servers
-                server_params_list = stream._eneo_context.get('server_params_list', [])
+                # Execute tools using direct server routing
+                tool_to_server_map = stream._eneo_context.get('tool_to_server_map', {})
 
                 for tool_call in tool_calls:
-                    logger.info(f"[MCP] Executing tool: {tool_call.function.name}")
-                    tool_executed = False
+                    sanitized_tool_name = tool_call.function.name
+                    logger.info(f"[MCP] Executing tool: {sanitized_tool_name}")
 
-                    # Try each MCP server until one successfully executes the tool
-                    for server_params in server_params_list:
-                        try:
-                            async with stdio_client(server_params) as (read, write):
-                                async with ClientSession(read, write) as session:
-                                    await session.initialize()
+                    # Look up server and original tool name using routing map
+                    server_info = tool_to_server_map.get(sanitized_tool_name)
 
-                                    # Parse tool arguments from JSON string
-                                    tool_name = tool_call.function.name
-                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-
-                                    # Execute the tool using native MCP method
-                                    result = await session.call_tool(tool_name, arguments=arguments)
-
-                                    # Extract text content from MCP result
-                                    result_text = ""
-                                    if hasattr(result, 'content') and result.content:
-                                        for content_item in result.content:
-                                            if hasattr(content_item, 'text'):
-                                                result_text += content_item.text
-
-                                    logger.info(f"[MCP] Tool {tool_name} executed successfully. Result: {result_text}")
-
-                                    # Add tool result to messages
-                                    messages.append({
-                                        "role": "tool",
-                                        "tool_call_id": tool_call.id,
-                                        "content": result_text
-                                    })
-                                    tool_executed = True
-                                    break  # Success, don't try other servers
-                        except Exception as e:
-                            logger.error(f"[MCP] Server {server_params.command} couldn't execute tool {tool_call.function.name}: {e}")
-                            continue  # Try next server
-
-                    if not tool_executed:
-                        # No server could execute the tool
-                        logger.error(f"[MCP] No MCP server could execute tool: {tool_call.function.name}")
+                    if not server_info:
+                        logger.error(f"[MCP] No server found for tool: {sanitized_tool_name}")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": f"Tool {tool_call.function.name} not available"})
+                            "content": json.dumps({"error": f"Tool {sanitized_tool_name} not available"})
+                        })
+                        continue
+
+                    # Unpack server and original tool name
+                    mcp_server, original_tool_name = server_info
+
+                    # Get auth value for MCPClient
+                    auth_value = None
+                    if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
+                        auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
+
+                    # Connect directly to the correct server
+                    try:
+                        client = MCPClient(
+                            server_url=mcp_server.http_url,
+                            transport_type=getattr(mcp_server, 'transport_type', 'http'),
+                            auth_type=getattr(mcp_server, 'http_auth_type', None),
+                            auth_value=auth_value,
+                            timeout=10.0
+                        )
+
+                        async with client:
+                            # Parse tool arguments
+                            arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+
+                            # Execute tool (use original name without prefix)
+                            result = await client.call_tool(
+                                MCPCallToolRequestParams(
+                                    name=original_tool_name,
+                                    arguments=arguments
+                                )
+                            )
+
+                            # Handle error results
+                            if result.isError:
+                                error_msg = ""
+                                if hasattr(result, 'content') and result.content:
+                                    for content_item in result.content:
+                                        if hasattr(content_item, 'text'):
+                                            error_msg += content_item.text
+                                logger.warning(f"[MCP] Tool {original_tool_name} returned error: {error_msg}")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps({"error": error_msg or "Tool execution failed"})
+                                })
+                            else:
+                                # Extract text content from successful result
+                                result_text = ""
+                                if hasattr(result, 'content') and result.content:
+                                    for content_item in result.content:
+                                        if hasattr(content_item, 'text'):
+                                            result_text += content_item.text
+
+                                logger.info(f"[MCP] Tool {original_tool_name} executed successfully on {mcp_server.name}")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": result_text
+                                })
+
+                    except Exception as e:
+                        logger.exception(f"[MCP] Failed to execute tool {original_tool_name} on {mcp_server.name}: {e}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
                         })
 
                 # Make follow-up streaming request with tool results

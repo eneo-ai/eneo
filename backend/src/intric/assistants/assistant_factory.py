@@ -178,8 +178,12 @@ class AssistantFactory:
             if integration_knowledge.id in integration_knowledge_ids
         ]
 
-        # Map MCP servers from database to domain entities
-        mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
+        # Use filtered MCP servers if available (set by space repo), otherwise map from DB
+        if hasattr(assistant_in_db, '_mcp_server_entities') and assistant_in_db._mcp_server_entities is not None:
+            mcp_servers = assistant_in_db._mcp_server_entities
+        else:
+            # Fallback: Map MCP servers from database to domain entities (without filtering)
+            mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
         completion_model_kwargs = ModelKwargs.model_validate(
             assistant_in_db.completion_model_kwargs or {}

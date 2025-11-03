@@ -6,7 +6,6 @@ from intric.assistants.api.assistant_models import (
     DefaultAssistant,
     ModelInfo,
 )
-from intric.main.models import ModelId
 from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.assistants.assistant import Assistant
 from intric.collections.presentation.collection_models import CollectionPublic
@@ -123,7 +122,30 @@ class AssistantAssembler:
             groups=groups,
             websites=[WebsitePublic.from_domain(website) for website in assistant.websites],
             integration_knowledge_list=integration_knowledge_list,
-            mcp_servers=[ModelId(id=mcp.id) for mcp in assistant.mcp_servers],
+            mcp_servers=[
+                {
+                    "id": str(server.id),
+                    "name": server.name,
+                    "description": server.description,
+                    "http_url": server.http_url,
+                    "transport_type": server.transport_type,
+                    "http_auth_type": server.http_auth_type,
+                    "tags": server.tags,
+                    "icon_url": server.icon_url,
+                    "tools": [
+                        {
+                            "id": str(tool.id),
+                            "name": tool.name,
+                            "description": tool.description,
+                            "input_schema": tool.input_schema,
+                            "is_enabled": tool.is_enabled_by_default,
+                        }
+                        for tool in server.tools
+                    ],
+                }
+                for server in assistant.mcp_servers
+            ],
+            mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,
             logging_enabled=assistant.logging_enabled,

@@ -1,11 +1,11 @@
-"""MCP Client for connecting to and executing MCP servers."""
+"""MCP Client for connecting to and executing HTTP-based MCP servers."""
 
-import asyncio
 import logging
 from typing import Any, Optional
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
@@ -19,92 +19,83 @@ class MCPClientError(Exception):
 
 
 class MCPClient:
-    """Client for interacting with MCP servers."""
+    """Client for interacting with HTTP-based MCP servers."""
 
-    def __init__(self, mcp_server: MCPServer, env_vars: dict[str, str] | None = None):
+    def __init__(self, mcp_server: MCPServer, auth_credentials: dict[str, str] | None = None):
         """
         Initialize MCP client.
 
         Args:
             mcp_server: MCP server configuration
-            env_vars: Environment variables for the server
+            auth_credentials: Authentication credentials from tenant settings
         """
         self.mcp_server = mcp_server
-        self.env_vars = env_vars or {}
+        self.auth_credentials = auth_credentials or {}
         self.session: Optional[ClientSession] = None
-        self._read = None
-        self._write = None
+        self._streams_context = None
+        self._session_context = None
+
+    def _build_auth_headers(self) -> dict[str, str]:
+        """Build authentication headers based on server auth type."""
+        headers = {}
+
+        if self.mcp_server.http_auth_type == "bearer":
+            token = self.auth_credentials.get("token")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        elif self.mcp_server.http_auth_type == "api_key":
+            api_key = self.auth_credentials.get("api_key")
+            key_header = self.auth_credentials.get("header_name", "X-API-Key")
+            if api_key:
+                headers[key_header] = api_key
+
+        elif self.mcp_server.http_auth_type == "custom_headers":
+            # Custom headers are passed directly from credentials
+            headers.update(self.auth_credentials)
+
+        return headers
 
     async def connect(self) -> None:
-        """Connect to the MCP server."""
+        """Connect to the HTTP-based MCP server."""
         try:
-            if self.mcp_server.server_type == "npm":
-                await self._connect_npm()
-            elif self.mcp_server.server_type == "uvx":
-                await self._connect_uvx()
-            elif self.mcp_server.server_type == "docker":
-                await self._connect_docker()
-            elif self.mcp_server.server_type == "http":
-                await self._connect_http()
+            headers = self._build_auth_headers()
+
+            # Use SSE or Streamable HTTP based on transport type
+            if self.mcp_server.transport_type == "sse":
+                self._streams_context = sse_client(
+                    url=self.mcp_server.http_url,
+                    headers=headers
+                )
+            elif self.mcp_server.transport_type == "streamable_http":
+                self._streams_context = streamablehttp_client(
+                    url=self.mcp_server.http_url,
+                    headers=headers
+                )
             else:
-                raise MCPClientError(f"Unsupported server type: {self.mcp_server.server_type}")
+                raise MCPClientError(f"Unsupported transport type: {self.mcp_server.transport_type}")
+
+            # Enter the streams context
+            streams = await self._streams_context.__aenter__()
+
+            # For streamable_http, we get (read, write, session_id), for SSE we get (read, write)
+            if self.mcp_server.transport_type == "streamable_http":
+                read, write, session_id = streams
+                logger.debug(f"Streamable HTTP session ID: {session_id}")
+            else:
+                read, write = streams
+
+            # Create session
+            self._session_context = ClientSession(read, write)
+            self.session = await self._session_context.__aenter__()
 
             # Initialize the session
             await self.session.initialize()
-            logger.info(f"Connected to MCP server: {self.mcp_server.name}")
+            logger.info(f"Connected to MCP server: {self.mcp_server.name} via {self.mcp_server.transport_type}")
 
         except Exception as e:
             logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {e}")
             raise MCPClientError(f"Connection failed: {e}")
-
-    async def _connect_npm(self) -> None:
-        """Connect to NPM-based MCP server."""
-        if not self.mcp_server.npm_package:
-            raise MCPClientError("NPM package not specified")
-
-        server_params = StdioServerParameters(
-            command="npx",
-            args=["-y", self.mcp_server.npm_package],
-            env=self.env_vars,
-        )
-
-        self._read, self._write = await stdio_client(server_params).__aenter__()
-        self.session = ClientSession(self._read, self._write)
-
-    async def _connect_uvx(self) -> None:
-        """Connect to UVX-based MCP server."""
-        if not self.mcp_server.uvx_package:
-            raise MCPClientError("UVX package not specified")
-
-        server_params = StdioServerParameters(
-            command="uvx",
-            args=[self.mcp_server.uvx_package],
-            env=self.env_vars,
-        )
-
-        self._read, self._write = await stdio_client(server_params).__aenter__()
-        self.session = ClientSession(self._read, self._write)
-
-    async def _connect_docker(self) -> None:
-        """Connect to Docker-based MCP server."""
-        if not self.mcp_server.docker_image:
-            raise MCPClientError("Docker image not specified")
-
-        # Docker MCP servers run via stdio too, but through docker run
-        server_params = StdioServerParameters(
-            command="docker",
-            args=["run", "-i", "--rm", self.mcp_server.docker_image],
-            env=self.env_vars,
-        )
-
-        self._read, self._write = await stdio_client(server_params).__aenter__()
-        self.session = ClientSession(self._read, self._write)
-
-    async def _connect_http(self) -> None:
-        """Connect to HTTP-based MCP server."""
-        # HTTP MCP servers use SSE transport
-        # For now, we'll skip HTTP implementation as it requires different transport
-        raise MCPClientError("HTTP MCP servers not yet supported")
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """
@@ -189,12 +180,18 @@ class MCPClient:
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
         try:
-            if self.session:
-                # Clean up session
+            # Exit session context first
+            if self._session_context:
+                await self._session_context.__aexit__(None, None, None)
+                self._session_context = None
                 self.session = None
-                self._read = None
-                self._write = None
-                logger.info(f"Disconnected from MCP server: {self.mcp_server.name}")
+
+            # Then exit streams context
+            if self._streams_context:
+                await self._streams_context.__aexit__(None, None, None)
+                self._streams_context = None
+
+            logger.info(f"Disconnected from MCP server: {self.mcp_server.name}")
         except Exception as e:
             logger.error(f"Error disconnecting from {self.mcp_server.name}: {e}")
 

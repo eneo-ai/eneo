@@ -17,36 +17,66 @@
   const { openController, onSubmit }: Props = $props();
 
   let name = $state("");
-  let server_type = $state<"npm" | "uvx" | "docker" | "http">("npm");
   let description = $state("");
-  let npm_package = $state("");
-  let uvx_package = $state("");
-  let docker_image = $state("");
   let http_url = $state("");
+  let transport_type = $state<"sse" | "streamable_http">("sse");
+  let http_auth_type = $state<"none" | "bearer" | "api_key" | "custom_headers">("none");
   let documentation_url = $state("");
+
+  // Authentication credentials
+  let bearer_token = $state("");
+  let api_key = $state("");
+  let api_key_header = $state("X-API-Key");
+  let custom_headers = $state("");
+
   let submitting = $state(false);
 
   async function handleSubmit() {
     submitting = true;
     try {
-      await onSubmit({
+      const data: any = {
         name,
-        server_type,
-        description: description || undefined,
-        npm_package: npm_package || undefined,
-        uvx_package: uvx_package || undefined,
-        docker_image: docker_image || undefined,
-        http_url: http_url || undefined,
-        documentation_url: documentation_url || undefined
-      });
+        http_url,
+        transport_type,
+        http_auth_type,
+      };
+
+      // Add optional fields with actual values
+      if (description) data.description = description;
+      if (documentation_url) data.documentation_url = documentation_url;
+
+      // Add auth config if needed
+      if (http_auth_type === "bearer" && bearer_token) {
+        data.http_auth_config_schema = { token: bearer_token };
+      } else if (http_auth_type === "api_key" && api_key) {
+        data.http_auth_config_schema = {
+          api_key: api_key,
+          header_name: api_key_header
+        };
+      } else if (http_auth_type === "custom_headers" && custom_headers) {
+        try {
+          data.http_auth_config_schema = JSON.parse(custom_headers);
+        } catch (e) {
+          alert("Invalid JSON for custom headers");
+          submitting = false;
+          return;
+        }
+      }
+
+      await onSubmit(data);
+
       // Reset form
       name = "";
       description = "";
-      npm_package = "";
-      uvx_package = "";
-      docker_image = "";
       http_url = "";
+      transport_type = "sse";
+      http_auth_type = "none";
       documentation_url = "";
+      bearer_token = "";
+      api_key = "";
+      api_key_header = "X-API-Key";
+      custom_headers = "";
+
       $openController = false;
     } finally {
       submitting = false;
@@ -72,21 +102,6 @@
         </div>
 
         <div>
-          <label for="server_type" class="text-default mb-1 block text-sm font-medium">{m.server_type()}</label>
-          <select
-            id="server_type"
-            bind:value={server_type}
-            required
-            class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-          >
-            <option value="npm">{m.npm()}</option>
-            <option value="uvx">UVX</option>
-            <option value="docker">{m.docker()}</option>
-            <option value="http">HTTP</option>
-          </select>
-        </div>
-
-        <div>
           <label for="description" class="text-default mb-1 block text-sm font-medium">{m.description()}</label>
           <textarea
             id="description"
@@ -96,55 +111,99 @@
           ></textarea>
         </div>
 
-        {#if server_type === "npm"}
+        <div>
+          <label for="http_url" class="text-default mb-1 block text-sm font-medium">HTTP URL *</label>
+          <input
+            id="http_url"
+            type="url"
+            bind:value={http_url}
+            required
+            placeholder="https://example.com/sse or https://example.com/mcp"
+            class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+          />
+          <p class="text-muted mt-1 text-xs">Full URL to the MCP server endpoint</p>
+        </div>
+
+        <div>
+          <label for="transport_type" class="text-default mb-1 block text-sm font-medium">Transport Type</label>
+          <select
+            id="transport_type"
+            bind:value={transport_type}
+            required
+            class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+          >
+            <option value="sse">SSE (Server-Sent Events)</option>
+            <option value="streamable_http">Streamable HTTP</option>
+          </select>
+          <p class="text-muted mt-1 text-xs">SSE is recommended for most use cases</p>
+        </div>
+
+        <div>
+          <label for="http_auth_type" class="text-default mb-1 block text-sm font-medium">Authentication Type</label>
+          <select
+            id="http_auth_type"
+            bind:value={http_auth_type}
+            required
+            class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+          >
+            <option value="none">None</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="api_key">API Key</option>
+            <option value="custom_headers">Custom Headers</option>
+          </select>
+        </div>
+
+        {#if http_auth_type === "bearer"}
           <div>
-            <label for="npm_package" class="text-default mb-1 block text-sm font-medium">{m.npm_package()}</label>
+            <label for="bearer_token" class="text-default mb-1 block text-sm font-medium">Bearer Token</label>
             <input
-              id="npm_package"
-              type="text"
-              bind:value={npm_package}
-              placeholder="@modelcontextprotocol/server-example"
+              id="bearer_token"
+              type="password"
+              bind:value={bearer_token}
+              placeholder="your-bearer-token"
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
             />
+            <p class="text-muted mt-1 text-xs">Will be sent as: Authorization: Bearer &lt;token&gt;</p>
           </div>
         {/if}
 
-        {#if server_type === "uvx"}
-          <div>
-            <label for="uvx_package" class="text-default mb-1 block text-sm font-medium">{m.uvx_package()}</label>
-            <input
-              id="uvx_package"
-              type="text"
-              bind:value={uvx_package}
-              placeholder="mcp-server-time"
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-            />
+        {#if http_auth_type === "api_key"}
+          <div class="space-y-3">
+            <div>
+              <label for="api_key" class="text-default mb-1 block text-sm font-medium">API Key</label>
+              <input
+                id="api_key"
+                type="password"
+                bind:value={api_key}
+                placeholder="your-api-key"
+                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+              />
+            </div>
+            <div>
+              <label for="api_key_header" class="text-default mb-1 block text-sm font-medium">Header Name</label>
+              <input
+                id="api_key_header"
+                type="text"
+                bind:value={api_key_header}
+                placeholder="X-API-Key"
+                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+              />
+              <p class="text-muted mt-1 text-xs">Default: X-API-Key</p>
+            </div>
           </div>
         {/if}
 
-        {#if server_type === "docker"}
+        {#if http_auth_type === "custom_headers"}
           <div>
-            <label for="docker_image" class="text-default mb-1 block text-sm font-medium">{m.docker_image()}</label>
-            <input
-              id="docker_image"
-              type="text"
-              bind:value={docker_image}
-              placeholder="mcp/server-example:latest"
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-            />
-          </div>
-        {/if}
-
-        {#if server_type === "http"}
-          <div>
-            <label for="http_url" class="text-default mb-1 block text-sm font-medium">{m.http_url()}</label>
-            <input
-              id="http_url"
-              type="url"
-              bind:value={http_url}
-              placeholder="https://example.com/mcp"
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-            />
+            <label for="custom_headers" class="text-default mb-1 block text-sm font-medium">Custom Headers (JSON)</label>
+            <textarea
+              id="custom_headers"
+              bind:value={custom_headers}
+              rows="4"
+              placeholder="&#123;&quot;X-Custom-Header&quot;: &quot;value&quot;, &quot;Authorization&quot;: &quot;Bearer token&quot;&#125;"
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            ></textarea>
+            <p class="text-muted mt-1 text-xs">Provide headers as a JSON object</p>
           </div>
         {/if}
 
@@ -165,7 +224,7 @@
       <Button is={close} variant="secondary">
         {m.cancel()}
       </Button>
-      <Button variant="primary" onclick={handleSubmit} disabled={submitting || !name}>
+      <Button variant="primary" onclick={handleSubmit} disabled={submitting || !name || !http_url}>
         {submitting ? m.loading() : m.add_mcp_server()}
       </Button>
     </Dialog.Controls>

@@ -10,6 +10,7 @@ from intric.database.tables.ai_models_table import (
     TranscriptionModels,
 )
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
+from intric.database.tables.mcp_server_table import MCPServers
 from intric.database.tables.security_classifications_table import SecurityClassification
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from intric.database.tables.assistant_table import Assistants
     from intric.database.tables.collections_table import CollectionsTable
     from intric.database.tables.integration_table import IntegrationKnowledge
+    from intric.database.tables.mcp_server_table import SpacesMCPServers
     from intric.database.tables.service_table import Services
     from intric.database.tables.websites_table import Websites
 
@@ -49,6 +51,9 @@ class Spaces(BasePublic):
     transcription_models: Mapped[list[TranscriptionModels]] = relationship(
         secondary="spaces_transcription_models", order_by=TranscriptionModels.created_at
     )
+    mcp_servers: Mapped[list[MCPServers]] = relationship(
+        secondary="spaces_mcp_servers", order_by=MCPServers.created_at
+    )
     members: Mapped[list["SpacesUsers"]] = relationship(
         order_by="SpacesUsers.created_at", viewonly=True
     )
@@ -73,6 +78,9 @@ class Spaces(BasePublic):
     )
     transcription_models_mapping: Mapped[list["SpacesTranscriptionModels"]] = (
         relationship(viewonly=True)
+    )
+    mcp_servers_mapping: Mapped[list["SpacesMCPServers"]] = relationship(
+        viewonly=True
     )
 
 

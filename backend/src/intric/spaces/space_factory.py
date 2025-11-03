@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model import CompletionModel
     from intric.database.tables.websites_table import Websites
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
@@ -55,6 +56,7 @@ class SpaceFactory:
             embedding_models=[],
             completion_models=[],
             transcription_models=[],
+            mcp_servers=[],
             default_assistant=None,
             assistants=[],
             group_chats=[],
@@ -75,6 +77,7 @@ class SpaceFactory:
         completion_models: list["CompletionModel"] = [],
         embedding_models: list["EmbeddingModel"] = [],
         transcription_models: list["TranscriptionModel"] = [],
+        mcp_servers: list["MCPServer"] = [],
         assistants_in_db: list["Assistants"] = [],
         group_chats_in_db: list["GroupChatsTable"] = [],
         apps_in_db: list["Apps"] = [],
@@ -102,6 +105,7 @@ class SpaceFactory:
             space_completion_models = non_deprecated_completion_models
             space_transcription_models = non_deprecated_transcription_models
             space_embedding_models = non_deprecated_embedding_models
+            space_mcp_servers = mcp_servers
         else:
             space_completion_models = [
                 completion_model
@@ -128,6 +132,15 @@ class SpaceFactory:
                 in [
                     mapping.embedding_model_id
                     for mapping in space_in_db.embedding_models_mapping
+                ]
+            ]
+            space_mcp_servers = [
+                mcp_server
+                for mcp_server in mcp_servers
+                if mcp_server.id
+                in [
+                    mapping.mcp_server_id
+                    for mapping in space_in_db.mcp_servers_mapping
                 ]
             ]
 
@@ -270,6 +283,7 @@ class SpaceFactory:
             embedding_models=space_embedding_models,
             transcription_models=space_transcription_models,
             completion_models=space_completion_models,
+            mcp_servers=space_mcp_servers,
             default_assistant=default_assistant,
             assistants=space_assistants,
             group_chats=space_group_chats,

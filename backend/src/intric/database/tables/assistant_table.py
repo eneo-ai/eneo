@@ -75,6 +75,7 @@ class Assistants(BasePublic):
     )
     assistant_websites: Mapped[list["AssistantsWebsites"]] = relationship(viewonly=True)
     assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(viewonly=True)
+    assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(viewonly=True)
 
     __table_args__ = {"extend_existing": True}  # Temporary
 
@@ -119,7 +120,7 @@ class AssistantIntegrationKnowledge(BasePublic):
 
 
 class AssistantMCPServers(BaseCrossReference):
-    """Assistant many-to-many MCP server association."""
+    """Assistant-level MCP server selection."""
     __tablename__ = "assistant_mcp_servers"
 
     assistant_id: Mapped[UUID] = mapped_column(
@@ -129,9 +130,19 @@ class AssistantMCPServers(BaseCrossReference):
         ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
     )
 
-    enabled: Mapped[bool] = mapped_column(server_default="True")
-    config: Mapped[Optional[dict]] = mapped_column(JSONB)  # Assistant-specific config overrides
-    priority: Mapped[int] = mapped_column(server_default="0")  # Tool loading order (higher = first)
-
     # Relationships
     mcp_server: Mapped[MCPServers] = relationship()
+
+
+class AssistantMCPServerTools(BaseCrossReference):
+    """Assistant-level tool permissions."""
+    __tablename__ = "assistant_mcp_server_tools"
+
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
+    )
+    mcp_server_tool_id: Mapped[UUID] = mapped_column(
+        ForeignKey("mcp_server_tools.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    is_enabled: Mapped[bool] = mapped_column(server_default="True", nullable=False)

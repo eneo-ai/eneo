@@ -19,7 +19,8 @@ function initAssistantEditor(data: {
     resource: data.assistant,
     defaults: {
       prompt: { description: "", text: "" },
-      insight_enabled: false
+      insight_enabled: false,
+      mcp_tools: []
     },
     updateResource: async (resource, changes) => {
       const updated = await data.intric.assistants.update({ assistant: resource, update: changes });
@@ -37,6 +38,7 @@ function initAssistantEditor(data: {
       groups: ["id"],
       integration_knowledge_list: ["id"],
       mcp_servers: ["id"],
+      mcp_tools: ["tool_id", "is_enabled"],
       attachments: ["id"]
     },
     manageAttachements: "attachments"

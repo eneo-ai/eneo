@@ -20,6 +20,11 @@ class MCPServerRepository(ABC):
         ...
 
     @abstractmethod
+    async def query_by_tenant(self, tenant_id: UUID) -> list["MCPServer"]:
+        """Get all MCP servers for a specific tenant."""
+        ...
+
+    @abstractmethod
     async def one(self, id: UUID) -> "MCPServer":
         """Get one MCP server by ID. Raises if not found."""
         ...

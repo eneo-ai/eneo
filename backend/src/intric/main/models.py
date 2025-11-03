@@ -43,6 +43,12 @@ class NotProvided:
 NOT_PROVIDED = NotProvided()
 
 
+class MCPToolSetting(BaseModel):
+    """MCP server tool enablement setting."""
+    tool_id: UUID
+    is_enabled: bool
+
+
 class ResourcePermission(Enum):
     READ = "read"
     CREATE = "create"

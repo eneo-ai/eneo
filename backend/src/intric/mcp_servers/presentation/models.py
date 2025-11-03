@@ -15,16 +15,15 @@ class BaseListModel(BaseModel, Generic[T]):
 
 
 class MCPServerPublic(BaseModel):
-    """Public DTO for MCP server."""
+    """Public DTO for MCP server (HTTP-only)."""
 
     id: UUID
     name: str
     description: Optional[str]
-    server_type: str  # "npm", "uvx", "docker", "http"
-    npm_package: Optional[str]
-    uvx_package: Optional[str]
-    docker_image: Optional[str]
-    http_url: Optional[str]
+    http_url: str
+    transport_type: str  # "sse", "streamable_http"
+    http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
+    http_auth_config_schema: Optional[dict]
     config_schema: Optional[dict]
     tags: Optional[list[str]]
     icon_url: Optional[str]
@@ -36,15 +35,14 @@ class MCPServerList(BaseListModel[MCPServerPublic]):
 
 
 class MCPServerCreate(BaseModel):
-    """DTO for creating an MCP server (admin only)."""
+    """DTO for creating an MCP server (admin only, HTTP-only)."""
 
     name: str
-    server_type: Literal["npm", "uvx", "docker", "http"]
+    http_url: str
+    transport_type: Literal["sse", "streamable_http"] = "sse"
+    http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
     description: Optional[str] = None
-    npm_package: Optional[str] = None
-    uvx_package: Optional[str] = None
-    docker_image: Optional[str] = None
-    http_url: Optional[str] = None
+    http_auth_config_schema: Optional[dict] = None
     config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[str] = None
@@ -52,15 +50,14 @@ class MCPServerCreate(BaseModel):
 
 
 class MCPServerUpdate(BaseModel):
-    """DTO for updating an MCP server (admin only)."""
+    """DTO for updating an MCP server (admin only, HTTP-only)."""
 
     name: Optional[str] = None
-    server_type: Optional[Literal["npm", "uvx", "docker", "http"]] = None
-    description: Optional[str] = None
-    npm_package: Optional[str] = None
-    uvx_package: Optional[str] = None
-    docker_image: Optional[str] = None
     http_url: Optional[str] = None
+    transport_type: Optional[Literal["sse", "streamable_http"]] = None
+    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = None
+    description: Optional[str] = None
+    http_auth_config_schema: Optional[dict] = None
     config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[str] = None
@@ -113,3 +110,24 @@ class AssistantMCPServerUpdate(BaseModel):
     enabled: Optional[bool] = None
     config: Optional[dict] = None
     priority: Optional[int] = None
+
+
+class MCPServerToolPublic(BaseModel):
+    """DTO for MCP server tool."""
+
+    id: UUID
+    mcp_server_id: UUID
+    name: str
+    description: Optional[str]
+    input_schema: Optional[dict]
+    is_enabled_by_default: bool
+
+
+class MCPServerToolList(BaseListModel[MCPServerToolPublic]):
+    pass
+
+
+class MCPServerToolUpdate(BaseModel):
+    """DTO for updating tenant-level tool settings."""
+
+    is_enabled: bool

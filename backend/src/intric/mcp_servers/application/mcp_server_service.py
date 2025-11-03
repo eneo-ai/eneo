@@ -1,12 +1,17 @@
+import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
     from intric.mcp_servers.domain.repositories.mcp_server_repo import MCPServerRepository
+    from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import MCPServerToolRepository
     from intric.users.user import UserInDB
+
+logger = logging.getLogger(__name__)
 
 
 class MCPServerService:
@@ -15,9 +20,11 @@ class MCPServerService:
     def __init__(
         self,
         mcp_server_repo: "MCPServerRepository",
+        mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
     ):
         self.repo = mcp_server_repo
+        self.tool_repo = mcp_server_tool_repo
         self.user = user
 
     async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
@@ -34,66 +41,69 @@ class MCPServerService:
     async def create_mcp_server(
         self,
         name: str,
-        server_type: str,
+        http_url: str,
+        transport_type: str = "sse",
+        http_auth_type: str = "none",
         description: str | None = None,
-        npm_package: str | None = None,
-        uvx_package: str | None = None,
-        docker_image: str | None = None,
-        http_url: str | None = None,
+        http_auth_config_schema: dict | None = None,
         config_schema: dict | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
     ) -> MCPServer:
-        """Create a new MCP server in global catalog (admin only)."""
+        """Create a new MCP server for the tenant (admin only, HTTP-only)."""
         mcp_server = MCPServer(
+            tenant_id=self.user.tenant_id,
             name=name,
-            server_type=server_type,
-            description=description,
-            npm_package=npm_package,
-            uvx_package=uvx_package,
-            docker_image=docker_image,
             http_url=http_url,
+            transport_type=transport_type,
+            http_auth_type=http_auth_type,
+            description=description,
+            http_auth_config_schema=http_auth_config_schema,
             config_schema=config_schema,
             tags=tags,
             icon_url=icon_url,
             documentation_url=documentation_url,
         )
-        return await self.repo.add(mcp_server)
+        mcp_server = await self.repo.add(mcp_server)
+
+        # Auto-discover tools after creating server
+        # Uses http_auth_config_schema as credentials if provided
+        auth_credentials = http_auth_config_schema if http_auth_config_schema else None
+        await self.discover_and_sync_tools(mcp_server, auth_credentials)
+
+        return mcp_server
 
     @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
         self,
         mcp_server_id: UUID,
         name: str | None = None,
-        description: str | None = None,
-        server_type: str | None = None,
-        npm_package: str | None = None,
-        uvx_package: str | None = None,
-        docker_image: str | None = None,
         http_url: str | None = None,
+        transport_type: str | None = None,
+        http_auth_type: str | None = None,
+        description: str | None = None,
+        http_auth_config_schema: dict | None = None,
         config_schema: dict | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
     ) -> MCPServer:
-        """Update an MCP server in global catalog (admin only)."""
+        """Update an MCP server in global catalog (admin only, HTTP-only)."""
         mcp_server = await self.repo.one(id=mcp_server_id)
 
         if name is not None:
             mcp_server.name = name
-        if description is not None:
-            mcp_server.description = description
-        if server_type is not None:
-            mcp_server.server_type = server_type
-        if npm_package is not None:
-            mcp_server.npm_package = npm_package
-        if uvx_package is not None:
-            mcp_server.uvx_package = uvx_package
-        if docker_image is not None:
-            mcp_server.docker_image = docker_image
         if http_url is not None:
             mcp_server.http_url = http_url
+        if transport_type is not None:
+            mcp_server.transport_type = transport_type
+        if http_auth_type is not None:
+            mcp_server.http_auth_type = http_auth_type
+        if description is not None:
+            mcp_server.description = description
+        if http_auth_config_schema is not None:
+            mcp_server.http_auth_config_schema = http_auth_config_schema
         if config_schema is not None:
             mcp_server.config_schema = config_schema
         if tags is not None:
@@ -109,3 +119,179 @@ class MCPServerService:
     async def delete_mcp_server(self, mcp_server_id: UUID) -> None:
         """Delete an MCP server from global catalog (admin only)."""
         await self.repo.delete(id=mcp_server_id)
+
+    async def discover_and_sync_tools(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None
+    ) -> list[MCPServerTool]:
+        """
+        Connect to MCP server, discover tools, and sync them to database.
+
+        Args:
+            mcp_server: MCP server to discover tools from
+            auth_credentials: Optional authentication credentials
+
+        Returns:
+            List of discovered and synced tools
+        """
+        try:
+            logger.info(f"Discovering tools for MCP server: {mcp_server.name}")
+
+            # Connect to MCP server and list tools
+            async with MCPClient(mcp_server, auth_credentials) as client:
+                tool_defs = await client.list_tools()
+
+            logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")
+
+            # Convert to domain entities and upsert
+            synced_tools = []
+            for tool_def in tool_defs:
+                tool = MCPServerTool(
+                    mcp_server_id=mcp_server.id,
+                    name=tool_def["name"],
+                    description=tool_def.get("description"),
+                    input_schema=tool_def.get("input_schema"),
+                    is_enabled_by_default=True,
+                )
+
+                # Upsert tool (update if exists, insert if new)
+                synced_tool = await self.tool_repo.upsert_by_server_and_name(tool)
+                synced_tools.append(synced_tool)
+
+            logger.info(f"Synced {len(synced_tools)} tools for {mcp_server.name}")
+            return synced_tools
+
+        except Exception as e:
+            logger.error(f"Failed to discover tools for {mcp_server.name}: {e}")
+            # Don't raise - allow server creation to succeed even if tool discovery fails
+            return []
+
+    @validate_permissions(Permission.ADMIN)
+    async def refresh_tools(
+        self,
+        mcp_server_id: UUID,
+        auth_credentials: dict[str, str] | None = None
+    ) -> list[MCPServerTool]:
+        """
+        Manually refresh tools for an MCP server (admin only).
+
+        Args:
+            mcp_server_id: ID of MCP server to refresh
+            auth_credentials: Optional authentication credentials
+
+        Returns:
+            List of refreshed tools
+        """
+        mcp_server = await self.repo.one(id=mcp_server_id)
+        return await self.discover_and_sync_tools(mcp_server, auth_credentials)
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_tool_default_enabled(
+        self,
+        tool_id: UUID,
+        is_enabled: bool
+    ) -> MCPServerTool:
+        """
+        Update the global default enabled status for a tool (admin only).
+
+        Args:
+            tool_id: ID of the tool to update
+            is_enabled: Whether tool should be enabled by default
+
+        Returns:
+            Updated tool
+        """
+        tool = await self.tool_repo.one(id=tool_id)
+        tool.is_enabled_by_default = is_enabled
+        return await self.tool_repo.update(tool)
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_tenant_tool_enabled(
+        self,
+        tool_id: UUID,
+        is_enabled: bool
+    ) -> MCPServerTool:
+        """
+        Update tenant-level enablement for a tool (admin only).
+        Creates or updates a record in mcp_server_tool_settings.
+
+        Args:
+            tool_id: ID of the tool to update
+            is_enabled: Whether tool should be enabled for this tenant
+
+        Returns:
+            Tool with updated tenant setting applied
+        """
+        from intric.database.tables.mcp_server_table import MCPServerToolSettings
+
+        # Verify tool exists
+        tool = await self.tool_repo.one(id=tool_id)
+
+        # Upsert tenant tool setting
+        from datetime import datetime, timezone
+        from sqlalchemy.dialects.postgresql import insert
+
+        now = datetime.now(timezone.utc)
+        stmt = insert(MCPServerToolSettings).values(
+            tenant_id=self.user.tenant_id,
+            mcp_server_tool_id=tool_id,
+            is_enabled=is_enabled,
+            created_at=now,
+            updated_at=now
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=['tenant_id', 'mcp_server_tool_id'],
+            set_={
+                'is_enabled': is_enabled,
+                'updated_at': now
+            }
+        )
+
+        await self.repo.session.execute(stmt)
+        await self.repo.session.commit()
+
+        # Return tool with tenant setting applied
+        tool.is_enabled_by_default = is_enabled
+        return tool
+
+    async def get_tools_with_tenant_settings(
+        self,
+        mcp_server_id: UUID
+    ) -> list[MCPServerTool]:
+        """
+        Get all tools for an MCP server with tenant-level settings applied.
+
+        Args:
+            mcp_server_id: ID of the MCP server
+
+        Returns:
+            List of tools with effective tenant-level enablement
+        """
+        import sqlalchemy as sa
+        from intric.database.tables.mcp_server_table import MCPServerToolSettings
+
+        # Get all tools for this server
+        tools = await self.tool_repo.by_server(mcp_server_id)
+
+        # Load tenant-level tool settings
+        tenant_settings_query = (
+            sa.select(MCPServerToolSettings)
+            .where(MCPServerToolSettings.tenant_id == self.user.tenant_id)
+        )
+        tenant_settings_result = await self.repo.session.execute(tenant_settings_query)
+        tenant_settings_db = tenant_settings_result.scalars().all()
+
+        # Create map: tool_id -> is_enabled (tenant level)
+        tenant_tool_settings = {
+            setting.mcp_server_tool_id: setting.is_enabled
+            for setting in tenant_settings_db
+        }
+
+        # Apply tenant settings to tools
+        for tool in tools:
+            if tool.id in tenant_tool_settings:
+                # Override with tenant setting
+                tool.is_enabled_by_default = tenant_tool_settings[tool.id]
+
+        return tools

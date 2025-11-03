@@ -11,6 +11,7 @@
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import AddMCPDialog from "./AddMCPDialog.svelte";
+  import ToolsList from "./ToolsList.svelte";
   import { writable } from "svelte/store";
 
   const { data } = $props();
@@ -32,8 +33,11 @@
         });
       }
 
-      // Refresh data
-      await invalidate('admin:layout');
+      // Refresh both admin layout and space data
+      await Promise.all([
+        invalidate('admin:layout'),
+        invalidate('spaces:data')
+      ]);
     } catch (error) {
       console.error('Failed to toggle MCP:', error);
     }
@@ -42,22 +46,47 @@
   async function handleAddMCP(mcpData: any) {
     try {
       await data.intric.mcpServers.create(mcpData);
-      // Refresh data
-      await invalidate('admin:layout');
+      // Refresh both admin layout and space data
+      await Promise.all([
+        invalidate('admin:layout'),
+        invalidate('spaces:data')
+      ]);
     } catch (error) {
       console.error('Failed to create MCP:', error);
       throw error;
     }
   }
 
-  function getServerTypeColor(type: string) {
+  function getTransportTypeColor(type: string) {
     switch (type) {
-      case 'npm': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
-      case 'uvx': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
-      case 'docker': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
-      case 'http': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+      case 'sse': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      case 'streamable_http': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
+  }
+
+  function getAuthTypeColor(type: string) {
+    switch (type) {
+      case 'none': return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+      case 'bearer': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+      case 'api_key': return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+      case 'custom_headers': return 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
+  }
+
+  function formatTransportType(type: string) {
+    if (type === 'streamable_http') return 'Streamable HTTP';
+    if (type === 'sse') return 'SSE';
+    return type;
+  }
+
+  function formatAuthType(type: string) {
+    if (type === 'none') return 'None';
+    if (type === 'bearer') return 'Bearer Token';
+    if (type === 'api_key') return 'API Key';
+    if (type === 'custom_headers') return 'Custom Headers';
+    return type;
   }
 </script>
 
@@ -81,70 +110,61 @@
         <div class="space-y-4">
           {#if data.mcpSettings && data.mcpSettings.items && data.mcpSettings.items.length > 0}
             {#each data.mcpSettings.items as mcpServer}
-              <div class="border-default flex items-center justify-between rounded-lg border p-4">
-                <div class="flex-1">
-                  <div class="flex items-center gap-3">
-                    <h3 class="text-default text-lg font-semibold">{mcpServer.name}</h3>
-                    <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {getServerTypeColor(mcpServer.server_type)}">
-                      {mcpServer.server_type}
-                    </span>
-                    {#if mcpServer.is_org_enabled}
-                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                        {m.enabled()}
+              <div class="border-default rounded-lg border p-4">
+                <div class="flex items-center justify-between">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-3">
+                      <h3 class="text-default text-lg font-semibold">{mcpServer.name}</h3>
+                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {getTransportTypeColor(mcpServer.transport_type)}">
+                        {formatTransportType(mcpServer.transport_type)}
                       </span>
-                    {/if}
-                  </div>
-                  {#if mcpServer.description}
-                    <p class="text-muted text-sm mt-1">{mcpServer.description}</p>
-                  {/if}
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    {#if mcpServer.npm_package}
-                      <span class="text-xs text-muted">
-                        <strong>{m.npm()}:</strong> {mcpServer.npm_package}
+                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {getAuthTypeColor(mcpServer.http_auth_type)}">
+                        {formatAuthType(mcpServer.http_auth_type)}
                       </span>
+                      {#if mcpServer.is_org_enabled}
+                        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                          {m.enabled()}
+                        </span>
+                      {/if}
+                    </div>
+                    {#if mcpServer.description}
+                      <p class="text-muted text-sm mt-1">{mcpServer.description}</p>
                     {/if}
-                    {#if mcpServer.uvx_package}
-                      <span class="text-xs text-muted">
-                        <strong>UVX:</strong> {mcpServer.uvx_package}
-                      </span>
-                    {/if}
-                    {#if mcpServer.docker_image}
-                      <span class="text-xs text-muted">
-                        <strong>{m.docker()}:</strong> {mcpServer.docker_image}
-                      </span>
-                    {/if}
-                    {#if mcpServer.http_url}
+                    <div class="mt-2 flex flex-wrap gap-2">
                       <span class="text-xs text-muted">
                         <strong>{m.url()}:</strong> {mcpServer.http_url}
                       </span>
+                    </div>
+                    {#if mcpServer.tags && mcpServer.tags.length > 0}
+                      <div class="mt-2 flex flex-wrap gap-1">
+                        {#each mcpServer.tags as tag}
+                          <span class="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">{tag}</span>
+                        {/each}
+                      </div>
                     {/if}
                   </div>
-                  {#if mcpServer.tags && mcpServer.tags.length > 0}
-                    <div class="mt-2 flex flex-wrap gap-1">
-                      {#each mcpServer.tags as tag}
-                        <span class="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">{tag}</span>
-                      {/each}
-                    </div>
-                  {/if}
+                  <div class="flex items-center gap-4">
+                    {#if mcpServer.documentation_url}
+                      <a
+                        href={mcpServer.documentation_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-sm text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {m.docs()}
+                      </a>
+                    {/if}
+                    <Tooltip text={mcpServer.is_org_enabled ? m.click_to_disable() : m.click_to_enable()}>
+                      <Input.Switch
+                        sideEffect={() => toggleMCPEnabled(mcpServer)}
+                        value={mcpServer.is_org_enabled}
+                      ></Input.Switch>
+                    </Tooltip>
+                  </div>
                 </div>
-                <div class="flex items-center gap-4">
-                  {#if mcpServer.documentation_url}
-                    <a
-                      href={mcpServer.documentation_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="text-sm text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {m.docs()}
-                    </a>
-                  {/if}
-                  <Tooltip text={mcpServer.is_org_enabled ? m.click_to_disable() : m.click_to_enable()}>
-                    <Input.Switch
-                      sideEffect={() => toggleMCPEnabled(mcpServer)}
-                      value={mcpServer.is_org_enabled}
-                    ></Input.Switch>
-                  </Tooltip>
-                </div>
+
+                <!-- Tools list for this server -->
+                <ToolsList mcpServerId={mcpServer.mcp_server_id} intricClient={data.intric} />
               </div>
             {/each}
           {:else}
@@ -159,12 +179,12 @@
       <Settings.Group title={m.what_are_mcp_servers()}>
         <div class="text-muted text-sm space-y-2">
           <p>
-            {m.mcp_servers_description()}
+            MCP (Model Context Protocol) servers provide additional tools and capabilities to AI assistants. All MCP servers are accessed via HTTP.
           </p>
           <ul class="list-disc list-inside space-y-1 ml-4">
-            <li><strong>{m.npm_servers()}</strong> {m.npm_servers_description()}</li>
-            <li><strong>{m.docker_servers()}</strong> {m.docker_servers_description()}</li>
-            <li><strong>{m.http_servers()}</strong> {m.http_servers_description()}</li>
+            <li><strong>SSE (Server-Sent Events)</strong> - Recommended transport for real-time streaming</li>
+            <li><strong>Streamable HTTP</strong> - Alternative HTTP-based transport for production use</li>
+            <li><strong>Authentication</strong> - Supports bearer tokens, API keys, and custom headers</li>
           </ul>
         </div>
       </Settings.Group>

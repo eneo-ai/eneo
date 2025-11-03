@@ -45,3 +45,13 @@ class MCPServerRepoImpl(
             return []
 
         return self.mapper.to_entities(result)
+
+    async def query_by_tenant(self, tenant_id) -> list[MCPServer]:
+        """Get all MCP servers for a specific tenant."""
+        query = select(self._db_model).where(self._db_model.tenant_id == tenant_id)
+        result = await self.session.scalars(query)
+        result = result.all()
+        if not result:
+            return []
+
+        return self.mapper.to_entities(result)

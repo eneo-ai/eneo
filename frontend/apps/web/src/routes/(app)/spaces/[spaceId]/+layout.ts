@@ -7,6 +7,9 @@
 import type { Space } from "@intric/intric-js";
 
 export const load = async (event) => {
+  // Register dependency for targeted invalidation when space data changes
+  event.depends('spaces:data');
+
   const { intric, currentSpace: personalSpace, loadedAt } = await event.parent();
 
   const spaceId = event.params.spaceId;

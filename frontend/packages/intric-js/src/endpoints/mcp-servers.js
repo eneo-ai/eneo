@@ -36,14 +36,14 @@ export function initMCPServers(client) {
     },
 
     /**
-     * Create a new MCP server in the global catalog (admin only).
+     * Create a new MCP server in the global catalog (admin only, HTTP-only).
      * @param {Object} params
      * @param {string} params.name Name of the MCP server
-     * @param {"npm" | "docker" | "http"} params.server_type Type of MCP server
+     * @param {string} params.http_url HTTP URL to the MCP server
+     * @param {"sse" | "streamable_http"} [params.transport_type] Transport type (default: sse)
+     * @param {"none" | "bearer" | "api_key" | "custom_headers"} [params.http_auth_type] Authentication type (default: none)
      * @param {string} [params.description] Description
-     * @param {string} [params.npm_package] NPM package name (for npm type)
-     * @param {string} [params.docker_image] Docker image (for docker type)
-     * @param {string} [params.http_url] HTTP URL (for http type)
+     * @param {Object} [params.http_auth_config_schema] Authentication configuration
      * @param {Object} [params.config_schema] JSON schema for configuration
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
@@ -52,11 +52,11 @@ export function initMCPServers(client) {
      * */
     create: async ({
       name,
-      server_type,
-      description,
-      npm_package,
-      docker_image,
       http_url,
+      transport_type,
+      http_auth_type,
+      description,
+      http_auth_config_schema,
       config_schema,
       tags,
       icon_url,
@@ -67,11 +67,11 @@ export function initMCPServers(client) {
         requestBody: {
           "application/json": {
             name,
-            server_type,
-            description,
-            npm_package,
-            docker_image,
             http_url,
+            transport_type,
+            http_auth_type,
+            description,
+            http_auth_config_schema,
             config_schema,
             tags,
             icon_url,
@@ -83,15 +83,15 @@ export function initMCPServers(client) {
     },
 
     /**
-     * Update an MCP server in the global catalog (admin only).
+     * Update an MCP server in the global catalog (admin only, HTTP-only).
      * @param {Object} params
      * @param {string} params.id The MCP server ID
      * @param {string} [params.name] Name of the MCP server
-     * @param {"npm" | "docker" | "http"} [params.server_type] Type of MCP server
+     * @param {string} [params.http_url] HTTP URL to the MCP server
+     * @param {"sse" | "streamable_http"} [params.transport_type] Transport type
+     * @param {"none" | "bearer" | "api_key" | "custom_headers"} [params.http_auth_type] Authentication type
      * @param {string} [params.description] Description
-     * @param {string} [params.npm_package] NPM package name (for npm type)
-     * @param {string} [params.docker_image] Docker image (for docker type)
-     * @param {string} [params.http_url] HTTP URL (for http type)
+     * @param {Object} [params.http_auth_config_schema] Authentication configuration
      * @param {Object} [params.config_schema] JSON schema for configuration
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
@@ -101,11 +101,11 @@ export function initMCPServers(client) {
     update: async ({
       id,
       name,
-      server_type,
-      description,
-      npm_package,
-      docker_image,
       http_url,
+      transport_type,
+      http_auth_type,
+      description,
+      http_auth_config_schema,
       config_schema,
       tags,
       icon_url,
@@ -119,11 +119,11 @@ export function initMCPServers(client) {
         requestBody: {
           "application/json": {
             name,
-            server_type,
-            description,
-            npm_package,
-            docker_image,
             http_url,
+            transport_type,
+            http_auth_type,
+            description,
+            http_auth_config_schema,
             config_schema,
             tags,
             icon_url,
@@ -220,6 +220,84 @@ export function initMCPServers(client) {
           path: { mcp_server_id }
         }
       });
+    },
+
+    /**
+     * Get all tools for an MCP server.
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @throws {IntricError}
+     * */
+    listTools: async ({ mcp_server_id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/", {
+        method: "get",
+        params: {
+          path: { mcp_server_id }
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Manually refresh/sync tools for an MCP server (admin only).
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @throws {IntricError}
+     * */
+    syncTools: async ({ mcp_server_id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/sync/", {
+        method: "post",
+        params: {
+          path: { mcp_server_id }
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Update global default enabled status for a tool (admin only).
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @param {string} params.tool_id The tool ID
+     * @param {boolean} params.is_enabled Whether tool should be enabled by default
+     * @throws {IntricError}
+     * */
+    updateToolEnabled: async ({ mcp_server_id, tool_id, is_enabled }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/{tool_id}/", {
+        method: "put",
+        params: {
+          path: { mcp_server_id, tool_id }
+        },
+        requestBody: {
+          "application/json": {
+            is_enabled
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Update tenant-level enablement for a tool (admin only).
+     * Creates or updates a record in mcp_server_tool_settings.
+     * @param {Object} params
+     * @param {string} params.tool_id The tool ID
+     * @param {boolean} params.is_enabled Whether tool should be enabled for this tenant
+     * @throws {IntricError}
+     * */
+    updateTenantToolEnabled: async ({ tool_id, is_enabled }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/settings/tools/{tool_id}/", {
+        method: "put",
+        params: {
+          path: { tool_id }
+        },
+        requestBody: {
+          "application/json": {
+            is_enabled
+          }
+        }
+      });
+      return res;
     }
   };
 }

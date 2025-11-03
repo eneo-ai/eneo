@@ -136,6 +136,10 @@ async def update_assistant(
     if assistant.mcp_servers is not None:
         mcp_server_ids = [mcp.id for mcp in assistant.mcp_servers]
 
+    mcp_tool_settings = None
+    if assistant.mcp_tools is not None:
+        mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools]
+
     completion_model_id = None
     if assistant.completion_model is not None:
         completion_model_id = assistant.completion_model.id
@@ -169,6 +173,7 @@ async def update_assistant(
         websites=websites,
         integration_knowledge_ids=integration_knowledge_ids,
         mcp_server_ids=mcp_server_ids,
+        mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
         data_retention_days=assistant.data_retention_days,

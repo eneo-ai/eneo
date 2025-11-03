@@ -10,6 +10,9 @@ from intric.mcp_servers.presentation.models import (
     MCPServerSettingsCreate,
     MCPServerSettingsPublic,
     MCPServerSettingsUpdate,
+    MCPServerToolList,
+    MCPServerToolPublic,
+    MCPServerToolUpdate,
     MCPServerUpdate,
 )
 from intric.server.dependencies.container import get_container
@@ -75,8 +78,9 @@ async def enable_mcp_for_tenant(
     service = container.mcp_server_settings_service()
     assembler = container.mcp_server_settings_assembler()
 
-    settings = await service.enable_mcp_for_tenant(
+    settings = await service.update_mcp_settings(
         mcp_server_id=mcp_server_id,
+        is_org_enabled=True,
         env_vars=data.env_vars,
     )
     return assembler.from_domain_to_model(settings)
@@ -115,7 +119,29 @@ async def disable_mcp_for_tenant(
 ):
     """Disable an MCP server for the current tenant."""
     service = container.mcp_server_settings_service()
-    await service.disable_mcp_for_tenant(mcp_server_id)
+    await service.update_mcp_settings(
+        mcp_server_id=mcp_server_id,
+        is_org_enabled=False,
+    )
+
+
+@router.put(
+    "/settings/tools/{tool_id}/",
+    response_model=MCPServerToolPublic,
+    responses=responses.get_responses([403, 404]),
+)
+async def update_tenant_tool_enabled(
+    tool_id: UUID,
+    data: MCPServerToolUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Update tenant-level enablement for a tool (admin only)."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    # Update tool's tenant-level enabled status
+    tool = await service.update_tenant_tool_enabled(tool_id, data.is_enabled)
+    return assembler.from_domain_to_model(tool)
 
 
 # ============================================================================
@@ -155,12 +181,11 @@ async def create_mcp_server(
 
     mcp_server = await service.create_mcp_server(
         name=data.name,
-        server_type=data.server_type,
-        description=data.description,
-        npm_package=data.npm_package,
-        uvx_package=data.uvx_package,
-        docker_image=data.docker_image,
         http_url=data.http_url,
+        transport_type=data.transport_type,
+        http_auth_type=data.http_auth_type,
+        description=data.description,
+        http_auth_config_schema=data.http_auth_config_schema,
         config_schema=data.config_schema,
         tags=data.tags,
         icon_url=data.icon_url,
@@ -186,12 +211,11 @@ async def update_mcp_server(
     mcp_server = await service.update_mcp_server(
         mcp_server_id=id,
         name=data.name,
-        server_type=data.server_type,
-        description=data.description,
-        npm_package=data.npm_package,
-        uvx_package=data.uvx_package,
-        docker_image=data.docker_image,
         http_url=data.http_url,
+        transport_type=data.transport_type,
+        http_auth_type=data.http_auth_type,
+        description=data.description,
+        http_auth_config_schema=data.http_auth_config_schema,
         config_schema=data.config_schema,
         tags=data.tags,
         icon_url=data.icon_url,
@@ -212,3 +236,64 @@ async def delete_mcp_server(
     """Delete an MCP server from global catalog (admin only)."""
     service = container.mcp_server_service()
     await service.delete_mcp_server(id)
+
+
+# ============================================================================
+# MCP Server Tools Endpoints
+# ============================================================================
+
+
+@router.get(
+    "/{id}/tools/",
+    response_model=MCPServerToolList,
+    responses=responses.get_responses([404]),
+)
+async def get_mcp_server_tools(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Get all tools for an MCP server with tenant-level settings applied."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    # Get tools with tenant settings applied
+    tools = await service.get_tools_with_tenant_settings(id)
+    return assembler.to_paginated_response(tools)
+
+
+@router.post(
+    "/{id}/tools/sync/",
+    response_model=MCPServerToolList,
+    responses=responses.get_responses([403, 404]),
+)
+async def sync_mcp_server_tools(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Manually refresh/sync tools for an MCP server (admin only)."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    # Refresh tools from MCP server
+    tools = await service.refresh_tools(id)
+    return assembler.to_paginated_response(tools)
+
+
+@router.put(
+    "/{id}/tools/{tool_id}/",
+    response_model=MCPServerToolPublic,
+    responses=responses.get_responses([403, 404]),
+)
+async def update_tool_default_enabled(
+    id: UUID,
+    tool_id: UUID,
+    data: MCPServerToolUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Update global default enabled status for a tool (admin only)."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    # Update tool's default enabled status
+    tool = await service.update_tool_default_enabled(tool_id, data.is_enabled)
+    return assembler.from_domain_to_model(tool)

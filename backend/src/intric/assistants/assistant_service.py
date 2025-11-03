@@ -274,6 +274,7 @@ class AssistantService:
         websites: list[UUID] | None = None,
         integration_knowledge_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
+        mcp_tools: list | None = None,  # List of (tool_id, is_enabled) tuples
         attachment_ids: list[UUID] | None = None,
         description: Union[str, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
@@ -323,8 +324,9 @@ class AssistantService:
                 for integration_knowledge_id in integration_knowledge_ids
             ]
 
-        # Store MCP server IDs for repository to handle
+        # Store MCP server IDs and tool settings for repository to handle
         assistant._mcp_server_ids = mcp_server_ids
+        assistant._mcp_tool_settings = mcp_tools
 
         assistant.update(
             name=name,
