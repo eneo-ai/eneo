@@ -18,6 +18,7 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
+from intric.spaces.utils.space_utils import effective_space_ids
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -248,3 +249,22 @@ class InfoBlobService:
         await self._validate(info_blob_deleted, action=SpaceAction.DELETE)
 
         return info_blob_deleted
+    
+    async def get_for_space(self, space_id: UUID, *, limit: int | None = None) -> list[InfoBlobInDB]:
+        space = await self.space_repo.one(space_id)
+
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_read_info_blobs():
+            raise UnauthorizedException()
+        
+        space_ids = effective_space_ids(space)
+
+        return await self.repo.list_by_space_ids(
+            space_ids=space_ids,
+            include_groups=True,
+            include_websites=True,
+            include_integrations=True,
+            limit=limit,
+            order_desc=True,
+            load_text=False,
+        )

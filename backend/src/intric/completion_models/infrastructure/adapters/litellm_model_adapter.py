@@ -42,6 +42,10 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
+        # Store the original model name for provider detection (before any transformation)
+        # This is critical for correct credential resolution with custom providers
+        self._original_model_name = model.litellm_model_name
+
         # Get provider configuration based on litellm_model_name
         provider_registry = LiteLLMProviderRegistry.get_provider_for_model(
             model.litellm_model_name
@@ -62,7 +66,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         # Validate credentials early if credential_resolver is provided
         # This ensures errors are raised before streaming starts
         if credential_resolver is not None:
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             try:
                 # Pre-validate that credential exists
                 # Don't store it yet - will get it per-request for security
@@ -97,7 +101,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             litellm_model_name: The LiteLLM model name (e.g., 'azure/gpt-4', 'anthropic/claude-3')
 
         Returns:
-            Provider name (openai, azure, anthropic, berget, mistral, ovhcloud, vllm)
+            Provider name (openai, azure, anthropic, berget, gdm, mistral, ovhcloud, vllm)
         """
         if litellm_model_name.startswith("azure/"):
             return "azure"
@@ -105,6 +109,8 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             return "anthropic"
         elif litellm_model_name.startswith("berget/"):
             return "berget"
+        elif litellm_model_name.startswith("gdm/"):
+            return "gdm"
         elif litellm_model_name.startswith("mistral/"):
             return "mistral"
         elif litellm_model_name.startswith("ovhcloud/"):
@@ -224,7 +230,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         # Inject tenant-specific API key if credential_resolver is provided
         if self.credential_resolver:
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             try:
                 api_key = self.credential_resolver.get_api_key(provider)
                 kwargs["api_key"] = api_key
@@ -347,7 +353,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         # Inject tenant-specific API key - raises APIKeyNotConfiguredException if missing
         if self.credential_resolver:
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             try:
                 api_key = self.credential_resolver.get_api_key(provider)
                 kwargs["api_key"] = api_key

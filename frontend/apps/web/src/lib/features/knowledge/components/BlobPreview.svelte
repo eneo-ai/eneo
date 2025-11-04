@@ -4,6 +4,7 @@
   import { IconDocument } from "@intric/icons/document";
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
+  import * as m from "$lib/paraglide/messages";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;

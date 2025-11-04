@@ -96,10 +96,14 @@ services:
       - db-init
 
   worker:
+    # Background task processor (crawls, uploads, integrations)
+    # Uses same image as backend but runs ARQ worker instead of HTTP server
+    # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_worker
     restart: unless-stopped
-    command: ["arq", "src.intric.worker.arq.WorkerSettings"]
+    environment:
+      - RUN_AS_WORKER=true  # Runs ARQ worker instead of HTTP server
     env_file:
       - env_backend.env
     volumes:

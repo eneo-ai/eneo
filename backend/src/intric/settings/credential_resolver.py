@@ -83,7 +83,7 @@ class CredentialResolver:
                         )
 
                 self._source_cache[provider_lower] = "tenant"
-                logger.info(
+                logger.debug(
                     "Credential resolved successfully",
                     extra={
                         "tenant_id": str(self.tenant.id),
@@ -121,6 +121,7 @@ class CredentialResolver:
             "anthropic": self.settings.anthropic_api_key,
             "azure": self.settings.azure_api_key,
             "berget": self.settings.berget_api_key,
+            "gdm": self.settings.gdm_api_key,
             "mistral": self.settings.mistral_api_key,
             "ovhcloud": self.settings.ovhcloud_api_key,
             "vllm": self.settings.vllm_api_key,
@@ -136,7 +137,7 @@ class CredentialResolver:
         global_key = _resolve_global_env_var(provider_lower)
         if global_key:
             self._source_cache[provider_lower] = "global"
-            logger.info(
+            logger.debug(
                 "Credential resolved successfully",
                 extra={
                     "tenant_id": str(self.tenant.id) if self.tenant else None,

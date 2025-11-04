@@ -1,7 +1,7 @@
 import { hasPermission } from "$lib/core/hasPermission";
 import { writable } from "svelte/store";
 import { createContext } from "./context";
-import type { CurrentUser, Limits, Tenant } from "@intric/intric-js";
+import type { CurrentUser, Limits, Tenant, Settings } from "@intric/intric-js";
 import type { createZitadelClient } from "$lib/core/Zitadel";
 
 const [getAppContext, setAppContext] = createContext<ReturnType<typeof AppContext>>(
@@ -24,6 +24,7 @@ type AppContextParams = {
   zitadelClient: ReturnType<typeof createZitadelClient> | null;
   tenant: Tenant;
   limits: Limits;
+  settings: Settings;
   versions: {
     frontend: string;
     backend: string;
@@ -62,6 +63,7 @@ function AppContext(data: AppContextParams) {
     user,
     tenant: data.tenant,
     limits: data.limits,
+    settings: data.settings,
     versions: data.versions,
     featureFlags: data.featureFlags,
     environment: data.environment,

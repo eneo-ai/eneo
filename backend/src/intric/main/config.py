@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
     berget_api_key: Optional[str] = None
+    gdm_api_key: Optional[str] = None
     intric_marketplace_api_key: Optional[str] = None
     intric_marketplace_url: Optional[str] = None
     intric_super_api_key: Optional[str] = None
@@ -240,12 +241,59 @@ class Settings(BaseSettings):
     sharepoint_subscription_lifetime_minutes: Optional[int] = None
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
-    # Required for encrypting HTTP auth credentials, tenant API credentials, etc.
-    # Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
-    encryption_key: str
+    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
+    # Also needed for worker/crawler HTTP authentication
+    # Generate with: uv run python -m intric.cli.generate_encryption_key
+    encryption_key: Optional[str] = None
 
     # Tenant credential management
     tenant_credentials_enabled: bool = False
+
+    @model_validator(mode="after")
+    def validate_encryption_key_requirements(self):
+        """
+        Validate that encryption_key is present and valid when features requiring it are enabled.
+        
+        Encryption is required for:
+        - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
+        - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+        - Worker/crawler HTTP authentication
+        """
+        encryption_required = (
+            self.tenant_credentials_enabled or 
+            self.federation_per_tenant_enabled
+        )
+        
+        if encryption_required:
+            if not self.encryption_key or not self.encryption_key.strip():
+                logging.error(
+                    "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true "
+                    "or FEDERATION_PER_TENANT_ENABLED=true.\n"
+                    "Generate key: uv run python -m intric.cli.generate_encryption_key"
+                )
+                sys.exit(1)
+            
+            # Validate Fernet key format
+            try:
+                from cryptography.fernet import Fernet
+                Fernet(self.encryption_key.encode("utf-8"))
+            except Exception as e:
+                logging.error(
+                    f"Invalid ENCRYPTION_KEY format: {e}\n"
+                    f"The key must be a 32-byte URL-safe base64-encoded string.\n"
+                    f"Generate a valid key: uv run python -m intric.cli.generate_encryption_key"
+                )
+                sys.exit(1)
+        
+        # Warn if crawling is enabled but no encryption key (HTTP auth will be disabled)
+        if self.using_crawl and (not self.encryption_key or not self.encryption_key.strip()):
+            logging.warning(
+                "⚠️  ENCRYPTION_KEY not set. HTTP authentication for crawling will be disabled.\n"
+                "To enable HTTP auth for protected websites, generate key:\n"
+                "  uv run python -m intric.cli.generate_encryption_key"
+            )
+        
+        return self
 
     @model_validator(mode="before")
     @classmethod

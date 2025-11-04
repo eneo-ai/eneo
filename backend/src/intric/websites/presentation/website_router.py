@@ -143,11 +143,11 @@ async def update_website(
     return WebsitePublic.from_domain(website)
 
 
-@router.delete("/{id}/", status_code=204, responses=responses.get_responses([404]))
+@router.delete("/{id}/", status_code=200, responses=responses.get_responses([404]))
 async def delete_website(id: UUID, container: Container = Depends(get_container(with_user=True))):
     service = container.website_crud_service()
     await service.delete_website(id)
-
+    return {"id": id, "deletion_info": {"success": True}}
 
 @router.post(
     "/{id}/run/",
@@ -197,7 +197,7 @@ async def transfer_website_to_space(
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.resource_mover_service()
-    await service.move_website_to_space(website_id=id, space_id=transfer_req.target_space_id)
+    await service.link_website_to_space(website_id=id, space_id=transfer_req.target_space_id)
 
 
 @router.get(

@@ -321,6 +321,20 @@ completion_models:
     vision: true
     reasoning: true
 
+  # GDM.se - Swedish AI provider
+  - name: 'gemma3-27b-it'
+    nickname: 'Gemma 3 27B'
+    family: 'openai'
+    token_limit: 128000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'swe'
+    litellm_model_name: 'gdm/gemma3-27b-it'
+    description: Google's Gemma 3 27B instruction-tuned model, hosted by GDM in Sweden (ai.gdm.se).
+    org: GDM
+    vision: false
+    reasoning: false
+
   - name: 'claude-haiku-4-5-20251001'
     nickname: 'Claude-haiku-4-5'
     family: 'claude'
@@ -384,12 +398,17 @@ embedding_models:
   # ⚠️ CRITICAL: Embedding models have NO 'nickname' field!
   # The 'name' field is BOTH the sync key AND display name
   # Changing/removing will orphan all collections, groups, and embeddings!
+  #
+  # max_batch_size (optional, default 32)
+  #   Controls how many chunks are grouped into a single embedding API request.
+  #   Tune per provider to respect API limits (e.g., Azure often requires <=16).
 
   - name: 'text-embedding-3-small'  # ⚠️ SYNC KEY + DISPLAY NAME - NEVER CHANGE
     family: 'openai'
     open_source: false
     dimensions: 512
     max_input: 8191
+    max_batch_size: 32
     is_deprecated: false
     stability: 'stable'
     hosting: 'usa'
@@ -400,6 +419,7 @@ embedding_models:
     family: 'openai'
     open_source: false
     max_input: 8191
+    max_batch_size: 32
     is_deprecated: false
     stability: 'stable'
     hosting: 'usa'
@@ -411,6 +431,7 @@ embedding_models:
     family: 'e5'
     open_source: true
     max_input: 1400  # Model has 512 token limit; ~1400 chars = ~400 tokens (conservative for multilingual)
+    max_batch_size: 32
     is_deprecated: false
     stability: 'experimental'
     hosting: 'swe'
@@ -419,12 +440,27 @@ embedding_models:
     org: Microsoft
     litellm_model_name: 'berget/intfloat/multilingual-e5-large'
 
+  # GDM.se - Swedish AI provider
+  - name: 'multilingual-e5-large-instruct'
+    family: 'e5'
+    open_source: true
+    max_input: 1400  # Per-item character limit (~512 tokens with margin for multilingual text)
+                     # Note: Batching uses count-based strategy (default 32 items/batch)
+    max_batch_size: 32
+    is_deprecated: false
+    stability: 'experimental'
+    hosting: 'swe'
+    description: GDM's E5 multilingual embedding model with instruction tuning, hosted in Sweden (ai.gdm.se).
+    org: GDM
+    litellm_model_name: 'gdm/multilingual-e5-large-instruct'
+
   - name: 'text-embedding-3-large-azure'
     family: 'openai'
     litellm_model_name: 'azure/text-embedding-3-large'
     open_source: false
     dimensions: 3072
     max_input: 8191
+    max_batch_size: 16
     is_deprecated: false
     stability: 'stable'
     hosting: 'swe'

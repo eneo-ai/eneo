@@ -7,10 +7,12 @@
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconPeople } from "@intric/icons/people";
-  import { IntricError } from "@intric/intric-js";
+  import { IntricError, type Settings } from "@intric/intric-js";
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+
+  let { data }: { data: { settings: Settings } } = $props();
 
   const intric = getIntric();
 
@@ -48,7 +50,7 @@
 </script>
 
 <div class="flex gap-[1px]">
-  <TemplateCreateAssistant let:trigger={createAssistantTrigger}>
+  <TemplateCreateAssistant settings={data.settings} let:trigger={createAssistantTrigger}>
     <Button variant="primary" is={createAssistantTrigger} class="!rounded-r-none"
       >{m.create_assistant()}</Button
     ></TemplateCreateAssistant

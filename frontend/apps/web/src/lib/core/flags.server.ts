@@ -8,7 +8,7 @@ import { env } from "$env/dynamic/private";
  * @returns The boolean flag value
  *
  * @example
- * getFlagFromEnv("SHOW_TEMPLATES", true) // returns boolean based on env.SHOW_TEMPLATES
+ * getFlagFromEnv("SHOW_WEB_SEARCH", true) // returns boolean based on env.SHOW_WEB_SEARCH
  * getFlagFromEnv("DEBUG_MODE", false)    // returns boolean based on env.DEBUG_MODE
  */
 function getFlagFromEnv(key: string, defaultValue: boolean): boolean {
@@ -124,7 +124,6 @@ function isConfigured(value: unknown): boolean {
 
 export function getFeatureFlags() {
   // UI Features (enabled by default)
-  const showTemplates = getFlagFromEnv("SHOW_TEMPLATES", false);
   const showWebSearch = getFlagFromEnv("SHOW_WEB_SEARCH", false);
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
 
@@ -144,7 +143,6 @@ export function getFeatureFlags() {
 
   return Object.freeze({
     newAuth: useNewAuth,
-    showTemplates,
     showWebSearch,
     showHelpCenter,
     tenantFederationEnabled,

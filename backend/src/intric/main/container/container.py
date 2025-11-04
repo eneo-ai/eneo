@@ -225,6 +225,9 @@ from intric.templates.assistant_template.assistant_template_repo import (
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
+from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
+from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
+from intric.feature_flag.feature_flag_service import FeatureFlagService
 from intric.templates.templates_service import TemplateService
 from intric.tenants.tenant import TenantInDB
 from intric.tenants.tenant_repo import TenantRepository
@@ -333,6 +336,7 @@ class Container(containers.DeclarativeContainer):
     prompt_factory = providers.Factory(PromptFactory)
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
     app_template_factory = providers.Factory(AppTemplateFactory)
+    feature_flag_factory = providers.Factory(FeatureFlagFactory)
 
     # App factory must be defined before it's used by the space factory
     app_factory = providers.Factory(
@@ -520,6 +524,9 @@ class Container(containers.DeclarativeContainer):
     assistant_template_repo = providers.Factory(
         AssistantTemplateRepository, factory=assistant_template_factory, session=session
     )
+    feature_flag_repo = providers.Factory(
+        FeatureFlagRepository, db_session=session
+    )
 
     module_repo = providers.Factory(ModuleRepository, session=session)
 
@@ -666,13 +673,6 @@ class Container(containers.DeclarativeContainer):
         job_service=job_service,
         quota_service=quota_service,
     )
-    collection_crud_service = providers.Factory(
-        CollectionCRUDService,
-        user=user,
-        space_service=space_service,
-        space_repo=space_repo,
-        actor_manager=actor_manager,
-    )
     group_service = providers.Factory(
         GroupService,
         user=user,
@@ -685,7 +685,15 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         task_service=task_service,
     )
-
+    collection_crud_service = providers.Factory(
+        CollectionCRUDService,
+        user=user,
+        space_service=space_service,
+        space_repo=space_repo,
+        actor_manager=actor_manager,
+        group_service=group_service,
+    )
+    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
         user=user,
@@ -695,11 +703,16 @@ class Container(containers.DeclarativeContainer):
         PredefinedRolesService, repo=predefined_roles_repo
     )
     role_service = providers.Factory(RolesService, user=user, repo=role_repo)
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
     settings_service = providers.Factory(
         SettingService,
         user=user,
         repo=settings_repo,
         ai_models_service=ai_models_service,
+        feature_flag_service=feature_flag_service,
     )
     crawl_service = providers.Factory(
         CrawlService, repo=crawl_run_repo, task_service=task_service
@@ -754,6 +767,9 @@ class Container(containers.DeclarativeContainer):
         AssistantTemplateService,
         repo=assistant_template_repo,
         factory=assistant_template_factory,
+        feature_flag_service=feature_flag_service,
+        session=session,
+        user=user,
     )
     session_service = providers.Factory(
         SessionService,
@@ -801,6 +817,9 @@ class Container(containers.DeclarativeContainer):
         AppTemplateService,
         repo=app_template_repo,
         factory=app_template_factory,
+        feature_flag_service=feature_flag_service,
+        session=session,
+        user=user,
     )
 
     template_service = providers.Factory(
@@ -825,12 +844,6 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         tenant_repo=tenant_repo,
         user_service=user_service,
-    )
-    settings_service = providers.Factory(
-        SettingService,
-        user=user,
-        repo=settings_repo,
-        ai_models_service=ai_models_service,
     )
     service_service = providers.Factory(
         ServiceService,

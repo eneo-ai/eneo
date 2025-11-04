@@ -73,6 +73,10 @@ class InfoBlobRepository:
             )
             embedding_model_id = integration_knowledge.embedding_model_id
 
+        else:
+            # Skydd mot none
+            raise ValueError("InfoBlob must reference a group, website, or integration_knowledge")
+        
         info_blob_to_db = InfoBlobAddToDB(
             **info_blob.model_dump(),
             embedding_model_id=embedding_model_id,

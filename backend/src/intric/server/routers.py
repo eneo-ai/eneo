@@ -51,6 +51,12 @@ from intric.templates.app_template.api.app_template_router import (
 from intric.templates.assistant_template.api.assistant_template_router import (
     router as assistant_template_router,
 )
+from intric.templates.assistant_template.api.admin_router import (
+    router as assistant_template_admin_router,
+)
+from intric.templates.app_template.api.admin_router import (
+    router as app_template_admin_router,
+)
 from intric.token_usage.presentation.token_usage_router import (
     router as token_usage_router,
 )
@@ -87,6 +93,8 @@ router.include_router(services_router, prefix="/services", tags=["services"])
 router.include_router(logging_router, prefix="/logging", tags=["logging"])
 router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
+router.include_router(assistant_template_admin_router, prefix="", tags=["admin-templates"])
+router.include_router(app_template_admin_router, prefix="", tags=["admin-templates"])
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 router.include_router(user_groups_router, prefix="/user-groups", tags=["user-groups"])
 router.include_router(allowed_origins_router, prefix="/allowed-origins", tags=["allowed-origins"])
