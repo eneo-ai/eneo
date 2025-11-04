@@ -3,8 +3,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-
+from fastapi import APIRouter, Depends, HTTPException, Query
 from intric.completion_models.presentation import (
     CompletionModelPublic,
     CompletionModelUpdateFlags,
@@ -345,9 +344,8 @@ async def get_migration_history_by_id(
     """Get a specific migration history record by ID"""
     service = container.completion_model_migration_history_service()
     history = await service.get_migration_history_by_id(migration_id, user.tenant_id)
-    
+
     if not history:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Migration history not found")
-    
+
     return history

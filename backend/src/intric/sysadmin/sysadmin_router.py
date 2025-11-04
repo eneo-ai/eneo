@@ -1,20 +1,21 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter, Depends, Query, Security
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
-    CompletionModelPublic,
-    CompletionModelUpdateFlags,
+    CompletionModelCreate,
+    CompletionModelSparse,
+    CompletionModelUpdate,
 )
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
 from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelLegacy,
-    EmbeddingModelPublicLegacy,
-    EmbeddingModelUpdateFlags,
+    EmbeddingModelCreate,
+    EmbeddingModelSparse,
+    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
 )
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
@@ -29,7 +30,6 @@ from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
 from intric.server import protocol
 from intric.server.dependencies.container import get_container, get_container_for_sysadmin
-from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
 from intric.tenants.tenant import TenantBase, TenantUpdatePublic, TenantWithMaskedCredentials
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
@@ -309,76 +309,160 @@ async def get_oidc_debug_status(
     )
 
 
-@router.get(
-    "/embedding-models/",
-    response_model=PaginatedResponse[EmbeddingModelLegacy],
-    responses=responses.get_responses([404]),
-)
-async def get_embedding_models(
-    embedding_model_repo: AdminEmbeddingModelsService = Depends(
-        get_repository(AdminEmbeddingModelsService)
-    ),
-):
-    models = await embedding_model_repo.get_models(with_deprecated=False)
-    return protocol.to_paginated_response(models)
-
-
-@router.get(
-    "/completion-models/",
-    response_model=PaginatedResponse[CompletionModelPublic],
-    responses=responses.get_responses([404]),
-)
-async def get_completion_models(
-    completion_model_repo: CompletionModelsRepository = Depends(
-        get_repository(CompletionModelsRepository)
-    ),
-):
-    models = await completion_model_repo.get_models(is_deprecated=False)
-    return protocol.to_paginated_response(models)
-
+# CRUD Operations for Completion Models
 
 @router.post(
-    "/tenants/{id}/completion-models/{completion_model_id}/",
-    response_model=CompletionModelPublic,
-    responses=responses.get_responses([404]),
+    "/completion-models/create",
+    response_model=CompletionModelSparse,
+    responses=responses.get_responses([400, 401]),
 )
-async def enable_completion_model(
+async def create_completion_model(
+    model_data: CompletionModelCreate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> CompletionModelSparse:
+    """
+    Create a new completion model (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    """
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+        model = await repo.create_model(model_data)
+
+    return model
+
+
+@router.put(
+    "/completion-models/{id}/metadata",
+    response_model=CompletionModelSparse,
+    responses=responses.get_responses([404, 401]),
+)
+async def update_completion_model_metadata(
     id: UUID,
-    completion_model_id: UUID,
-    data: CompletionModelUpdateFlags,
-    completion_model_repo: CompletionModelsRepository = Depends(
-        get_repository(CompletionModelsRepository)
-    ),
+    model_data: CompletionModelUpdate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> CompletionModelSparse:
+    """
+    Update completion model metadata (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    """
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+
+        # Ensure model_data has the id
+        update_with_id = CompletionModelUpdate(id=id, **model_data.model_dump(exclude={'id'}, exclude_unset=True))
+        model = await repo.update_model(update_with_id)
+
+    return model
+
+
+@router.delete(
+    "/completion-models/{id}",
+    responses=responses.get_responses([404, 400, 401]),
+)
+async def delete_completion_model(
+    id: UUID,
+    force: bool = Query(False, description="Force delete even if in use"),
+    container: Container = Depends(get_container_for_sysadmin()),
 ):
-    await completion_model_repo.enable_completion_model(
-        is_org_enabled=data.is_org_enabled,
-        completion_model_id=completion_model_id,
-        tenant_id=id,
-    )
+    """
+    Delete a completion model (system-wide operation).
 
-    return await completion_model_repo.get_model(completion_model_id, tenant_id=id)
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
 
+    Note: Deletion affects all tenants. Use with caution.
+    Set force=true to delete even if model is in use (may break references).
+    """
+    # TODO: Check usage across ALL tenants before deletion
+    # For now, we allow deletion with force parameter
+    # Future enhancement: Add cross-tenant usage check
+
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+        await repo.delete_model(id)
+
+    return {"success": True, "message": f"Model {id} deleted successfully"}
+
+
+# CRUD Operations for Embedding Models
 
 @router.post(
-    "/tenants/{id}/embedding-models/{embedding_model_id}/",
-    response_model=EmbeddingModelPublicLegacy,
-    responses=responses.get_responses([404]),
+    "/embedding-models/create",
+    response_model=EmbeddingModelSparse,
+    responses=responses.get_responses([400, 401]),
 )
-async def enable_embedding_model(
-    id: UUID,
-    embedding_model_id: UUID,
-    data: EmbeddingModelUpdateFlags,
-    embedding_model_repo: AdminEmbeddingModelsService = Depends(
-        get_repository(AdminEmbeddingModelsService)
-    ),
-):
-    await embedding_model_repo.enable_embedding_model(
-        is_org_enabled=data.is_org_enabled,
-        embedding_model_id=embedding_model_id,
-        tenant_id=id,
-    )
+async def create_embedding_model(
+    model_data: EmbeddingModelCreate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> EmbeddingModelSparse:
+    """
+    Create a new embedding model (system-wide operation).
 
-    return await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    """
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+        model = await repo.create_model(model_data)
+
+    return model
+
+
+@router.put(
+    "/embedding-models/{id}/metadata",
+    response_model=EmbeddingModelSparse,
+    responses=responses.get_responses([404, 401]),
+)
+async def update_embedding_model_metadata(
+    id: UUID,
+    model_data: EmbeddingModelMetadataUpdate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> EmbeddingModelSparse:
+    """
+    Update embedding model metadata (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    """
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+
+        # Ensure model_data has the id
+        update_with_id = EmbeddingModelMetadataUpdate(id=id, **model_data.model_dump(exclude={'id'}, exclude_unset=True))
+        model = await repo.update_model(update_with_id)
+
+    return model
+
+
+@router.delete(
+    "/embedding-models/{id}",
+    responses=responses.get_responses([404, 400, 401]),
+)
+async def delete_embedding_model(
+    id: UUID,
+    force: bool = Query(False, description="Force delete even if in use"),
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    """
+    Delete an embedding model (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    Note: Deletion affects all tenants. Use with caution.
+    """
+    # TODO: Add cross-tenant usage check before deletion
+    # For now, we allow deletion with force parameter
+
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+        await repo.delete_model(id)
+
+    return {"success": True, "message": f"Embedding model {id} deleted successfully"}
 
 
 @router.post("/allowed-origins/", response_model=AllowedOriginInDB)
