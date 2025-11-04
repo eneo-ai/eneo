@@ -8,6 +8,7 @@ Why Infrastructure Layer:
 """
 
 import base64
+from typing import Optional
 from cryptography.fernet import Fernet
 
 from intric.websites.domain.http_auth_credentials import HttpAuthCredentials
@@ -35,19 +36,31 @@ class HttpAuthEncryptionService:
         encryption_key = get_settings().encryption_key
         self._fernet = self._initialize_fernet(encryption_key)
 
-    def _initialize_fernet(self, encryption_key: str) -> Fernet:
+    def _initialize_fernet(self, encryption_key: Optional[str]) -> Optional[Fernet]:
         """Initialize Fernet cipher with encryption key.
 
         Args:
-            encryption_key: Fernet encryption key string
+            encryption_key: Fernet encryption key string or None
+
+        Returns:
+            Fernet instance if key is valid, None if key is not provided
 
         Raises:
-            RuntimeError: If encryption key is invalid
+            RuntimeError: If encryption key is provided but invalid
         """
+        if not encryption_key or not encryption_key.strip():
+            # Return None - encryption service is disabled
+            # This should only happen if validation was bypassed
+            return None
+        
         try:
             return Fernet(encryption_key.encode())
         except Exception as e:
-            raise RuntimeError(f"Invalid encryption_key: {str(e)}")
+            raise RuntimeError(
+                f"Invalid ENCRYPTION_KEY: {str(e)}\\n"
+                f"The key must be a 32-byte URL-safe base64-encoded string.\\n"
+                f"Generate a valid key: uv run python -m intric.cli.generate_encryption_key"
+            )
 
     def encrypt_password(self, password: str) -> str:
         """Encrypt password for storage.
@@ -57,7 +70,16 @@ class HttpAuthEncryptionService:
 
         Returns:
             Base64-encoded encrypted password safe for database storage
+            
+        Raises:
+            RuntimeError: If encryption service is not initialized (missing encryption_key)
         """
+        if self._fernet is None:
+            raise RuntimeError(
+                "Encryption service is not initialized. "
+                "ENCRYPTION_KEY is required for HTTP authentication. "
+                "Generate key: uv run python -m intric.cli.generate_encryption_key"
+            )
         encrypted_bytes = self._fernet.encrypt(password.encode('utf-8'))
         return base64.urlsafe_b64encode(encrypted_bytes).decode()
 
@@ -71,8 +93,15 @@ class HttpAuthEncryptionService:
             Plaintext password
 
         Raises:
+            RuntimeError: If encryption service is not initialized (missing encryption_key)
             ValueError: If decryption fails (corrupted data or wrong key)
         """
+        if self._fernet is None:
+            raise RuntimeError(
+                "Encryption service is not initialized. "
+                "ENCRYPTION_KEY is required for HTTP authentication. "
+                "Generate key: uv run python -m intric.cli.generate_encryption_key"
+            )
         try:
             encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
             decrypted_bytes = self._fernet.decrypt(encrypted_bytes)

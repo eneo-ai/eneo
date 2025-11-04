@@ -43,12 +43,12 @@
       meaning if we ever intend to change that, we would need that distinction here
     -->
     {#if $currentSpace.hasPermission("create", "assistant")}
-      <CreateNew></CreateNew>
+      <CreateNew {data}></CreateNew>
     {/if}
   </Page.Header>
 
   <Page.Main>
-    {#if $currentSpace.applications.assistants.length < 1 && data.featureFlags.showTemplates && $currentSpace.hasPermission("create", "assistant")}
+    {#if $currentSpace.applications.assistants.length < 1 && data.settings.using_templates && $currentSpace.hasPermission("create", "assistant")}
       <TemplateCreateAssistantHint></TemplateCreateAssistantHint>
     {:else}
       <AssistantsTable items={$currentSpace.applications.chat}></AssistantsTable>

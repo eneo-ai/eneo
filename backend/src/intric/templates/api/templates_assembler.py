@@ -31,9 +31,14 @@ class TemplateAssembler:
             templates.assistant_templates
         ).items
 
-        # Sort items
+        # Sort items: defaults first, then alphabetically by name (stable & predictable)
         all_items = sorted(
-            apps + assistants, key=lambda item: item.created_at, reverse=True
+            apps + assistants,
+            key=lambda item: (
+                not item.is_default,  # False (defaults) sort before True (non-defaults)
+                item.name.lower(),     # Alphabetical (case-insensitive, stable)
+                -item.created_at.timestamp()  # Tiebreaker for same name (newer first)
+            )
         )
 
         return TemplateListPublic(items=all_items)

@@ -94,6 +94,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             "azure",
             "anthropic",
             "berget",
+            "gdm",
             "mistral",
             "ovhcloud",
             "vllm",

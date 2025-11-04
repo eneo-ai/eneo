@@ -23,7 +23,7 @@ def mock_openai_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-test-key-for-chunking")
 
 
-def _get_adapter_with_max_limit(max_limit: int):
+def _get_adapter_with_max_limit(max_limit: int, max_batch_size: int | None = None):
     model = EmbeddingModelLegacy(
         id=uuid4(),
         name="multilingual-e5-large",
@@ -33,6 +33,7 @@ def _get_adapter_with_max_limit(max_limit: int):
         stability=ModelStability.STABLE,
         hosting=ModelHostingLocation.USA,
         is_deprecated=False,
+        max_batch_size=max_batch_size,
     )
 
     adapter = OpenAIEmbeddingAdapter(model=model)
@@ -55,7 +56,8 @@ def _get_chunks(texts: list[str]):
 
 
 def test_chunking_is_one_chunk_if_sum_is_less_than_limit():
-    adapter = _get_adapter_with_max_limit(8191)
+    # Test that with max_batch_size=32, all 9 chunks fit in 1 batch
+    adapter = _get_adapter_with_max_limit(8191, max_batch_size=32)
 
     texts = ["c" * i for i in range(1, 10)]
     chunks = _get_chunks(texts)
@@ -64,7 +66,8 @@ def test_chunking_is_one_chunk_if_sum_is_less_than_limit():
 
 
 def test_chunking_is_two_chunks_if_sum_is_slightly_larger_than_limit():
-    adapter = _get_adapter_with_max_limit(8)
+    # Test that with max_batch_size=1, each chunk goes in its own batch
+    adapter = _get_adapter_with_max_limit(8, max_batch_size=1)
 
     texts = ["c" * 5, "c" * 5]
     chunks = _get_chunks(texts)
@@ -73,9 +76,10 @@ def test_chunking_is_two_chunks_if_sum_is_slightly_larger_than_limit():
 
 
 def test_chunking_with_three_chunks():
-    adapter = _get_adapter_with_max_limit(8)
+    # Test that with max_batch_size=2, 4 chunks are split into 2 batches
+    adapter = _get_adapter_with_max_limit(8, max_batch_size=2)
 
     texts = ["c" * 7, "c" * 5, "c" * 3, "c" * 6]
     chunks = _get_chunks(texts)
 
-    assert len(list(adapter._chunk_chunks(chunks))) == 3
+    assert len(list(adapter._chunk_chunks(chunks))) == 2

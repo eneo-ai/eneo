@@ -43,6 +43,7 @@ class MockSettings:
         anthropic_api_key: str | None = None,
         azure_api_key: str | None = None,
         berget_api_key: str | None = None,
+        gdm_api_key: str | None = None,
         mistral_api_key: str | None = None,
         ovhcloud_api_key: str | None = None,
         vllm_api_key: str | None = None,
@@ -52,6 +53,7 @@ class MockSettings:
         self.anthropic_api_key = anthropic_api_key
         self.azure_api_key = azure_api_key
         self.berget_api_key = berget_api_key
+        self.gdm_api_key = gdm_api_key
         self.mistral_api_key = mistral_api_key
         self.ovhcloud_api_key = ovhcloud_api_key
         self.vllm_api_key = vllm_api_key

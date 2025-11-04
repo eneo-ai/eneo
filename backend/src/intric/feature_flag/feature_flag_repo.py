@@ -18,7 +18,7 @@ class FeatureFlagRepository:
         self.db_session = db_session
 
     async def _delete_tenant(self, tenant_id: UUID) -> None:
-        stmt = delete(TenantFeatureFlag).where(tenant_id=tenant_id)
+        stmt = delete(TenantFeatureFlag).where(TenantFeatureFlag.tenant_id == tenant_id)
         await self.db_session.execute(stmt)
 
     async def _insert_tenant(self, obj: FeatureFlag, tenant_id: UUID) -> None:
