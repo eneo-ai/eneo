@@ -117,6 +117,10 @@ export interface paths {
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
   };
+  "/api/v1/info-blobs/spaces/{space_id}/info-blobs/": {
+    /** Get Space Info Blobs */
+    get: operations["get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get"];
+  };
   "/api/v1/groups/": {
     /**
      * Get Groups
@@ -1106,6 +1110,10 @@ export interface paths {
   "/api/v1/spaces/type/personal/": {
     /** Get Personal Space */
     get: operations["get_personal_space_api_v1_spaces_type_personal__get"];
+  };
+  "/api/v1/spaces/type/organization/": {
+    /** Get Organization Space */
+    get: operations["get_organization_space_api_v1_spaces_type_organization__get"];
   };
   "/api/v1/dashboard/": {
     /** Get Dashboard */
@@ -2728,6 +2736,11 @@ export interface components {
       name: string;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["CollectionMetadata"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
     };
     /** CollectionUpdate */
     CollectionUpdate: {
@@ -3880,6 +3893,11 @@ export interface components {
        */
       id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
       metadata: components["schemas"]["GroupMetadata"];
     };
     /** HTTPValidationError */
@@ -5034,19 +5052,6 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[PredefinedRolePublic] */
-    PaginatedResponse_PredefinedRolePublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["PredefinedRolePublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -5054,19 +5059,6 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
-    /** PaginatedResponse[RolePublic] */
-    PaginatedResponse_RolePublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["RolePublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -5354,11 +5346,21 @@ export interface components {
       | "admin"
       | "websites"
       | "integration_knowledge_list";
-    /** PermissionPublic */
-    PermissionPublic: {
-      name: components["schemas"]["Permission"];
-      /** Description */
-      description: string;
+    /** PredefinedRoleInDB */
+    PredefinedRoleInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Name */
+      name: string;
+      /** Permissions */
+      permissions: components["schemas"]["Permission"][];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
     };
     /** PredefinedRoleInDB */
     PredefinedRoleInDB: {
@@ -5509,12 +5511,26 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
-    /** RoleCreateRequest */
-    RoleCreateRequest: {
+    /** RoleInDB */
+    RoleInDB: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /** Name */
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /** RoleInDB */
     RoleInDB: {
@@ -5552,18 +5568,6 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-    };
-    /** RoleUpdateRequest */
-    RoleUpdateRequest: {
-      /** Name */
-      name?: string | null;
-      /** Permissions */
-      permissions?: components["schemas"]["Permission"][] | null;
-    };
-    /** RolesPaginatedResponse */
-    RolesPaginatedResponse: {
-      roles: components["schemas"]["PaginatedResponse_RolePublic_"];
-      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -6110,6 +6114,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
       applications: components["schemas"]["Applications"];
     };
     /** SpaceMember */
@@ -6154,6 +6160,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
       applications: components["schemas"]["Applications"];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
@@ -6201,6 +6209,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
     };
     /**
      * Status
@@ -8475,6 +8485,28 @@ export interface operations {
       404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Space Info Blobs */
+  get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get: {
+    parameters: {
+      path: {
+        space_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_InfoBlobPublicNoText_"];
         };
       };
       /** @description Validation Error */
@@ -13911,6 +13943,17 @@ export interface operations {
   };
   /** Get Personal Space */
   get_personal_space_api_v1_spaces_type_personal__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+    };
+  };
+  /** Get Organization Space */
+  get_organization_space_api_v1_spaces_type_organization__get: {
     responses: {
       /** @description Successful Response */
       200: {

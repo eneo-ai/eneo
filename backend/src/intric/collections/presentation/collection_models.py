@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -20,7 +21,8 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
     name: str
     embedding_model: EmbeddingModelPublic
     metadata: CollectionMetadata
-
+    space_id: UUID
+    
     @classmethod
     def from_domain(cls, collection: "Collection"):
         return cls(
@@ -34,6 +36,7 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
                 size=collection.size,
             ),
             permissions=collection.permissions,
+            space_id=collection.space_id,
         )
 
 

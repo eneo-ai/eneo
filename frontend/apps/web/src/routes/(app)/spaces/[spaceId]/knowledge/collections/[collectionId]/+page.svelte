@@ -40,9 +40,9 @@
       placement="left"
     >
       <Page.Flex>
-        <BlobCreate disabled={$disabledModelInUse} collection={data.collection}></BlobCreate>
+        <BlobCreate disabled={$disabledModelInUse || data.readonly} collection={data.collection}></BlobCreate>
         <BlobUpload
-          disabled={$disabledModelInUse}
+          disabled={$disabledModelInUse || data.readonly}
           collection={data.collection}
           currentBlobs={data.blobs}
         ></BlobUpload>
@@ -50,6 +50,6 @@
     </Tooltip>
   </Page.Header>
   <Page.Main>
-    <BlobTable blobs={data.blobs} canEdit={true}></BlobTable>
+    <BlobTable blobs={data.blobs} canEdit={!data.readonly}></BlobTable>
   </Page.Main>
 </Page.Root>

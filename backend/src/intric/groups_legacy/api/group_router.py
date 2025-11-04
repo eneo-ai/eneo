@@ -32,6 +32,7 @@ from intric.server.models.api import InfoBlobUpsertRequest
 from intric.server.protocol import responses
 from intric.spaces.api.space_models import TransferRequest
 from intric.users.user import UserInDB
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
@@ -95,15 +96,14 @@ async def update_group(
 
 @router.delete(
     "/{id}/",
-    status_code=204,
     responses=responses.get_responses([404]),
 )
 async def delete_group_by_id(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
-    service = container.collection_crud_service()
-    await service.delete_collection(collection_id=id)
-
+    service = container.group_service()
+    await service.delete_group(group_id=id)
+    return JSONResponse({"id": str(id), "deletion_info": {"success": True}}, status_code=200)
 
 @router.post(
     "/{id}/info-blobs/",

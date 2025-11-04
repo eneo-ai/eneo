@@ -16,6 +16,8 @@ from intric.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from sqlalchemy.exc import IntegrityError
+from intric.main.exceptions import UniqueException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
 from intric.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
@@ -47,6 +49,7 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
 
+TENANT_SPACE_NAME = "Organization space" 
 
 class SpaceService:
     def __init__(
@@ -75,11 +78,20 @@ class SpaceService:
         self.actor_manager = actor_manager
         self.security_classification_service = security_classification_service
 
+    @staticmethod
+    def is_org_space(space: Space) -> bool:
+        return space.user_id is None and space.tenant_space_id is None
+
     def _get_actor(self, space: Space):
         return self.actor_manager.get_space_actor_from_space(space)
 
     async def create_space(self, name: str):
-        space = self.factory.create_space(name=name, tenant_id=self.user.tenant_id)
+        hub = await self.get_or_create_tenant_space()
+        space = self.factory.create_space(
+            name=name, 
+            tenant_id=self.user.tenant_id, 
+            tenant_space_id=getattr(hub, "id", None)
+        )
 
         def _get_latest_model(models):
             for model in sorted(models, key=lambda model: model.created_at, reverse=True):
@@ -365,9 +377,13 @@ class SpaceService:
         return space.get_member(user_id)
 
     async def create_personal_space(self):
+        hub = await self.get_or_create_tenant_space()
         space_name = f"{self.user.username}'s personal space"
         space = self.factory.create_space(
-            name=space_name, user_id=self.user.id, tenant_id=self.user.tenant_id
+            name=space_name, 
+            user_id=self.user.id, 
+            tenant_id=self.user.tenant_id,
+            tenant_space_id=getattr(hub, "id", None),
         )
 
         # Set tenant
@@ -377,7 +393,7 @@ class SpaceService:
 
         return space_in_db
 
-    async def get_personal_space(self):
+    async def get_personal_space(self): 
         return await self.repo.get_personal_space(self.user.id)
 
     async def _get_space_by_resource(self, space: Space) -> Space:
@@ -411,3 +427,56 @@ class SpaceService:
     async def get_space_by_service(self, service_id: UUID) -> Space:
         space = await self.repo.get_space_by_service(service_id=service_id)
         return await self._get_space_by_resource(space)
+
+
+
+    async def get_knowledge_for_space(self, space_id: UUID):
+        space = await self.get_space(space_id)
+        return (
+            space.collections,
+            space.websites,
+            space.integration_knowledge_list,
+        )
+    
+    async def ensure_org_admin_members(self, hub: "Space") -> "Space":
+        admins = await self.user_repo.list_tenant_admins(self.user.tenant_id)
+        added = False
+        for u in admins:
+            if u.id not in hub.members:
+                hub.members[u.id] = SpaceMember(
+                    id=u.id,
+                    username=u.username,
+                    email=u.email,
+                    role=SpaceRoleValue.ADMIN,
+                )
+                added = True
+        if added:
+            hub = await self.repo.update(hub)
+        return hub
+
+    async def get_or_create_tenant_space(self) -> "Space":
+        hub = await self.repo.get_space_by_name_and_tenant(
+            name=TENANT_SPACE_NAME, tenant_id=self.user.tenant_id
+        )
+        if hub is not None:
+            hub = await self.ensure_org_admin_members(hub)
+            return hub
+
+        try:
+            async with self.repo.session.begin_nested():
+                hub = self.factory.create_space(
+                    name=TENANT_SPACE_NAME,
+                    tenant_id=self.user.tenant_id,
+                    user_id=None,
+                    description="Delad knowledge för hela tenant",
+                )
+                hub = await self.repo.add(hub)
+        except (IntegrityError, UniqueException):
+            hub = await self.repo.get_space_by_name_and_tenant(
+                name=TENANT_SPACE_NAME, tenant_id=self.user.tenant_id
+            )
+            if hub is None:
+                raise
+
+        hub = await self.ensure_org_admin_members(hub)
+        return hub

@@ -1,5 +1,6 @@
 export const load = async (event) => {
   const { intric } = await event.parent();
+  const { organizationSpaceId } = await event.parent();
 
   event.depends("crawlruns:list");
 
@@ -9,9 +10,12 @@ export const load = async (event) => {
     intric.websites.indexedBlobs.list({ id: event.params.id })
   ]);
 
+  const isOrgWebsite = organizationSpaceId != null && website.space_id === organizationSpaceId;
+
   return {
     crawlRuns: crawlRuns.reverse(),
     infoBlobs,
-    website
+    website,
+    readonly: isOrgWebsite
   };
 };

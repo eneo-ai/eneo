@@ -108,7 +108,7 @@ class AssistantService:
         actor_manager: "ActorManager",
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         completion_service: "CompletionService",
-        references_service: "ReferencesService",
+        references_service: "ReferencesService", 
     ):
         self.repo = repo
         self.space_repo = space_repo
@@ -241,26 +241,37 @@ class AssistantService:
         return assistant
 
     async def get_completion_model(self, space: "Space") -> "CompletionModel":
-        completion_model = space.get_default_completion_model() or (
-            space.get_latest_completion_model()
-            if not space.is_personal()
-            else await self.completion_model_crud_service.get_default_completion_model()
-        )
+        model = space.get_default_completion_model()
+        if model:
+            return model
+        
+        if space.completion_models:
+            try:
+                model = space.get_latest_completion_model()
+                if model:
+                    return model
+            except Exception:
+                pass
 
-        if completion_model is None:
+        model = await self.completion_model_crud_service.get_default_completion_model()
+        if model is None:
             raise BadRequestException(
                 "Can not create an assistant in a space without enabled completion models"
             )
-
-        return completion_model
+        return model
 
     async def create_default_assistant(self, name: str, space: "Space"):
-        completion_model = space.get_default_completion_model()
+        cm = await self.get_completion_model(space)
+
+        if not space.is_completion_model_in_space(cm.id):
+            space.add_completion_model(cm)
+            await self.space_repo.update(space)
+
         return self.factory.create_assistant(
             name=name,
             user=self.user,
             space_id=space.id,
-            completion_model=completion_model,
+            completion_model=cm,
             is_default=True,
         )
 
