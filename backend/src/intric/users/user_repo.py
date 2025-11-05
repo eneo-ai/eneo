@@ -15,8 +15,22 @@ from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.database.tables.widget_table import Widgets
 from intric.main.exceptions import UniqueException
+from intric.main.logging import get_logger
 from intric.main.models import ModelId
-from intric.users.user import UserAdd, UserInDB, UserState, UserUpdate
+from intric.users.user import (
+    PaginatedResult,
+    PaginationParams,
+    SearchFilters,
+    SortField,
+    SortOptions,
+    SortOrder,
+    UserAdd,
+    UserInDB,
+    UserState,
+    UserUpdate,
+)
+
+logger = get_logger(__name__)
 
 
 class UsersRepository:
@@ -237,3 +251,104 @@ class UsersRepository:
             return await self.soft_delete(id=id)
 
         return await self.hard_delete(id=id)
+
+    async def get_paginated(
+        self,
+        tenant_id: UUID,
+        pagination: PaginationParams,
+        search: SearchFilters,
+        sort: SortOptions,
+    ) -> PaginatedResult[UserInDB]:
+        """
+        Get paginated list of users with search and sort capabilities.
+
+        CRITICAL: tenant_id filtering MUST be first WHERE condition for security.
+
+        Performance:
+        - Uses composite B-tree indexes for tenant isolation + sorting
+        - Uses GIN trigram indexes for fuzzy email/username search
+        - Time complexity: O(log n + offset + page_size) for pagination
+        - Time complexity: O(log n + matches) for search queries
+
+        Args:
+            tenant_id: Tenant UUID for isolation (REQUIRED - security critical)
+            pagination: Page number and page size
+            search: Optional email and name filters
+            sort: Sort field and order
+
+        Returns:
+            PaginatedResult with items and metadata (total_count, total_pages, etc.)
+        """
+        import time
+        start_time = time.time()
+
+        # Build base query with tenant isolation (FIRST WHERE condition - security critical!)
+        query = sa.select(Users).where(Users.tenant_id == tenant_id)
+
+        # Add soft-delete filter
+        query = query.where(Users.deleted_at.is_(None))
+
+        # Add email search filter if provided (uses idx_users_email_trgm GIN index)
+        if search.email is not None:
+            query = query.where(
+                sa.func.lower(Users.email).like(f"%{search.email.lower()}%")
+            )
+
+        # Add username search filter if provided (uses idx_users_username_trgm GIN index)
+        if search.name is not None:
+            query = query.where(
+                sa.func.lower(Users.username).like(f"%{search.name.lower()}%")
+            )
+
+        # Execute COUNT query for total_count (separate query for accuracy)
+        count_query = sa.select(sa.func.count()).select_from(query.subquery())
+        total_count = await self.session.scalar(count_query) or 0
+
+        # Map SortField enum to SQLAlchemy columns
+        sort_column_map = {
+            SortField.EMAIL: Users.email,
+            SortField.USERNAME: Users.username,
+            SortField.CREATED_AT: Users.created_at,
+        }
+        sort_column = sort_column_map[sort.field]
+
+        # Apply sorting with stable tie-breaker (uses composite B-tree indexes: idx_users_tenant_*)
+        # CRITICAL: Always add id as secondary sort for pagination stability
+        # Without this, rows with identical sort_column values can appear in different positions
+        # across pages, causing duplicates/skips when new users are created
+        if sort.order == SortOrder.ASC:
+            query = query.order_by(sort_column.asc(), Users.id.asc())
+        else:
+            query = query.order_by(sort_column.desc(), Users.id.desc())
+
+        # Apply pagination (LIMIT + OFFSET)
+        query = query.limit(pagination.page_size).offset(pagination.offset)
+
+        # Add eager loading to prevent N+1 queries
+        query = query.options(
+            selectinload(Users.roles),
+            selectinload(Users.predefined_roles),
+            selectinload(Users.tenant).selectinload(Tenants.modules),
+            selectinload(Users.api_key),
+            selectinload(Users.user_groups),
+        )
+
+        # Execute query
+        result = await self.session.execute(query)
+        users = [UserInDB.model_validate(user) for user in result.scalars().all()]
+
+        # Log query performance
+        execution_time = (time.time() - start_time) * 1000  # milliseconds
+        logger.info(
+            f"get_paginated: tenant={tenant_id}, page={pagination.page}, "
+            f"page_size={pagination.page_size}, search_email={search.email}, "
+            f"search_name={search.name}, sort={sort.field.value}:{sort.order.value}, "
+            f"results={len(users)}, total={total_count}, time={execution_time:.2f}ms"
+        )
+
+        return PaginatedResult(
+            items=users,
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )

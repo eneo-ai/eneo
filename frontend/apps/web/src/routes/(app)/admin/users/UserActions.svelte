@@ -1,87 +1,53 @@
+<!--
+    Copyright (c) 2024 Sundsvalls Kommun
+
+    Licensed under the MIT License.
+-->
+
 <script lang="ts">
-  import { IconEdit } from "@intric/icons/edit";
   import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconLink } from "@intric/icons/link";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
-  import type { User } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
-  import { getAppContext } from "$lib/core/AppContext";
+  import { Button, Dialog } from "@intric/ui";
   import { invalidate } from "$app/navigation";
-  import InviteLinkDialog from "./editor/InviteLinkDialog.svelte";
+  import type { User } from "@intric/intric-js";
   import UserEditor from "./editor/UserEditor.svelte";
+  import { getAppContext } from "$lib/core/AppContext";
+  import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
   export let user: User;
 
-  const { user: currentUser } = getAppContext();
-
-  let isProcessing = false;
-  let showDeleteDialog: Dialog.OpenState;
   async function deleteUser() {
-    isProcessing = true;
     try {
       await intric.users.delete(user);
       invalidate("admin:users:load");
-      $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_user());
       console.error(e);
     }
-    isProcessing = false;
   }
 
-  let showInviteDialog: Dialog.OpenState;
-  let showEditDialog: Dialog.OpenState;
+  const { user: currentUser } = getAppContext();
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button is={trigger} disabled={false} padding="icon">
-      <IconEllipsis></IconEllipsis>
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
-        $showEditDialog = true;
-      }}
-    >
-      <IconEdit size="sm"></IconEdit>
-      {m.edit()}</Button
-    >
+<!-- Edit button (renders its own Dialog.Trigger) -->
+<UserEditor {user} mode="update"></UserEditor>
 
-    {#if !user.is_active}
-      <Button
-        is={item}
-        padding="icon-leading"
-        on:click={() => {
-          $showInviteDialog = true;
-        }}
-      >
-        <IconLink size="sm" />
-        {m.show_invite_link()}</Button
-      >
-    {/if}
+<div class="w-2"></div>
 
+<!-- Delete button -->
+<Dialog.Root alert>
+  <Dialog.Trigger asFragment let:trigger>
     <Button
-      is={item}
+      is={trigger}
+      label={m.delete_user()}
       variant="destructive"
-      on:click={() => {
-        $showDeleteDialog = true;
-      }}
-      disabled={currentUser.id === user.id}
-      padding="icon-leading"
+      padding="icon"
+      disabled={user.id === currentUser.id}
     >
-      <IconTrash size="sm"></IconTrash>{m.delete()}</Button
-    >
-  </Dropdown.Menu>
-</Dropdown.Root>
+      <IconTrash />
+    </Button>
+  </Dialog.Trigger>
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.delete_user()}</Dialog.Title>
     <Dialog.Description
@@ -91,13 +57,7 @@
 
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteUser}
-        >{isProcessing ? m.deleting() : m.delete()}</Button
-      >
+      <Button is={close} variant="destructive" on:click={deleteUser}>{m.delete()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
-
-<InviteLinkDialog bind:isOpen={showInviteDialog} {user}></InviteLinkDialog>
-
-<UserEditor bind:isOpen={showEditDialog} {user}></UserEditor>

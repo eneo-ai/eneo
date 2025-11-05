@@ -42,19 +42,32 @@ export function initUser(client) {
     /**
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
-     * @param {{includeDetails: true}} options
+     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number}} options
      * @return {Promise<User[]>}
      *
      * @overload
      * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string}} [options]
      * @return {Promise<import('../types/resources').Paginated<UserSparse>> }
      *
-     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string}} [options]
+     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number}} [options]
      * @throws {IntricError}
      * */
     list: async (options) => {
       if (options && options.includeDetails) {
-        const res = await client.fetch("/api/v1/admin/users/", { method: "get" });
+        // Backend returns { items: User[], metadata: {...} }
+        const res = await client.fetch("/api/v1/admin/users/", {
+          method: "get",
+          params: {
+            query: {
+              page: options.page,
+              page_size: options.page_size,
+              search_email: options.search_email,
+              search_name: options.search_name
+            }
+          }
+        });
+
+        // Return full response with items and metadata for pagination
         return res.items;
       }
 

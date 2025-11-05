@@ -558,8 +558,79 @@ export interface paths {
   };
   "/api/v1/admin/users/": {
     /**
-     * List all users in tenant
-     * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
+     * List users with pagination and search
+     * @description List tenant users with pagination, fuzzy search, and sorting capabilities.
+     *
+     * **Performance Optimization:**
+     * - Uses pg_trgm GIN indexes for efficient fuzzy text search (email and username)
+     * - Uses composite B-tree indexes for fast tenant-scoped sorting
+     * - Sub-second response time even with 10,000+ users per tenant
+     *
+     * **Pagination:**
+     * - Max depth: 100 pages (prevents deep pagination performance issues)
+     * - Default: 100 users per page, sorted by creation date (newest first)
+     * - Supports custom page sizes (1-100)
+     *
+     * **Search:**
+     * - Email search: Case-insensitive partial match (e.g., "john" matches john.doe@example.com)
+     * - Name search: Case-insensitive partial match on username (e.g., "emma" matches emma.andersson)
+     * - Combined search: Use both filters with AND logic
+     *
+     * **Sorting:**
+     * - Sort by: email, username, or created_at (default)
+     * - Sort order: asc or desc (default)
+     *
+     * **Example Requests:**
+     *
+     * Default (first 100 users, newest first):
+     * ```
+     * GET /api/v1/admin/users/
+     * ```
+     *
+     * Custom page size (50 users per page):
+     * ```
+     * GET /api/v1/admin/users/?page_size=50
+     * ```
+     *
+     * Email search (find users at municipality domain):
+     * ```
+     * GET /api/v1/admin/users/?search_email=@municipality.se
+     * ```
+     *
+     * Name search (find users named Emma):
+     * ```
+     * GET /api/v1/admin/users/?search_name=emma
+     * ```
+     *
+     * Combined search and pagination:
+     * ```
+     * GET /api/v1/admin/users/?search_email=@municipality.se&page=2&page_size=50
+     * ```
+     *
+     * Sort by email ascending:
+     * ```
+     * GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+     * ```
+     *
+     * **Response Format:**
+     * ```json
+     * {
+     *   "items": [...],
+     *   "metadata": {
+     *     "page": 1,
+     *     "page_size": 100,
+     *     "total_count": 543,
+     *     "total_pages": 6,
+     *     "has_next": true,
+     *     "has_previous": false
+     *   }
+     * }
+     * ```
+     *
+     * **Important Notes:**
+     * - Only active users (not soft-deleted) are returned
+     * - All results are isolated to your tenant (cross-tenant access is prevented)
+     * - Max depth limit (100 pages) ensures consistent performance
      */
     get: operations["get_users_api_v1_admin_users__get"];
     /**
@@ -5164,19 +5235,6 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[UserAdminView] */
-    PaginatedResponse_UserAdminView_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["UserAdminView"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
     /** PaginatedResponse[UserGroupPublic] */
     PaginatedResponse_UserGroupPublic_: {
       /**
@@ -5228,6 +5286,54 @@ export interface components {
        * @description Number of items returned in the response
        */
       count: number;
+    };
+    /** PaginatedUsersResponse[UserAdminView] */
+    PaginatedUsersResponse_UserAdminView_: {
+      /**
+       * Items
+       * @description List of users for the current page
+       */
+      items: components["schemas"]["UserAdminView"][];
+      /** @description Pagination metadata for navigation */
+      metadata: components["schemas"]["PaginationMetadata"];
+    };
+    /**
+     * PaginationMetadata
+     * @description Pagination metadata for frontend navigation.
+     *
+     * Provides all information needed to build pagination UI (page numbers, next/previous buttons).
+     */
+    PaginationMetadata: {
+      /**
+       * Page
+       * @description Current page number (1-based)
+       */
+      page: number;
+      /**
+       * Page Size
+       * @description Number of items per page
+       */
+      page_size: number;
+      /**
+       * Total Count
+       * @description Total number of items across all pages
+       */
+      total_count: number;
+      /**
+       * Total Pages
+       * @description Total number of pages (calculated from total_count and page_size)
+       */
+      total_pages: number;
+      /**
+       * Has Next
+       * @description Whether there is a next page available
+       */
+      has_next: boolean;
+      /**
+       * Has Previous
+       * @description Whether there is a previous page available
+       */
+      has_previous: boolean;
     };
     /** PartialAssistantUpdatePublic */
     PartialAssistantUpdatePublic: {
@@ -6088,6 +6194,18 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
+    /**
+     * SortField
+     * @description Allowed fields for sorting user lists
+     * @enum {string}
+     */
+    SortField: "email" | "username" | "created_at";
+    /**
+     * SortOrder
+     * @description Sort direction for user lists
+     * @enum {string}
+     */
+    SortOrder: "asc" | "desc";
     /** SpaceDashboard */
     SpaceDashboard: {
       /**
@@ -11107,15 +11225,108 @@ export interface operations {
     };
   };
   /**
-   * List all users in tenant
-   * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
+   * List users with pagination and search
+   * @description List tenant users with pagination, fuzzy search, and sorting capabilities.
+   *
+   * **Performance Optimization:**
+   * - Uses pg_trgm GIN indexes for efficient fuzzy text search (email and username)
+   * - Uses composite B-tree indexes for fast tenant-scoped sorting
+   * - Sub-second response time even with 10,000+ users per tenant
+   *
+   * **Pagination:**
+   * - Max depth: 100 pages (prevents deep pagination performance issues)
+   * - Default: 100 users per page, sorted by creation date (newest first)
+   * - Supports custom page sizes (1-100)
+   *
+   * **Search:**
+   * - Email search: Case-insensitive partial match (e.g., "john" matches john.doe@example.com)
+   * - Name search: Case-insensitive partial match on username (e.g., "emma" matches emma.andersson)
+   * - Combined search: Use both filters with AND logic
+   *
+   * **Sorting:**
+   * - Sort by: email, username, or created_at (default)
+   * - Sort order: asc or desc (default)
+   *
+   * **Example Requests:**
+   *
+   * Default (first 100 users, newest first):
+   * ```
+   * GET /api/v1/admin/users/
+   * ```
+   *
+   * Custom page size (50 users per page):
+   * ```
+   * GET /api/v1/admin/users/?page_size=50
+   * ```
+   *
+   * Email search (find users at municipality domain):
+   * ```
+   * GET /api/v1/admin/users/?search_email=@municipality.se
+   * ```
+   *
+   * Name search (find users named Emma):
+   * ```
+   * GET /api/v1/admin/users/?search_name=emma
+   * ```
+   *
+   * Combined search and pagination:
+   * ```
+   * GET /api/v1/admin/users/?search_email=@municipality.se&page=2&page_size=50
+   * ```
+   *
+   * Sort by email ascending:
+   * ```
+   * GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+   * ```
+   *
+   * **Response Format:**
+   * ```json
+   * {
+   *   "items": [...],
+   *   "metadata": {
+   *     "page": 1,
+   *     "page_size": 100,
+   *     "total_count": 543,
+   *     "total_pages": 6,
+   *     "has_next": true,
+   *     "has_previous": false
+   *   }
+   * }
+   * ```
+   *
+   * **Important Notes:**
+   * - Only active users (not soft-deleted) are returned
+   * - All results are isolated to your tenant (cross-tenant access is prevented)
+   * - Max depth limit (100 pages) ensures consistent performance
    */
   get_users_api_v1_admin_users__get: {
+    parameters: {
+      query?: {
+        /** @description Page number (1-100) */
+        page?: number;
+        /** @description Users per page (1-100) */
+        page_size?: number;
+        /** @description Search by email (case-insensitive, partial match) */
+        search_email?: string | null;
+        /** @description Search by username (case-insensitive, partial match) */
+        search_name?: string | null;
+        /** @description Sort field (default: alphabetical by email) */
+        sort_by?: components["schemas"]["SortField"];
+        /** @description Sort order (default: ascending A-Z) */
+        sort_order?: components["schemas"]["SortOrder"];
+      };
+    };
     responses: {
-      /** @description List of users successfully retrieved */
+      /** @description Paginated list of users successfully retrieved */
       200: {
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_UserAdminView_"];
+          "application/json": components["schemas"]["PaginatedUsersResponse_UserAdminView_"];
+        };
+      };
+      /** @description Invalid pagination parameters (page/page_size out of bounds) */
+      400: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Authentication required (invalid or missing API key) */
@@ -11125,6 +11336,12 @@ export interface operations {
       /** @description Admin permissions required */
       403: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };

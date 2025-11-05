@@ -1,14 +1,25 @@
 import sqlalchemy as sa
 
-from intric.admin.admin_models import PrivacyPolicy, UserDeletedListItem, UserStateListItem
+from intric.admin.admin_models import (
+    AdminUsersQueryParams,
+    PaginatedUsersResponse,
+    PaginationMetadata,
+    PrivacyPolicy,
+    UserDeletedListItem,
+    UserStateListItem,
+)
 from intric.database.tables.users_table import Users
 from intric.main.exceptions import BadRequestException, NotFoundException, UniqueUserException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import (
+    PaginationParams,
+    SearchFilters,
+    SortOptions,
     UserAddAdmin,
     UserAddSuperAdmin,
+    UserAdminView,
     UserInDB,
     UserState,
     UserUpdatePublic,
@@ -35,11 +46,77 @@ class AdminService:
     @validate_permissions(Permission.ADMIN)
     async def get_tenant_users(self):
         logger.info(f"Admin user {self.user.username} listing all users in tenant {self.user.tenant_id}")
-        
+
         users = await self.user_repo.get_all_users(self.user.tenant_id)
-        
+
         logger.info(f"Successfully retrieved {len(users)} users for tenant {self.user.tenant_id}")
         return users
+
+    @validate_permissions(Permission.ADMIN)
+    async def list_users_paginated(
+        self, query_params: AdminUsersQueryParams
+    ) -> PaginatedUsersResponse[UserAdminView]:
+        """
+        List tenant users with pagination, search, and sorting.
+
+        Implements efficient large-dataset browsing with sub-second performance.
+        Uses pg_trgm GIN indexes for fuzzy search and composite B-tree indexes for sorting.
+
+        Args:
+            query_params: Pagination, search, and sort parameters from API request
+
+        Returns:
+            PaginatedUsersResponse with users and metadata for frontend navigation
+
+        Raises:
+            ValueError: If pagination parameters are invalid (caught by router and converted to BadRequestException)
+        """
+        logger.info(
+            f"Admin user {self.user.username} listing paginated users in tenant {self.user.tenant_id}: "
+            f"page={query_params.page}, page_size={query_params.page_size}, "
+            f"search_email={query_params.search_email}, search_name={query_params.search_name}"
+        )
+
+        # Convert API query params to domain objects
+        pagination = PaginationParams(
+            page=query_params.page,
+            page_size=query_params.page_size,
+        )
+        search = SearchFilters(
+            email=query_params.search_email,
+            name=query_params.search_name,
+        )
+        sort = SortOptions(
+            field=query_params.sort_by,
+            order=query_params.sort_order,
+        )
+
+        # Call repository with domain objects
+        result = await self.user_repo.get_paginated(
+            tenant_id=self.user.tenant_id,
+            pagination=pagination,
+            search=search,
+            sort=sort,
+        )
+
+        # Convert domain entities to API response models
+        users_admin_view = [UserAdminView(**user.model_dump()) for user in result.items]
+
+        metadata = PaginationMetadata(
+            page=result.page,
+            page_size=result.page_size,
+            total_count=result.total_count,
+            total_pages=result.total_pages,
+            has_next=result.has_next,
+            has_previous=result.has_previous,
+        )
+
+        logger.info(
+            f"Successfully retrieved {len(users_admin_view)} users (page {result.page} of {result.total_pages}, "
+            f"total={result.total_count}) for tenant {self.user.tenant_id}"
+        )
+
+        return PaginatedUsersResponse(items=users_admin_view, metadata=metadata)
 
     @validate_permissions(Permission.ADMIN)
     async def register_tenant_user(self, user: UserAddAdmin):
