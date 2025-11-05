@@ -943,6 +943,138 @@ async def tenant_user_token(test_tenant, test_settings):
     return token
 
 
+@pytest.fixture(autouse=True)
+async def seed_default_models(setup_database, monkeypatch):
+    """Seed default completion and embedding models for integration tests.
+
+    Since we disabled auto-seeding in lifespan.py, tests need at least one
+    completion model to create assistants/apps/services.
+
+    This fixture also patches TenantService.create_tenant to auto-enable models
+    for any new tenants created during tests.
+
+    This fixture runs automatically for all integration tests after database setup.
+    """
+    from intric.ai_models.completion_models.completion_model import CompletionModelCreate
+    from intric.ai_models.embedding_models.embedding_model import EmbeddingModelCreate
+    from intric.ai_models.completion_models.completion_models_repo import CompletionModelsRepository
+    from intric.ai_models.embedding_models.embedding_models_repo import AdminEmbeddingModelsService
+    from intric.database.tables.ai_models_table import CompletionModelSettings, EmbeddingModelSettings
+    from intric.database.database import sessionmanager
+    from intric.tenants.tenant_service import TenantService
+    from intric.tenants.tenant import TenantBase, TenantInDB
+
+    # Create default models
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            # Create a default completion model (using unique name to avoid conflicts with tests)
+            completion_repo = CompletionModelsRepository(session=session)
+            default_completion = CompletionModelCreate(
+                name="fixture-gpt-4",
+                nickname="Fixture GPT-4",
+                family="openai",
+                token_limit=8000,
+                is_deprecated=False,
+                stability="stable",
+                hosting="usa",
+                open_source=False,
+                org="OpenAI",
+                vision=True,
+                reasoning=False,
+                base_url="https://api.openai.com/v1",
+                litellm_model_name="gpt-4",
+            )
+            completion_model = await completion_repo.create_model(default_completion)
+
+            # Create a default embedding model (using unique name to avoid conflicts with tests)
+            embedding_repo = AdminEmbeddingModelsService(session=session)
+            default_embedding = EmbeddingModelCreate(
+                name="fixture-text-embedding",
+                family="openai",
+                is_deprecated=False,
+                open_source=False,
+                dimensions=1536,
+                max_input=8191,
+                max_batch_size=100,
+                stability="stable",
+                hosting="usa",
+                org="OpenAI",
+                litellm_model_name="text-embedding-ada-002",
+            )
+            embedding_model = await embedding_repo.create_model(default_embedding)
+
+            # Enable both models for all existing tenants
+            from intric.database.tables.tenant_table import Tenants
+            import sqlalchemy as sa
+
+            result = await session.execute(sa.select(Tenants))
+            tenants = result.scalars().all()
+
+            for tenant in tenants:
+                # Enable completion model
+                completion_settings = CompletionModelSettings(
+                    tenant_id=tenant.id,
+                    completion_model_id=completion_model.id,
+                    is_org_enabled=True,
+                    is_org_default=True,
+                )
+                session.add(completion_settings)
+
+                # Enable embedding model
+                embedding_settings = EmbeddingModelSettings(
+                    tenant_id=tenant.id,
+                    embedding_model_id=embedding_model.id,
+                    is_org_enabled=True,
+                    is_org_default=True,
+                )
+                session.add(embedding_settings)
+
+    # Patch TenantService.create_tenant to auto-enable models for new tenants in tests
+    original_create_tenant = TenantService.create_tenant
+
+    async def create_tenant_with_models(self, tenant: TenantBase) -> TenantInDB:
+        # Call original method
+        tenant_in_db = await original_create_tenant(self, tenant)
+
+        # Auto-enable default models (test-only behavior)
+        session = self.repo.session
+        import sqlalchemy as sa
+
+        # Enable completion model
+        stmt = sa.select(CompletionModelSettings).where(
+            CompletionModelSettings.tenant_id == tenant_in_db.id,
+            CompletionModelSettings.completion_model_id == completion_model.id,
+        )
+        existing = await session.execute(stmt)
+        if not existing.scalar_one_or_none():
+            completion_settings = CompletionModelSettings(
+                tenant_id=tenant_in_db.id,
+                completion_model_id=completion_model.id,
+                is_org_enabled=True,
+                is_org_default=True,
+            )
+            session.add(completion_settings)
+
+        # Enable embedding model
+        stmt = sa.select(EmbeddingModelSettings).where(
+            EmbeddingModelSettings.tenant_id == tenant_in_db.id,
+            EmbeddingModelSettings.embedding_model_id == embedding_model.id,
+        )
+        existing = await session.execute(stmt)
+        if not existing.scalar_one_or_none():
+            embedding_settings = EmbeddingModelSettings(
+                tenant_id=tenant_in_db.id,
+                embedding_model_id=embedding_model.id,
+                is_org_enabled=True,
+                is_org_default=True,
+            )
+            session.add(embedding_settings)
+
+        return tenant_in_db
+
+    monkeypatch.setattr(TenantService, "create_tenant", create_tenant_with_models)
+
+
 @pytest.fixture
 def mock_transcription_models(monkeypatch):
     """Stub transcription model enablement to avoid external dependencies."""

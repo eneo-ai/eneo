@@ -53,36 +53,8 @@ class TenantService:
     async def create_tenant(self, tenant: TenantBase) -> TenantInDB:
         tenant_in_db = await self.repo.add(tenant)
 
-        default_completion_model = "gpt-4o"
-        gpt_4o = await self.completion_model_repo.get_model_by_name(name=default_completion_model)
-
-        await self.completion_model_repo.enable_completion_model(
-            is_org_enabled=True,
-            completion_model_id=gpt_4o.id,
-            tenant_id=tenant_in_db.id,
-        )
-
-        default_embedding_model = "text-embedding-3-small"
-        text_embedding_3_small = await self.embedding_model_repo.get_model_by_name(
-            default_embedding_model
-        )
-
-        await self.embedding_model_repo.enable_embedding_model(
-            is_org_enabled=True,
-            embedding_model_id=text_embedding_3_small.id,
-            tenant_id=tenant_in_db.id,
-        )
-
-        default_transcription_model = "whisper-1"
-        whisper_1_id = await self.transcription_models_enable_service.get_model_id_by_name(
-            model_name=default_transcription_model
-        )
-        await self.transcription_models_enable_service.enable_transcription_model(
-            transcription_model_id=whisper_1_id,
-            tenant_id=tenant_in_db.id,
-            is_org_enabled=True,
-            is_org_default=True,
-        )
+        # Note: Models are now managed via API/UI by admins
+        # New tenants start with no pre-enabled models
 
         return tenant_in_db
 
