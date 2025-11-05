@@ -53,7 +53,7 @@ class CompletionModelSettings(BaseCrossReference):
 
 
 class TranscriptionModels(BasePublic):
-    name: Mapped[str] = mapped_column()
+    name: Mapped[str] = mapped_column(unique=True)
     model_name: Mapped[str] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")

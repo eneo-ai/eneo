@@ -311,6 +311,29 @@ async def get_oidc_debug_status(
 
 # CRUD Operations for Completion Models
 
+@router.get(
+    "/completion-models/",
+    response_model=PaginatedResponse[CompletionModelSparse],
+    responses=responses.get_responses([401]),
+)
+async def get_completion_models(
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    """
+    Get all completion models (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    Returns all completion models without tenant-specific fields.
+    """
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+        models = await repo.get_models(is_deprecated=False)
+
+    return protocol.to_paginated_response(models)
+
+
 @router.post(
     "/completion-models/create",
     response_model=CompletionModelSparse,
@@ -394,6 +417,29 @@ async def delete_completion_model(
 
 
 # CRUD Operations for Embedding Models
+
+@router.get(
+    "/embedding-models/",
+    response_model=PaginatedResponse[EmbeddingModelSparse],
+    responses=responses.get_responses([401]),
+)
+async def get_embedding_models(
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    """
+    Get all embedding models (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    Returns all embedding models without tenant-specific fields.
+    """
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+        models = await repo.get_models(with_deprecated=False)
+
+    return protocol.to_paginated_response(models)
+
 
 @router.post(
     "/embedding-models/create",

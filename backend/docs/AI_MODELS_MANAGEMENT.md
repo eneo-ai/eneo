@@ -26,6 +26,29 @@ All endpoints require the `X-API-Key` header with the value from `INTRIC_SUPER_A
 
 ### Completion Models
 
+#### List All Completion Models
+```http
+GET /api/v1/sysadmin/completion-models/
+X-API-Key: <super_admin_key>
+```
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "name": "gpt-4",
+      "nickname": "GPT-4",
+      "family": "openai",
+      "token_limit": 8000,
+      ...
+    }
+  ],
+  "total": 1
+}
+```
+
 #### Create Completion Model
 ```http
 POST /api/v1/sysadmin/completion-models/create
@@ -73,6 +96,28 @@ X-API-Key: <super_admin_key>
 **Warning:** Deletion is system-wide and affects all tenants. Ensure the model is not in use.
 
 ### Embedding Models
+
+#### List All Embedding Models
+```http
+GET /api/v1/sysadmin/embedding-models/
+X-API-Key: <super_admin_key>
+```
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "name": "text-embedding-ada-002",
+      "family": "openai",
+      "dimensions": 1536,
+      ...
+    }
+  ],
+  "total": 1
+}
+```
 
 #### Create Embedding Model
 ```http
