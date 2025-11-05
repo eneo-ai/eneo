@@ -15,11 +15,11 @@ depends_on = None
 
 
 def upgrade():
-    # Drop unique constraints on name fields
+    # Drop unique constraints on name fields for completion and embedding models
     # This allows the same model name to exist from different providers
+    # Note: Transcription models keep their unique constraint (hardcoded models only)
     op.drop_constraint('completion_models_name_key', 'completion_models', type_='unique')
     op.drop_constraint('embedding_models_name_key', 'embedding_models', type_='unique')
-    op.drop_constraint('transcription_models_name_key', 'transcription_models', type_='unique')
 
 
 def downgrade():
@@ -27,4 +27,3 @@ def downgrade():
     # Note: This will fail if duplicate names exist in the database
     op.create_unique_constraint('completion_models_name_key', 'completion_models', ['name'])
     op.create_unique_constraint('embedding_models_name_key', 'embedding_models', ['name'])
-    op.create_unique_constraint('transcription_models_name_key', 'transcription_models', ['name'])
