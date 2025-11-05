@@ -1,48 +1,78 @@
+<!--
+    Copyright (c) 2024 Sundsvalls Kommun
+
+    Licensed under the MIT License.
+-->
+
 <script lang="ts">
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconLink } from "@intric/icons/link";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
   import type { User } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
-  import { getAppContext } from "$lib/core/AppContext";
+  import { Button, Dialog, Dropdown } from "@intric/ui";
+  import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "lucide-svelte";
   import { invalidate } from "$app/navigation";
-  import InviteLinkDialog from "./editor/InviteLinkDialog.svelte";
   import UserEditor from "./editor/UserEditor.svelte";
+  import { getAppContext } from "$lib/core/AppContext";
+  import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
-  export let user: User;
 
-  const { user: currentUser } = getAppContext();
+  // Svelte 5 runes mode: use $props() instead of export let
+  let { user } = $props<{ user: User }>();
 
-  let isProcessing = false;
-  let showDeleteDialog: Dialog.OpenState;
   async function deleteUser() {
     isProcessing = true;
     try {
       await intric.users.delete(user);
-      invalidate("admin:users:load");
+      invalidate("admin:users");  // Stable dependency key
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_user());
       console.error(e);
     }
     isProcessing = false;
   }
 
-  let showInviteDialog: Dialog.OpenState;
+  async function deactivateUser() {
+    try {
+      await intric.users.deactivate({ user: { username: user.username } });
+      invalidate("admin:users");  // Stable dependency key
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function reactivateUser() {
+    try {
+      await intric.users.reactivate({ user: { username: user.username } });
+      invalidate("admin:users");  // Stable dependency key
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  const { user: currentUser } = getAppContext();
+
+  // Determine button visibility based on user state
+  const isActive = $derived(user.state === 'active' || user.state === 'invited');
+  const isInactive = $derived(user.state === 'inactive');
+
+  let isProcessing = false;
   let showEditDialog: Dialog.OpenState;
+  let showDeleteDialog: Dialog.OpenState;
 </script>
 
 <Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button is={trigger} disabled={false} padding="icon">
-      <IconEllipsis></IconEllipsis>
+  <Dropdown.Trigger asFragment let:trigger>
+    <Button
+      is={trigger}
+      padding="icon"
+      aria-label={m.actions()}
+    >
+      <MoreVertical size={16} />
     </Button>
   </Dropdown.Trigger>
+
   <Dropdown.Menu let:item>
+    <!-- Edit action - always available -->
     <Button
       is={item}
       padding="icon-leading"
@@ -50,54 +80,68 @@
         $showEditDialog = true;
       }}
     >
-      <IconEdit size="sm"></IconEdit>
-      {m.edit()}</Button
-    >
+      <Edit size={16} />
+      {m.edit_user()}
+    </Button>
 
-    {#if !user.is_active}
+    <!-- Deactivate - only for active/invited users -->
+    {#if isActive}
       <Button
         is={item}
         padding="icon-leading"
-        on:click={() => {
-          $showInviteDialog = true;
-        }}
+        disabled={user.id === currentUser.id}
+        on:click={deactivateUser}
       >
-        <IconLink size="sm" />
-        {m.show_invite_link()}</Button
-      >
+        <UserMinus size={16} />
+        {m.deactivate_user()}
+      </Button>
     {/if}
 
+    <!-- Reactivate - only for inactive users -->
+    {#if isInactive}
+      <Button
+        is={item}
+        padding="icon-leading"
+        on:click={reactivateUser}
+      >
+        <UserPlus size={16} />
+        {m.reactivate_user()}
+      </Button>
+    {/if}
+
+    <!-- Delete - always available but destructive -->
     <Button
       is={item}
       variant="destructive"
+      padding="icon-leading"
+      disabled={user.id === currentUser.id}
       on:click={() => {
         $showDeleteDialog = true;
       }}
-      disabled={currentUser.id === user.id}
-      padding="icon-leading"
     >
-      <IconTrash size="sm"></IconTrash>{m.delete()}</Button
-    >
+      <Trash2 size={16} />
+      {m.delete_user()}
+    </Button>
   </Dropdown.Menu>
 </Dropdown.Root>
 
+<!-- Edit Dialog - hide built-in trigger since we control it from dropdown -->
+<UserEditor {user} mode="update" hideTrigger={true} bind:showDialog={showEditDialog}></UserEditor>
+
+<!-- Delete Confirmation Dialog -->
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.delete_user()}</Dialog.Title>
-    <Dialog.Description
-      >{m.do_you_really_want_to_delete()}
-      <span class="italic">{user.email}</span>?</Dialog.Description
-    >
+    <Dialog.Description>
+      {m.do_you_really_want_to_delete()}
+      <span class="italic">{user.email}</span>?
+    </Dialog.Description>
 
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteUser}
-        >{isProcessing ? m.deleting() : m.delete()}</Button
-      >
+      <Button variant="destructive" on:click={deleteUser}>
+        {isProcessing ? m.deleting() : m.delete()}
+      </Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
-
-<InviteLinkDialog bind:isOpen={showInviteDialog} {user}></InviteLinkDialog>
-
-<UserEditor bind:isOpen={showEditDialog} {user}></UserEditor>
