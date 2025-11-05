@@ -212,8 +212,7 @@ class ServiceService:
 
         if move_resources:
             for group in service.groups:
-                await self.group_service.move_group_to_space(
+                await self.group_service.import_group_to_space(
                     group_id=group.id,
                     space_id=space_id,
-                    service_ids=[service_id],
                 )

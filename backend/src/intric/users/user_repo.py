@@ -32,6 +32,7 @@ from intric.users.user import (
 
 logger = get_logger(__name__)
 
+ORG_SPACE_ROLES = {"owner", "ai configurator"}  # Temp, kan bytas senare.
 
 class UsersRepository:
     def __init__(self, session: AsyncSession):
@@ -397,3 +398,25 @@ class UsersRepository:
             page_size=pagination.page_size,
             counts=state_counts,  # Include counts for both states
         )
+
+    async def list_users_by_tenant_id(self, tenant_id: UUID) -> list[UserInDB]:
+        query = sa.select(Users).where(
+            Users.deleted_at.is_(None),
+            Users.tenant_id == tenant_id,
+        )
+        return await self._get_models_from_query(query, with_deleted=False)
+
+    async def list_tenant_admins(self, tenant_id: UUID) -> list["UserInDB"]:
+        """
+        Returnerar alla users i tenant som har en predefined role som räknas som 'admin'
+        """
+        q = (
+            sa.select(Users)
+            .join(Users.predefined_roles)
+            .where(
+                Users.deleted_at.is_(None),
+                Users.tenant_id == tenant_id,
+                sa.func.lower(PredefinedRoles.name).in_(ORG_SPACE_ROLES),
+            )
+        )
+        return await self._get_models_from_query(q, with_deleted=False)

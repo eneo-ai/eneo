@@ -660,13 +660,6 @@ class Container(containers.DeclarativeContainer):
         job_service=job_service,
         quota_service=quota_service,
     )
-    collection_crud_service = providers.Factory(
-        CollectionCRUDService,
-        user=user,
-        space_service=space_service,
-        space_repo=space_repo,
-        actor_manager=actor_manager,
-    )
     group_service = providers.Factory(
         GroupService,
         user=user,
@@ -679,7 +672,15 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         task_service=task_service,
     )
-
+    collection_crud_service = providers.Factory(
+        CollectionCRUDService,
+        user=user,
+        space_service=space_service,
+        space_repo=space_repo,
+        actor_manager=actor_manager,
+        group_service=group_service,
+    )
+    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
         user=user,

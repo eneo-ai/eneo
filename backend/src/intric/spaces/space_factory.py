@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from intric.apps.apps.app_factory import AppFactory
 from intric.collections.domain.collection import Collection
@@ -43,12 +43,14 @@ class SpaceFactory:
     def create_space(
         name: str,
         tenant_id: "UUID",
+        tenant_space_id: "UUID" = None,
         description: str = None,
         user_id: "UUID" = None,
     ) -> Space:
         return Space(
             id=None,
             tenant_id=tenant_id,
+            tenant_space_id=tenant_space_id,
             user_id=user_id,
             name=name,
             description=description,
@@ -80,6 +82,7 @@ class SpaceFactory:
         apps_in_db: list["Apps"] = [],
         services_in_db: list[Services] = [],
         security_classification: Optional[SecurityClassification] = None,
+        integration_knowledge_in_db: Optional[Iterable] = None,
     ) -> Space:
         non_deprecated_completion_models = [
             completion_model
@@ -169,27 +172,27 @@ class SpaceFactory:
             for website in websites_in_db
         ]
 
+        ik_source = list(integration_knowledge_in_db) if integration_knowledge_in_db is not None \
+            else list(getattr(space_in_db, "integration_knowledge_list", []) or [])
+
         integration_knowledge_list = []
-        for i in space_in_db.integration_knowledge_list:
+        for i in ik_source:
             integration_knowledge_list.append(
                 IntegrationKnowledge(
                     name=i.name,
-                    user_integration=i.user_integration,
+                    user_integration=getattr(i, "user_integration", None), 
                     embedding_model=next(
-                        (
-                            embedding_model
-                            for embedding_model in embedding_models
-                            if embedding_model.id == i.embedding_model_id
-                        ),
+                        (em for em in embedding_models if em.id == i.embedding_model_id),
                         None,
                     ),
                     tenant_id=i.tenant_id,
                     space_id=i.space_id,
                     id=i.id,
-                    url=i.url,
-                    size=i.size,
+                    url=getattr(i, "url", None),
+                    size=getattr(i, "size", None),
                 )
             )
+
         all_assistants = [
             self.assistant_factory.create_space_assistant_from_db(
                 assistant_in_db=assistant,
@@ -264,6 +267,7 @@ class SpaceFactory:
             updated_at=space_in_db.updated_at,
             id=space_in_db.id,
             tenant_id=space_in_db.tenant_id,
+            tenant_space_id=space_in_db.tenant_space_id,
             user_id=space_in_db.user_id,
             name=space_in_db.name,
             description=space_in_db.description,
