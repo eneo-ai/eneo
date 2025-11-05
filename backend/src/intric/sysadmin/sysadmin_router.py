@@ -348,6 +348,8 @@ async def update_completion_model_metadata(
 
     Requires: X-API-Key header with INTRIC_SUPER_API_KEY
     """
+    from intric.main.exceptions import NotFoundException
+
     session = container.session()
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
@@ -355,6 +357,9 @@ async def update_completion_model_metadata(
         # Ensure model_data has the id
         update_with_id = CompletionModelUpdate(id=id, **model_data.model_dump(exclude={'id'}, exclude_unset=True))
         model = await repo.update_model(update_with_id)
+
+        if model is None:
+            raise NotFoundException(f"Completion model with id {id} not found")
 
     return model
 
@@ -427,6 +432,8 @@ async def update_embedding_model_metadata(
 
     Requires: X-API-Key header with INTRIC_SUPER_API_KEY
     """
+    from intric.main.exceptions import NotFoundException
+
     session = container.session()
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
@@ -434,6 +441,9 @@ async def update_embedding_model_metadata(
         # Ensure model_data has the id
         update_with_id = EmbeddingModelMetadataUpdate(id=id, **model_data.model_dump(exclude={'id'}, exclude_unset=True))
         model = await repo.update_model(update_with_id)
+
+        if model is None:
+            raise NotFoundException(f"Embedding model with id {id} not found")
 
     return model
 
