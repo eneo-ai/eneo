@@ -1,9 +1,16 @@
 from datetime import datetime
+from enum import Enum
 from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from intric.users.user import SortField, SortOrder
+
+
+class StateFilter(str, Enum):
+    """Filter for user state in admin users list"""
+    ACTIVE = "active"  # Returns users with state='active' OR state='invited'
+    INACTIVE = "inactive"  # Returns users with state='inactive'
 
 
 class PrivacyPolicy(BaseModel):
@@ -75,6 +82,10 @@ class AdminUsersQueryParams(BaseModel):
 
         Sort by email ascending:
         GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+
+        Filter by state (active includes invited):
+        GET /api/v1/admin/users/?state_filter=active
+        GET /api/v1/admin/users/?state_filter=inactive
     """
     page: int = Field(
         default=1,
@@ -109,6 +120,11 @@ class AdminUsersQueryParams(BaseModel):
         default=SortOrder.DESC,
         description="Sort order (ascending or descending)",
         examples=["desc"]
+    )
+    state_filter: Optional[StateFilter] = Field(
+        default=None,
+        description="Filter users by state. 'active' includes both active and invited users. 'inactive' shows only inactive users. Omit for all non-deleted users.",
+        examples=["active", "inactive"]
     )
 
     @field_validator("page")
@@ -155,6 +171,7 @@ class PaginationMetadata(BaseModel):
     Pagination metadata for frontend navigation.
 
     Provides all information needed to build pagination UI (page numbers, next/previous buttons).
+    Includes counts by state for tab display.
     """
     page: int = Field(
         description="Current page number (1-based)",
@@ -179,6 +196,11 @@ class PaginationMetadata(BaseModel):
     has_previous: bool = Field(
         description="Whether there is a previous page available",
         examples=[False]
+    )
+    counts: dict[str, int] | None = Field(
+        default=None,
+        description="Optional counts by state (active, inactive) for tab display",
+        examples=[{"active": 2828, "inactive": 3}]
     )
 
 

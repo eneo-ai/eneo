@@ -5,6 +5,7 @@ from intric.admin.admin_models import (
     AdminUsersQueryParams,
     PaginatedUsersResponse,
     PrivacyPolicy,
+    StateFilter,
     UserDeletedListItem,
     UserStateListItem,
 )
@@ -167,6 +168,7 @@ async def get_users(
     search_name: str | None = Query(None, description="Search by username (case-insensitive, partial match)"),
     sort_by: SortField = Query(SortField.EMAIL, description="Sort field (default: alphabetical by email)"),
     sort_order: SortOrder = Query(SortOrder.ASC, description="Sort order (default: ascending A-Z)"),
+    state_filter: StateFilter | None = Query(None, description="Filter by user state (active includes invited, inactive for temporary leave)"),
     container: Container = Depends(get_container(with_user=True))
 ):
     """
@@ -202,6 +204,7 @@ async def get_users(
             search_name=search_name,
             sort_by=sort_by,
             sort_order=sort_order,
+            state_filter=state_filter,
         )
 
         service = container.admin_service()

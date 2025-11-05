@@ -67,8 +67,8 @@
         // Note: 'deleted' state never appears (filtered by deleted_at IS NULL in queries)
         const stateLabels: Record<string, { label: string; color: Label.LabelColor }> = {
           active: { label: m.active(), color: "green" },
-          inactive: { label: m.inactive(), color: "yellow" },
-          invited: { label: m.invited(), color: "gray" }
+          inactive: { label: m.inactive(), color: "gray" },  // Gray = neutral (temporary leave)
+          invited: { label: m.invited(), color: "blue" }
         };
         const label = stateLabels[item.value.state] || stateLabels.active;
         return createRender(Label.Single, { item: label });
@@ -93,6 +93,7 @@
       }
     }),
     table.columnActions({
+      header: m.actions(),  // Add "Åtgärder" header for clarity
       cell: (item) => {
         return createRender(UserActions, { user: item.value });
       }

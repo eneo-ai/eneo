@@ -90,13 +90,16 @@ class SearchFilters:
         >>> filters.has_filters()  # True
         >>> filters = SearchFilters()
         >>> filters.has_filters()  # False
+        >>> filters = SearchFilters(state_filter="active")
+        >>> filters.has_filters()  # True
     """
     email: str | None = None
     name: str | None = None
+    state_filter: str | None = None  # "active" (includes invited) or "inactive"
 
     def has_filters(self) -> bool:
         """Check if any search filters are active"""
-        return self.email is not None or self.name is not None
+        return self.email is not None or self.name is not None or self.state_filter is not None
 
 
 @dataclass(frozen=True)
@@ -124,17 +127,20 @@ class PaginatedResult(Generic[T]):
     Generic paginated result container with metadata.
 
     Provides pagination metadata for frontend navigation (total_pages, has_next, has_previous).
+    Optionally includes counts by state for tab navigation.
 
     Examples:
         >>> result = PaginatedResult(items=[user1, user2], total_count=50, page=1, page_size=25)
         >>> result.total_pages  # 2
         >>> result.has_next  # True
         >>> result.has_previous  # False
+        >>> result.counts  # {'active': 2828, 'inactive': 3}
     """
     items: list[T]
     total_count: int
     page: int
     page_size: int
+    counts: dict[str, int] | None = None  # Optional: counts by state for tab display
 
     @property
     def total_pages(self) -> int:

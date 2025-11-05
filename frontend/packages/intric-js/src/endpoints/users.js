@@ -42,14 +42,14 @@ export function initUser(client) {
     /**
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
-     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number}} options
+     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: string}} options
      * @return {Promise<User[]>}
      *
      * @overload
      * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string}} [options]
      * @return {Promise<import('../types/resources').Paginated<UserSparse>> }
      *
-     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number}} [options]
+     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: string}} [options]
      * @throws {IntricError}
      * */
     list: async (options) => {
@@ -62,13 +62,14 @@ export function initUser(client) {
               page: options.page,
               page_size: options.page_size,
               search_email: options.search_email,
-              search_name: options.search_name
+              search_name: options.search_name,
+              state_filter: options.state_filter
             }
           }
         });
 
-        // Return full response with items and metadata for pagination
-        return res.items;
+        // Return full response with items and metadata (for pagination and counts)
+        return res;
       }
 
       const res = await client.fetch("/api/v1/users/", {
@@ -125,6 +126,34 @@ export function initUser(client) {
         params: { path: { id } }
       });
       return true;
+    },
+
+    /**
+     * Deactivate a user (temporary leave). Requires admin privileges.
+     * @param {{user: {username: string}}} options User to deactivate
+     * @returns {Promise<User>} Returns the deactivated user
+     * @throws {IntricError}
+     * */
+    deactivate: async (options) => {
+      const res = await client.fetch("/api/v1/admin/users/{username}/deactivate", {
+        method: "post",
+        params: { path: { username: options.user.username } }
+      });
+      return res;
+    },
+
+    /**
+     * Reactivate a user (return from leave). Requires admin privileges.
+     * @param {{user: {username: string}}} options User to reactivate
+     * @returns {Promise<User>} Returns the reactivated user
+     * @throws {IntricError}
+     * */
+    reactivate: async (options) => {
+      const res = await client.fetch("/api/v1/admin/users/{username}/reactivate", {
+        method: "post",
+        params: { path: { username: options.user.username } }
+      });
+      return res;
     },
 
     /**

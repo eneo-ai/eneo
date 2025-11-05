@@ -85,6 +85,7 @@ class AdminService:
         search = SearchFilters(
             email=query_params.search_email,
             name=query_params.search_name,
+            state_filter=query_params.state_filter.value if query_params.state_filter else None,
         )
         sort = SortOptions(
             field=query_params.sort_by,
@@ -109,6 +110,7 @@ class AdminService:
             total_pages=result.total_pages,
             has_next=result.has_next,
             has_previous=result.has_previous,
+            counts=result.counts,  # Pass state counts for tab display
         )
 
         logger.info(

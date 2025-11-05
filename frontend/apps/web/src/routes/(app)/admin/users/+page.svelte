@@ -4,14 +4,18 @@
   import UserEditor from "./editor/UserEditor.svelte";
   import UserTable from "./UserTable.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { goto } from "$app/navigation";
+  import { goto, invalidate } from "$app/navigation";
   import { page } from "$app/stores";
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
 
-  // Get search value from URL params for display
+  // Get search value and tab from URL params
   const searchValue = $derived($page.url.searchParams.get('search') || '');
+  const currentTab = $derived($page.url.searchParams.get('tab') || 'active');
+
+  // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
+  const numberFormatter = new Intl.NumberFormat('sv-SE');
 
   setAdminUserCtx({
     customRoles: data.customRoles,
@@ -39,9 +43,12 @@
           // Only trigger search if empty OR >= 3 characters (matches backend validation)
           // Prevents unnecessary network requests and 400 errors for short searches
           if (trimmed === '' || trimmed.length >= 3) {
-            const url = trimmed
-              ? `/admin/users?search=${encodeURIComponent(trimmed)}`
-              : '/admin/users';
+            // Preserve current tab when searching
+            const params = new URLSearchParams();
+            if (currentTab) params.set('tab', currentTab);
+            if (trimmed) params.set('search', trimmed);
+
+            const url = params.toString() ? `/admin/users?${params.toString()}` : '/admin/users';
 
             goto(url, { noScroll: true, keepFocus: true, replaceState: true });
           }
@@ -64,6 +71,29 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.users()}></Page.Title>
+    <Page.Tabbar>
+      <!-- TabTrigger uses goto() for proper SvelteKit navigation -->
+      <Page.TabTrigger tab="active">
+        <span class="inline-flex items-baseline">
+          <span>{m.active_users()}</span>
+          {#if data.counts?.active != null}
+            <span class="ml-1.5 text-sm text-gray-500">
+              ({numberFormatter.format(data.counts.active)})
+            </span>
+          {/if}
+        </span>
+      </Page.TabTrigger>
+      <Page.TabTrigger tab="inactive">
+        <span class="inline-flex items-baseline">
+          <span>{m.inactive_users()}</span>
+          {#if data.counts?.inactive != null}
+            <span class="ml-1.5 text-sm text-gray-500">
+              ({numberFormatter.format(data.counts.inactive)})
+            </span>
+          {/if}
+        </span>
+      </Page.TabTrigger>
+    </Page.Tabbar>
     <UserEditor mode="create"></UserEditor>
   </Page.Header>
   <Page.Main>

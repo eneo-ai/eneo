@@ -31,6 +31,7 @@
   };
 
   export let mode: "update" | "create" = "create";
+  export let hideTrigger: boolean = false;  // Hide built-in trigger when controlled externally
 
   export let user: {
     id: string;
@@ -48,7 +49,8 @@
 
   let editableUser = makeEditable(user);
 
-  let showDialog: Dialog.OpenState;
+  // Export showDialog for parent component control (used in UserActions dropdown)
+  export let showDialog: Dialog.OpenState;
 
   function getRolesUpdate() {
     const updatedRoles = userRoles.reduce(
@@ -117,14 +119,17 @@
 </script>
 
 <Dialog.Root bind:isOpen={showDialog}>
-  {#if mode === "create"}
-    <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>{m.create_user()}</Button>
-    </Dialog.Trigger>
-  {:else}
-    <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger}>{m.edit()}</Button>
-    </Dialog.Trigger>
+  <!-- Only show built-in trigger if not controlled externally -->
+  {#if !hideTrigger}
+    {#if mode === "create"}
+      <Dialog.Trigger asFragment let:trigger>
+        <Button variant="primary" is={trigger}>{m.create_user()}</Button>
+      </Dialog.Trigger>
+    {:else}
+      <Dialog.Trigger asFragment let:trigger>
+        <Button is={trigger}>{m.edit()}</Button>
+      </Dialog.Trigger>
+    {/if}
   {/if}
 
   <Dialog.Content width="medium" form>

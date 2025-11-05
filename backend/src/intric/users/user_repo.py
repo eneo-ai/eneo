@@ -288,6 +288,15 @@ class UsersRepository:
         # Add soft-delete filter
         query = query.where(Users.deleted_at.is_(None))
 
+        # Add state filter if provided
+        # "active" includes both ACTIVE and INVITED states (users who can log in)
+        # "inactive" shows only INACTIVE state (temporary leave)
+        if search.state_filter == "active":
+            query = query.where(Users.state.in_([UserState.ACTIVE, UserState.INVITED]))
+        elif search.state_filter == "inactive":
+            query = query.where(Users.state == UserState.INACTIVE)
+        # If no state_filter, show all non-deleted users (backward compatible)
+
         # Add email search filter if provided (uses idx_users_email_trgm GIN index)
         if search.email is not None:
             query = query.where(
@@ -303,6 +312,41 @@ class UsersRepository:
         # Execute COUNT query for total_count (separate query for accuracy)
         count_query = sa.select(sa.func.count()).select_from(query.subquery())
         total_count = await self.session.scalar(count_query) or 0
+
+        # Get counts for both active and inactive states for tab display
+        # Uses PostgreSQL FILTER clause for efficient conditional aggregation
+        # Single query, single table scan - O(n) where n = users matching filters
+        state_counts_query = (
+            sa.select(
+                sa.func.count(1).filter(
+                    Users.state.in_([UserState.ACTIVE, UserState.INVITED])
+                ).label("active_count"),
+                sa.func.count(1).filter(
+                    Users.state == UserState.INACTIVE
+                ).label("inactive_count"),
+            )
+            .select_from(Users)
+            .where(Users.tenant_id == tenant_id)
+            .where(Users.deleted_at.is_(None))
+        )
+
+        # Apply same search filters to counts for consistency
+        if search.email is not None:
+            state_counts_query = state_counts_query.where(
+                sa.func.lower(Users.email).like(f"%{search.email.lower()}%")
+            )
+        if search.name is not None:
+            state_counts_query = state_counts_query.where(
+                sa.func.lower(Users.username).like(f"%{search.name.lower()}%")
+            )
+
+        # Execute counts query
+        counts_result = await self.session.execute(state_counts_query)
+        counts_row = counts_result.one()
+        state_counts = {
+            'active': int(counts_row.active_count or 0),
+            'inactive': int(counts_row.inactive_count or 0)
+        }
 
         # Map SortField enum to SQLAlchemy columns
         sort_column_map = {
@@ -351,4 +395,5 @@ class UsersRepository:
             total_count=total_count,
             page=pagination.page,
             page_size=pagination.page_size,
+            counts=state_counts,  # Include counts for both states
         )

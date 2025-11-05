@@ -1,22 +1,33 @@
 export const load = async (event) => {
   const { intric } = await event.parent();
 
-  event.depends("admin:users:load");
+  // Stable dependency key for manual invalidation after mutations
+  event.depends("admin:users");
 
-  // Read search parameter from URL for server-side search across all users
+  // Read search and tab parameters from URL for server-side filtering
   const search_email = event.url.searchParams.get('search') || undefined;
+  const tab = event.url.searchParams.get('tab') || 'active';  // Default to 'active' tab
+
+  // Convert tab to state_filter for backend
+  // 'active' tab shows ACTIVE + INVITED users (users who can log in)
+  // 'inactive' tab shows INACTIVE users (temporary leave)
+  const state_filter = tab === 'inactive' ? 'inactive' : 'active';
 
   // Backend now returns { items: User[], metadata: PaginationMetadata }
   const response = await intric.users.list({
     includeDetails: true,
-    search_email  // Server-side search across all 2831 users
+    search_email,  // Server-side search
+    state_filter   // Server-side state filtering
   });
 
-  // Extract items array (handle empty results properly)
-  const users = Array.isArray(response) ? response : (response.items || []);
+  // Extract items, pagination, and state counts from response
+  const users = response.items || [];
+  const pagination = response.metadata || null;
+  const counts = response.metadata?.counts || null;
 
   return {
-    users,  // Return array directly (matching original pattern)
-    pagination: response.metadata || null
+    users,
+    pagination,
+    counts  // State counts for tab display (active, inactive)
   };
 };

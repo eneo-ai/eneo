@@ -5302,6 +5302,7 @@ export interface components {
      * @description Pagination metadata for frontend navigation.
      *
      * Provides all information needed to build pagination UI (page numbers, next/previous buttons).
+     * Includes counts by state for tab display.
      */
     PaginationMetadata: {
       /**
@@ -5334,6 +5335,13 @@ export interface components {
        * @description Whether there is a previous page available
        */
       has_previous: boolean;
+      /**
+       * Counts
+       * @description Optional counts by state (active, inactive) for tab display
+       */
+      counts?: {
+        [key: string]: number;
+      } | null;
     };
     /** PartialAssistantUpdatePublic */
     PartialAssistantUpdatePublic: {
@@ -6320,6 +6328,12 @@ export interface components {
       /** Personal */
       personal: boolean;
     };
+    /**
+     * StateFilter
+     * @description Filter for user state in admin users list
+     * @enum {string}
+     */
+    StateFilter: "active" | "inactive";
     /**
      * Status
      * @enum {string}
@@ -11314,6 +11328,8 @@ export interface operations {
         sort_by?: components["schemas"]["SortField"];
         /** @description Sort order (default: ascending A-Z) */
         sort_order?: components["schemas"]["SortOrder"];
+        /** @description Filter by user state (active includes invited, inactive for temporary leave) */
+        state_filter?: components["schemas"]["StateFilter"] | null;
       };
     };
     responses: {
