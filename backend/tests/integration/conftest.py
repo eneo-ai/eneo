@@ -967,11 +967,11 @@ async def seed_default_models(setup_database, monkeypatch):
     # Create default models
     async with sessionmanager.session() as session:
         async with session.begin():
-            # Create a default completion model
+            # Create a default completion model (using unique name to avoid conflicts with tests)
             completion_repo = CompletionModelsRepository(session=session)
             default_completion = CompletionModelCreate(
-                name="gpt-4",
-                nickname="GPT-4 Test",
+                name="fixture-gpt-4",
+                nickname="Fixture GPT-4",
                 family="openai",
                 token_limit=8000,
                 is_deprecated=False,
@@ -986,10 +986,10 @@ async def seed_default_models(setup_database, monkeypatch):
             )
             completion_model = await completion_repo.create_model(default_completion)
 
-            # Create a default embedding model
+            # Create a default embedding model (using unique name to avoid conflicts with tests)
             embedding_repo = AdminEmbeddingModelsService(session=session)
             default_embedding = EmbeddingModelCreate(
-                name="text-embedding-ada-002",
+                name="fixture-text-embedding",
                 family="openai",
                 is_deprecated=False,
                 open_source=False,
