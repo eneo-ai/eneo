@@ -583,12 +583,14 @@ class InitiateAuthResponse(BaseModel):
 
     authorization_url: str
     state: str  # Server-signed state (includes tenant context)
+    tenant_slug: str  # Echo back resolved tenant slug for frontend routing
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "authorization_url": "https://idp.example.com/authorize?client_id=abc123&...",
                 "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "tenant_slug": "example-tenant",
             }
         }
     }
@@ -987,6 +989,7 @@ async def initiate_auth(
     return InitiateAuthResponse(
         authorization_url=authorization_url,
         state=signed_state,
+        tenant_slug=tenant_obj.slug or tenant_obj.name,
     )
 
 

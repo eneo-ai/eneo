@@ -4224,7 +4224,8 @@ export interface components {
      * @description Response with IdP authorization URL.
      * @example {
      *   "authorization_url": "https://idp.example.com/authorize?client_id=abc123&...",
-     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     *   "tenant_slug": "example-tenant"
      * }
      */
     InitiateAuthResponse: {
@@ -4232,6 +4233,8 @@ export interface components {
       authorization_url: string;
       /** State */
       state: string;
+      /** Tenant Slug */
+      tenant_slug: string;
     };
     /** InputField */
     InputField: {
@@ -6291,6 +6294,19 @@ export interface components {
     /**
      * SetFederationRequest
      * @description Request model for setting tenant federation config.
+     * @example {
+     *   "allowed_domains": [
+     *     "sundsvall.se",
+     *     "sundsvall.gov.se"
+     *   ],
+     *   "canonical_public_origin": "https://sundsvall.eneo.se",
+     *   "client_id": "abc123-def456-ghi789",
+     *   "client_secret": "super-secret-value",
+     *   "discovery_endpoint": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration",
+     *   "provider": "entra_id",
+     *   "redirect_path": "/auth/callback",
+     *   "slug": "sundsvall"
+     * }
      */
     SetFederationRequest: {
       /**
@@ -6315,7 +6331,7 @@ export interface components {
       client_secret: string;
       /**
        * Allowed Domains
-       * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
+       * @description Email domains allowed for this tenant (e.g., ['sundsvall.se'])
        */
       allowed_domains?: string[];
       /**
@@ -6328,6 +6344,11 @@ export interface components {
        * @description Optional custom redirect path starting with /
        */
       redirect_path?: string | null;
+      /**
+       * Slug
+       * @description URL-safe tenant identifier for federation routing (e.g., 'sundsvall'). Required for tenant to appear in login selector. Auto-generated from tenant name if omitted. Must be lowercase alphanumeric + hyphens, max 63 chars.
+       */
+      slug?: string | null;
     };
     /**
      * SetFederationResponse
@@ -6345,6 +6366,11 @@ export interface components {
       masked_secret: string;
       /** Message */
       message: string;
+      /**
+       * Slug
+       * @description Effective slug (custom or auto-generated) for this tenant
+       */
+      slug?: string | null;
     };
     /** SettingsPublic */
     SettingsPublic: {
