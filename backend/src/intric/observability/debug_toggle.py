@@ -6,14 +6,17 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import aiohttp
 import redis.asyncio as aioredis
 
 from intric.main.config import get_loglevel
+from intric.main.logging import get_logger
 
 
 FLAG_KEY = "observability:oidc_debug"
@@ -236,3 +239,103 @@ async def is_debug_enabled(redis_client: Optional[aioredis.Redis]) -> bool:
 
 def get_cached_flag() -> DebugFlag:
     return _cache
+
+
+def create_oidc_trace_config(correlation_id: str) -> aiohttp.TraceConfig:
+    """
+    Create aiohttp TraceConfig with timing hooks for OIDC debug mode.
+
+    Logs detailed network timing information:
+    - DNS resolution time
+    - TCP connection time
+    - TLS handshake time
+    - Time to first byte (TTFB)
+    - Total request time
+
+    Args:
+        correlation_id: Request correlation ID for log tracing
+
+    Returns:
+        aiohttp.TraceConfig with debug logging hooks
+    """
+    trace_logger = get_logger(__name__)
+    trace_config = aiohttp.TraceConfig()
+
+    @trace_config.on_request_start.append
+    async def on_request_start(session, trace_config_ctx, params):
+        trace_config_ctx.start = time.perf_counter()
+        trace_config_ctx.trace_request_ctx = {
+            "correlation_id": correlation_id,
+            "method": params.method,
+            "url": str(params.url),
+        }
+        trace_logger.debug(
+            "[OIDC TRACE] Request started",
+            extra={
+                "event": "trace_request_start",
+                "correlation_id": correlation_id,
+                "method": params.method,
+                "url": str(params.url),
+            },
+        )
+
+    @trace_config.on_dns_resolvehost_start.append
+    async def on_dns_start(session, trace_config_ctx, params):
+        trace_config_ctx.dns_start = time.perf_counter()
+
+    @trace_config.on_dns_resolvehost_end.append
+    async def on_dns_end(session, trace_config_ctx, params):
+        dns_ms = int((time.perf_counter() - trace_config_ctx.dns_start) * 1000)
+        trace_logger.debug(
+            "[OIDC TRACE] DNS resolution completed",
+            extra={
+                "event": "trace_dns_resolved",
+                "correlation_id": correlation_id,
+                "dns_ms": dns_ms,
+                "host": params.host,
+            },
+        )
+
+    @trace_config.on_connection_create_start.append
+    async def on_connection_start(session, trace_config_ctx, params):
+        trace_config_ctx.connect_start = time.perf_counter()
+
+    @trace_config.on_connection_create_end.append
+    async def on_connection_end(session, trace_config_ctx, params):
+        connect_ms = int((time.perf_counter() - trace_config_ctx.connect_start) * 1000)
+        trace_logger.debug(
+            "[OIDC TRACE] TCP connection established",
+            extra={
+                "event": "trace_connection_established",
+                "correlation_id": correlation_id,
+                "tcp_connect_ms": connect_ms,
+            },
+        )
+
+    @trace_config.on_request_end.append
+    async def on_request_end(session, trace_config_ctx, params):
+        total_ms = int((time.perf_counter() - trace_config_ctx.start) * 1000)
+        trace_logger.debug(
+            "[OIDC TRACE] Request completed",
+            extra={
+                "event": "trace_request_completed",
+                "correlation_id": correlation_id,
+                "status": params.response.status,
+                "total_ms": total_ms,
+            },
+        )
+
+    @trace_config.on_request_exception.append
+    async def on_request_exception(session, trace_config_ctx, params):
+        total_ms = int((time.perf_counter() - trace_config_ctx.start) * 1000)
+        trace_logger.debug(
+            "[OIDC TRACE] Request failed with exception",
+            extra={
+                "event": "trace_request_exception",
+                "correlation_id": correlation_id,
+                "exception": params.exception.__class__.__name__,
+                "total_ms": total_ms,
+            },
+        )
+
+    return trace_config

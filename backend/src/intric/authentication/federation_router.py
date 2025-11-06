@@ -1,14 +1,17 @@
 """Public OIDC authentication endpoints for tenant-based federation."""
 
+import asyncio
 import base64
 import contextlib
 import json
+import random
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
+import aiohttp
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
@@ -34,6 +37,145 @@ router = APIRouter(
 
 JWKClient = _PyJWKClient
 PyJWKClient = JWKClient  # Backwards compatibility alias for tests/monkeypatching
+
+
+# HTTP timeout configuration for IdP requests
+# Per-endpoint timeouts based on expected response times
+OIDC_TIMEOUTS = {
+    "discovery": aiohttp.ClientTimeout(total=3.0, connect=1.5),
+    "jwks": aiohttp.ClientTimeout(total=3.0, connect=1.5),
+    "token": aiohttp.ClientTimeout(total=8.0, connect=2.0),
+}
+
+# Sensitive keys that should NEVER be logged
+SENSITIVE_KEYS = {
+    "client_secret",
+    "authorization_code",
+    "code",
+    "access_token",
+    "id_token",
+    "refresh_token",
+    "password",
+    "secret",
+}
+
+# Sensitive headers that should NOT be logged
+SENSITIVE_HEADERS = {
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+}
+
+
+def _classify_http_error(status_code: int) -> str:
+    """
+    Classify HTTP status code into error_kind for structured logging.
+
+    Args:
+        status_code: HTTP status code from IdP response
+
+    Returns:
+        Error kind string for logging and classification
+    """
+    if status_code == 502:
+        return "http_502_bad_gateway"
+    elif status_code == 503:
+        return "http_503_service_unavailable"
+    elif status_code == 504:
+        return "http_504_gateway_timeout"
+    elif status_code == 401:
+        return "http_401_unauthorized"
+    elif status_code == 403:
+        return "http_403_forbidden"
+    elif status_code == 429:
+        return "http_429_rate_limited"
+    elif 400 <= status_code < 500:
+        return "http_4xx_client_error"
+    elif 500 <= status_code < 600:
+        return "http_5xx_server_error"
+    else:
+        return "http_unknown"
+
+
+def _is_proxy_error(status_code: int, headers: dict) -> bool:
+    """
+    Detect if HTTP error is from proxy/load balancer vs IdP application.
+
+    Proxy errors typically return HTML error pages with specific server headers.
+
+    Args:
+        status_code: HTTP status code
+        headers: Response headers
+
+    Returns:
+        True if error appears to be from proxy, False if from IdP app
+    """
+    if status_code not in (502, 503, 504):
+        return False
+
+    content_type = headers.get("content-type", "").lower()
+    server = headers.get("server", "").lower()
+
+    # Proxy typically returns HTML error page
+    is_html = "text/html" in content_type
+    is_proxy_server = any(p in server for p in ["nginx", "apache", "haproxy", "envoy"])
+
+    return is_html or is_proxy_server
+
+
+def _classify_token_error(status_code: int, error_code: str) -> str:
+    """
+    Classify OAuth token exchange error.
+
+    Args:
+        status_code: HTTP status code
+        error_code: OAuth error code from response body
+
+    Returns:
+        Error kind string combining OAuth error and HTTP status
+    """
+    if error_code == "invalid_grant":
+        return "oauth_invalid_grant"
+    elif error_code == "invalid_client":
+        return "oauth_invalid_client"
+    elif error_code == "access_denied":
+        return "oauth_access_denied"
+    elif error_code == "unauthorized_client":
+        return "oauth_unauthorized_client"
+    elif error_code == "unsupported_grant_type":
+        return "oauth_unsupported_grant_type"
+    else:
+        return _classify_http_error(status_code)
+
+
+def _redact_sensitive_data(data: dict) -> dict:
+    """
+    Remove sensitive keys from dict for safe logging.
+
+    Args:
+        data: Dict potentially containing sensitive keys
+
+    Returns:
+        Dict with sensitive values redacted
+    """
+    return {
+        k: "***REDACTED***" if k.lower() in SENSITIVE_KEYS else v
+        for k, v in data.items()
+    }
+
+
+def _safe_headers(headers: dict) -> dict:
+    """
+    Remove sensitive headers for safe logging.
+
+    Args:
+        headers: Response headers dict
+
+    Returns:
+        Dict with sensitive headers removed
+    """
+    return {k: v for k, v in headers.items() if k.lower() not in SENSITIVE_HEADERS}
 
 
 @contextlib.asynccontextmanager
@@ -84,36 +226,294 @@ async def _log_oidc_debug(
     )
 
 
-async def fetch_discovery(discovery_url: str) -> dict:
+async def _make_idp_http_request(
+    method: str,
+    url: str,
+    endpoint_type: Literal["discovery", "token", "jwks"],
+    correlation_id: str,
+    tenant_id: UUID,
+    provider: str,
+    redis_client=None,
+    retry_enabled: bool = True,
+    **request_kwargs,
+) -> tuple[bytes, int, dict]:
     """
-    Fetch OIDC discovery document.
+    Make HTTP request to IdP with timeout, retry, and enhanced logging.
 
-    Simple fetch without caching - discovery endpoints are rarely called
-    and IdPs handle rate limiting themselves.
+    CRITICAL: Reads response body ONCE to avoid stream consumption errors.
+    Returns raw bytes for caller to parse.
+
+    Args:
+        method: HTTP method (GET, POST)
+        url: Full URL to request
+        endpoint_type: Type of endpoint (discovery, token, jwks)
+        correlation_id: Request correlation ID for tracing
+        tenant_id: Tenant UUID
+        provider: IdP provider name
+        redis_client: Redis client for debug mode check
+        retry_enabled: Enable retry for GET requests
+        **request_kwargs: Additional arguments for aiohttp (data, headers, etc.)
+
+    Returns:
+        Tuple of (response_body_bytes, status_code, headers_dict)
+
+    Raises:
+        aiohttp.ClientError: Network-level errors
+        asyncio.TimeoutError: Request timeout
+    """
+    timeout = OIDC_TIMEOUTS.get(endpoint_type, OIDC_TIMEOUTS["token"])
+    max_attempts = 3 if method == "GET" and retry_enabled else 1
+    backoff_delays = [0.2, 0.4, 0.8]  # seconds
+
+    debug_enabled = await is_debug_enabled(redis_client) if redis_client else False
+
+    for attempt in range(max_attempts):
+        attempt_start = time.perf_counter()
+
+        # Add jitter to backoff for retries
+        if attempt > 0:
+            jitter = random.uniform(-0.02, 0.02)
+            delay = backoff_delays[attempt - 1] + jitter
+            await asyncio.sleep(delay)
+            logger.debug(
+                "Retrying IdP HTTP request",
+                extra={
+                    "correlation_id": correlation_id,
+                    "endpoint_type": endpoint_type,
+                    "attempt": attempt + 1,
+                    "max_attempts": max_attempts,
+                    "backoff_ms": int(delay * 1000),
+                },
+            )
+
+        try:
+            # Use standard aiohttp_client for connection pooling
+            # Note: TraceConfig requires ClientSession at creation, so debug mode
+            # would need separate session. For now, keep it simple and add TraceConfig
+            # in Phase 2 if network-level diagnostics are needed.
+            async with aiohttp_client() as session:
+                async with session.request(
+                    method=method,
+                    url=url,
+                    timeout=timeout,
+                    **request_kwargs,
+                ) as response:
+                    # Read response body ONCE (critical for stream safety)
+                    body_bytes = await response.read()
+                    status_code = response.status
+                    headers = dict(response.headers)
+
+                    duration_ms = int((time.perf_counter() - attempt_start) * 1000)
+
+                    # Log successful or error responses
+                    log_extra = {
+                        "event": "idp_http_request",
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                        "provider": provider,
+                        "endpoint_type": endpoint_type,
+                        "http_method": method,
+                        "url": url,  # NOTE: client_id in query params is safe to log
+                        "http_status": status_code,
+                        "duration_ms": duration_ms,
+                        "content_type": headers.get("content-type", ""),
+                        "response_size_bytes": len(body_bytes),
+                        "attempt": attempt + 1,
+                    }
+
+                    if status_code >= 400:
+                        error_kind = _classify_http_error(status_code)
+                        proxy_generated = _is_proxy_error(status_code, headers)
+
+                        log_extra.update(
+                            {
+                                "error_kind": error_kind,
+                                "proxy_generated": proxy_generated,
+                            }
+                        )
+
+                        # Debug mode: log response body preview and headers
+                        if debug_enabled:
+                            body_preview = body_bytes[:2048].decode(
+                                "utf-8", errors="ignore"
+                            )
+                            safe_headers = _safe_headers(headers)
+                            log_extra.update(
+                                {
+                                    "response_body_preview": body_preview,
+                                    "response_headers": safe_headers,
+                                }
+                            )
+
+                        logger.error(f"IdP HTTP request failed: HTTP {status_code}", extra=log_extra)
+
+                        # Retry conditions for GET requests
+                        if (
+                            method == "GET"
+                            and status_code in (502, 503, 504, 429)
+                            and attempt < max_attempts - 1
+                        ):
+                            logger.warning(
+                                "IdP request failed, will retry",
+                                extra={
+                                    "correlation_id": correlation_id,
+                                    "http_status": status_code,
+                                    "attempt": attempt + 1,
+                                    "max_attempts": max_attempts,
+                                },
+                            )
+                            continue  # Retry
+
+                        # No retry, return error response
+                        return body_bytes, status_code, headers
+
+                    else:
+                        # Success (2xx)
+                        logger.info(
+                            "IdP HTTP request succeeded",
+                            extra=log_extra,
+                        )
+
+                        # Debug mode: log response preview
+                        if debug_enabled and endpoint_type in ("discovery", "jwks"):
+                            body_preview = body_bytes[:2048].decode(
+                                "utf-8", errors="ignore"
+                            )
+                            log_extra["response_body_preview"] = body_preview
+
+                            await _log_oidc_debug(
+                                redis_client=redis_client,
+                                correlation_id=correlation_id,
+                                event=f"{endpoint_type}.response_preview",
+                                body_preview=body_preview,
+                            )
+
+                        return body_bytes, status_code, headers
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            duration_ms = int((time.perf_counter() - attempt_start) * 1000)
+
+            # Classify error type for better diagnostics
+            if isinstance(e, asyncio.TimeoutError):
+                error_kind = "timeout_error"
+            elif isinstance(e, aiohttp.ClientConnectorSSLError):
+                error_kind = "tls_handshake_error"
+            elif isinstance(e, aiohttp.ClientConnectorError):
+                error_kind = "connection_error"
+            elif isinstance(e, aiohttp.ClientConnectionError):
+                error_kind = "connection_error"
+            else:
+                error_kind = "network_error"
+
+            logger.error(
+                f"IdP HTTP request {error_kind}: {e.__class__.__name__}",
+                extra={
+                    "event": "idp_http_request_failed",
+                    "correlation_id": correlation_id,
+                    "tenant_id": str(tenant_id),
+                    "provider": provider,
+                    "endpoint_type": endpoint_type,
+                    "http_method": method,
+                    "url": url,
+                    "error_kind": error_kind,
+                    "exception_class": e.__class__.__name__,
+                    "error_message": str(e),
+                    "duration_ms": duration_ms,
+                    "attempt": attempt + 1,
+                },
+            )
+
+            # Retry for GET on network errors
+            if method == "GET" and attempt < max_attempts - 1:
+                logger.warning(
+                    "Network error, will retry",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "exception": e.__class__.__name__,
+                        "attempt": attempt + 1,
+                    },
+                )
+                continue  # Retry
+
+            # Re-raise for caller to handle
+            raise
+
+    # Should not reach here, but for safety
+    raise Exception(f"Max retry attempts ({max_attempts}) exhausted")
+
+
+async def fetch_discovery(
+    discovery_url: str,
+    correlation_id: str,
+    tenant_id: UUID,
+    provider: str,
+    redis_client=None,
+) -> dict:
+    """
+    Fetch OIDC discovery document with timeout and enhanced error logging.
+
+    Uses wrapper function for timeout, retry, and enhanced logging.
+    Discovery endpoints are rarely called and IdPs handle rate limiting.
 
     Args:
         discovery_url: URL to OIDC discovery document
+        correlation_id: Request correlation ID for tracing
+        tenant_id: Tenant UUID
+        provider: IdP provider name
+        redis_client: Redis client for debug mode check
 
     Returns:
         dict: Discovery document JSON
 
     Raises:
         HTTPException 500: Failed to fetch discovery document
+        aiohttp.ClientError: Network errors
+        asyncio.TimeoutError: Request timeout
     """
-    async with aiohttp_client().get(discovery_url) as resp:
-        if resp.status != 200:
+    try:
+        body_bytes, status_code, headers = await _make_idp_http_request(
+            method="GET",
+            url=discovery_url,
+            endpoint_type="discovery",
+            correlation_id=correlation_id,
+            tenant_id=tenant_id,
+            provider=provider,
+            redis_client=redis_client,
+            retry_enabled=True,
+        )
+
+        if status_code != 200:
+            # Error already logged by wrapper
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch discovery document: HTTP {status_code}",
+            )
+
+        # Parse discovery document JSON
+        try:
+            return json.loads(body_bytes)
+        except json.JSONDecodeError as e:
             logger.error(
-                f"Failed to fetch OIDC discovery document: HTTP {resp.status}",
+                "Failed to parse discovery document JSON",
                 extra={
-                    "discovery_url": discovery_url,
-                    "http_status": resp.status,
+                    "correlation_id": correlation_id,
+                    "tenant_id": str(tenant_id),
+                    "error_kind": "discovery_parse_error",
+                    "error": str(e),
+                    "body_preview": body_bytes[:256].decode("utf-8", errors="ignore"),
                 },
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to fetch discovery document: HTTP {resp.status}",
+                detail="Discovery document is not valid JSON",
             )
-        return await resp.json()
+
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        # Network error already logged by wrapper
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch discovery document: network error",
+        )
 
 
 class TenantInfo(BaseModel):
@@ -490,7 +890,13 @@ async def initiate_auth(
     authorization_endpoint = federation_config.get("authorization_endpoint")
     if not authorization_endpoint and federation_config.get("discovery_endpoint"):
         try:
-            discovery = await fetch_discovery(federation_config["discovery_endpoint"])
+            discovery = await fetch_discovery(
+                discovery_url=federation_config["discovery_endpoint"],
+                correlation_id=correlation_id,
+                tenant_id=tenant_obj.id,
+                provider=federation_config.get("provider", "unknown"),
+                redis_client=redis_client,
+            )
             authorization_endpoint = discovery.get("authorization_endpoint")
         except HTTPException:
             raise  # Re-raise HTTP exceptions
@@ -501,6 +907,7 @@ async def initiate_auth(
                     "tenant_id": str(tenant_obj.id),
                     "discovery_endpoint": federation_config.get("discovery_endpoint"),
                     "error": str(e),
+                    "correlation_id": correlation_id,
                 },
             )
             raise HTTPException(
@@ -614,6 +1021,16 @@ async def auth_callback(
     except Exception:  # pragma: no cover - dependency injector safety net
         redis_client = None
 
+    # Log callback entry (before correlation_id is available)
+    logger.info(
+        "OIDC callback received",
+        extra={
+            "event": "oidc_callback_received",
+            "code_present": bool(callback.code),
+            "state_present": bool(callback.state),
+        },
+    )
+
     # Validate and decode state
     # Note: pyjwt.decode() automatically validates 'exp' claim and raises ExpiredSignatureError
     try:
@@ -660,6 +1077,17 @@ async def auth_callback(
     # Extract correlation ID from state (flows from initiate endpoint)
     correlation_id = state_payload.get("correlation_id", secrets.token_hex(8))
     set_request_context(correlation_id=correlation_id, tenant_slug=tenant_slug)
+
+    # Log state validation success
+    logger.info(
+        "State validation succeeded",
+        extra={
+            "event": "oidc_state_validated",
+            "tenant_id": str(tenant_id),
+            "tenant_slug": tenant_slug,
+            "correlation_id": correlation_id,
+        },
+    )
 
     await _log_oidc_debug(
         redis_client=redis_client,
@@ -1003,7 +1431,11 @@ async def auth_callback(
             if not token_endpoint and federation_config.get("discovery_endpoint"):
                 try:
                     discovery = await fetch_discovery(
-                        federation_config["discovery_endpoint"]
+                        discovery_url=federation_config["discovery_endpoint"],
+                        correlation_id=correlation_id,
+                        tenant_id=tenant_id,
+                        provider=federation_config.get("provider", "unknown"),
+                        redis_client=redis_client,
                     )
                     token_endpoint = discovery.get("token_endpoint")
                 except HTTPException as e:
@@ -1051,7 +1483,11 @@ async def auth_callback(
             if not token_auth_method and federation_config.get("discovery_endpoint"):
                 try:
                     discovery = await fetch_discovery(
-                        federation_config["discovery_endpoint"]
+                        discovery_url=federation_config["discovery_endpoint"],
+                        correlation_id=correlation_id,
+                        tenant_id=tenant_id,
+                        provider=federation_config.get("provider", "unknown"),
+                        redis_client=redis_client,
                     )
                     supported_methods = discovery.get(
                         "token_endpoint_auth_methods_supported"
@@ -1108,28 +1544,69 @@ async def auth_callback(
                     "tenant_id": str(tenant_id),
                     "token_endpoint": token_endpoint,
                     "auth_method": token_auth_method,
+                    "client_id": federation_config["client_id"],  # Safe to log
                     "correlation_id": correlation_id,
                 },
             )
 
-            async with aiohttp_client().post(
-                token_endpoint, data=token_data, headers=headers or None
-            ) as resp:
-                if resp.status != 200:
-                    # Capture IdP error response for debugging
-                    try:
-                        error_body = await resp.json()
-                    except Exception:
-                        error_body = await resp.text()
+            # Exchange authorization code for tokens
+            try:
+                body_bytes, status_code, response_headers = await _make_idp_http_request(
+                    method="POST",
+                    url=token_endpoint,
+                    endpoint_type="token",
+                    correlation_id=correlation_id,
+                    tenant_id=tenant_id,
+                    provider=federation_config.get("provider", "unknown"),
+                    redis_client=redis_client,
+                    retry_enabled=False,  # NEVER retry token POST (OAuth safety)
+                    data=token_data,
+                    headers=headers or None,
+                    allow_redirects=False,  # Token endpoint should NEVER redirect
+                )
 
+                # Check for unexpected redirects (3xx status codes)
+                if 300 <= status_code < 400:
                     logger.error(
-                        f"Token exchange failed: HTTP {resp.status}",
+                        "Unexpected redirect from token endpoint",
                         extra={
                             "tenant_id": str(tenant_id),
-                            "http_status": resp.status,
+                            "http_status": status_code,
                             "token_endpoint": token_endpoint,
-                            "error_response": error_body,  # IdP's actual error message
+                            "error_kind": "unexpected_redirect_token_endpoint",
+                            "location_header": response_headers.get("location"),
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Token endpoint configuration error: unexpected redirect",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
+                if status_code != 200:
+                    # Parse OAuth error response
+                    try:
+                        error_json = json.loads(body_bytes)
+                        error_code = error_json.get("error", "unknown")
+                        error_desc = error_json.get("error_description", "")[:256]  # Truncate
+                    except Exception:
+                        error_code = "parse_failed"
+                        error_desc = body_bytes[:256].decode("utf-8", errors="ignore")
+
+                    # Enhanced error logging with OAuth error details
+                    logger.error(
+                        f"Token exchange failed: HTTP {status_code}",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "http_status": status_code,
+                            "token_endpoint": token_endpoint,
+                            "idp_error_code": error_code,
+                            "idp_error_description": error_desc,
                             "auth_method": token_auth_method,
+                            "client_id": federation_config["client_id"],  # Safe to log
+                            "error_kind": _classify_token_error(status_code, error_code),
+                            "proxy_generated": _is_proxy_error(status_code, response_headers),
                             "correlation_id": correlation_id,
                         },
                     )
@@ -1138,7 +1615,45 @@ async def auth_callback(
                         detail="Failed to exchange authorization code for tokens",
                         headers={"X-Correlation-ID": correlation_id},
                     )
-                token_response = await resp.json()
+
+                # Parse token response JSON
+                try:
+                    token_response = json.loads(body_bytes)
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        "Token response is not valid JSON",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "error_kind": "token_response_parse_error",
+                            "content_type": response_headers.get("content-type"),
+                            "error": str(e),
+                            "body_preview": body_bytes[:256].decode("utf-8", errors="ignore"),
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Token endpoint returned invalid response",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                # Network error already logged by wrapper
+                logger.error(
+                    "Token exchange - network error",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "token_endpoint": token_endpoint,
+                        "error_kind": "network_error",
+                        "exception_class": e.__class__.__name__,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to exchange authorization code: network error",
+                    headers={"X-Correlation-ID": correlation_id},
+                )
 
             id_token = token_response.get("id_token")
             access_token = token_response.get("access_token")
@@ -1164,7 +1679,11 @@ async def auth_callback(
             if not jwks_uri and federation_config.get("discovery_endpoint"):
                 try:
                     discovery = await fetch_discovery(
-                        federation_config["discovery_endpoint"]
+                        discovery_url=federation_config["discovery_endpoint"],
+                        correlation_id=correlation_id,
+                        tenant_id=tenant_id,
+                        provider=federation_config.get("provider", "unknown"),
+                        redis_client=redis_client,
                     )
                     jwks_uri = discovery.get("jwks_uri")
                 except HTTPException as e:
@@ -1200,24 +1719,71 @@ async def auth_callback(
                 },
             )
 
+            # Try to decode ID token header for logging (non-fatal if fails)
+            kid = None
+            alg = None
             try:
+                unverified_header = pyjwt.get_unverified_header(id_token)
+                kid = unverified_header.get("kid")
+                alg = unverified_header.get("alg")
+
+                logger.debug(
+                    "ID token header decoded",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "kid": kid,
+                        "alg": alg,
+                        "correlation_id": correlation_id,
+                    },
+                )
+            except Exception:
+                # Header decoding is only for logging, don't fail if it doesn't work
+                # JWKClient will handle validation
+                pass
+
+            try:
+                # Fetch JWKS and extract signing key
                 jwk_client = JWKClient(jwks_uri)
                 signing_key = jwk_client.get_signing_key_from_jwt(
                     id_token
                 ).key  # Extract raw key from PyJWK wrapper
+
                 logger.debug(
-                    "JWKS fetched successfully",
+                    "JWKS fetched and signing key extracted",
                     extra={
                         "tenant_id": str(tenant_id),
+                        "kid": kid,
                         "correlation_id": correlation_id,
                     },
                 )
+            except pyjwt.exceptions.PyJWKClientError as e:
+                # JWKS fetch failed or kid not found
+                logger.error(
+                    "JWKS fetch failed or kid not found",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "jwks_uri": jwks_uri,
+                        "kid": kid,
+                        "error_kind": "jwks_fetch_failed",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to fetch JWKS or validate ID token signature",
+                    headers={"X-Correlation-ID": correlation_id},
+                )
             except Exception as e:
+                # Other errors (network, etc.)
                 logger.error(
                     "Failed to fetch JWKS or extract signing key",
                     extra={
                         "tenant_id": str(tenant_id),
                         "jwks_uri": jwks_uri,
+                        "kid": kid,
+                        "error_kind": "jwks_unknown_error",
                         "error": str(e),
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
@@ -1237,6 +1803,20 @@ async def auth_callback(
                 signing_algos=["RS256"],
                 client_id=federation_config["client_id"],
                 correlation_id=correlation_id,
+            )
+
+            # Log ID token validation success
+            logger.info(
+                "ID token validation succeeded",
+                extra={
+                    "event": "id_token_validated",
+                    "tenant_id": str(tenant_id),
+                    "iss": payload.get("iss"),
+                    "aud": payload.get("aud"),
+                    "kid": kid if "kid" in locals() else None,
+                    "alg": alg if "alg" in locals() else None,
+                    "correlation_id": correlation_id,
+                },
             )
 
             # Extract email from claims
@@ -1357,6 +1937,15 @@ async def auth_callback(
                         headers={"X-Correlation-ID": correlation_id},
                     )
                 else:
+                    logger.info(
+                        "Email domain validation succeeded",
+                        extra={
+                            "event": "email_domain_validated",
+                            "tenant_id": str(tenant_id),
+                            "email_domain": email_domain,
+                            "correlation_id": correlation_id,
+                        },
+                    )
                     await _log_oidc_debug(
                         redis_client=redis_client,
                         correlation_id=correlation_id,
@@ -1417,6 +2006,18 @@ async def auth_callback(
                     detail="Access denied for this organization.",
                     headers={"X-Correlation-ID": correlation_id},
                 )
+
+            # Log user lookup and tenant validation success
+            logger.info(
+                "User lookup and tenant validation succeeded",
+                extra={
+                    "event": "user_validated",
+                    "tenant_id": str(tenant_id),
+                    "user_id": str(user.id),
+                    "email_domain": email.split("@")[1] if "@" in email else "unknown",
+                    "correlation_id": correlation_id,
+                },
+            )
 
             # Create JWT token for existing user
             access_token_response = auth_service.create_access_token_for_user(user)

@@ -846,6 +846,9 @@ def oidc_mock(monkeypatch):
             def __init__(self, payload: dict, status: int = 200):
                 self._payload = payload
                 self.status = status
+                self.headers = {"content-type": "application/json"}
+                # Pre-encode body bytes for read() method (new wrapper requirement)
+                self._body_bytes = json.dumps(self._payload).encode("utf-8")
 
             async def __aenter__(self):
                 return self
@@ -859,7 +862,21 @@ def oidc_mock(monkeypatch):
             async def text(self):
                 return json.dumps(self._payload)
 
+            async def read(self):
+                """Return response body as bytes (required by new wrapper function)."""
+                return self._body_bytes
+
         class _FakeClient:
+            """Fake aiohttp client that supports async context manager protocol."""
+
+            async def __aenter__(self):
+                """Support 'async with aiohttp_client() as session' pattern."""
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                """Support async context manager exit."""
+                return False  # Don't suppress exceptions
+
             def get(self, url: str, **kwargs):
                 """Accept headers, params, timeout, and other kwargs for compatibility."""
                 request_log.append(("GET", url))
@@ -879,6 +896,15 @@ def oidc_mock(monkeypatch):
                     raise AssertionError(f"Unmocked token request: {url} code={code}")
                 payload, status = token_map[key]
                 return _FakeResponse(payload, status)
+
+            def request(self, method: str, url: str, **kwargs):
+                """Support generic request() method (used by new wrapper function)."""
+                if method.upper() == "GET":
+                    return self.get(url, **kwargs)
+                elif method.upper() == "POST":
+                    return self.post(url, **kwargs)
+                else:
+                    raise AssertionError(f"Unsupported HTTP method: {method}")
 
         fake_client = _FakeClient()
 
