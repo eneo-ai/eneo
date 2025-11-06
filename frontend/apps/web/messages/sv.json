@@ -930,6 +930,7 @@
   "disable_model": "Inaktivera modell",
   "enable_model": "Aktivera modell",
   "model_available_on_request": "Denna modell är tillgänglig på begäran.",
+  "api_credentials_required_for_provider": "API-uppgifter krävs för denna leverantör",
   "toggle_to_disable_model": "Klicka för att inaktivera modell",
   "toggle_to_enable_model": "Klicka för att aktivera modell",
   "enable_completion_model_for_assistants": "Aktivera minst en kompletteringsmodell för att kunna använda assistenter",

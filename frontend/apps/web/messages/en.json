@@ -934,6 +934,7 @@
   "disable_model": "Disable model",
   "enable_model": "Enable model",
   "model_available_on_request": "This model is available on request.",
+  "api_credentials_required_for_provider": "API credentials required for this provider",
   "toggle_to_disable_model": "Toggle to disable model",
   "toggle_to_enable_model": "Toggle to enable model",
   "enable_completion_model_for_assistants": "Enable at least one completion model to be able to use assistants",
