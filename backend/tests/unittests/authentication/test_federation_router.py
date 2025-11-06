@@ -102,16 +102,23 @@ class FakeSession:
 
 
 class FakeAioHttpClient:
-    """Fake aiohttp client context manager."""
+    """Fake aiohttp client that supports both context manager and direct usage."""
 
     def __init__(self, response: FakeResponse):
         self._response = response
+        self._session = FakeSession(response)
 
     async def __aenter__(self):
-        return FakeSession(self._response)
+        """Support 'async with aiohttp_client() as session' pattern."""
+        return self._session
 
     async def __aexit__(self, exc_type, exc, tb):  # noqa: ARG002
+        """Support context manager exit (doesn't close for singleton compatibility)."""
         return False
+
+    def request(self, method: str, url: str, **kwargs):  # noqa: ARG002
+        """Support direct 'client.request()' call (new wrapper uses this)."""
+        return self._session.request(method, url, **kwargs)
 
     def post(self, *args, **kwargs):  # noqa: ARG002
         """Legacy method for backwards compatibility."""
@@ -607,3 +614,145 @@ def test_safe_headers_proxy_authorization():
 
     assert "proxy-authorization" not in safe
     assert safe["via"] == "1.1 proxy"
+
+
+# Critical bug-prevention tests
+
+
+@pytest.mark.asyncio
+async def test_oauth_error_parameter_access_denied(monkeypatch):
+    """Test OAuth error parameter detection (access_denied)."""
+    dummy_settings = DummySettings()
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    tenant_id = uuid4()
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Test Tenant",
+        display_name="Test Tenant",
+        slug="test",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "auth0",
+            "client_id": "test",
+            "client_secret": "test",
+            "discovery_endpoint": "https://test.auth0.com/.well-known/openid-configuration"
+        },
+    )
+
+    redis_client = FakeRedis()
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(None),  # Won't reach user lookup
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+
+    # Create valid state
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": "test",
+        "nonce": "nonce123",
+        "redirect_uri": "http://localhost/callback",
+        "correlation_id": "test-corr-id",
+        "exp": int(time.time()) + 600,
+        "iat": int(time.time()),
+    }
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    # Callback with OAuth error parameters (IdP rejected the request)
+    callback = federation_router.CallbackRequest(
+        code=None,  # No code when error present
+        state=signed_state,
+        error="access_denied",  # User canceled login
+        error_description="User denied access"
+    )
+
+    # Should raise HTTP 400 with user-friendly message
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.auth_callback(callback, container=container)
+
+    assert exc.value.status_code == 400
+    assert "canceled" in exc.value.detail.lower() or "denied" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_missing_code_without_error(monkeypatch):
+    """Test missing authorization code is detected when no OAuth error present."""
+    dummy_settings = DummySettings()
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    tenant_id = uuid4()
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Test Tenant",
+        display_name="Test Tenant",
+        slug="test",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "auth0",
+            "client_id": "test",
+            "client_secret": "test",
+            "discovery_endpoint": "https://test.auth0.com/.well-known/openid-configuration"
+        },
+    )
+
+    redis_client = FakeRedis()
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(None),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": "test",
+        "nonce": "nonce123",
+        "redirect_uri": "http://localhost/callback",
+        "correlation_id": "test-corr-id",
+        "exp": int(time.time()) + 600,
+        "iat": int(time.time()),
+    }
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    # Malformed callback: no code, no error (should not happen but need to handle)
+    callback = federation_router.CallbackRequest(
+        code=None,
+        state=signed_state,
+        error=None
+    )
+
+    # Should raise HTTP 400 for missing code
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.auth_callback(callback, container=container)
+
+    assert exc.value.status_code == 400
+    assert "code" in exc.value.detail.lower() or "missing" in exc.value.detail.lower()
+
+
+def test_code_fingerprinting():
+    """Test code fingerprinting produces consistent hash."""
+    code = "test_authorization_code_12345"
+    fingerprint = federation_router._fingerprint_code(code)
+
+    # Should be in format sha256:XXXX...
+    assert fingerprint.startswith("sha256:")
+    assert len(fingerprint) == 19  # "sha256:" + 12 hex chars
+
+    # Same code produces same fingerprint
+    fingerprint2 = federation_router._fingerprint_code(code)
+    assert fingerprint == fingerprint2
+
+    # Different code produces different fingerprint
+    different_code = "different_code"
+    fingerprint3 = federation_router._fingerprint_code(different_code)
+    assert fingerprint != fingerprint3

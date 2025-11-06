@@ -4,10 +4,11 @@
 */
 
 import { env } from "$env/dynamic/private";
-import { setFrontendAuthCookie } from "./auth.server";
+import { getCorrelationId, isDebugMode, sanitizeHeaders, setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
 
 export async function loginWithOidc(code: string, state: string): Promise<boolean> {
+  const startTime = performance.now();
   if (!env.INTRIC_BACKEND_URL) {
     console.error("[OIDC] Missing INTRIC_BACKEND_URL configuration");
     return false;
@@ -18,7 +19,8 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
   console.debug("[OIDC] Starting backend callback", {
     hasCode: !!code,
     hasState: !!state,
-    backendUrl
+    backendUrl,
+    timestamp: new Date().toISOString()
   });
 
   try {
@@ -42,16 +44,30 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
         errorDetails = responseText;
       }
 
-      const correlationId = response.headers.get("X-Correlation-ID") || undefined;
+      const correlationId = getCorrelationId(response) || undefined;
+      const errorKind = response.headers.get("x-error-kind") || undefined;
       const rawDetail = typeof errorDetails === 'object' && errorDetails?.detail
         ? errorDetails.detail
         : undefined;
+
+      // Debug mode: Log response metadata
+      if (isDebugMode()) {
+        console.debug("[OIDC] Response metadata (debug)", {
+          correlationId,
+          errorKind,
+          status: response.status,
+          contentType: response.headers.get("content-type"),
+          responseSize: response.headers.get("content-length"),
+          headers: sanitizeHeaders(response.headers)
+        });
+      }
 
       console.error("[OIDC] Backend callback failed", {
         status: response.status,
         statusText: response.statusText,
         error: errorDetails,
-        correlationId
+        correlationId,
+        errorKind
       });
 
       // Map status codes to specific error codes and throw LoginError
@@ -114,7 +130,8 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
       });
     }
 
-    console.debug("[OIDC] Backend callback successful");
+    const duration = Math.round(performance.now() - startTime);
+    console.debug("[OIDC] Backend callback successful", { durationMs: duration });
 
     const data = await response.json();
     const { access_token } = data;
@@ -127,15 +144,19 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
     // Set frontend auth cookie (backend returns "access_token", frontend calls it "id_token")
     await setFrontendAuthCookie({ id_token: access_token });
 
-    console.debug("[OIDC] Login complete, auth cookie set");
+    console.debug("[OIDC] Login complete, auth cookie set", { totalDurationMs: Math.round(performance.now() - startTime) });
     return true;
   } catch (error) {
+    const duration = Math.round(performance.now() - startTime);
+
     // Re-throw LoginError so it propagates to the callback handler with metadata
     if (error instanceof LoginError) {
+      console.error("[OIDC] Login failed (LoginError)", { durationMs: duration, code: error.code });
       throw error;
     }
 
     console.error("[OIDC] Unexpected error during callback", {
+      durationMs: duration,
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
     });

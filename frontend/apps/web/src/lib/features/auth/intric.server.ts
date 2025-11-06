@@ -3,7 +3,7 @@
  * to be registered directly in intric with username and password.
  */
 
-import { setFrontendAuthCookie } from "./auth.server";
+import { getCorrelationId, setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
 import { env } from "$env/dynamic/private";
 
@@ -33,7 +33,7 @@ export async function loginWithIntric(
   });
 
   // Extract correlation ID from response headers (available on both success and failure)
-  const correlationId = response.headers.get("X-Correlation-ID") || null;
+  const correlationId = getCorrelationId(response);
 
   if (!response.ok) {
     console.error(

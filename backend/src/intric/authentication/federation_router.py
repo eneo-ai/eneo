@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import random
 import secrets
@@ -178,6 +179,23 @@ def _safe_headers(headers: dict) -> dict:
     return {k: v for k, v in headers.items() if k.lower() not in SENSITIVE_HEADERS}
 
 
+def _fingerprint_code(code: str) -> str:
+    """
+    Create SHA256 fingerprint of authorization code for logging.
+
+    Never logs the full code value (security risk). Creates a hash
+    that can be used to correlate requests without exposing the secret.
+
+    Args:
+        code: Authorization code from IdP
+
+    Returns:
+        SHA256 hash prefix (first 12 chars) in format "sha256:abc123..."
+    """
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    return f"sha256:{code_hash[:12]}"
+
+
 @contextlib.asynccontextmanager
 async def _cleanup_state_cache(
     redis_client, state_key: str, *, tenant_id: UUID | None, correlation_id: str
@@ -287,108 +305,109 @@ async def _make_idp_http_request(
             )
 
         try:
-            # Use standard aiohttp_client for connection pooling
-            # Note: TraceConfig requires ClientSession at creation, so debug mode
-            # would need separate session. For now, keep it simple and add TraceConfig
-            # in Phase 2 if network-level diagnostics are needed.
-            async with aiohttp_client() as session:
-                async with session.request(
-                    method=method,
-                    url=url,
-                    timeout=timeout,
-                    **request_kwargs,
-                ) as response:
-                    # Read response body ONCE (critical for stream safety)
-                    body_bytes = await response.read()
-                    status_code = response.status
-                    headers = dict(response.headers)
+            # CRITICAL: Get singleton session directly (NOT as context manager)
+            # Using `async with aiohttp_client() as session` would close the singleton!
+            # The old code used aiohttp_client().post() which doesn't close the session.
+            # We only use async with on the RESPONSE level, not session level.
+            session = aiohttp_client()
+            if session is None:
+                raise RuntimeError("aiohttp ClientSession not started")
 
-                    duration_ms = int((time.perf_counter() - attempt_start) * 1000)
+            async with session.request(
+                method=method,
+                url=url,
+                timeout=timeout,
+                **request_kwargs,
+            ) as response:
+                # Read response body ONCE (critical for stream safety)
+                body_bytes = await response.read()
+                status_code = response.status
+                headers = dict(response.headers)
 
-                    # Log successful or error responses
-                    log_extra = {
-                        "event": "idp_http_request",
-                        "correlation_id": correlation_id,
-                        "tenant_id": str(tenant_id),
-                        "provider": provider,
-                        "endpoint_type": endpoint_type,
-                        "http_method": method,
-                        "url": url,  # NOTE: client_id in query params is safe to log
-                        "http_status": status_code,
-                        "duration_ms": duration_ms,
-                        "content_type": headers.get("content-type", ""),
-                        "response_size_bytes": len(body_bytes),
-                        "attempt": attempt + 1,
+            duration_ms = int((time.perf_counter() - attempt_start) * 1000)
+
+            # Log successful or error responses
+            log_extra = {
+                "event": "idp_http_request",
+                "correlation_id": correlation_id,
+                "tenant_id": str(tenant_id),
+                "provider": provider,
+                "endpoint_type": endpoint_type,
+                "http_method": method,
+                "url": url,  # NOTE: client_id in query params is safe to log
+                "http_status": status_code,
+                "duration_ms": duration_ms,
+                "content_type": headers.get("content-type", ""),
+                "response_size_bytes": len(body_bytes),
+                "attempt": attempt + 1,
+            }
+
+            if status_code >= 400:
+                error_kind = _classify_http_error(status_code)
+                proxy_generated = _is_proxy_error(status_code, headers)
+
+                log_extra.update(
+                    {
+                        "error_kind": error_kind,
+                        "proxy_generated": proxy_generated,
                     }
+                )
 
-                    if status_code >= 400:
-                        error_kind = _classify_http_error(status_code)
-                        proxy_generated = _is_proxy_error(status_code, headers)
+                # Debug mode: log response body preview and headers
+                if debug_enabled:
+                    body_preview = body_bytes[:2048].decode("utf-8", errors="ignore")
+                    safe_headers = _safe_headers(headers)
+                    log_extra.update(
+                        {
+                            "response_body_preview": body_preview,
+                            "response_headers": safe_headers,
+                        }
+                    )
 
-                        log_extra.update(
-                            {
-                                "error_kind": error_kind,
-                                "proxy_generated": proxy_generated,
-                            }
-                        )
+                logger.error(
+                    f"IdP HTTP request failed: HTTP {status_code}", extra=log_extra
+                )
 
-                        # Debug mode: log response body preview and headers
-                        if debug_enabled:
-                            body_preview = body_bytes[:2048].decode(
-                                "utf-8", errors="ignore"
-                            )
-                            safe_headers = _safe_headers(headers)
-                            log_extra.update(
-                                {
-                                    "response_body_preview": body_preview,
-                                    "response_headers": safe_headers,
-                                }
-                            )
+                # Retry conditions for GET requests
+                if (
+                    method == "GET"
+                    and status_code in (502, 503, 504, 429)
+                    and attempt < max_attempts - 1
+                ):
+                    logger.warning(
+                        "IdP request failed, will retry",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "http_status": status_code,
+                            "attempt": attempt + 1,
+                            "max_attempts": max_attempts,
+                        },
+                    )
+                    continue  # Retry
 
-                        logger.error(f"IdP HTTP request failed: HTTP {status_code}", extra=log_extra)
+                # No retry, return error response
+                return body_bytes, status_code, headers
 
-                        # Retry conditions for GET requests
-                        if (
-                            method == "GET"
-                            and status_code in (502, 503, 504, 429)
-                            and attempt < max_attempts - 1
-                        ):
-                            logger.warning(
-                                "IdP request failed, will retry",
-                                extra={
-                                    "correlation_id": correlation_id,
-                                    "http_status": status_code,
-                                    "attempt": attempt + 1,
-                                    "max_attempts": max_attempts,
-                                },
-                            )
-                            continue  # Retry
+            else:
+                # Success (2xx)
+                logger.info(
+                    "IdP HTTP request succeeded",
+                    extra=log_extra,
+                )
 
-                        # No retry, return error response
-                        return body_bytes, status_code, headers
+                # Debug mode: log response preview
+                if debug_enabled and endpoint_type in ("discovery", "jwks"):
+                    body_preview = body_bytes[:2048].decode("utf-8", errors="ignore")
+                    log_extra["response_body_preview"] = body_preview
 
-                    else:
-                        # Success (2xx)
-                        logger.info(
-                            "IdP HTTP request succeeded",
-                            extra=log_extra,
-                        )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event=f"{endpoint_type}.response_preview",
+                        body_preview=body_preview,
+                    )
 
-                        # Debug mode: log response preview
-                        if debug_enabled and endpoint_type in ("discovery", "jwks"):
-                            body_preview = body_bytes[:2048].decode(
-                                "utf-8", errors="ignore"
-                            )
-                            log_extra["response_body_preview"] = body_preview
-
-                            await _log_oidc_debug(
-                                redis_client=redis_client,
-                                correlation_id=correlation_id,
-                                event=f"{endpoint_type}.response_preview",
-                                body_preview=body_preview,
-                            )
-
-                        return body_bytes, status_code, headers
+                return body_bytes, status_code, headers
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             duration_ms = int((time.perf_counter() - attempt_start) * 1000)
@@ -576,11 +595,13 @@ class InitiateAuthResponse(BaseModel):
 
 
 class CallbackRequest(BaseModel):
-    """OIDC callback with authorization code."""
+    """OIDC callback with authorization code or error from IdP."""
 
-    code: str
+    code: Optional[str] = None
     state: str
     code_verifier: Optional[str] = None  # For PKCE (future use)
+    error: Optional[str] = None  # OAuth error code from IdP
+    error_description: Optional[str] = None  # OAuth error description from IdP
 
     model_config = {
         "json_schema_extra": {
@@ -1028,8 +1049,58 @@ async def auth_callback(
             "event": "oidc_callback_received",
             "code_present": bool(callback.code),
             "state_present": bool(callback.state),
+            "error_present": bool(callback.error),
         },
     )
+
+    # Check if IdP returned OAuth error parameters (e.g., redirect_uri mismatch, user canceled)
+    if callback.error:
+        error_desc = callback.error_description or ""
+        logger.error(
+            f"IdP returned error during authorization: {callback.error}",
+            extra={
+                "event": "oidc_callback_idp_error",
+                "idp_error_code": callback.error,
+                "idp_error_description": error_desc[:256],  # Truncate for safety
+                "state_present": bool(callback.state),
+            },
+        )
+
+        # Map common OAuth errors to user-friendly messages
+        if callback.error == "access_denied":
+            user_message = "Login was canceled or access was denied."
+        elif callback.error == "invalid_request":
+            user_message = f"Configuration error: {error_desc[:100]}"
+        elif callback.error == "unauthorized_client":
+            user_message = "This application is not authorized."
+        elif callback.error == "server_error":
+            user_message = "Identity provider encountered an error. Please try again."
+        else:
+            user_message = f"Authentication failed: {callback.error}"
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=user_message,
+            headers={
+                "X-Error-Kind": f"idp_{callback.error}",
+                "X-IdP-Error-Code": callback.error,
+            },
+        )
+
+    # Validate code is present when no error
+    if not callback.code:
+        logger.error(
+            "OIDC callback missing authorization code",
+            extra={
+                "event": "oidc_callback_missing_code",
+                "state_present": bool(callback.state),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Authorization code is missing. Please try logging in again.",
+            headers={"X-Error-Kind": "missing_authorization_code"},
+        )
 
     # Validate and decode state
     # Note: pyjwt.decode() automatically validates 'exp' claim and raises ExpiredSignatureError
@@ -1046,6 +1117,7 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Authorization session expired. Please try logging in again.",
+            headers={"X-Error-Kind": "state_expired"},
         )
     except pyjwt.PyJWTError as e:
         # Note: correlation_id not available yet (state decode failed)
@@ -1055,7 +1127,8 @@ async def auth_callback(
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid state parameter",
+            detail="Invalid state parameter. Please try logging in again.",
+            headers={"X-Error-Kind": "invalid_state"},
         )
 
     state_nonce = state_payload.get("nonce")
@@ -1104,7 +1177,9 @@ async def auth_callback(
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
-                event="callback.state_cache_hit" if cached_state else "callback.state_cache_miss",
+                event="callback.state_cache_hit"
+                if cached_state
+                else "callback.state_cache_miss",
                 tenant_slug=tenant_slug,
             )
         except Exception as exc:  # pragma: no cover - best effort cache fetch
@@ -1195,7 +1270,10 @@ async def auth_callback(
                     )
 
                 expected_tenant_slug = (cached_state.get("tenant_slug") or "").lower()
-                if expected_tenant_slug and expected_tenant_slug != (tenant_slug or "").lower():
+                if (
+                    expected_tenant_slug
+                    and expected_tenant_slug != (tenant_slug or "").lower()
+                ):
                     logger.error(
                         "OIDC state tenant slug mismatch detected",
                         extra={
@@ -1489,9 +1567,9 @@ async def auth_callback(
                         provider=federation_config.get("provider", "unknown"),
                         redis_client=redis_client,
                     )
-                    supported_methods = discovery.get(
-                        "token_endpoint_auth_methods_supported"
-                    ) or []
+                    supported_methods = (
+                        discovery.get("token_endpoint_auth_methods_supported") or []
+                    )
                     token_auth_method = _select_auth_method(supported_methods)
                 except HTTPException:
                     # Discovery failure handled earlier when resolving endpoints; fall back
@@ -1520,9 +1598,7 @@ async def auth_callback(
             headers: dict[str, str] = {}
 
             if token_auth_method == "client_secret_basic":
-                credentials = (
-                    f"{federation_config['client_id']}:{federation_config['client_secret']}"
-                )
+                credentials = f"{federation_config['client_id']}:{federation_config['client_secret']}"
                 basic_token = base64.b64encode(credentials.encode()).decode()
                 headers["Authorization"] = f"Basic {basic_token}"
                 token_data.pop("client_secret", None)
@@ -1549,9 +1625,44 @@ async def auth_callback(
                 },
             )
 
+            # Debug mode: Log token request parameters for diagnosing config issues
+            if redis_client and await is_debug_enabled(redis_client) and callback.code:
+                # Create sanitized view of request parameters
+                # Note: Only log if code exists (it's Optional now for OAuth error callbacks)
+                code_fingerprint = _fingerprint_code(callback.code)
+                token_request_params = {
+                    "grant_type": token_data.get("grant_type"),
+                    "redirect_uri": token_data.get("redirect_uri"),
+                    "client_id": token_data.get("client_id"),
+                    "auth_method": token_auth_method,
+                    "code_fingerprint": code_fingerprint,  # Hash only, not full code
+                    "request_headers_present": list(headers.keys()) if headers else [],
+                }
+
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="token_exchange.request_params",
+                    tenant_slug=tenant_slug,
+                    **token_request_params,
+                )
+
+                logger.debug(
+                    "Token exchange request parameters (debug mode)",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                        **token_request_params,
+                    },
+                )
+
             # Exchange authorization code for tokens
             try:
-                body_bytes, status_code, response_headers = await _make_idp_http_request(
+                (
+                    body_bytes,
+                    status_code,
+                    response_headers,
+                ) = await _make_idp_http_request(
                     method="POST",
                     url=token_endpoint,
                     endpoint_type="token",
@@ -1589,7 +1700,9 @@ async def auth_callback(
                     try:
                         error_json = json.loads(body_bytes)
                         error_code = error_json.get("error", "unknown")
-                        error_desc = error_json.get("error_description", "")[:256]  # Truncate
+                        error_desc = error_json.get("error_description", "")[
+                            :256
+                        ]  # Truncate
                     except Exception:
                         error_code = "parse_failed"
                         error_desc = body_bytes[:256].decode("utf-8", errors="ignore")
@@ -1605,15 +1718,24 @@ async def auth_callback(
                             "idp_error_description": error_desc,
                             "auth_method": token_auth_method,
                             "client_id": federation_config["client_id"],  # Safe to log
-                            "error_kind": _classify_token_error(status_code, error_code),
-                            "proxy_generated": _is_proxy_error(status_code, response_headers),
+                            "error_kind": _classify_token_error(
+                                status_code, error_code
+                            ),
+                            "proxy_generated": _is_proxy_error(
+                                status_code, response_headers
+                            ),
                             "correlation_id": correlation_id,
                         },
                     )
+                    error_kind = _classify_token_error(status_code, error_code)
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Failed to exchange authorization code for tokens",
-                        headers={"X-Correlation-ID": correlation_id},
+                        headers={
+                            "X-Correlation-ID": correlation_id,
+                            "X-Error-Kind": error_kind,
+                            "X-IdP-Error-Code": error_code,
+                        },
                     )
 
                 # Parse token response JSON
@@ -1627,7 +1749,9 @@ async def auth_callback(
                             "error_kind": "token_response_parse_error",
                             "content_type": response_headers.get("content-type"),
                             "error": str(e),
-                            "body_preview": body_bytes[:256].decode("utf-8", errors="ignore"),
+                            "body_preview": body_bytes[:256].decode(
+                                "utf-8", errors="ignore"
+                            ),
                             "correlation_id": correlation_id,
                         },
                     )

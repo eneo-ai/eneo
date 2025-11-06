@@ -31,6 +31,13 @@ def get_application():
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-Correlation-ID",
+            "X-Error-Kind",
+            "X-IdP-Error-Code",
+            "Content-Type",
+            "X-Debug-Mode",
+        ],
         callback=get_origin,
     )
 
