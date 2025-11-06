@@ -8,5 +8,5 @@ export const SharepointIntegrationData: IntegrationData = {
   displayName: "Sharepoint",
   importHint: "Import a site from Sharepoint",
   ImportDialog: SharepointImportDialog,
-  previewLinkLabel: "Open in Sharepoint"
+  previewLinkLabel: "open_in_sharepoint"
 };

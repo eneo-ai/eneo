@@ -65,6 +65,9 @@ class IntegrationKnowledgeService:
         space_id: UUID,
         key: str,
         url: str,
+        folder_id: str = None,
+        folder_path: str = None,
+        selected_item_type: str = None,
     ) -> IntegrationKnowledge:
         space = await self.space_repo.one(id=space_id)
         if not space.is_embedding_model_in_space(embedding_model_id=embedding_model_id):
@@ -81,6 +84,9 @@ class IntegrationKnowledgeService:
             tenant_id=self.user.tenant_id,
             url=url,
             site_id=site_id_value,
+            folder_id=folder_id,
+            folder_path=folder_path,
+            selected_item_type=selected_item_type,
         )
         knowledge = await self.integration_knowledge_repo.add(obj=obj)
 
@@ -111,17 +117,25 @@ class IntegrationKnowledgeService:
                     token_id=token.id,
                     integration_knowledge_id=knowledge.id,
                     site_id=key,
+                    folder_id=folder_id,
+                    folder_path=folder_path,
                 ),
             )
+            # Register webhooks for both full-site and folder/file-level syncs
+            # For folder-level: subscribes to specific folder and its children
+            # For full-site: subscribes to entire drive root
+            logger.info("Starting subscription registration for knowledge %s (folder_id=%s)", knowledge.id, knowledge.folder_id)
             try:
                 knowledge = await self.sharepoint_subscription_service.ensure_subscription(
                     token=token, knowledge=knowledge
                 )
+                logger.info("Successfully registered subscription for knowledge %s", knowledge.id)
             except Exception as exc:
                 logger.warning(
                     "Failed to register SharePoint subscription for knowledge %s: %s",
                     knowledge.id,
                     exc,
+                    exc_info=True
                 )
         else:
             raise ValueError("Unknown integration type")

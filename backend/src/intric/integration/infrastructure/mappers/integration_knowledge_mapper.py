@@ -31,6 +31,9 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
             "sharepoint_subscription_id": entity.sharepoint_subscription_id,
             "sharepoint_subscription_expires_at": entity.sharepoint_subscription_expires_at,
             "delta_token": entity.delta_token,
+            "folder_id": entity.folder_id,
+            "folder_path": entity.folder_path,
+            "selected_item_type": entity.selected_item_type,
         }
 
     def to_entity(

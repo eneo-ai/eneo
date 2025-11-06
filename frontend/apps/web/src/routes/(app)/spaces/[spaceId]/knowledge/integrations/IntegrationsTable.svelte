@@ -72,9 +72,12 @@
       accessor: (item) => item,
       header: m.link(),
       cell: (item) => {
+        const labelKey = integrationData[item.value.integration_type].previewLinkLabel;
+        // Get the translated label from the message system
+        const translatedLabel = m[labelKey as keyof typeof m]?.() ?? labelKey;
         return createRender(Table.ButtonCell, {
           link: item.value.url ?? "",
-          label: integrationData[item.value.integration_type].previewLinkLabel,
+          label: translatedLabel,
           linkIsExternal: true
         });
       }

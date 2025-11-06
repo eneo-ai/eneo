@@ -31,6 +31,9 @@ class IntegrationKnowledge(Entity):
         sharepoint_subscription_id: str | None = None,
         sharepoint_subscription_expires_at: datetime | None = None,
         delta_token: str | None = None,
+        folder_id: str | None = None,
+        folder_path: str | None = None,
+        selected_item_type: str | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.name = name
@@ -46,6 +49,9 @@ class IntegrationKnowledge(Entity):
         self.sharepoint_subscription_id = sharepoint_subscription_id
         self.sharepoint_subscription_expires_at = sharepoint_subscription_expires_at
         self.delta_token = delta_token
+        self.folder_id = folder_id
+        self.folder_path = folder_path
+        self.selected_item_type = selected_item_type or "site_root"
 
     @property
     def integration_type(self) -> str:

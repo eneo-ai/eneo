@@ -87,6 +87,9 @@ from intric.integration.application.integration_preview_service import (
     IntegrationPreviewService,
 )
 from intric.integration.application.integration_service import IntegrationService
+from intric.integration.application.sharepoint_tree_service import (
+    SharePointTreeService as AppSharePointTreeService,
+)
 from intric.integration.application.oauth2_service import Oauth2Service
 from intric.integration.application.tenant_integration_service import (
     TenantIntegrationService,
@@ -923,6 +926,10 @@ class Container(containers.DeclarativeContainer):
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
     )
+    office_change_key_service = providers.Factory(
+        OfficeChangeKeyService,
+        redis_client=redis_client,
+    )
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
         oauth_token_repo=oauth_token_repo,
@@ -935,10 +942,7 @@ class Container(containers.DeclarativeContainer):
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
         sync_log_repo=sync_log_repo,
-    )
-    office_change_key_service = providers.Factory(
-        OfficeChangeKeyService,
-        redis_client=redis_client,
+        change_key_service=office_change_key_service,
     )
     sharepoint_webhook_service = providers.Factory(
         SharepointWebhookService,
@@ -962,6 +966,12 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         confluence_preview_service=confluence_preview_service,
         sharepoint_preview_service=sharepoint_preview_service,
+    )
+    sharepoint_tree_service = providers.Factory(
+        AppSharePointTreeService,
+        oauth_token_repo=oauth_token_repo,
+        user_integration_repo=user_integration_repo,
+        oauth_token_service=oauth_token_service,
     )
     # Completion
     service_runner = providers.Factory(

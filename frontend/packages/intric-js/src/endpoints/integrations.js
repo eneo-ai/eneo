@@ -99,7 +99,7 @@ export function initIntegrations(client) {
       import: async ({ integration, preview, space, embedding_model }) => {
         const { id: user_integration_id } = integration;
         const { id } = space;
-        const { key, name, url } = preview;
+        const { key, name, url, folder_id, folder_path, type } = preview;
         await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/", {
           method: "post",
           params: {
@@ -110,6 +110,9 @@ export function initIntegrations(client) {
               key,
               name,
               url,
+              folder_id,
+              folder_path,
+              selected_item_type: type,
               embedding_model
             }
           }

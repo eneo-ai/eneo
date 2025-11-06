@@ -59,11 +59,20 @@ class SharePointSubscriptionService:
             "Content-Type": "application/json",
         }
 
+        # Microsoft Graph subscriptions only support drive/root level resources
+        # We always subscribe to the entire drive root, regardless of folder_id
+        # The webhook handler will filter notifications based on folder_id in the IntegrationKnowledge
+        resource = f"/sites/{knowledge.site_id}/drives/{drive_id}/root"
+        if knowledge.folder_id:
+            logger.info("Creating subscription for folder %s (knowledge %s) - webhooks will be filtered to this folder", knowledge.folder_id, knowledge.id)
+        else:
+            logger.info("Creating subscription for entire drive root (knowledge %s)", knowledge.id)
+
         # Microsoft Graph only accepts the "updated" changeType for drive/root subscriptions; it also covers create/delete events.
         payload = {
             "changeType": "updated",
             "notificationUrl": self.notification_url,
-            "resource": f"/sites/{knowledge.site_id}/drives/{drive_id}/root",
+            "resource": resource,
             "expirationDateTime": expiration.isoformat().replace("+00:00", "Z"),
         }
 

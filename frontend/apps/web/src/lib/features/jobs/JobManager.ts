@@ -77,8 +77,12 @@ function createJobManager(data: { intric: Intric }) {
   }
 
   const updateJobsFrequency_ms = 30 * 1000;
+  const updateJobsFrequency_fast_ms = 2 * 1000; // Check every 2 seconds for faster feedback
+  const fastPollDuration_ms = 15 * 1000; // Use fast polling for 15 seconds after job starts
   let updateJobsInterval: ReturnType<typeof setInterval>;
   let updateJobsRunning = false;
+  let lastJobAddedTime = 0;
+
   async function startUpdatePolling() {
     if (updateJobsRunning === false) {
       updateJobsRunning = true;
@@ -90,6 +94,38 @@ function createJobManager(data: { intric: Intric }) {
           stopUpdatePolling();
         }
       }, updateJobsFrequency_ms);
+    }
+  }
+
+  async function startFastUpdatePolling() {
+    // Use fast polling for recently added jobs
+    if (updateJobsRunning === false) {
+      updateJobsRunning = true;
+      lastJobAddedTime = Date.now();
+      await updateJobs();
+
+      updateJobsInterval = setInterval(async () => {
+        const jobs = await updateJobs();
+        const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+        const timeSinceJobAdded = Date.now() - lastJobAddedTime;
+
+        // Switch to slow polling after 15 seconds or if no active jobs
+        if (!hasActiveJobs || timeSinceJobAdded > fastPollDuration_ms) {
+          if (!hasActiveJobs) {
+            stopUpdatePolling();
+          } else {
+            // Switch to slow polling
+            clearInterval(updateJobsInterval);
+            updateJobsInterval = setInterval(async () => {
+              const jobs = await updateJobs();
+              const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+              if (!hasActiveJobs) {
+                stopUpdatePolling();
+              }
+            }, updateJobsFrequency_ms);
+          }
+        }
+      }, updateJobsFrequency_fast_ms);
     }
   }
 
@@ -244,6 +280,7 @@ function createJobManager(data: { intric: Intric }) {
     queueUploads,
     clearFinishedUploads,
     updateJobs,
-    startUpdatePolling
+    startUpdatePolling,
+    startFastUpdatePolling
   };
 }

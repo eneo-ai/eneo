@@ -99,6 +99,8 @@ class SharepointContentTaskParam(ResourceTaskParams):
     token_id: UUID
     integration_knowledge_id: UUID
     site_id: str
+    folder_id: Optional[str] = None
+    folder_path: Optional[str] = None
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):
@@ -114,6 +116,25 @@ class IntegrationPreviewData(BaseModel):
 
 class IntegrationPreviewDataList(BaseListModel[IntegrationPreviewData]):
     pass
+
+
+class SharePointTreeItem(BaseModel):
+    id: str
+    name: str
+    type: str
+    path: str
+    has_children: bool
+    size: Optional[int] = None
+    modified: Optional[datetime] = None
+    web_url: Optional[str] = None
+
+
+class SharePointTreeResponse(BaseModel):
+    items: list[SharePointTreeItem]
+    current_path: str
+    parent_id: Optional[str] = None
+    drive_id: str
+    site_id: str
 
 
 class IntegrationKnowledgeMetaData(BaseModel):
@@ -134,6 +155,9 @@ class IntegrationKnowledgePublic(BaseModel):
     site_id: Optional[str] = None
     sharepoint_subscription_id: Optional[str] = None
     sharepoint_subscription_expires_at: Optional[datetime] = None
+    folder_id: Optional[str] = None
+    folder_path: Optional[str] = None
+    selected_item_type: Optional[str] = None
     permissions: list[ResourcePermission] = []
     metadata: IntegrationKnowledgeMetaData
     integration_type: Literal["confluence", "sharepoint"]

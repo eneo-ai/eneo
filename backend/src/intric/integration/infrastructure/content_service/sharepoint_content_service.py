@@ -15,6 +15,9 @@ from intric.integration.infrastructure.clients.sharepoint_content_client import 
 from intric.integration.infrastructure.content_service.utils import (
     file_extension_to_type,
 )
+from intric.integration.infrastructure.office_change_key_service import (
+    OfficeChangeKeyService,
+)
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -58,6 +61,7 @@ class SharePointContentService:
         oauth_token_service: "OauthTokenService",
         session: "AsyncSession",
         sync_log_repo: "SyncLogRepository" = None,
+        change_key_service: "OfficeChangeKeyService" = None,
     ):
         self.job_service = job_service
         self.oauth_token_repo = oauth_token_repo
@@ -69,20 +73,39 @@ class SharePointContentService:
         self.oauth_token_service = oauth_token_service
         self.session = session
         self.sync_log_repo = sync_log_repo
+        self.change_key_service = change_key_service
 
     async def pull_content(
         self,
         token_id: UUID,
         integration_knowledge_id: UUID,
         site_id: str,
+        folder_id: Optional[str] = None,
+        folder_path: Optional[str] = None,
     ) -> str:
-        # Start logging the sync
         sync_log = None
         started_at = datetime.now(timezone.utc)
 
         try:
             token = await self.oauth_token_repo.one(id=token_id)
             stats = self._initialize_stats()
+
+            # Load integration knowledge and set folder context BEFORE pulling content
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
+            )
+            if not getattr(integration_knowledge, "site_id", None):
+                integration_knowledge.site_id = site_id
+
+            if folder_id:
+                integration_knowledge.folder_id = folder_id
+                # Note: selected_item_type is set in _pull_content based on whether it's a file or folder
+
+            if folder_path:
+                integration_knowledge.folder_path = folder_path
+
+            # Save the folder context so _pull_content can access it
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
             await self._pull_content(
                 token=token,
@@ -92,13 +115,18 @@ class SharePointContentService:
             )
             summary_stats = self._build_summary_stats(stats)
 
+            # Reload to get any updates from _pull_content (like selected_item_type)
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
-            if not getattr(integration_knowledge, "site_id", None):
-                integration_knowledge.site_id = site_id
+
+            # Only update sync timestamp if files were actually processed or deleted
+            files_processed = summary_stats.get("files_processed", 0)
+            files_deleted = summary_stats.get("files_deleted", 0)
+
             integration_knowledge.last_sync_summary = summary_stats
-            integration_knowledge.last_synced_at = datetime.now(timezone.utc)
+            if files_processed > 0 or files_deleted > 0:
+                integration_knowledge.last_synced_at = datetime.now(timezone.utc)
 
             # Initialize delta token if this is the first sync
             if not integration_knowledge.delta_token:
@@ -124,17 +152,26 @@ class SharePointContentService:
 
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
-            # Log successful sync
+            # Log successful sync only if files were processed or deleted
             if self.sync_log_repo:
-                sync_log = SyncLog(
-                    integration_knowledge_id=integration_knowledge_id,
-                    sync_type="full",
-                    status="success",
-                    started_at=started_at,
-                    completed_at=datetime.now(timezone.utc),
-                    metadata=summary_stats,
-                )
-                await self.sync_log_repo.add(sync_log)
+                files_processed = summary_stats.get("files_processed", 0)
+                files_deleted = summary_stats.get("files_deleted", 0)
+
+                if files_processed > 0 or files_deleted > 0:
+                    sync_log = SyncLog(
+                        integration_knowledge_id=integration_knowledge_id,
+                        sync_type="full",
+                        status="success",
+                        started_at=started_at,
+                        completed_at=datetime.now(timezone.utc),
+                        metadata=summary_stats,
+                    )
+                    await self.sync_log_repo.add(sync_log)
+                else:
+                    logger.info(
+                        f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
+                        "no files processed or deleted"
+                    )
 
             return self._format_summary_for_job(summary_stats)
 
@@ -160,19 +197,6 @@ class SharePointContentService:
         integration_knowledge_id: UUID,
         site_id: str,
     ) -> str:
-        """
-        Process incremental changes using the delta token.
-        This is called by the webhook handler to efficiently sync only changed items.
-
-        Args:
-            token_id: OAuth token ID
-            integration_knowledge_id: Integration knowledge ID
-            site_id: SharePoint site ID
-
-        Returns:
-            Summary of changes processed
-        """
-        # Start logging the sync
         started_at = datetime.now(timezone.utc)
 
         try:
@@ -181,7 +205,6 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
 
-            # If no delta token exists, fall back to full sync
             if not integration_knowledge.delta_token:
                 logger.warning(
                     f"No delta token found for integration knowledge {integration_knowledge_id}, "
@@ -219,75 +242,52 @@ class SharePointContentService:
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
 
-                # If we get 0 changes, check if it's due to an invalid delta token
-                # by comparing current SharePoint files with database
+                # If we get 0 changes, it's normal - no changes in SharePoint since last sync
+                # Just update the delta token and return
                 if len(changes) == 0:
-                    logger.warning(
+                    logger.info(
                         f"Delta query returned 0 changes for integration knowledge {integration_knowledge_id}. "
-                        "Checking if delta token is invalid by comparing with current SharePoint state..."
+                        "No updates needed - SharePoint is in sync with database."
                     )
 
-                    # Get current list of files from SharePoint
-                    sharepoint_files = await self._get_all_sharepoint_files(
-                        content_client=content_client,
-                        site_id=site_id
-                    )
-                    sharepoint_file_names = {f.get("name") for f in sharepoint_files}
+                    # Update delta token for next sync (if we got a new one)
+                    if new_delta_token:
+                        integration_knowledge.delta_token = new_delta_token
 
-                    # Get current list of files in database for this integration
-                    db_blobs = await self.info_blob_service.repo.get_by_filter_integration_knowledge(
-                        integration_knowledge_id=integration_knowledge_id
-                    )
-                    db_file_names = {blob.title for blob in db_blobs}
-
-                    # Find deleted files (in DB but not in SharePoint)
-                    deleted_files = db_file_names - sharepoint_file_names
-
-                    if deleted_files:
-                        logger.info(f"Found {len(deleted_files)} deleted files: {deleted_files}")
-                        # Delete the missing files from database
-                        for filename in deleted_files:
-                            deleted_blobs = await self.info_blob_service.repo.delete_by_title_and_integration_knowledge(
-                                title=filename,
-                                integration_knowledge_id=integration_knowledge_id,
-                            )
-                            for blob in deleted_blobs:
-                                if blob is not None:
-                                    integration_knowledge.size -= blob.size
-                                    stats["files_deleted"] += 1
-
-                    # Update stats with actual current count from database
-                    total_blobs = await self.info_blob_service.repo.get_count_by_integration_knowledge(
-                        integration_knowledge_id
-                    )
-
+                    # Don't update last_synced_at or create sync log when nothing changed
+                    # (This is handled by the caller based on files_processed/files_deleted counts)
                     summary_stats = {
-                        "files_processed": total_blobs,
-                        "files_deleted": stats.get("files_deleted", 0),
+                        "files_processed": 0,
+                        "files_deleted": 0,
                         "pages_processed": 0,
                         "folders_processed": 0,
                         "skipped_items": 0,
                     }
 
-                    # Reset delta token so next sync will do a fresh initialization
-                    integration_knowledge.delta_token = None
                     integration_knowledge.last_sync_summary = summary_stats
-                    integration_knowledge.last_synced_at = datetime.now(timezone.utc)
                     await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
-                    logger.info(f"Delta sync completed with recovery: {summary_stats}")
+                    logger.info("Delta sync completed: no changes detected")
                     return self._format_summary_for_job(summary_stats)
 
-                # Process each changed item
                 logger.info(f"Processing {len(changes)} changed items from delta query")
                 for item in changes:
                     item_name = item.get("name", "")
+                    item_id = item.get("id")
                     is_deleted = item.get("deleted", False)
                     is_folder = item.get("folder", False)
+                    change_key = item.get("cTag")  # cTag is Microsoft's ChangeKey
 
-                    logger.debug(f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})")
+                    logger.debug(f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})")
 
-                    # Check if item was deleted
+                    if not self._is_item_in_folder_scope(
+                        item,
+                        integration_knowledge.folder_id,
+                        selected_item_type=integration_knowledge.selected_item_type,
+                    ):
+                        logger.debug(f"  - Skipping item {item_name}: not in folder scope")
+                        continue
+
                     if is_deleted:
                         # Delete the corresponding info_blob if it exists
                         try:
@@ -304,6 +304,13 @@ class SharePointContentService:
 
                             logger.info(f"Deleted {len(valid_deleted_blobs)} info_blob(s) for removed SharePoint file: {item_name}")
                             stats["files_deleted"] = stats.get("files_deleted", 0) + len(valid_deleted_blobs)
+
+                            # Invalidate ChangeKey cache for deleted item
+                            if self.change_key_service and item_id:
+                                await self.change_key_service.invalidate_change_key(
+                                    integration_knowledge_id=integration_knowledge_id,
+                                    item_id=item_id,
+                                )
                         except Exception as e:
                             logger.warning(
                                 f"Could not delete info_blob for {item_name}: {e}"
@@ -318,10 +325,25 @@ class SharePointContentService:
                         # will be in the delta changes if they changed
                         continue
 
+                    # Check if this item's ChangeKey has already been processed (deduplication)
+                    should_process = True
+                    if self.change_key_service and item_id and change_key:
+                        should_process = await self.change_key_service.should_process(
+                            integration_knowledge_id=integration_knowledge_id,
+                            item_id=item_id,
+                            change_key=change_key,
+                        )
+
+                    if not should_process:
+                        logger.info(
+                            f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
+                        )
+                        stats["skipped_items"] += 1
+                        continue
+
                     # Process changed/added file
                     # The smart update logic in _process_info_blob will automatically
                     # delete the old version with the same title before adding the new one
-                    item_id = item.get("id")
                     web_url = item.get("webUrl", "")
 
                     try:
@@ -336,8 +358,17 @@ class SharePointContentService:
                                 text=content,
                                 url=web_url,
                                 integration_knowledge=integration_knowledge,
+                                sharepoint_item_id=item_id,
                             )
                             stats["files_processed"] += 1
+
+                            # Update ChangeKey cache after successful processing
+                            if self.change_key_service and item_id and change_key:
+                                await self.change_key_service.update_change_key(
+                                    integration_knowledge_id=integration_knowledge_id,
+                                    item_id=item_id,
+                                    change_key=change_key,
+                                )
                         else:
                             stats["skipped_items"] += 1
 
@@ -347,7 +378,6 @@ class SharePointContentService:
 
                 # Update integration knowledge with new delta token and sync info
                 integration_knowledge.delta_token = new_delta_token
-                integration_knowledge.last_synced_at = datetime.now(timezone.utc)
 
                 # For delta sync, show the number of items actually processed, not total count
                 # This gives users insight into what changed, not the entire library
@@ -359,6 +389,13 @@ class SharePointContentService:
                     "skipped_items": stats.get("skipped_items", 0),
                 }
                 integration_knowledge.last_sync_summary = summary_stats
+
+                # Only update sync timestamp if files were actually processed or deleted
+                files_processed = summary_stats.get("files_processed", 0)
+                files_deleted = summary_stats.get("files_deleted", 0)
+                if files_processed > 0 or files_deleted > 0:
+                    integration_knowledge.last_synced_at = datetime.now(timezone.utc)
+
                 logger.info(f"Delta sync completed: {summary_stats}")
 
                 await self.integration_knowledge_repo.update(obj=integration_knowledge)
@@ -367,17 +404,26 @@ class SharePointContentService:
                     f"Processed {len(changes)} delta changes for integration knowledge {integration_knowledge_id}"
                 )
 
-                # Log successful delta sync
+                # Log successful delta sync only if files were processed or deleted
                 if self.sync_log_repo:
-                    sync_log = SyncLog(
-                        integration_knowledge_id=integration_knowledge_id,
-                        sync_type="delta",
-                        status="success",
-                        started_at=started_at,
-                        completed_at=datetime.now(timezone.utc),
-                        metadata=summary_stats,
-                    )
-                    await self.sync_log_repo.add(sync_log)
+                    files_processed = summary_stats.get("files_processed", 0)
+                    files_deleted = summary_stats.get("files_deleted", 0)
+
+                    if files_processed > 0 or files_deleted > 0:
+                        sync_log = SyncLog(
+                            integration_knowledge_id=integration_knowledge_id,
+                            sync_type="delta",
+                            status="success",
+                            started_at=started_at,
+                            completed_at=datetime.now(timezone.utc),
+                            metadata=summary_stats,
+                        )
+                        await self.sync_log_repo.add(sync_log)
+                    else:
+                        logger.info(
+                            f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
+                            "no files processed or deleted"
+                        )
 
                 return self._format_summary_for_job(summary_stats)
 
@@ -425,26 +471,91 @@ class SharePointContentService:
                 token_id=token.id,
                 token_refresh_callback=self.token_refresh_callback,
             ) as content_client:
-                # Documents, include folders
-                documents = await content_client.get_documents_in_drive(site_id=site_id)
-                if data := documents.get("value", []):
-                    await self._process_documents(
-                        documents=data,
-                        client=content_client,
-                        integration_knowledge=integration_knowledge,
-                        token=token,
-                        stats=stats,
+                drive_id = await content_client.get_default_drive_id(site_id)
+
+                # If a specific item was selected, process it based on its type
+                if integration_knowledge.folder_id:
+                    # Get the item details to determine if it's a file or folder
+                    item_info = await content_client.get_file_metadata(
+                        drive_id=drive_id,
+                        item_id=integration_knowledge.folder_id,
                     )
 
-                # Site pages
-                pages = await content_client.get_site_pages(site_id=site_id)
-                if data := pages.get("value", []):
-                    await self._process_pages(
-                        pages=data,
-                        client=content_client,
-                        integration_knowledge=integration_knowledge,
-                        stats=stats,
-                    )
+                    is_folder = item_info.get("folder") is not None
+                    item_name = item_info.get("name", "")
+
+                    if is_folder:
+                        logger.info(
+                            f"Processing folder '{item_name}' (ID: {integration_knowledge.folder_id}) "
+                            f"for integration knowledge {integration_knowledge_id}"
+                        )
+                        integration_knowledge.selected_item_type = "folder"
+                        processed_items = set()
+                        await self._fetch_and_process_content(
+                            site_id=site_id,
+                            drive_id=drive_id,
+                            client=content_client,
+                            token=token,
+                            integration_knowledge_id=integration_knowledge_id,
+                            folder_id=integration_knowledge.folder_id,
+                            processed_items=processed_items,
+                            stats=stats,
+                            is_root_call=True,
+                        )
+                        # Return early - don't process site pages when we have a specific folder selected
+                        return stats
+                    else:
+                        # It's a file - just process that single file (no site pages)
+                        logger.info(
+                            f"Processing single file '{item_name}' (ID: {integration_knowledge.folder_id}) "
+                            f"for integration knowledge {integration_knowledge_id}"
+                        )
+                        integration_knowledge.selected_item_type = "file"
+
+                        # Get and process the file
+                        content, _ = await content_client.get_file_content_by_id(
+                            drive_id=drive_id,
+                            item_id=integration_knowledge.folder_id,
+                        )
+
+                        if content:
+                            await self._process_info_blob(
+                                title=item_name,
+                                text=content,
+                                url=item_info.get("webUrl", ""),
+                                integration_knowledge=integration_knowledge,
+                                sharepoint_item_id=integration_knowledge.folder_id,
+                            )
+                            stats["files_processed"] += 1
+                        else:
+                            stats["skipped_items"] += 1
+
+                        # Return early - don't process site pages when we have a specific file selected
+                        return stats
+                else:
+                    # Process all documents and pages if no specific item selected
+                    integration_knowledge.selected_item_type = "site_root"
+
+                    # Documents, include folders
+                    documents = await content_client.get_documents_in_drive(site_id=site_id)
+                    if data := documents.get("value", []):
+                        await self._process_documents(
+                            documents=data,
+                            client=content_client,
+                            integration_knowledge=integration_knowledge,
+                            token=token,
+                            stats=stats,
+                        )
+
+                    # Site pages (only when doing full sync)
+                    pages = await content_client.get_site_pages(site_id=site_id)
+                    if data := pages.get("value", []):
+                        await self._process_pages(
+                            pages=data,
+                            client=content_client,
+                            integration_knowledge=integration_knowledge,
+                            stats=stats,
+                        )
 
         except Exception as e:
             logger.error(f"Error processing document {site_id}: {e}")
@@ -477,6 +588,7 @@ class SharePointContentService:
                     folder_id=item_id,
                     processed_items=processed_items,
                     stats=stats,
+                    is_root_call=False,
                 )
             else:
                 # file
@@ -519,6 +631,7 @@ class SharePointContentService:
         text: str,
         url: str,
         integration_knowledge: "IntegrationKnowledge",
+        sharepoint_item_id: Optional[str] = None,
     ) -> None:
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -529,6 +642,7 @@ class SharePointContentService:
             website_id=None,
             tenant_id=self.user.tenant_id,
             integration_knowledge_id=integration_knowledge.id,
+            sharepoint_item_id=sharepoint_item_id,
         )
 
         # Use idempotent upsert to handle duplicate webhooks from Microsoft
@@ -573,6 +687,7 @@ class SharePointContentService:
         stats: Dict[str, int],
         folder_id: Optional[str] = None,
         processed_items: set = None,
+        is_root_call: bool = True,
     ):
         if processed_items is None:
             processed_items = set()
@@ -593,6 +708,7 @@ class SharePointContentService:
             token=token,
             processed_items=processed_items,
             stats=stats,
+            is_root_call=is_root_call,
         )
 
     async def _process_folder_results(
@@ -605,6 +721,7 @@ class SharePointContentService:
         token: "SharePointToken",
         processed_items: set,
         stats: Dict[str, int],
+        is_root_call: bool = True,
     ) -> None:
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
@@ -625,6 +742,7 @@ class SharePointContentService:
 
             if item_type == "folder":
                 stats["folders_processed"] += 1
+                # Always recurse into folders to get their contents
                 await self._fetch_and_process_content(
                     site_id=site_id,
                     drive_id=drive_id,
@@ -634,6 +752,7 @@ class SharePointContentService:
                     folder_id=item_id,
                     processed_items=processed_items,
                     stats=stats,
+                    is_root_call=False,
                 )
                 continue
 
@@ -650,6 +769,7 @@ class SharePointContentService:
                         website_id=None,
                         tenant_id=self.user.tenant_id,
                         integration_knowledge_id=integration_knowledge_id,
+                        sharepoint_item_id=item_id,
                     )
 
                     info_blob = await self.info_blob_service.add_info_blob_without_validation(
@@ -713,6 +833,51 @@ class SharePointContentService:
             message = f"{message} ({'; '.join(extra_parts)})"
         return message
 
+    def _is_item_in_folder_scope(
+        self,
+        item: Dict[str, Any],
+        scope_folder_id: Optional[str],
+        known_subfolder_ids: Optional[set] = None,
+        selected_item_type: Optional[str] = None,
+    ) -> bool:
+        """
+        Check if an item is within the scope of a selected folder/file.
+
+        Behavior depends on selected_item_type:
+        - "file": Only include the specific file (item.id == scope_folder_id)
+        - "folder": Include direct children and descendants of the folder
+        - "site_root" or None: Include all items (no filtering)
+
+        For folder scope, an item is in scope if:
+        - Its parent is the scope folder itself, OR
+        - Its parent is a known subfolder within the scope
+        """
+        if not scope_folder_id:
+            return True
+
+        # If selected_item_type is "file", only include the exact file
+        if selected_item_type == "file":
+            item_id = item.get("id")
+            return item_id == scope_folder_id
+
+        # If selected_item_type is "site_root", include everything
+        if selected_item_type == "site_root" or selected_item_type is None:
+            return True
+
+        # For "folder" type, check if item is in the folder hierarchy
+        parent_ref = item.get("parentReference", {})
+        parent_id = parent_ref.get("id")
+
+        # Direct child of the scope folder
+        if parent_id == scope_folder_id:
+            return True
+
+        # Child of a subfolder within the scope
+        if known_subfolder_ids and parent_id in known_subfolder_ids:
+            return True
+
+        return False
+
     async def _get_all_sharepoint_files(
         self,
         content_client: SharePointContentClient,
@@ -720,15 +885,27 @@ class SharePointContentService:
     ) -> List[Dict[str, Any]]:
         """
         Recursively collect all file names from SharePoint for comparison with database.
-        Returns a flat list of all files (not folders) in the drive.
+        Returns a flat list of all files (not folders) in the drive, including files in subfolders.
+
+        This is used during delta recovery to accurately detect deleted files.
         """
         all_files = []
 
         try:
-            # Get all documents in the drive
-            documents = await content_client.get_documents_in_drive(site_id=site_id)
-            if data := documents.get("value", []):
-                all_files.extend(self._flatten_files(data))
+            # Get default drive for the site
+            drive_id = await content_client.get_default_drive_id(site_id=site_id)
+            if not drive_id:
+                logger.warning(f"Could not get drive ID for site {site_id}")
+                return []
+
+            # Recursively collect all files starting from root
+            await self._collect_files_recursive(
+                content_client=content_client,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=None,  # None means root
+                all_files=all_files,
+            )
 
             # Also get site pages
             pages = await content_client.get_site_pages(site_id=site_id)
@@ -742,6 +919,57 @@ class SharePointContentService:
 
         return all_files
 
+    async def _collect_files_recursive(
+        self,
+        content_client: SharePointContentClient,
+        site_id: str,
+        drive_id: str,
+        folder_id: Optional[str],
+        all_files: List[Dict[str, Any]],
+    ) -> None:
+        """
+        Recursively collect all files from a folder and its subfolders.
+
+        Args:
+            content_client: The SharePoint client
+            site_id: The site ID
+            drive_id: The drive ID
+            folder_id: The folder ID to collect from (None for root)
+            all_files: The list to collect files into (mutated)
+        """
+        try:
+            # Get items in this folder
+            if folder_id:
+                items = await content_client.get_folder_items(
+                    site_id=site_id,
+                    drive_id=drive_id,
+                    folder_id=folder_id,
+                )
+            else:
+                # Root folder
+                documents = await content_client.get_documents_in_drive(site_id=site_id)
+                items = documents.get("value", [])
+
+            for item in items:
+                if item.get("folder"):
+                    # It's a folder - recurse into it
+                    item_id = item.get("id")
+                    if item_id:
+                        await self._collect_files_recursive(
+                            content_client=content_client,
+                            site_id=site_id,
+                            drive_id=drive_id,
+                            folder_id=item_id,
+                            all_files=all_files,
+                        )
+                else:
+                    # It's a file - add to our list
+                    all_files.append(item)
+
+        except Exception as e:
+            logger.warning(f"Error collecting files from folder {folder_id}: {e}")
+            # Continue with other folders on error
+
     def _flatten_files(self, items: list[dict]) -> List[Dict[str, Any]]:
         """Extract all files from a list of items (excluding folders)."""
         files = []
@@ -749,8 +977,6 @@ class SharePointContentService:
             if not item.get("folder", {}):
                 # It's a file
                 files.append(item)
-            # Note: We don't recursively process folders here since we're just
-            # collecting names for comparison. The full sync would handle recursion.
         return files
 
     async def token_refresh_callback(self, token_id: UUID) -> Dict[str, str]:

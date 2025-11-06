@@ -101,6 +101,9 @@ class IntegrationKnowledge(BasePublic):
         DateTime(timezone=True), nullable=True
     )
     delta_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    folder_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+    folder_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    selected_item_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site_root")
 
     user_integration: Mapped[UserIntegration] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()

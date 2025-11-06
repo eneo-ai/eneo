@@ -391,6 +391,9 @@ async def create_space_integration_knowledge(
         embedding_model_id=data.embedding_model.id,
         url=data.url,
         key=data.key,
+        folder_id=data.folder_id,
+        folder_path=data.folder_path,
+        selected_item_type=data.selected_item_type,
     )
     return assembler.to_space_knowledge_model(item=knowledge)
 

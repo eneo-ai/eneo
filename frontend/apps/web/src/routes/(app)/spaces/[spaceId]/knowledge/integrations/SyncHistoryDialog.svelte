@@ -33,17 +33,7 @@
   export let knowledge: IntegrationKnowledge | null;
   export let open = false; // publik boolean, används av förälder
 
-  // Dialog kräver en Writable<boolean> – använd openController/isOpen enligt typerna
-  let openController: Writable<boolean> = writable(open);
-
-  // Håll boolean-propet och controllern i synk båda vägarna
-  const unsub = openController.subscribe((v) => {
-    if (v !== open) open = v;
-  });
-  $: if ($openController !== open) {
-    openController.set(open);
-  }
-
+  // Declare state variables FIRST before using them in callbacks
   let syncLogs: SyncLog[] = [];
   let loading = false;
   let error: string | null = null;
@@ -53,6 +43,23 @@
   let totalCount = 0;
   let totalPages = 1;
   let hasLoadedOnce = false;
+
+  // Dialog kräver en Writable<boolean> – använd openController/isOpen enligt typerna
+  let openController: Writable<boolean> = writable(open);
+
+  // Håll boolean-propet och controllern i synk båda vägarna
+  const unsub = openController.subscribe((v) => {
+    if (v !== open) open = v;
+    // Reset state when dialog closes
+    if (!v) {
+      hasLoadedOnce = false;
+      syncLogs = [];
+      currentPage = 1;
+    }
+  });
+  $: if ($openController !== open) {
+    openController.set(open);
+  }
 
   onMount(() => {
     if (knowledge) {
@@ -163,10 +170,20 @@
     return { pageFiles, pageDeleted, pagePages, pageSyncs, pageSuccessfulSyncs };
   }
 
-  // Ladda historik när dialogen öppnas första gången
-  $: if ($openController && knowledge && !hasLoadedOnce && !loading) {
-    localKnowledge = knowledge;
-    loadSyncHistory(1);
+  // Ladda historik när dialogen öppnas eller när knowledge ändras
+  $: if ($openController && knowledge) {
+    // If knowledge changed, reset and reload
+    if (localKnowledge?.id !== knowledge?.id) {
+      hasLoadedOnce = false;
+      syncLogs = [];
+      currentPage = 1;
+      localKnowledge = knowledge;
+      loadSyncHistory(1);
+    } else if (!hasLoadedOnce && !loading) {
+      // First load for this knowledge
+      localKnowledge = knowledge;
+      loadSyncHistory(1);
+    }
   }
 
   function close() {

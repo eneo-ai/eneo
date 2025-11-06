@@ -35,6 +35,9 @@ class IntegrationKnowledgeFactory:
                 record, "sharepoint_subscription_expires_at", None
             ),
             delta_token=getattr(record, "delta_token", None),
+            folder_id=getattr(record, "folder_id", None),
+            folder_path=getattr(record, "folder_path", None),
+            selected_item_type=getattr(record, "selected_item_type", None),
         )
 
     @classmethod

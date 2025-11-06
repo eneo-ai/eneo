@@ -8,6 +8,7 @@ from intric.integration.presentation.models import (
     IntegrationList,
     IntegrationPreviewDataList,
     PaginatedSyncLogList,
+    SharePointTreeResponse,
     SyncLog,
     TenantIntegration,
     TenantIntegrationFilter,
@@ -180,6 +181,34 @@ async def get_integration_preview(
     preview_data = await service.get_preview_data(user_integration_id=user_integration_id)
 
     return assembler.to_paginated_response(items=preview_data)
+
+
+@router.get(
+    "/{user_integration_id:uuid}/sharepoint/tree/",
+    response_model=SharePointTreeResponse,
+    status_code=200,
+)
+async def get_sharepoint_folder_tree(
+    user_integration_id: UUID,
+    site_id: str = Query(..., description="SharePoint site ID"),
+    folder_id: Optional[str] = Query(None, description="Folder ID (null for root)"),
+    folder_path: str = Query("", description="Current folder path"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.sharepoint_tree_service()
+
+    # Convert string "null" to actual None
+    if folder_id == "null":
+        folder_id = None
+
+    tree_data = await service.get_folder_tree(
+        user_integration_id=user_integration_id,
+        site_id=site_id,
+        folder_id=folder_id,
+        folder_path=folder_path,
+    )
+
+    return SharePointTreeResponse(**tree_data)
 
 
 @router.get(

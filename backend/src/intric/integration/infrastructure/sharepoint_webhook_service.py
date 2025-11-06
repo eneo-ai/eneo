@@ -86,7 +86,11 @@ class SharepointWebhookService:
         """Queue refresh jobs for a site based on notifications.
 
         Validates each notification's ChangeKey before queuing to prevent
-        processing duplicates.
+        processing duplicates. Filters integrations by scope to avoid
+        unnecessary syncs for file/folder-level integrations.
+
+        Uses site-level ChangeKey deduplication so the same webhook
+        notification doesn't trigger multiple syncs.
         """
         knowledge_records = await self._fetch_knowledge_by_site(site_id=site_id)
 
@@ -98,30 +102,78 @@ class SharepointWebhookService:
         user_cache: Dict[str, UserInDB] = {}
         queued_knowledge: Set[str] = set()
 
+        # Filter out duplicate notifications at site level first
+        # This prevents the same webhook from being processed multiple times
+        unique_notifications = []
+        for notification in notifications:
+            # Check ChangeKey at site level (not per integration)
+            resource_data = notification.get("resourceData", {})
+            item_id = resource_data.get("id")
+            change_key = notification.get("changeKey") or resource_data.get("changeKey")
+
+            if not item_id or not change_key:
+                # Missing data - include it (fail-safe)
+                unique_notifications.append(notification)
+                continue
+
+            # Check if we've already seen this item+changekey combo in this webhook batch
+            # This handles the case where Microsoft sends duplicate notifications
+            should_include = await self.change_key_service.should_process(
+                integration_knowledge_id=site_id,  # Use site_id as integration_id for deduping
+                item_id=item_id,
+                change_key=change_key,
+            )
+
+            if should_include:
+                unique_notifications.append(notification)
+                await self.change_key_service.update_change_key(
+                    integration_knowledge_id=site_id,
+                    item_id=item_id,
+                    change_key=change_key,
+                )
+                logger.info(
+                    f"Site {site_id}: Notification for item {item_id} passed deduplication (new or changed)"
+                )
+            else:
+                logger.info(
+                    f"Site {site_id}: Skipping duplicate notification for item {item_id} (ChangeKey unchanged)"
+                )
+
+        if not unique_notifications:
+            logger.info(f"Site {site_id}: All notifications were duplicates, nothing to sync")
+            return
+
         for knowledge_db, user_integration_db in knowledge_records:
             # Skip if we've already queued a job for this knowledge in this webhook
             knowledge_id_str = str(knowledge_db.id)
             if knowledge_id_str in queued_knowledge:
-                logger.debug(
+                logger.info(
                     f"Skipping duplicate queue for integration knowledge {knowledge_id_str}"
                 )
                 continue
 
-            # Validate at least one notification with ChangeKey should be processed
+            # Check if ANY of the unique notifications are in scope for this integration
             should_process_any = False
-            for notification in notifications:
-                should_process = await self.should_process_notification(
+            for notification in unique_notifications:
+                # Check if the changed item is in this integration's scope
+                in_scope = self._is_notification_in_scope(
                     notification=notification,
-                    knowledge_id=knowledge_db.id,
+                    knowledge_db=knowledge_db,
                 )
-                if should_process:
+                if in_scope:
                     should_process_any = True
+                    logger.info(
+                        f"Knowledge {knowledge_id_str}: Notification IS IN SCOPE - will queue sync"
+                    )
                     break
+                else:
+                    logger.info(
+                        f"Knowledge {knowledge_id_str}: Notification NOT IN SCOPE - skipping"
+                    )
 
             if not should_process_any:
-                logger.debug(
-                    f"No new changes detected for knowledge {knowledge_id_str} "
-                    f"(all notifications had same or missing ChangeKey)"
+                logger.info(
+                    f"Knowledge {knowledge_id_str}: No changes in scope detected. Will NOT queue sync."
                 )
                 continue
 
@@ -141,6 +193,8 @@ class SharepointWebhookService:
                 token_id=token.id,
                 integration_knowledge_id=knowledge_db.id,
                 site_id=knowledge_db.site_id or site_id,
+                folder_id=knowledge_db.folder_id,
+                folder_path=knowledge_db.folder_path,
             )
 
             user_id_str = str(user_integration_db.user_id)
@@ -196,6 +250,85 @@ class SharepointWebhookService:
 
         result = await self.session.execute(stmt)
         return result.all()
+
+    def _is_notification_in_scope(
+        self, notification: Dict, knowledge_db: IntegrationKnowledgeDBModel
+    ) -> bool:
+        """Check if a webhook notification is within an integration's scope.
+
+        For file-level integrations: notification must be for that specific file
+        For folder-level integrations: notification must be in that folder/subfolders
+        For site-level integrations: all notifications are in scope
+
+        NOTE: This is a lightweight check. For folder-level integrations, we can't
+        fully verify scope without metadata, so we use a heuristic: if the item
+        might be related to the folder, we include it. Full scope filtering happens
+        during sync service processing.
+
+        Args:
+            notification: The webhook notification
+            knowledge_db: The integration knowledge record
+
+        Returns:
+            True if notification is in scope, False otherwise
+        """
+        # If no scope restriction (site_root), all notifications are in scope
+        if not knowledge_db.folder_id and (knowledge_db.selected_item_type == "site_root" or not knowledge_db.selected_item_type):
+            logger.info(
+                f"Knowledge {knowledge_db.id} is site-level (no folder_id, no scope); notification is in scope"
+            )
+            return True
+
+        # Extract the changed item ID from notification
+        resource_data = notification.get("resourceData", {})
+        item_id = resource_data.get("id")
+
+        # For file-level integrations: check item_id if available, otherwise queue
+        if knowledge_db.selected_item_type == "file":
+            if not item_id:
+                # Microsoft often doesn't send item_id in webhooks
+                # Queue sync and let delta sync + sync service filtering handle it
+                logger.info(
+                    f"Knowledge {knowledge_db.id} is FILE-level for {knowledge_db.folder_id}; "
+                    f"notification has no item_id -> QUEUEING (delta sync will check for changes)"
+                )
+                return True
+
+            # If we have item_id, do exact matching
+            is_in_scope = item_id == knowledge_db.folder_id
+            logger.info(
+                f"Knowledge {knowledge_db.id} is FILE-level for {knowledge_db.folder_id}; "
+                f"notification item_id={item_id} -> {'MATCH (in scope)' if is_in_scope else 'NO MATCH (out of scope)'}"
+            )
+            return is_in_scope
+
+        # For folder-level integrations: we can't fully determine scope at webhook level
+        # We don't have parentReference data in the notification, so we can't verify
+        # if the item is actually inside the folder.
+        #
+        # Strategy: Include the notification and let the sync service do the filtering.
+        # The sync service has full metadata and can check parentReference properly.
+        #
+        # This may cause some false positives (syncing when item is outside folder),
+        # but the sync service's filtering will catch those and skip them.
+        # Better to have false positives (filtered later) than false negatives (missed updates).
+        #
+        # NOTE: Microsoft often sends notifications without item_id (just @odata.type),
+        # indicating "something changed in this drive/folder". We queue these to let
+        # delta sync discover what actually changed.
+        if knowledge_db.selected_item_type == "folder":
+            logger.info(
+                f"Knowledge {knowledge_db.id} is FOLDER-level for {knowledge_db.folder_id}; "
+                f"notification item_id={item_id or 'N/A'} -> QUEUEING (sync service will filter by parentReference)"
+            )
+            return True
+
+        # Default: process the notification
+        logger.info(
+            f"Knowledge {knowledge_db.id}: Unknown selected_item_type '{knowledge_db.selected_item_type}'; "
+            f"assuming in scope (fail-safe)"
+        )
+        return True
 
     async def should_process_notification(
         self,
