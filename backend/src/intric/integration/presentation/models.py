@@ -141,7 +141,6 @@ class IntegrationKnowledgeMetaData(BaseModel):
     size: int
     last_sync_summary: Optional[Dict[str, int]] = None
     last_synced_at: Optional[datetime] = None
-    sharepoint_subscription_expires_at: Optional[datetime] = None
 
 
 class IntegrationKnowledgePublic(BaseModel):
@@ -153,8 +152,7 @@ class IntegrationKnowledgePublic(BaseModel):
     user_integration_id: UUID
     embedding_model: EmbeddingModelPublicLegacy
     site_id: Optional[str] = None
-    sharepoint_subscription_id: Optional[str] = None
-    sharepoint_subscription_expires_at: Optional[datetime] = None
+    sharepoint_subscription_id: Optional[UUID] = None
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     selected_item_type: Optional[str] = None

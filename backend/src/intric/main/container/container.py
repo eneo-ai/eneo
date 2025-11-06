@@ -106,6 +106,7 @@ from intric.integration.infrastructure.auth_service.sharepoint_auth_service impo
 from intric.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
 from intric.integration.infrastructure.office_change_key_service import OfficeChangeKeyService
 from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
+from intric.integration.infrastructure.sharepoint_subscription_repo_impl import SharePointSubscriptionRepositoryImpl
 from intric.integration.infrastructure.content_service.confluence_content_service import (
     ConfluenceContentService,
 )
@@ -120,6 +121,9 @@ from intric.integration.infrastructure.mappers.integration_mapper import (
 )
 from intric.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
+)
+from intric.integration.infrastructure.mappers.sharepoint_subscription_mapper import (
+    SharePointSubscriptionMapper,
 )
 from intric.integration.infrastructure.mappers.sync_log_mapper import (
     SyncLogMapper,
@@ -410,6 +414,7 @@ class Container(containers.DeclarativeContainer):
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
     confluence_token_mapper = providers.Factory(OauthTokenMapper)
     sync_log_mapper = providers.Factory(SyncLogMapper)
+    sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
 
     # HTTP auth encryption service
     http_auth_encryption_service = providers.Factory(HttpAuthEncryptionService)
@@ -455,6 +460,11 @@ class Container(containers.DeclarativeContainer):
         session=session,
         mapper=integration_knowledge_mapper,
         embedding_model_repo=embedding_model_repo2,
+    )
+    sharepoint_subscription_repo = providers.Factory(
+        SharePointSubscriptionRepositoryImpl,
+        session=session,
+        mapper=sharepoint_subscription_mapper,
     )
     integration_repo = providers.Factory(
         IntegrationRepoImpl, session=session, mapper=integration_mapper
@@ -898,7 +908,7 @@ class Container(containers.DeclarativeContainer):
 
     sharepoint_subscription_service = providers.Factory(
         SharePointSubscriptionService,
-        integration_knowledge_repo=integration_knowledge_repo,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
         oauth_token_service=oauth_token_service
     )
 

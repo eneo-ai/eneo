@@ -7,6 +7,7 @@ from intric.base.base_entity import Entity
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.integration.domain.entities.user_integration import UserIntegration
+    from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
 
 
 _DEFAULT_SIZE = 0
@@ -28,8 +29,8 @@ class IntegrationKnowledge(Entity):
         site_id: str | None = None,
         last_synced_at: datetime | None = None,
         last_sync_summary: Dict[str, int] | None = None,
-        sharepoint_subscription_id: str | None = None,
-        sharepoint_subscription_expires_at: datetime | None = None,
+        sharepoint_subscription_id: UUID | None = None,
+        sharepoint_subscription: Optional["SharePointSubscription"] = None,
         delta_token: str | None = None,
         folder_id: str | None = None,
         folder_path: str | None = None,
@@ -47,7 +48,7 @@ class IntegrationKnowledge(Entity):
         self.last_synced_at = last_synced_at
         self.last_sync_summary = last_sync_summary
         self.sharepoint_subscription_id = sharepoint_subscription_id
-        self.sharepoint_subscription_expires_at = sharepoint_subscription_expires_at
+        self.sharepoint_subscription = sharepoint_subscription
         self.delta_token = delta_token
         self.folder_id = folder_id
         self.folder_path = folder_path

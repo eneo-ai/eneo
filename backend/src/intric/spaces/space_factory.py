@@ -180,7 +180,7 @@ class SpaceFactory:
             integration_knowledge_list.append(
                 IntegrationKnowledge(
                     name=i.name,
-                    user_integration=getattr(i, "user_integration", None), 
+                    user_integration=getattr(i, "user_integration", None),
                     embedding_model=next(
                         (em for em in embedding_models if em.id == i.embedding_model_id),
                         None,
@@ -194,9 +194,11 @@ class SpaceFactory:
                     last_synced_at=i.last_synced_at,
                     last_sync_summary=i.last_sync_summary,
                     sharepoint_subscription_id=getattr(i, "sharepoint_subscription_id", None),
-                    sharepoint_subscription_expires_at=getattr(
-                        i, "sharepoint_subscription_expires_at", None
-                    ),
+                    sharepoint_subscription=None,  # Don't lazy load - not needed in Space context
+                    delta_token=getattr(i, "delta_token", None),
+                    folder_id=getattr(i, "folder_id", None),
+                    folder_path=getattr(i, "folder_path", None),
+                    selected_item_type=getattr(i, "selected_item_type", None),
                 )
             )
 

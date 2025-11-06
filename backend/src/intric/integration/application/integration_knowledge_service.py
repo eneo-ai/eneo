@@ -121,18 +121,33 @@ class IntegrationKnowledgeService:
                     folder_path=folder_path,
                 ),
             )
-            # Register webhooks for both full-site and folder/file-level syncs
-            # For folder-level: subscribes to specific folder and its children
-            # For full-site: subscribes to entire drive root
-            logger.info("Starting subscription registration for knowledge %s (folder_id=%s)", knowledge.id, knowledge.folder_id)
+            # Register site-level webhook subscription (shared across all integrations on this site)
+            # One subscription per (user_integration, site) handles all folders/files on that site
+            # Webhook filtering happens in the webhook handler based on folder_id in IntegrationKnowledge
+            logger.info("Ensuring site-level subscription for knowledge %s (site=%s)", knowledge.id, key[:30])
             try:
-                knowledge = await self.sharepoint_subscription_service.ensure_subscription(
-                    token=token, knowledge=knowledge
+                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                    user_integration_id=user_integration_id,
+                    site_id=key,
+                    token=token
                 )
-                logger.info("Successfully registered subscription for knowledge %s", knowledge.id)
+                if subscription:
+                    # Link this knowledge to the shared subscription
+                    knowledge.sharepoint_subscription_id = subscription.id
+                    knowledge = await self.integration_knowledge_repo.update(knowledge)
+                    logger.info(
+                        "Successfully linked knowledge %s to subscription %s",
+                        knowledge.id,
+                        subscription.subscription_id
+                    )
+                else:
+                    logger.warning(
+                        "Could not create/reuse subscription for site %s (webhook URL may not be configured)",
+                        key[:30]
+                    )
             except Exception as exc:
                 logger.warning(
-                    "Failed to register SharePoint subscription for knowledge %s: %s",
+                    "Failed to ensure SharePoint subscription for knowledge %s: %s",
                     knowledge.id,
                     exc,
                     exc_info=True
@@ -225,5 +240,28 @@ class IntegrationKnowledgeService:
                     IntegrationKnowledgesSpaces.integration_knowledge_id == knowledge.id
                 )
             )
+
+        # Cleanup site-level subscription if this was a SharePoint integration
+        subscription_id = knowledge.sharepoint_subscription_id
+        if subscription_id and knowledge.integration_type == "sharepoint":
+            try:
+                token = await self.oauth_token_repo.one(
+                    user_integration_id=knowledge.user_integration.id
+                )
+                await self.sharepoint_subscription_service.delete_subscription_if_unused(
+                    subscription_id=subscription_id,
+                    token=token
+                )
+                logger.info(
+                    "Cleaned up subscription %s (if no longer referenced)",
+                    subscription_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to cleanup subscription %s: %s",
+                    subscription_id,
+                    exc,
+                    exc_info=True
+                )
 
         await self.integration_knowledge_repo.remove(id=knowledge.id)

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, List
+from uuid import UUID
 
 import aiohttp
 import socket
 
-from intric.integration.domain.entities.integration_knowledge import IntegrationKnowledge
+from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
 from intric.integration.domain.entities.oauth_token import SharePointToken
-from intric.integration.domain.repositories.integration_knowledge_repo import (
-    IntegrationKnowledgeRepository,
+from intric.integration.domain.repositories.sharepoint_subscription_repo import (
+    SharePointSubscriptionRepository,
 )
 from intric.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
@@ -22,37 +23,247 @@ logger = get_logger(__name__)
 
 
 class SharePointSubscriptionService:
+    """Manages site-level SharePoint webhook subscriptions.
+
+    Each subscription is shared across all integrations for a given (user, site) combination.
+    This reduces duplicate webhooks and simplifies subscription management.
+    """
+
     def __init__(
         self,
-        integration_knowledge_repo: IntegrationKnowledgeRepository,
+        sharepoint_subscription_repo: SharePointSubscriptionRepository,
         oauth_token_service: OauthTokenService,
     ):
-        self.integration_knowledge_repo = integration_knowledge_repo
+        self.subscription_repo = sharepoint_subscription_repo
         self.oauth_token_service = oauth_token_service
         settings = get_settings()
         self.notification_url = settings.sharepoint_webhook_notification_url
         self.client_state = settings.sharepoint_webhook_client_state
         self.subscription_lifetime_minutes = settings.sharepoint_subscription_lifetime_minutes or 1440
 
-    async def ensure_subscription(
+    async def ensure_subscription_for_site(
         self,
+        user_integration_id: UUID,
+        site_id: str,
         token: SharePointToken,
-        knowledge: IntegrationKnowledge,
-    ) -> IntegrationKnowledge:
+    ) -> Optional[SharePointSubscription]:
+        """Ensure a subscription exists for this user+site combination.
+
+        If a subscription already exists, returns it without creating a new one.
+        If no subscription exists, creates one and returns it.
+
+        This is the main entry point for integration creation - replaces the old
+        per-integration subscription logic.
+
+        Args:
+            user_integration_id: User integration that owns this subscription
+            site_id: SharePoint site ID
+            token: OAuth token for Microsoft Graph API
+
+        Returns:
+            SharePointSubscription if successful, None if subscription creation failed
+        """
         if not self.notification_url:
             logger.debug("SharePoint webhook notification URL not configured; skipping subscription")
-            return knowledge
+            return None
 
-        if not knowledge.site_id:
-            logger.debug("Integration knowledge %s is missing site_id; skipping subscription", knowledge.id)
-            return knowledge
+        # Check if subscription already exists for this user+site
+        existing = await self.subscription_repo.get_by_user_and_site(
+            user_integration_id=user_integration_id,
+            site_id=site_id
+        )
 
-        expiration = datetime.now(timezone.utc) + timedelta(minutes=self.subscription_lifetime_minutes)
+        if existing:
+            logger.info(
+                f"Reusing existing subscription {existing.subscription_id} "
+                f"for user_integration={user_integration_id}, site={site_id[:30]}..."
+            )
+            return existing
 
-        drive_id = await self._resolve_drive_id(token=token, site_id=knowledge.site_id)
+        # Create new subscription
+        logger.info(
+            f"Creating new site-level subscription for user_integration={user_integration_id}, "
+            f"site={site_id[:30]}..."
+        )
+
+        drive_id = await self._resolve_drive_id(token=token, site_id=site_id)
         if not drive_id:
-            logger.warning("Could not resolve drive id for site %s; skipping subscription", knowledge.site_id)
-            return knowledge
+            logger.warning(f"Could not resolve drive_id for site {site_id}; cannot create subscription")
+            return None
+
+        subscription_id = await self._create_graph_subscription(
+            token=token,
+            site_id=site_id,
+            drive_id=drive_id
+        )
+
+        if not subscription_id:
+            logger.warning(f"Failed to create Microsoft Graph subscription for site {site_id}")
+            return None
+
+        # Save to database
+        expiration = datetime.now(timezone.utc) + timedelta(minutes=self.subscription_lifetime_minutes)
+        subscription = SharePointSubscription(
+            user_integration_id=user_integration_id,
+            site_id=site_id,
+            subscription_id=subscription_id,
+            drive_id=drive_id,
+            expires_at=expiration,
+        )
+
+        saved = await self.subscription_repo.add(subscription)
+        logger.info(
+            f"Created and saved subscription {subscription_id} for site {site_id[:30]}... "
+            f"(expires {expiration.isoformat()})"
+        )
+
+        return saved
+
+    async def renew_subscription(
+        self,
+        subscription: SharePointSubscription,
+        token: SharePointToken,
+    ) -> bool:
+        """Renew an existing subscription before it expires.
+
+        Called by background renewal job to extend subscription lifetime.
+
+        Args:
+            subscription: Subscription to renew
+            token: OAuth token for Microsoft Graph API
+
+        Returns:
+            True if renewal successful, False otherwise
+        """
+        new_expiration = datetime.now(timezone.utc) + timedelta(minutes=self.subscription_lifetime_minutes)
+
+        headers = {
+            "Authorization": f"Bearer {token.access_token}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "expirationDateTime": new_expiration.isoformat().replace("+00:00", "Z"),
+        }
+
+        try:
+            # Use IPv4-only connector to avoid IPv6 issues
+            connector = aiohttp.TCPConnector(family=socket.AF_INET, force_close=True)
+            timeout = aiohttp.ClientTimeout(total=30)
+
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                async with session.patch(
+                    f"https://graph.microsoft.com/v1.0/subscriptions/{subscription.subscription_id}",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    if response.status == 200:
+                        # Update database
+                        subscription.expires_at = new_expiration
+                        await self.subscription_repo.update(subscription)
+
+                        logger.info(
+                            f"Renewed subscription {subscription.subscription_id} "
+                            f"for site {subscription.site_id[:30]}... until {new_expiration.isoformat()}"
+                        )
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to renew subscription {subscription.subscription_id}: "
+                            f"HTTP {response.status} - {error_text}"
+                        )
+                        return False
+
+        except Exception as exc:
+            logger.error(
+                f"Error renewing subscription {subscription.subscription_id}: {exc}",
+                exc_info=True
+            )
+            return False
+
+    async def delete_subscription_if_unused(
+        self,
+        subscription_id: UUID,
+        token: SharePointToken,
+    ) -> bool:
+        """Delete subscription if no integration_knowledge records reference it.
+
+        Called when an integration is deleted. Only deletes if this was the last
+        integration using this subscription.
+
+        Args:
+            subscription_id: Subscription database ID
+            token: OAuth token for Microsoft Graph API
+
+        Returns:
+            True if deleted (or didn't need deletion), False on error
+        """
+        # Check if any integrations still reference this subscription
+        ref_count = await self.subscription_repo.count_references(subscription_id)
+
+        if ref_count > 0:
+            logger.info(
+                f"Subscription {subscription_id} still has {ref_count} references; "
+                f"not deleting"
+            )
+            return True
+
+        # No references - safe to delete
+        subscription = await self.subscription_repo.get(subscription_id)
+        if not subscription:
+            logger.warning(f"Subscription {subscription_id} not found in database")
+            return True  # Already deleted
+
+        # Delete from Microsoft Graph
+        deleted = await self._delete_graph_subscription(
+            subscription_id=subscription.subscription_id,
+            token=token
+        )
+
+        if deleted:
+            # Delete from database
+            await self.subscription_repo.remove(id=subscription_id)
+            logger.info(
+                f"Deleted subscription {subscription.subscription_id} "
+                f"for site {subscription.site_id[:30]}... (no more references)"
+            )
+            return True
+        else:
+            logger.warning(
+                f"Failed to delete subscription {subscription.subscription_id} from Microsoft Graph; "
+                f"keeping in database for retry"
+            )
+            return False
+
+    async def list_expiring_subscriptions(
+        self,
+        hours: int = 4
+    ) -> List[SharePointSubscription]:
+        """List subscriptions expiring within the specified hours.
+
+        Used by renewal background job.
+
+        Args:
+            hours: Look ahead this many hours
+
+        Returns:
+            List of subscriptions that need renewal
+        """
+        threshold = datetime.now(timezone.utc) + timedelta(hours=hours)
+        return await self.subscription_repo.list_expiring_before(threshold)
+
+    async def _create_graph_subscription(
+        self,
+        token: SharePointToken,
+        site_id: str,
+        drive_id: str,
+    ) -> Optional[str]:
+        """Create subscription in Microsoft Graph.
+
+        Returns subscription_id from Microsoft Graph, or None on failure.
+        """
+        expiration = datetime.now(timezone.utc) + timedelta(minutes=self.subscription_lifetime_minutes)
 
         headers = {
             "Authorization": f"Bearer {token.access_token}",
@@ -60,17 +271,12 @@ class SharePointSubscriptionService:
         }
 
         # Microsoft Graph subscriptions only support drive/root level resources
-        # We always subscribe to the entire drive root, regardless of folder_id
-        # The webhook handler will filter notifications based on folder_id in the IntegrationKnowledge
-        resource = f"/sites/{knowledge.site_id}/drives/{drive_id}/root"
-        if knowledge.folder_id:
-            logger.info("Creating subscription for folder %s (knowledge %s) - webhooks will be filtered to this folder", knowledge.folder_id, knowledge.id)
-        else:
-            logger.info("Creating subscription for entire drive root (knowledge %s)", knowledge.id)
+        # We always subscribe to the entire drive root
+        # Webhook handler filters notifications based on folder_id in IntegrationKnowledge
+        resource = f"/sites/{site_id}/drives/{drive_id}/root"
 
-        # Microsoft Graph only accepts the "updated" changeType for drive/root subscriptions; it also covers create/delete events.
         payload = {
-            "changeType": "updated",
+            "changeType": "updated",  # Covers create/delete/update events
             "notificationUrl": self.notification_url,
             "resource": resource,
             "expirationDateTime": expiration.isoformat().replace("+00:00", "Z"),
@@ -80,85 +286,99 @@ class SharePointSubscriptionService:
             payload["clientState"] = self.client_state
 
         try:
-            timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-            connector = aiohttp.TCPConnector(
-                family=socket.AF_INET,
-                enable_cleanup_closed=True,
-                force_close=True,  
-                ttl_dns_cache=60,
-            )
+            # Use IPv4-only connector to avoid IPv6 issues
+            connector = aiohttp.TCPConnector(family=socket.AF_INET, force_close=True)
+            timeout = aiohttp.ClientTimeout(total=30)
 
-            async with aiohttp.ClientSession(
-                timeout=timeout,
-                connector=connector,
-                trust_env=True, 
-                headers={
-                    "Accept": "application/json",
-                    "Connection": "close",
-                    "Accept-Encoding": "identity",
-                },
-            ) as session:
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.post(
                     "https://graph.microsoft.com/v1.0/subscriptions",
                     headers=headers,
                     json=payload,
                 ) as response:
-                    if response.status >= 400:
-                        try:
-                            error_payload = await response.json()
-                        except aiohttp.ContentTypeError:
-                            error_payload = await response.text()
-                        logger.error(
-                            "Failed to create SharePoint subscription (status %s): %s",
-                            response.status,
-                            error_payload,
+                    if response.status == 201:
+                        data = await response.json()
+                        subscription_id = data.get("id")
+                        logger.info(
+                            f"Created Microsoft Graph subscription {subscription_id} "
+                            f"for site {site_id[:30]}..., drive {drive_id[:20]}..."
                         )
-                        return knowledge
+                        return subscription_id
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to create subscription for site {site_id}: "
+                            f"HTTP {response.status} - {error_text}"
+                        )
+                        return None
 
-                    data = await response.json()
+        except Exception as exc:
+            logger.error(
+                f"Error creating subscription for site {site_id}: {exc}",
+                exc_info=True
+            )
+            return None
 
-        except aiohttp.ClientError as exc:
-            logger.error("Failed to create SharePoint subscription: %s", exc)
-            return knowledge
+    async def _delete_graph_subscription(
+        self,
+        subscription_id: str,
+        token: SharePointToken,
+    ) -> bool:
+        """Delete subscription from Microsoft Graph.
 
-        data = await response.json()
-        knowledge.sharepoint_subscription_id = data.get("id")
-        expires_at_str: Optional[str] = data.get("expirationDateTime")
-        if expires_at_str:
-            try:
-                knowledge.sharepoint_subscription_expires_at = datetime.fromisoformat(
-                    expires_at_str.replace("Z", "+00:00")
-                )
-            except ValueError:
-                logger.warning("Could not parse subscription expiration time: %s", expires_at_str)
-
-        updated = await self.integration_knowledge_repo.update(obj=knowledge)
-        logger.info(
-            "Registered SharePoint subscription %s for knowledge %s",
-            knowledge.sharepoint_subscription_id,
-            knowledge.id,
-        )
-        return updated
-
-    async def _resolve_drive_id(self, token: SharePointToken, site_id: str) -> Optional[str]:
-        async with SharePointContentClient(
-            base_url=token.base_url,
-            api_token=token.access_token,
-            token_id=token.id,
-            token_refresh_callback=self.token_refresh_callback,
-        ) as client:
-            try:
-                drive_id = await client.get_default_drive_id(site_id)  
-                if not drive_id:
-                    logger.warning("No default drive for site %s", site_id)
-                return drive_id
-            except Exception as exc:
-                logger.error("Unable to resolve drive id for site %s: %s", site_id, exc)
-                return None
-            
-    async def token_refresh_callback(self, token_id):
-        token = await self.oauth_token_service.refresh_and_update_token(token_id=token_id)
-        return {
-            "access_token": token.access_token,
-            "refresh_token": token.refresh_token,
+        Returns True if successful or already deleted, False on error.
+        """
+        headers = {
+            "Authorization": f"Bearer {token.access_token}",
         }
+
+        try:
+            connector = aiohttp.TCPConnector(family=socket.AF_INET, force_close=True)
+            timeout = aiohttp.ClientTimeout(total=30)
+
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                async with session.delete(
+                    f"https://graph.microsoft.com/v1.0/subscriptions/{subscription_id}",
+                    headers=headers,
+                ) as response:
+                    if response.status == 204:
+                        logger.info(f"Deleted Microsoft Graph subscription {subscription_id}")
+                        return True
+                    elif response.status == 404:
+                        # Already deleted - that's fine
+                        logger.info(f"Subscription {subscription_id} already deleted from Microsoft Graph")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to delete subscription {subscription_id}: "
+                            f"HTTP {response.status} - {error_text}"
+                        )
+                        return False
+
+        except Exception as exc:
+            logger.error(
+                f"Error deleting subscription {subscription_id}: {exc}",
+                exc_info=True
+            )
+            return False
+
+    async def _resolve_drive_id(
+        self,
+        token: SharePointToken,
+        site_id: str,
+    ) -> Optional[str]:
+        """Resolve drive ID for a SharePoint site.
+
+        Uses SharePointContentClient to get default drive ID.
+        """
+        try:
+            content_client = SharePointContentClient(token=token)
+            drive_id = await content_client.get_default_drive_id(site_id=site_id)
+            return drive_id
+        except Exception as exc:
+            logger.error(
+                f"Error resolving drive ID for site {site_id}: {exc}",
+                exc_info=True
+            )
+            return None

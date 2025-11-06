@@ -31,9 +31,7 @@ class IntegrationKnowledgeFactory:
             last_synced_at=record.last_synced_at,
             last_sync_summary=record.last_sync_summary,
             sharepoint_subscription_id=getattr(record, "sharepoint_subscription_id", None),
-            sharepoint_subscription_expires_at=getattr(
-                record, "sharepoint_subscription_expires_at", None
-            ),
+            sharepoint_subscription=None,  # Don't lazy load - causes greenlet errors
             delta_token=getattr(record, "delta_token", None),
             folder_id=getattr(record, "folder_id", None),
             folder_path=getattr(record, "folder_path", None),

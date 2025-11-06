@@ -29,7 +29,6 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
             "last_sync_summary": entity.last_sync_summary,
             "site_id": entity.site_id,
             "sharepoint_subscription_id": entity.sharepoint_subscription_id,
-            "sharepoint_subscription_expires_at": entity.sharepoint_subscription_expires_at,
             "delta_token": entity.delta_token,
             "folder_id": entity.folder_id,
             "folder_path": entity.folder_path,

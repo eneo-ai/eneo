@@ -11,6 +11,7 @@ from intric.database.tables.base_class import BasePublic
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
+from intric.database.tables.sharepoint_subscription_table import SharePointSubscription
 
 
 class Integration(BasePublic):
@@ -96,9 +97,11 @@ class IntegrationKnowledge(BasePublic):
     )
     last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(JSONB, nullable=True)
     site_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    sharepoint_subscription_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    sharepoint_subscription_expires_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
+    # NOTE: After migration 202511061533, sharepoint_subscription_id becomes UUID FK
+    # Old text column and expires_at will be removed by migration
+    sharepoint_subscription_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("sharepoint_subscriptions.id", ondelete="SET NULL"),
+        nullable=True
     )
     delta_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     folder_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
@@ -107,3 +110,4 @@ class IntegrationKnowledge(BasePublic):
 
     user_integration: Mapped[UserIntegration] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
+    sharepoint_subscription: Mapped[Optional[SharePointSubscription]] = relationship()
