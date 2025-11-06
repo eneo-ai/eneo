@@ -27,6 +27,12 @@ from intric.settings.credential_resolver import CredentialResolver
 from intric.tenants.tenant_repo import TenantRepository
 
 
+@pytest.fixture(autouse=True)
+def enable_tenant_credentials(test_settings, monkeypatch):
+    """Enable tenant credentials feature for all tests in this module."""
+    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+
+
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
     payload = {
