@@ -1,8 +1,6 @@
 """Unit tests for aiohttp client configuration (IPv4 forcing and DNS caching)."""
 
 import socket
-import asyncio
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
