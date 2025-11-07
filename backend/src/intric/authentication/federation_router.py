@@ -45,7 +45,9 @@ PyJWKClient = JWKClient  # Backwards compatibility alias for tests/monkeypatchin
 OIDC_TIMEOUTS = {
     "discovery": aiohttp.ClientTimeout(total=3.0, connect=1.5),
     "jwks": aiohttp.ClientTimeout(total=3.0, connect=1.5),
-    "token": aiohttp.ClientTimeout(total=8.0, connect=2.0),
+    "token": aiohttp.ClientTimeout(
+        total=10.0, connect=5.0
+    ),  # Increased for load balancer redirects
 }
 
 # Sensitive keys that should NEVER be logged
@@ -1679,22 +1681,99 @@ async def auth_callback(
                     allow_redirects=False,  # Token endpoint should NEVER redirect
                 )
 
-                # Check for unexpected redirects (3xx status codes)
+                # Handle redirects from load balancer (e.g., m00 → m02/m03)
+                # Allow up to 3 hops to support multi-tier load balancer setups
+                max_redirects = 3
+                redirect_count = 0
+                while 300 <= status_code < 400 and redirect_count < max_redirects:
+                    location = response_headers.get("Location") or response_headers.get(
+                        "location"
+                    )
+                    if not location:
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Token endpoint redirect without Location header",
+                            headers={"X-Correlation-ID": correlation_id},
+                        )
+
+                    # Resolve absolute URL
+                    from urllib.parse import urljoin, urlparse
+
+                    redirected_url = urljoin(token_endpoint, location)
+                    parsed = urlparse(redirected_url)
+
+                    # Security validation: require HTTPS and expected domain
+                    if parsed.scheme != "https" or not parsed.netloc.endswith(
+                        ".login.sundsvall.se"
+                    ):
+                        logger.error(
+                            "Token endpoint redirected to unexpected location",
+                            extra={
+                                "tenant_id": str(tenant_id),
+                                "original_url": token_endpoint,
+                                "redirect_url": redirected_url,
+                                "http_status": status_code,
+                                "error_kind": "unexpected_redirect_target",
+                                "correlation_id": correlation_id,
+                            },
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Token endpoint configuration error: unexpected redirect target",
+                            headers={"X-Correlation-ID": correlation_id},
+                        )
+
+                    logger.info(
+                        f"Following token endpoint redirect (hop {redirect_count + 1})",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "from_url": token_endpoint
+                            if redirect_count == 0
+                            else "previous_redirect",
+                            "to_url": redirected_url,
+                            "http_status": status_code,
+                            "redirect_hop": redirect_count + 1,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+
+                    # Re-POST to redirected URL
+                    (
+                        body_bytes,
+                        status_code,
+                        response_headers,
+                    ) = await _make_idp_http_request(
+                        method="POST",
+                        url=redirected_url,
+                        endpoint_type="token",
+                        correlation_id=correlation_id,
+                        tenant_id=tenant_id,
+                        provider=federation_config.get("provider", "unknown"),
+                        redis_client=redis_client,
+                        retry_enabled=False,
+                        data=token_data,
+                        headers=headers or None,
+                        allow_redirects=False,
+                    )
+
+                    redirect_count += 1
+                    token_endpoint = redirected_url  # Update for next iteration logging
+
+                # If still 3xx after max redirects, fail
                 if 300 <= status_code < 400:
                     logger.error(
-                        "Unexpected redirect from token endpoint",
+                        "Too many redirects from token endpoint",
                         extra={
                             "tenant_id": str(tenant_id),
                             "http_status": status_code,
-                            "token_endpoint": token_endpoint,
-                            "error_kind": "unexpected_redirect_token_endpoint",
-                            "location_header": response_headers.get("location"),
+                            "redirect_count": redirect_count,
+                            "max_redirects": max_redirects,
                             "correlation_id": correlation_id,
                         },
                     )
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Token endpoint configuration error: unexpected redirect",
+                        detail=f"Token endpoint configuration error: exceeded {max_redirects} redirects",
                         headers={"X-Correlation-ID": correlation_id},
                     )
 
