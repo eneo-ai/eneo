@@ -1948,48 +1948,102 @@ async def auth_callback(
                 pass
 
             try:
-                # Fetch JWKS and extract signing key
-                jwk_client = JWKClient(jwks_uri)
-                signing_key = jwk_client.get_signing_key_from_jwt(
-                    id_token
-                ).key  # Extract raw key from PyJWK wrapper
+                # Fetch JWKS via our IPv4-only aiohttp wrapper (async, no blocking I/O)
+                jwks_bytes, jwks_status, jwks_headers = await _make_idp_http_request(
+                    method="GET",
+                    url=jwks_uri,
+                    endpoint_type="jwks",
+                    correlation_id=correlation_id,
+                    tenant_id=tenant_id,
+                    provider=federation_config.get("provider", "unknown"),
+                    redis_client=redis_client,
+                    retry_enabled=True,  # Safe to retry GET requests
+                )
+
+                if jwks_status != 200:
+                    logger.error(
+                        "JWKS endpoint returned non-200",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "jwks_uri": jwks_uri,
+                            "http_status": jwks_status,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail=f"Failed to fetch JWKS: HTTP {jwks_status}",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
+                # Parse JWKS JSON
+                try:
+                    jwks_json = json.loads(jwks_bytes)
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        "Invalid JWKS JSON",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "jwks_uri": jwks_uri,
+                            "error": str(e),
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid JWKS format",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+
+                # Extract signing key matching kid from ID token
+                from jwt import PyJWKSet
+
+                jwk_set = PyJWKSet.from_dict(jwks_json)
+                signing_key = None
+
+                for jwk in jwk_set.keys:
+                    if jwk.key_id == kid:
+                        signing_key = jwk.key
+                        break
+
+                if not signing_key:
+                    logger.error(
+                        "KID not found in JWKS",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "jwks_uri": jwks_uri,
+                            "kid": kid,
+                            "available_kids": [j.key_id for j in jwk_set.keys],
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Signing key not found in JWKS",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
 
                 logger.debug(
                     "JWKS fetched and signing key extracted",
                     extra={
                         "tenant_id": str(tenant_id),
                         "kid": kid,
-                        "correlation_id": correlation_id,
-                    },
-                )
-            except pyjwt.exceptions.PyJWKClientError as e:
-                # JWKS fetch failed or kid not found
-                logger.error(
-                    "JWKS fetch failed or kid not found",
-                    extra={
-                        "tenant_id": str(tenant_id),
                         "jwks_uri": jwks_uri,
-                        "kid": kid,
-                        "error_kind": "jwks_fetch_failed",
-                        "error": str(e),
-                        "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
                     },
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Failed to fetch JWKS or validate ID token signature",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
+
+            except HTTPException:
+                # Re-raise HTTP exceptions as-is
+                raise
             except Exception as e:
-                # Other errors (network, etc.)
+                # Catch any other errors (PyJWT parsing, etc.)
                 logger.error(
-                    "Failed to fetch JWKS or extract signing key",
+                    "Failed to process JWKS or extract signing key",
                     extra={
                         "tenant_id": str(tenant_id),
                         "jwks_uri": jwks_uri,
                         "kid": kid,
-                        "error_kind": "jwks_unknown_error",
                         "error": str(e),
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
