@@ -1,3 +1,4 @@
+import socket
 from typing import Optional, Tuple
 
 import aiohttp
@@ -11,7 +12,27 @@ logger = get_logger(__name__)
 class WrappedAiohttpClient:
     def __init__(self, base_url: str):
         self.base_url = base_url
-        self.client = aiohttp.ClientSession()
+
+        # Configure connector with same settings as main aiohttp_client singleton
+        # for consistency (IPv4-only, DNS caching, connection pooling)
+        connector = aiohttp.TCPConnector(
+            limit=100,
+            limit_per_host=30,
+            enable_cleanup_closed=True,
+            family=socket.AF_INET,  # Force IPv4 to avoid IPv6 blackhole issues
+            use_dns_cache=True,  # Cache DNS results
+            ttl_dns_cache=300,  # 5 minute TTL
+        )
+
+        timeout = aiohttp.ClientTimeout(
+            total=30.0,
+            connect=10.0,
+        )
+
+        self.client = aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector,
+        )
 
     def _create_url(self, endpoint: str):
         return f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"

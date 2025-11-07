@@ -90,15 +90,31 @@ class FakeSession:
 
     def request(self, method: str, url: str, **kwargs):  # noqa: ARG002
         """Return the configured response for any request."""
+        # Detect JWKS requests and return proper JWKS structure
+        if "/jwks" in url or "/certs" in url or url.endswith(".jwks"):
+            jwks_response = FakeResponse({
+                "keys": [{
+                    "kid": "test-kid",
+                    "kty": "RSA",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "test-n-value",
+                    "e": "AQAB",
+                }]
+            })
+            return jwks_response
+
+        # For all other requests (token POST, etc.)
         return self._response
 
     def post(self, *args, **kwargs):  # noqa: ARG002
         """Legacy method for backwards compatibility."""
         return self._response
 
-    def get(self, *args, **kwargs):  # noqa: ARG002
+    def get(self, url: str, **kwargs):  # noqa: ARG002
         """Support GET requests."""
-        return self._response
+        # Use same logic as request() for JWKS detection
+        return self.request("GET", url, **kwargs)
 
 
 class FakeAioHttpClient:

@@ -7,6 +7,7 @@ import hashlib
 import json
 import random
 import secrets
+import socket
 import time
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -314,6 +315,33 @@ async def _make_idp_http_request(
             session = aiohttp_client()
             if session is None:
                 raise RuntimeError("aiohttp ClientSession not started")
+
+            # DIAGNOSTIC: Log aiohttp client configuration for IPv4/DNS debugging
+            # Use getattr for mock compatibility (test mocks may not have connector/private attributes)
+            connector = getattr(session, 'connector', None)
+            if connector:
+                # Safely access private attributes (may not exist in mocks)
+                family = getattr(connector, '_family', None)
+                family_name = (
+                    "AF_INET" if family == socket.AF_INET
+                    else "AF_INET6" if family == socket.AF_INET6
+                    else f"UNKNOWN({family})" if family is not None
+                    else "NO_FAMILY"
+                )
+                logger.debug(
+                    f"DIAGNOSTIC: aiohttp session config for {endpoint_type} endpoint",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "correlation_id": correlation_id,
+                        "endpoint_type": endpoint_type,
+                        "connector_type": type(connector).__name__,
+                        "connector_family": family,
+                        "connector_family_name": family_name,
+                        "use_dns_cache": getattr(connector, '_use_dns_cache', None),
+                        "ttl_dns_cache": getattr(connector, '_ttl_dns_cache', None),
+                        "session_closed": getattr(session, 'closed', None),
+                    },
+                )
 
             async with session.request(
                 method=method,
@@ -2001,27 +2029,43 @@ async def auth_callback(
                 jwk_set = PyJWKSet.from_dict(jwks_json)
                 signing_key = None
 
-                for jwk in jwk_set.keys:
-                    if jwk.key_id == kid:
-                        signing_key = jwk.key
-                        break
+                # Try to find key by kid if kid is present
+                if kid:
+                    for jwk in jwk_set.keys:
+                        if jwk.key_id == kid:
+                            signing_key = jwk.key
+                            break
 
+                # Fallback: if kid missing or not found, use single key if available
                 if not signing_key:
-                    logger.error(
-                        "KID not found in JWKS",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "jwks_uri": jwks_uri,
-                            "kid": kid,
-                            "available_kids": [j.key_id for j in jwk_set.keys],
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Signing key not found in JWKS",
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
+                    if len(jwk_set.keys) == 1:
+                        # Only one key available - use it (common in test/dev environments)
+                        signing_key = jwk_set.keys[0].key
+                        logger.debug(
+                            "Using single available key from JWKS (kid not matched)",
+                            extra={
+                                "tenant_id": str(tenant_id),
+                                "jwks_uri": jwks_uri,
+                                "kid": kid,
+                                "correlation_id": correlation_id,
+                            },
+                        )
+                    else:
+                        logger.error(
+                            "KID not found in JWKS",
+                            extra={
+                                "tenant_id": str(tenant_id),
+                                "jwks_uri": jwks_uri,
+                                "kid": kid,
+                                "available_kids": [j.key_id for j in jwk_set.keys],
+                                "correlation_id": correlation_id,
+                            },
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Signing key not found in JWKS",
+                            headers={"X-Correlation-ID": correlation_id},
+                        )
 
                 logger.debug(
                     "JWKS fetched and signing key extracted",
