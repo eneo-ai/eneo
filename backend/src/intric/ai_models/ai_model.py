@@ -7,6 +7,7 @@ from intric.ai_models.model_enums import (
     ModelStability,
 )
 from intric.base.base_entity import Entity
+from intric.main.config import get_settings
 from intric.modules.module import Modules
 
 if TYPE_CHECKING:
@@ -65,7 +66,37 @@ class AIModel(Entity):
             if Modules.SWE_HOSTING not in self.user.modules:
                 return True
 
+        # Check if tenant credentials are missing when TENANT_CREDENTIALS_ENABLED=true
+        if get_settings().tenant_credentials_enabled:
+            # Use family value as provider name (claude → anthropic is special case)
+            provider = "anthropic" if self.family == ModelFamily.CLAUDE else self.family.value
+            if not self.user.tenant or not self.user.tenant.api_credentials:
+                return True
+            if provider not in self.user.tenant.api_credentials:
+                return True
+
         return False
+
+    @property
+    def lock_reason(self) -> Optional[str]:
+        if self.hosting == ModelHostingLocation.EU:
+            if Modules.EU_HOSTING not in self.user.modules:
+                return "module"
+
+        if self.hosting == ModelHostingLocation.SWE:
+            if Modules.SWE_HOSTING not in self.user.modules:
+                return "module"
+
+        # Check if tenant credentials are missing
+        if get_settings().tenant_credentials_enabled:
+            # Use family value as provider name (claude → anthropic is special case)
+            provider = "anthropic" if self.family == ModelFamily.CLAUDE else self.family.value
+            if not self.user.tenant or not self.user.tenant.api_credentials:
+                return "credentials"
+            if provider not in self.user.tenant.api_credentials:
+                return "credentials"
+
+        return None
 
     @property
     def can_access(self):
