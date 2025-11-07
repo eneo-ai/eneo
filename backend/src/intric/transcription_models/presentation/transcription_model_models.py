@@ -30,6 +30,7 @@ class TranscriptionModelPublic(BaseModel):
     org: Optional[ModelOrg] = None
     can_access: bool = False
     is_locked: bool = True
+    lock_reason: Optional[str] = None
     is_org_enabled: bool = False
     is_org_default: bool = False
     security_classification: Optional[SecurityClassificationPublic] = None
@@ -50,6 +51,7 @@ class TranscriptionModelPublic(BaseModel):
             org=model.org,
             can_access=model.can_access,
             is_locked=model.is_locked,
+            lock_reason=model.lock_reason,
             is_org_enabled=model.is_org_enabled,
             is_org_default=model.is_org_default,
             security_classification=SecurityClassificationPublic.from_domain(

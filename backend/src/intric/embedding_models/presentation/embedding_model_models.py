@@ -29,6 +29,7 @@ class EmbeddingModelPublic(BaseResponse):
     org: Optional[Orgs] = None
     can_access: bool = False
     is_locked: bool = True
+    lock_reason: Optional[str] = None
     is_org_enabled: bool = False
     security_classification: Optional[SecurityClassificationPublic] = None
 
@@ -58,6 +59,7 @@ class EmbeddingModelPublic(BaseResponse):
             dimensions=model.dimensions,
             can_access=model.can_access,
             is_locked=model.is_locked,
+            lock_reason=model.lock_reason,
             is_org_enabled=model.is_org_enabled,
             security_classification=security_classification,
         )

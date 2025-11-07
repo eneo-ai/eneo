@@ -212,7 +212,7 @@ def test_settings(
         using_iam=False,
         using_image_generation=False,
         using_crawl=False,
-        tenant_credentials_enabled=True,  # Enable tenant-specific credentials for tests
+        tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_per_tenant_enabled=True,
 
         # Note: Set to False for integration tests that need full app functionality
