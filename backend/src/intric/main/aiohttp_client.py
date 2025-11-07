@@ -1,3 +1,5 @@
+import socket
+
 import aiohttp
 
 
@@ -16,6 +18,7 @@ class AioHttpClient:
             limit=100,  # Total connection pool size
             limit_per_host=30,  # Max connections per host
             enable_cleanup_closed=True,  # Clean up closed connections
+            family=socket.AF_INET,  # Force IPv4 to avoid IPv6 blackhole issues
         )
 
         self.session = aiohttp.ClientSession(
