@@ -379,6 +379,36 @@ async def set_tenant_credential(
 
     masked_key = mask_api_key(request.api_key)
 
+    # Audit logging (sysadmin operation - system actor)
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=tenant.id,  # Use tenant as actor for sysadmin
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.CREDENTIALS_UPDATED,
+        entity_type=EntityType.CREDENTIAL,
+        entity_id=tenant_id,  # Credential tied to tenant
+        description=f"Sysadmin set {provider} credentials for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "provider": provider.value,
+                "masked_key": masked_key,
+            },
+        },
+    )
+
     return SetCredentialResponse(
         tenant_id=tenant_id,
         provider=provider,
@@ -415,6 +445,12 @@ async def delete_tenant_credential(
     Raises:
         HTTPException 404: Tenant not found
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     tenant_repo = container.tenant_repo()
 
     # Validate tenant exists
@@ -427,6 +463,30 @@ async def delete_tenant_credential(
 
     # Delete credential
     await tenant_repo.delete_api_credential(tenant_id=tenant_id, provider=provider)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=tenant.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.CREDENTIALS_UPDATED,
+        entity_type=EntityType.CREDENTIAL,
+        entity_id=tenant_id,
+        description=f"Sysadmin deleted {provider} credentials for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "provider": provider.value,
+                "action": "deleted",
+            },
+        },
+    )
 
     return DeleteCredentialResponse(
         tenant_id=tenant_id,
