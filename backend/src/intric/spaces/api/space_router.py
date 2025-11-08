@@ -49,10 +49,42 @@ async def create_space(
     create_space_req: CreateSpaceRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
+    current_user = container.user()
 
+    # Create space
     space = await space_creation_service.create_space(name=create_space_req.name)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_CREATED,
+        entity_type=EntityType.SPACE,
+        entity_id=space.id,
+        description=f"Created space '{space.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(space.id),
+                "name": space.name,
+            },
+        },
+    )
 
     return space_assembler.from_space_to_model(space)
 
@@ -201,11 +233,44 @@ async def create_space_assistant(
     assistant_in: CreateSpaceAssistantRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.assistant_service()
     assembler = container.assistant_assembler()
+    current_user = container.user()
 
+    # Create assistant
     assistant, permissions = await service.create_assistant(
         name=assistant_in.name, space_id=id, template_data=assistant_in.from_template
+    )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ASSISTANT_CREATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=assistant.id,
+        description=f"Created assistant '{assistant.name}' in space",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(assistant.id),
+                "name": assistant.name,
+                "space_id": str(id),
+            },
+        },
     )
 
     return assembler.from_assistant_to_model(assistant, permissions=permissions)
@@ -245,15 +310,48 @@ async def create_app(
     create_service_req: CreateSpaceAppRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     space_service = container.space_service()
     app_service = container.app_service()
     assembler = container.app_assembler()
+    current_user = container.user()
 
+    # Create app
     space = await space_service.get_space(id)
     app, permissions = await app_service.create_app(
         name=create_service_req.name,
         space=space,
         template_data=create_service_req.from_template,
+    )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.APP_CREATED,
+        entity_type=EntityType.APP,
+        entity_id=app.id,
+        description=f"Created app '{app.name}' in space",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(app.id),
+                "name": app.name,
+                "space_id": str(id),
+            },
+        },
     )
 
     return assembler.from_app_to_model(app, permissions=permissions)

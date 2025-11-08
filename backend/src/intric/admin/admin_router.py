@@ -255,8 +255,42 @@ async def register_user(
       "quota_limit": 50000000
     }
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     admin_service = container.admin_service()
+    current_user = container.user()
+
+    # Create user
     user, _, api_key = await admin_service.register_tenant_user(new_user)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_CREATED,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        description=f"Admin created user {user.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+            },
+        },
+    )
 
     user_admin_view = UserCreatedAdminView(**user.model_dump(exclude={"api_key"}), api_key=api_key)
 
@@ -358,8 +392,55 @@ async def update_user(
       "state": "active"
     }
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.admin_service()
+    current_user = container.user()
+
+    # Get old state for change tracking
+    old_user = await service.get_tenant_user(username)
+
+    # Update user
     user_updated = await service.update_tenant_user(username, user)
+
+    # Track changes
+    changes = {}
+    if user.email and user.email != old_user.email:
+        changes["email"] = {"old": old_user.email, "new": user.email}
+    if user.state and user.state != old_user.state:
+        changes["state"] = {"old": old_user.state, "new": user.state}
+    if user.quota_limit is not None and user.quota_limit != old_user.quota_limit:
+        changes["quota_limit"] = {"old": old_user.quota_limit, "new": user.quota_limit}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_UPDATED,
+        entity_type=EntityType.USER,
+        entity_id=user_updated.id,
+        description=f"Admin updated user {user_updated.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(user_updated.id),
+                "email": user_updated.email,
+                "username": user_updated.username,
+            },
+            "changes": changes,
+        },
+    )
 
     user_admin_view = UserAdminView(**user_updated.model_dump())
 
@@ -398,8 +479,45 @@ async def delete_user(username: str, container: Container = Depends(get_containe
     - User must exist in your tenant
     - User must not already be soft-deleted
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.admin_service()
+    current_user = container.user()
+
+    # Get user details BEFORE deletion
+    user_to_delete = await service.get_tenant_user(username)
+
+    # Delete user
     success = await service.delete_tenant_user(username)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_DELETED,
+        entity_type=EntityType.USER,
+        entity_id=user_to_delete.id,
+        description=f"Admin deleted user {user_to_delete.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(user_to_delete.id),
+                "email": user_to_delete.email,
+                "username": user_to_delete.username,
+            },
+        },
+    )
 
     return DeleteResponse(success=success)
 
@@ -446,8 +564,43 @@ async def deactivate_user(
     - User must exist in your tenant
     - User must not be from another tenant
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.admin_service()
+    current_user = container.user()
+
+    # Deactivate user
     user = await service.deactivate_tenant_user(username)
+    
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_UPDATED,  # Deactivation is a state update
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        description=f"Deactivated user {user.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+            },
+            "changes": {"state": {"old": "active", "new": "inactive"}},
+        },
+    )
     
     return UserAdminView(**user.model_dump())
 
@@ -493,8 +646,46 @@ async def reactivate_user(
     - User must exist in your tenant
     - User must not be from another tenant
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.admin_service()
+    current_user = container.user()
+
+    # Get old state
+    old_user = await service.get_tenant_user(username)
+    
+    # Reactivate user
     user = await service.reactivate_tenant_user(username)
+    
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_UPDATED,  # Reactivation is a state update
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        description=f"Reactivated user {user.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+            },
+            "changes": {"state": {"old": str(old_user.state), "new": "active"}},
+        },
+    )
     
     return UserAdminView(**user.model_dump())
 

@@ -562,9 +562,44 @@ async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    user_service = container.user_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-    return await user_service.invite_user(user_invite)
+    user_service = container.user_service()
+    current_user = container.user()
+
+    # Create user
+    new_user = await user_service.invite_user(user_invite)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_CREATED,
+        entity_type=EntityType.USER,
+        entity_id=new_user.id,
+        description=f"Created user {new_user.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(new_user.id),
+                "email": new_user.email,
+                "username": new_user.username,
+            },
+        },
+    )
+
+    return new_user
 
 
 @router.patch("/admin/{id}/", response_model=UserAdminView)
@@ -573,18 +608,100 @@ async def update_user(
     user_update: PropUserUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    user_service = container.user_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-    return await user_service.update_user(user_id=id, prop_user_update=user_update)
+    user_service = container.user_service()
+    current_user = container.user()
+
+    # Get old state for change tracking
+    old_user = await user_service.get_user_by_id(id)
+
+    # Update user
+    updated_user = await user_service.update_user(user_id=id, prop_user_update=user_update)
+
+    # Track what changed
+    changes = {}
+    if user_update.username and user_update.username != old_user.username:
+        changes["username"] = {"old": old_user.username, "new": user_update.username}
+    if user_update.email and user_update.email != old_user.email:
+        changes["email"] = {"old": old_user.email, "new": user_update.email}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_UPDATED,
+        entity_type=EntityType.USER,
+        entity_id=id,
+        description=f"Updated user {updated_user.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(updated_user.id),
+                "email": updated_user.email,
+                "username": updated_user.username,
+            },
+            "changes": changes,
+        },
+    )
+
+    return updated_user
 
 
 @router.delete("/admin/{id}/", status_code=204)
 async def delete_user(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
-    user_service = container.user_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    user_service = container.user_service()
+    current_user = container.user()
+
+    # Get user details BEFORE deletion (for audit metadata)
+    user_to_delete = await user_service.get_user_by_id(id)
+
+    # Delete user
     await user_service.delete_user(user_id=id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.USER_DELETED,
+        entity_type=EntityType.USER,
+        entity_id=id,
+        description=f"Deleted user {user_to_delete.email}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(user_to_delete.id),
+                "email": user_to_delete.email,
+                "username": user_to_delete.username,
+            },
+        },
+    )
 
 
 @router.post(
