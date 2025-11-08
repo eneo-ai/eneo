@@ -94,8 +94,40 @@ class OIDCDebugToggleResponse(BaseModel):
 async def register_new_user(
     new_user: UserAddSuperAdmin, container: Container = Depends(get_container())
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     user_service = container.user_service()
+
+    # Create user
     created_user, access_token, api_key = await user_service.register(new_user)
+
+    # Audit logging (system action since no authenticated user for sysadmin)
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=created_user.tenant_id,
+        actor_id=created_user.id,  # System user as actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_CREATED,
+        entity_type=EntityType.USER,
+        entity_id=created_user.id,
+        description=f"Sysadmin created user {created_user.email}",
+        metadata={
+            "actor": {"type": "sysadmin", "action": "register"},
+            "target": {
+                "id": str(created_user.id),
+                "email": created_user.email,
+                "username": created_user.username,
+                "tenant_id": str(created_user.tenant_id),
+            },
+        },
+    )
 
     return UserCreated(
         **created_user.model_dump(exclude={"api_key"}),
@@ -128,8 +160,43 @@ async def delete_user(
     user_id: UUID,
     container: Container = Depends(get_container()),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     user_service = container.user_service()
+
+    # Get user details BEFORE deletion
+    user_to_delete = await user_service.get_user_by_id(user_id)
+
+    # Delete user
     success = await user_service.delete_user(user_id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user_to_delete.tenant_id,
+        actor_id=user_to_delete.id,  # Use deleted user as actor for sysadmin
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_DELETED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=f"Sysadmin deleted user {user_to_delete.email}",
+        metadata={
+            "actor": {"type": "sysadmin"},
+            "target": {
+                "id": str(user_to_delete.id),
+                "email": user_to_delete.email,
+                "username": user_to_delete.username,
+                "tenant_id": str(user_to_delete.tenant_id),
+            },
+        },
+    )
 
     return DeleteResponse(success=success)
 
@@ -141,8 +208,52 @@ async def update_user(
     container: Container = Depends(get_container()),
 ):
     """Omitted fields are not updated."""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     user_service = container.user_service()
-    return await user_service.update_user(user_id, user_update)
+
+    # Get old state
+    old_user = await user_service.get_user_by_id(user_id)
+
+    # Update user
+    updated_user = await user_service.update_user(user_id, user_update)
+
+    # Track changes
+    changes = {}
+    if user_update.email and user_update.email != old_user.email:
+        changes["email"] = {"old": old_user.email, "new": user_update.email}
+    if user_update.username and user_update.username != old_user.username:
+        changes["username"] = {"old": old_user.username, "new": user_update.username}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=updated_user.tenant_id,
+        actor_id=updated_user.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_UPDATED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=f"Sysadmin updated user {updated_user.email}",
+        metadata={
+            "actor": {"type": "sysadmin"},
+            "target": {
+                "id": str(updated_user.id),
+                "email": updated_user.email,
+                "username": updated_user.username,
+            },
+            "changes": changes,
+        },
+    )
+
+    return updated_user
 
 
 @router.post("/users/{user_id}/access-token/", include_in_schema=False)
