@@ -36,8 +36,44 @@ async def upload_file(
     upload_file: UploadFile,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.file_service()
-    return await service.save_file(upload_file)
+    current_user = container.user()
+
+    # Upload file
+    file = await service.save_file(upload_file)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=file.id,
+        description=f"Uploaded file '{file.filename}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(file.id),
+                "filename": file.filename,
+                "size": file.size,
+            },
+        },
+    )
+
+    return file
 
 
 @router.get(
@@ -74,8 +110,44 @@ async def delete_file(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.file_service()
+    current_user = container.user()
+
+    # Get file details BEFORE deletion
+    file = await service.get_file(id)
+
+    # Delete file
     await service.delete_file(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.FILE_DELETED,
+        entity_type=EntityType.FILE,
+        entity_id=id,
+        description=f"Deleted file '{file.filename}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(file.id),
+                "filename": file.filename,
+            },
+        },
+    )
 
 
 @router.post(

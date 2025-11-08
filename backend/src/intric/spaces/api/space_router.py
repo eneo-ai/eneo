@@ -118,8 +118,17 @@ async def update_space(
     update_space_req: UpdateSpaceRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.space_service()
     assembler = container.space_assembler()
+    current_user = container.user()
+
+    # Get old state
+    old_space, _ = await service.get_space(id)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
         if models is None:
@@ -144,6 +153,39 @@ async def update_space(
         completion_model_ids=_get_model_ids_or_none(update_space_req.completion_models),
         transcription_model_ids=_get_model_ids_or_none(update_space_req.transcription_models),
         security_classification=security_classification,
+    )
+
+    # Track changes
+    changes = {}
+    if update_space_req.name and update_space_req.name != old_space.name:
+        changes["name"] = {"old": old_space.name, "new": update_space_req.name}
+    if update_space_req.description is not None:
+        changes["description"] = {"old": old_space.description, "new": update_space_req.description}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_UPDATED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Updated space '{space.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(space.id),
+                "name": space.name,
+            },
+            "changes": changes,
+        },
     )
 
     return assembler.from_space_to_model(space)
@@ -518,11 +560,46 @@ async def add_space_member(
     add_space_member_req: AddSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.space_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-    return await service.add_member(
+    service = container.space_service()
+    current_user = container.user()
+
+    # Add member
+    member = await service.add_member(
         id, member_id=add_space_member_req.id, role=add_space_member_req.role
     )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_MEMBER_ADDED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Added member to space (role: {add_space_member_req.role})",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "space_id": str(id),
+                "member_id": str(add_space_member_req.id),
+                "role": add_space_member_req.role,
+            },
+        },
+    )
+
+    return member
 
 
 @router.patch(
@@ -554,9 +631,41 @@ async def remove_space_member(
     user_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.space_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.space_service()
+    current_user = container.user()
+
+    # Remove member
     await service.remove_member(id, user_id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_MEMBER_REMOVED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description="Removed member from space",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "space_id": str(id),
+                "member_id": str(user_id),
+            },
+        },
+    )
 
 
 @router.get("/type/personal/", response_model=SpacePublic)

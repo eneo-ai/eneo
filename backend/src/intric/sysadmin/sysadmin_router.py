@@ -296,9 +296,41 @@ async def get_tenants(domain: str | None = None, container: Container = Depends(
     responses=responses.get_responses([400]),
 )
 async def create_tenant(tenant: TenantBase, container: Container = Depends(get_container())):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     tenant_service = container.tenant_service()
 
+    # Create tenant
     created_tenant = await tenant_service.create_tenant(tenant)
+
+    # Audit logging (sysadmin - system actor)
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=created_tenant.id,
+        actor_id=created_tenant.id,  # Use tenant as actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,  # Tenant creation is a settings operation
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=created_tenant.id,
+        description=f"Sysadmin created tenant '{created_tenant.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(created_tenant.id),
+                "name": created_tenant.name,
+                "display_name": created_tenant.display_name,
+                "state": created_tenant.state,
+            },
+        },
+    )
+
     return TenantWithMaskedCredentials.from_tenant(created_tenant)
 
 
@@ -312,9 +344,52 @@ async def update_tenant(
     tenant: TenantUpdatePublic,
     container: Container = Depends(get_container()),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     tenant_service = container.tenant_service()
 
+    # Get old state
+    old_tenant = await tenant_service.get_tenant(id)
+
+    # Update tenant
     updated_tenant = await tenant_service.update_tenant(tenant, id)
+
+    # Track changes
+    changes = {}
+    if tenant.name and tenant.name != old_tenant.name:
+        changes["name"] = {"old": old_tenant.name, "new": tenant.name}
+    if tenant.display_name and tenant.display_name != old_tenant.display_name:
+        changes["display_name"] = {"old": old_tenant.display_name, "new": tenant.display_name}
+    if tenant.state and tenant.state != old_tenant.state:
+        changes["state"] = {"old": old_tenant.state, "new": tenant.state}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=updated_tenant.id,
+        actor_id=updated_tenant.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=updated_tenant.id,
+        description=f"Sysadmin updated tenant '{updated_tenant.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(updated_tenant.id),
+                "name": updated_tenant.name,
+            },
+            "changes": changes,
+        },
+    )
+
     return TenantWithMaskedCredentials.from_tenant(updated_tenant)
 
 
@@ -324,9 +399,43 @@ async def update_tenant(
     responses=responses.get_responses([404]),
 )
 async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_container())):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     tenant_service = container.tenant_service()
 
+    # Get tenant BEFORE deletion
+    tenant_to_delete = await tenant_service.get_tenant(id)
+
+    # Delete tenant
     deleted_tenant = await tenant_service.delete_tenant(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=deleted_tenant.id,
+        actor_id=deleted_tenant.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,  # Deletion is a settings operation
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=deleted_tenant.id,
+        description=f"Sysadmin deleted tenant '{tenant_to_delete.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(deleted_tenant.id),
+                "name": tenant_to_delete.name,
+                "display_name": tenant_to_delete.display_name,
+            },
+        },
+    )
+
     return TenantWithMaskedCredentials.from_tenant(deleted_tenant)
 
 
@@ -466,14 +575,48 @@ async def enable_completion_model(
     completion_model_repo: CompletionModelsRepository = Depends(
         get_repository(CompletionModelsRepository)
     ),
+    container: Container = Depends(get_container()),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    # Enable model
     await completion_model_repo.enable_completion_model(
         is_org_enabled=data.is_org_enabled,
         completion_model_id=completion_model_id,
         tenant_id=id,
     )
 
-    return await completion_model_repo.get_model(completion_model_id, tenant_id=id)
+    model = await completion_model_repo.get_model(completion_model_id, tenant_id=id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=id,
+        actor_id=id,  # Use tenant as actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=id,
+        description=f"Sysadmin enabled completion model '{model.model_name}' for tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(id),
+                "model_id": str(completion_model_id),
+                "model_name": model.model_name,
+                "is_org_enabled": data.is_org_enabled,
+            },
+        },
+    )
+
+    return model
 
 
 @router.post(
@@ -488,14 +631,48 @@ async def enable_embedding_model(
     embedding_model_repo: AdminEmbeddingModelsService = Depends(
         get_repository(AdminEmbeddingModelsService)
     ),
+    container: Container = Depends(get_container()),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    # Enable model
     await embedding_model_repo.enable_embedding_model(
         is_org_enabled=data.is_org_enabled,
         embedding_model_id=embedding_model_id,
         tenant_id=id,
     )
 
-    return await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
+    model = await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=id,
+        actor_id=id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=id,
+        description=f"Sysadmin enabled embedding model '{model.model_name}' for tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(id),
+                "model_id": str(embedding_model_id),
+                "model_name": model.model_name,
+                "is_org_enabled": data.is_org_enabled,
+            },
+        },
+    )
+
+    return model
 
 
 @router.post("/allowed-origins/", response_model=AllowedOriginInDB)

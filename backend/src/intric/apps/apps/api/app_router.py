@@ -45,8 +45,17 @@ async def update_app(
     update_service_req: AppUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.app_service()
     assembler = container.app_assembler()
+    current_user = container.user()
+
+    # Get old state
+    old_app, _ = await service.get_app(id)
 
     completion_model_id = (
         update_service_req.completion_model.id
@@ -77,6 +86,39 @@ async def update_app(
         data_retention_days=update_service_req.data_retention_days,
     )
 
+    # Track changes
+    changes = {}
+    if update_service_req.name and update_service_req.name != old_app.name:
+        changes["name"] = {"old": old_app.name, "new": update_service_req.name}
+    if update_service_req.description is not None:
+        changes["description"] = {"old": old_app.description, "new": update_service_req.description}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.APP_UPDATED,
+        entity_type=EntityType.APP,
+        entity_id=id,
+        description=f"Updated app '{app.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(app.id),
+                "name": app.name,
+            },
+            "changes": changes,
+        },
+    )
+
     return assembler.from_app_to_model(app, permissions=permissions)
 
 
@@ -89,9 +131,44 @@ async def delete_app(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.app_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.app_service()
+    current_user = container.user()
+
+    # Get app details BEFORE deletion
+    app, _ = await service.get_app(id)
+
+    # Delete app
     await service.delete_app(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.APP_DELETED,
+        entity_type=EntityType.APP,
+        entity_id=id,
+        description=f"Deleted app '{app.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(app.id),
+                "name": app.name,
+            },
+        },
+    )
 
 
 @router.post(
@@ -105,11 +182,43 @@ async def run_app(
     run_app_req: RunAppRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.app_run_service()
     assembler = container.app_run_assembler()
+    current_user = container.user()
 
     file_ids = [file.id for file in run_app_req.files]
     app_run = await service.queue_app_run(id, file_ids=file_ids, text=run_app_req.text)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.APP_EXECUTED,
+        entity_type=EntityType.APP,
+        entity_id=id,
+        description=f"Executed app (run_id: {app_run.id})",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "app_id": str(id),
+                "run_id": str(app_run.id),
+                "file_count": len(file_ids),
+            },
+        },
+    )
 
     return assembler.from_app_run_to_model(app_run)
 
