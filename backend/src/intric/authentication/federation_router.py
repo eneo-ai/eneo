@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
+from intric.authentication.jwks_cache import get_jwks
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -1976,57 +1977,33 @@ async def auth_callback(
                 pass
 
             try:
-                # Fetch JWKS via our IPv4-only aiohttp wrapper (async, no blocking I/O)
-                jwks_bytes, jwks_status, jwks_headers = await _make_idp_http_request(
-                    method="GET",
-                    url=jwks_uri,
-                    endpoint_type="jwks",
-                    correlation_id=correlation_id,
+                # Create fetch function for JWKS cache
+                async def fetch_jwks_func():
+                    return await _make_idp_http_request(
+                        method="GET",
+                        url=jwks_uri,
+                        endpoint_type="jwks",
+                        correlation_id=correlation_id,
+                        tenant_id=tenant_id,
+                        provider=federation_config.get("provider", "unknown"),
+                        redis_client=redis_client,
+                        retry_enabled=True,
+                    )
+
+                # Get JWKS with caching (Redis-based, 1 hour TTL like PyJWKClient)
+                jwks_data = await get_jwks(
+                    jwks_uri=jwks_uri,
                     tenant_id=tenant_id,
+                    correlation_id=correlation_id,
                     provider=federation_config.get("provider", "unknown"),
                     redis_client=redis_client,
-                    retry_enabled=True,  # Safe to retry GET requests
+                    fetch_function=fetch_jwks_func,
                 )
-
-                if jwks_status != 200:
-                    logger.error(
-                        "JWKS endpoint returned non-200",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "jwks_uri": jwks_uri,
-                            "http_status": jwks_status,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail=f"Failed to fetch JWKS: HTTP {jwks_status}",
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-
-                # Parse JWKS JSON
-                try:
-                    jwks_json = json.loads(jwks_bytes)
-                except json.JSONDecodeError as e:
-                    logger.error(
-                        "Invalid JWKS JSON",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "jwks_uri": jwks_uri,
-                            "error": str(e),
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid JWKS format",
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
 
                 # Extract signing key matching kid from ID token
                 from jwt import PyJWKSet
 
-                jwk_set = PyJWKSet.from_dict(jwks_json)
+                jwk_set = PyJWKSet.from_dict(jwks_data)
                 signing_key = None
 
                 # Try to find key by kid if kid is present

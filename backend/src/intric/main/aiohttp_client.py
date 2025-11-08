@@ -36,12 +36,21 @@ class AioHttpClient:
         async def on_conn_end(session, trace_config_ctx, params):
             if hasattr(trace_config_ctx, "_conn_start_time"):
                 conn_duration_ms = (time.perf_counter() - trace_config_ctx._conn_start_time) * 1000
-                peername = params.transport.get_extra_info("peername") if params.transport else None
+
+                # Safely get peername - params.transport may not exist in all aiohttp versions
+                peername = None
+                try:
+                    if hasattr(params, 'transport') and params.transport:
+                        peername = params.transport.get_extra_info("peername")
+                except Exception:
+                    # Don't let trace callback errors break the request
+                    pass
+
                 logger.debug(
-                    f"TCP connection established to {peername}",
+                    f"TCP connection established to {peername or 'unknown'}",
                     extra={
                         "event": "tcp_connection",
-                        "peername": str(peername),
+                        "peername": str(peername) if peername else "unknown",
                         "duration_ms": int(conn_duration_ms),
                     },
                 )

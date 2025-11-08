@@ -1760,7 +1760,22 @@ export interface paths {
     get: operations["get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get"];
     /**
      * Set tenant federation config
-     * @description Configure custom identity provider for tenant. System admin only.
+     * @description Configure custom OIDC identity provider for a tenant.
+     *
+     * **What this endpoint does:**
+     * - Validates the IdP's OIDC discovery endpoint
+     * - Encrypts and stores client_secret (Fernet encryption)
+     * - Sets or auto-generates tenant slug (required for frontend login selector)
+     * - Returns the effective slug in the response
+     *
+     * **Field Guide:**
+     * - `provider`: IdP type (e.g., 'entra_id', 'auth0', 'mobilityguard', 'okta')
+     * - `slug`: Optional. Tenant identifier for routing. Auto-generated from tenant name if omitted
+     * - `canonical_public_origin`: Tenant's public URL. Used to construct redirect_uri for IdP
+     * - `discovery_endpoint`: OIDC .well-known/openid-configuration URL from your IdP
+     * - `client_id` & `client_secret`: OAuth credentials from IdP application registration
+     * - `allowed_domains`: Email domain whitelist (e.g., ["sundsvall.se", "ange.se"])
+     * - `redirect_path`: Optional. Callback path (defaults to "/auth/callback")
      */
     put: operations["set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put"];
     /**
@@ -3019,6 +3034,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** CompletionModelPublicAppTemplate */
@@ -3098,6 +3115,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -3611,6 +3630,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -3666,6 +3687,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
     };
     /** EmbeddingModelSecurityStatus */
     EmbeddingModelSecurityStatus: {
@@ -3706,6 +3729,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6297,14 +6322,13 @@ export interface components {
      * @example {
      *   "allowed_domains": [
      *     "sundsvall.se",
-     *     "sundsvall.gov.se"
+     *     "ange.se"
      *   ],
      *   "canonical_public_origin": "https://sundsvall.eneo.se",
      *   "client_id": "abc123-def456-ghi789",
-     *   "client_secret": "super-secret-value",
+     *   "client_secret": "your-secret-value",
      *   "discovery_endpoint": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration",
      *   "provider": "entra_id",
-     *   "redirect_path": "/auth/callback",
      *   "slug": "sundsvall"
      * }
      */
@@ -6331,17 +6355,17 @@ export interface components {
       client_secret: string;
       /**
        * Allowed Domains
-       * @description Email domains allowed for this tenant (e.g., ['sundsvall.se'])
+       * @description Email domain whitelist for user authentication (e.g., ['sundsvall.se', 'ange.se']). Only users with emails from these domains can log into this tenant. Leave empty to allow all domains (not recommended for production)
        */
       allowed_domains?: string[];
       /**
        * Canonical Public Origin
-       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required for multi-tenant federation to construct redirect_uri
+       * @description Tenant's public URL (e.g., https://sundsvall.eneo.se). Used to construct redirect_uri for IdP. Must match the redirect_uri registered in your IdP application. Required for multi-tenant federation
        */
       canonical_public_origin?: string | null;
       /**
        * Redirect Path
-       * @description Optional custom redirect path starting with /
+       * @description Optional custom callback path (defaults to '/auth/callback'). Most deployments can omit this field and use the default
        */
       redirect_path?: string | null;
       /**
@@ -6386,6 +6410,11 @@ export interface components {
        * @default false
        */
       using_templates?: boolean;
+      /**
+       * Tenant Credentials Enabled
+       * @default false
+       */
+      tenant_credentials_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -7065,6 +7094,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -7110,6 +7141,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -9571,6 +9604,8 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9872,6 +9907,8 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -16720,7 +16757,22 @@ export interface operations {
   };
   /**
    * Set tenant federation config
-   * @description Configure custom identity provider for tenant. System admin only.
+   * @description Configure custom OIDC identity provider for a tenant.
+   *
+   * **What this endpoint does:**
+   * - Validates the IdP's OIDC discovery endpoint
+   * - Encrypts and stores client_secret (Fernet encryption)
+   * - Sets or auto-generates tenant slug (required for frontend login selector)
+   * - Returns the effective slug in the response
+   *
+   * **Field Guide:**
+   * - `provider`: IdP type (e.g., 'entra_id', 'auth0', 'mobilityguard', 'okta')
+   * - `slug`: Optional. Tenant identifier for routing. Auto-generated from tenant name if omitted
+   * - `canonical_public_origin`: Tenant's public URL. Used to construct redirect_uri for IdP
+   * - `discovery_endpoint`: OIDC .well-known/openid-configuration URL from your IdP
+   * - `client_id` & `client_secret`: OAuth credentials from IdP application registration
+   * - `allowed_domains`: Email domain whitelist (e.g., ["sundsvall.se", "ange.se"])
+   * - `redirect_path`: Optional. Callback path (defaults to "/auth/callback")
    */
   set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
     parameters: {
