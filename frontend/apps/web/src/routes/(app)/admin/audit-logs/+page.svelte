@@ -14,6 +14,7 @@
   import { IconXMark } from "@intric/icons/x-mark";
   import { IconDownload } from "@intric/icons/download";
   import { IconInfo } from "@intric/icons/info";
+  import { Clock, CircleCheck, CircleX } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import { getIntric } from "$lib/core/Intric";
 
@@ -155,12 +156,44 @@
     return new Date(timestamp).toLocaleString();
   }
 
+  function formatJsonWithSyntaxHighlighting(obj: any): string {
+    const json = JSON.stringify(obj, null, 2);
+    return json
+      .replace(/"([^"]+)":/g, '<span class="text-blue-600 dark:text-blue-400">"$1"</span>:')  // Keys
+      .replace(/: "([^"]*)"/g, ': <span class="text-green-600 dark:text-green-400">"$1"</span>')  // String values
+      .replace(/: (\d+)/g, ': <span class="text-orange-600 dark:text-orange-400">$1</span>')  // Numbers
+      .replace(/: (true|false|null)/g, ': <span class="text-purple-600 dark:text-purple-400">$1</span>');  // Booleans/null
+  }
+
   function getActionBadgeClass(action: string): string {
+    // Admin actions (security critical) - RED
     const adminActions = ["user_created", "user_updated", "user_deleted", "role_modified", "permission_changed", "tenant_settings_updated"];
+
+    // App-related actions - PURPLE
+    const appActions = ["app_created", "app_updated", "app_deleted", "app_executed"];
+
+    // Assistant-related actions - BLUE
+    const assistantActions = ["assistant_created", "assistant_updated", "assistant_deleted"];
+
+    // Space-related actions - TEAL
+    const spaceActions = ["space_created", "space_updated", "space_member_added", "space_member_removed"];
+
+    // File-related actions - ORANGE
+    const fileActions = ["file_uploaded", "file_deleted"];
+
+    // System actions - GRAY
     const systemActions = ["website_crawled"];
 
     if (adminActions.includes(action)) {
       return "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 font-medium";
+    } else if (appActions.includes(action)) {
+      return "bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 font-medium";
+    } else if (assistantActions.includes(action)) {
+      return "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 font-medium";
+    } else if (spaceActions.includes(action)) {
+      return "bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-300 dark:border-teal-700 font-medium";
+    } else if (fileActions.includes(action)) {
+      return "bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 border border-orange-300 dark:border-orange-700 font-medium";
     } else if (systemActions.includes(action)) {
       return "bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 font-medium";
     } else {
@@ -351,7 +384,11 @@
         {m.audit_exporting()}
       {:else}
         <IconDownload class="h-4 w-4" />
-        {m.audit_export_csv()}
+        {#if activeFilterCount > 0}
+          {m.audit_export_csv()} ({data.total_count})
+        {:else}
+          {m.audit_export_csv()} ({data.total_count})
+        {/if}
       {/if}
     </Button>
   </Page.Header>
@@ -382,9 +419,9 @@
         {#if activeFilterCount > 0}
           <button
             onclick={clearFilters}
-            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted hover:bg-hover transition-colors"
+            class="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
           >
-            <IconXMark class="h-3 w-3" />
+            <IconXMark class="h-4 w-4" />
             {m.audit_clear_filter({ count: activeFilterCount })}
           </button>
         {/if}
@@ -393,15 +430,27 @@
       <!-- Date Presets -->
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
-        <Button onclick={() => setDatePreset(7)} variant="outlined" size="sm">
+        <button
+          onclick={() => setDatePreset(7)}
+          class="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+        >
+          <Clock class="h-3.5 w-3.5" />
           {m.audit_last_7_days()}
-        </Button>
-        <Button onclick={() => setDatePreset(30)} variant="outlined" size="sm">
+        </button>
+        <button
+          onclick={() => setDatePreset(30)}
+          class="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+        >
+          <Clock class="h-3.5 w-3.5" />
           {m.audit_last_30_days()}
-        </Button>
-        <Button onclick={() => setDatePreset(90)} variant="outlined" size="sm">
+        </button>
+        <button
+          onclick={() => setDatePreset(90)}
+          class="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+        >
+          <Clock class="h-3.5 w-3.5" />
           {m.audit_last_90_days()}
-        </Button>
+        </button>
       </div>
 
       <!-- Filter Grid -->
@@ -574,11 +623,13 @@
                   onclick={() => toggleRowExpansion(log.id || index.toString())}
                 >
                   <td class="px-4 py-3">
-                    {#if isExpanded}
-                      <IconChevronDown class="h-4 w-4 text-muted rotate-180" />
-                    {:else}
-                      <IconChevronDown class="h-4 w-4 text-muted" />
-                    {/if}
+                    <div class="rounded-md hover:bg-hover p-1 transition-colors">
+                      {#if isExpanded}
+                        <IconChevronDown class="h-5 w-5 text-muted rotate-180 transition-transform" />
+                      {:else}
+                        <IconChevronDown class="h-5 w-5 text-muted transition-transform" />
+                      {/if}
+                    </div>
                   </td>
                   <td class="px-4 py-3">
                     <div class="flex flex-col">
@@ -592,7 +643,7 @@
                   </td>
                   <td class="px-4 py-3">
                     <span class={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${getActionBadgeClass(log.action)}`}>
-                      {log.action.replace(/_/g, ' ')}
+                      {log.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                     </span>
                   </td>
                   <td class="px-4 py-3">
@@ -617,15 +668,17 @@
                       {log.entity_type}
                     </span>
                   </td>
-                  <td class="px-4 py-3 text-center">
+                  <td class="px-4 py-3">
                     {#if log.outcome === "success"}
-                      <div class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30" title="Success">
-                        <span class="text-green-600 dark:text-green-400 font-bold text-sm">✓</span>
-                      </div>
+                      <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+                        <CircleCheck class="h-3.5 w-3.5" />
+                        Success
+                      </span>
                     {:else}
-                      <div class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30" title="Failure">
-                        <span class="text-red-600 dark:text-red-400 font-bold text-sm">✗</span>
-                      </div>
+                      <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                        <CircleX class="h-3.5 w-3.5" />
+                        Failed
+                      </span>
                     {/if}
                   </td>
                 </tr>
@@ -649,7 +702,7 @@
                         {#if log.metadata && Object.keys(log.metadata).length > 0}
                           <div class="rounded-lg border border-default bg-primary p-3">
                             <p class="text-xs font-medium text-muted mb-2">{m.audit_metadata_json()}</p>
-                            <pre class="text-xs text-gray-800 dark:text-gray-200 rounded bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-3 max-h-96 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(log.metadata, null, 2)}</pre>
+                            <pre class="text-xs text-gray-800 dark:text-gray-200 rounded bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono">{@html formatJsonWithSyntaxHighlighting(log.metadata)}</pre>
                           </div>
                         {/if}
                       </div>
