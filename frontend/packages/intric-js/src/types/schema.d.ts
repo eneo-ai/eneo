@@ -1488,6 +1488,73 @@ export interface paths {
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
   };
+  "/api/v1/audit/logs": {
+    /**
+     * List Audit Logs
+     * @description List audit logs for the authenticated user's tenant.
+     *
+     * Access Control:
+     * - Regular users: See only their own actions
+     * - Admins: See all actions in their tenant
+     * - Compliance officers: See all actions in their tenant
+     *
+     * Requires: Authentication (JWT token or API key)
+     */
+    get: operations["list_audit_logs_api_v1_audit_logs_get"];
+  };
+  "/api/v1/audit/logs/user/{user_id}": {
+    /**
+     * Get User Logs
+     * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+     *
+     * Returns audit logs involving the user in any capacity.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Security: Only returns logs for the authenticated user's tenant
+     */
+    get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
+  };
+  "/api/v1/audit/logs/export": {
+    /**
+     * Export Audit Logs
+     * @description Export audit logs to CSV format.
+     *
+     * Use user_id for GDPR Article 15 data subject access requests.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Security: Only exports logs for the authenticated user's tenant
+     */
+    get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
+  };
+  "/api/v1/audit/retention-policy": {
+    /**
+     * Get Retention Policy
+     * @description Get the current retention policy for your tenant.
+     *
+     * Returns the number of days audit logs are retained before automatic purging.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     */
+    get: operations["get_retention_policy_api_v1_audit_retention_policy_get"];
+    /**
+     * Update Retention Policy
+     * @description Update the retention policy for your tenant.
+     *
+     * Configure how long audit logs are kept before automatic purging.
+     *
+     * Constraints:
+     * - Minimum: 1 day (Recommended: 90+ days for compliance)
+     * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+     * - Default: 365 days (Swedish Arkivlagen)
+     *
+     * The system automatically runs a daily job to soft-delete logs older than
+     * the retention period.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    put: operations["update_retention_policy_api_v1_audit_retention_policy_put"];
+  };
   "/api/v1/integrations/": {
     /** Get Integrations */
     get: operations["get_integrations_api_v1_integrations__get"];
@@ -1877,6 +1944,45 @@ export interface components {
       /** Token Type */
       token_type: string;
     };
+    /**
+     * ActionType
+     * @description Standardized vocabulary of auditable actions
+     * @enum {string}
+     */
+    ActionType:
+      | "user_created"
+      | "user_deleted"
+      | "user_updated"
+      | "role_modified"
+      | "permission_changed"
+      | "tenant_settings_updated"
+      | "credentials_updated"
+      | "federation_updated"
+      | "assistant_created"
+      | "assistant_deleted"
+      | "assistant_updated"
+      | "space_created"
+      | "space_updated"
+      | "space_member_added"
+      | "space_member_removed"
+      | "app_created"
+      | "app_deleted"
+      | "app_updated"
+      | "app_executed"
+      | "session_started"
+      | "session_ended"
+      | "file_uploaded"
+      | "file_deleted"
+      | "website_crawled"
+      | "retention_policy_applied"
+      | "encryption_key_rotated"
+      | "system_maintenance";
+    /**
+     * ActorType
+     * @description Categorize who performed the action
+     * @enum {string}
+     */
+    ActorType: "user" | "system" | "api_key";
     /** AddSpaceMemberRequest */
     AddSpaceMemberRequest: {
       /**
@@ -2771,6 +2877,83 @@ export interface components {
       formats: components["schemas"]["FormatLimit"][];
       /** Max In Question */
       max_in_question: number;
+    };
+    /**
+     * AuditLogListResponse
+     * @description Schema for audit log list response.
+     */
+    AuditLogListResponse: {
+      /** Logs */
+      logs: components["schemas"]["AuditLogResponse"][];
+      /** Total Count */
+      total_count: number;
+      /** Page */
+      page: number;
+      /** Page Size */
+      page_size: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * AuditLogResponse
+     * @description Schema for audit log response.
+     */
+    AuditLogResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Actor Id
+       * Format: uuid
+       */
+      actor_id: string;
+      actor_type: components["schemas"]["ActorType"];
+      action: components["schemas"]["ActionType"];
+      entity_type: components["schemas"]["EntityType"];
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /**
+       * Timestamp
+       * Format: date-time
+       */
+      timestamp: string;
+      /** Description */
+      description: string;
+      /** Metadata */
+      metadata: {
+        [key: string]: unknown;
+      };
+      outcome: components["schemas"]["Outcome"];
+      /** Ip Address */
+      ip_address?: string | null;
+      /** User Agent */
+      user_agent?: string | null;
+      /** Request Id */
+      request_id?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Deleted At */
+      deleted_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** AuthCallbackParams */
     AuthCallbackParams: {
@@ -3774,6 +3957,21 @@ export interface components {
        */
       is_org_enabled?: boolean | null;
     };
+    /**
+     * EntityType
+     * @description Categorize what type of entity was affected
+     * @enum {string}
+     */
+    EntityType:
+      | "user"
+      | "assistant"
+      | "space"
+      | "app"
+      | "file"
+      | "website"
+      | "tenant_settings"
+      | "credential"
+      | "federation_config";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -4887,6 +5085,12 @@ export interface components {
       /** Nonce */
       nonce?: string | null;
     };
+    /**
+     * Outcome
+     * @description Indicate success or failure of audited action
+     * @enum {string}
+     */
+    Outcome: "success" | "failure";
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -15625,6 +15829,190 @@ export interface operations {
       403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Audit Logs
+   * @description List audit logs for the authenticated user's tenant.
+   *
+   * Access Control:
+   * - Regular users: See only their own actions
+   * - Admins: See all actions in their tenant
+   * - Compliance officers: See all actions in their tenant
+   *
+   * Requires: Authentication (JWT token or API key)
+   */
+  list_audit_logs_api_v1_audit_logs_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Logs
+   * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+   *
+   * Returns audit logs involving the user in any capacity.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Security: Only returns logs for the authenticated user's tenant
+   */
+  get_user_logs_api_v1_audit_logs_user__user_id__get: {
+    parameters: {
+      query?: {
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+      path: {
+        /** @description User ID for GDPR export */
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Export Audit Logs
+   * @description Export audit logs to CSV format.
+   *
+   * Use user_id for GDPR Article 15 data subject access requests.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Security: Only exports logs for the authenticated user's tenant
+   */
+  export_audit_logs_api_v1_audit_logs_export_get: {
+    parameters: {
+      query?: {
+        /** @description User ID for GDPR export */
+        user_id?: string | null;
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Retention Policy
+   * @description Get the current retention policy for your tenant.
+   *
+   * Returns the number of days audit logs are retained before automatic purging.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   */
+  get_retention_policy_api_v1_audit_retention_policy_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /**
+   * Update Retention Policy
+   * @description Update the retention policy for your tenant.
+   *
+   * Configure how long audit logs are kept before automatic purging.
+   *
+   * Constraints:
+   * - Minimum: 1 day (Recommended: 90+ days for compliance)
+   * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+   * - Default: 365 days (Swedish Arkivlagen)
+   *
+   * The system automatically runs a daily job to soft-delete logs older than
+   * the retention period.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  update_retention_policy_api_v1_audit_retention_policy_put: {
+    parameters: {
+      query: {
+        /** @description Days to retain logs (1 min, 2555 max = 7 years). Recommended: 90+ days */
+        retention_days: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
