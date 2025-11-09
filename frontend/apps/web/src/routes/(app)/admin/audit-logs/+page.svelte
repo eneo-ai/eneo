@@ -14,9 +14,12 @@
   import { IconXMark } from "@intric/icons/x-mark";
   import { IconDownload } from "@intric/icons/download";
   import { IconInfo } from "@intric/icons/info";
+  import { IconCopy } from "@intric/icons/copy";
+  import { IconCheck } from "@intric/icons/check";
   import { Clock, CircleCheck, CircleX } from "lucide-svelte";
-  import { slide } from "svelte/transition";
+  import { slide, fade } from "svelte/transition";
   import { getIntric } from "$lib/core/Intric";
+  import { getLocale } from "$lib/paraglide/runtime";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
@@ -27,6 +30,7 @@
 
   // Expandable row state
   let expandedRows = $state<Set<string>>(new Set());
+  let copiedRowId = $state<string | null>(null);
 
   // Filter states
   let dateRange = $state<{ start: CalendarDate | undefined; end: CalendarDate | undefined }>({
@@ -43,35 +47,63 @@
   let userSearchTimer: ReturnType<typeof setTimeout>;
   let isExporting = $state(false);
 
+  // Get translated label for action type
+  function getActionLabel(action: ActionType | "all"): string {
+    const labels: Record<ActionType | "all", () => string> = {
+      all: m.audit_all_actions,
+      user_created: m.audit_action_user_created,
+      user_updated: m.audit_action_user_updated,
+      user_deleted: m.audit_action_user_deleted,
+      role_modified: m.audit_action_role_modified,
+      permission_changed: m.audit_action_permission_changed,
+      tenant_settings_updated: m.audit_action_tenant_settings_updated,
+      assistant_created: m.audit_action_assistant_created,
+      assistant_updated: m.audit_action_assistant_updated,
+      assistant_deleted: m.audit_action_assistant_deleted,
+      space_created: m.audit_action_space_created,
+      space_updated: m.audit_action_space_updated,
+      space_member_added: m.audit_action_space_member_added,
+      space_member_removed: m.audit_action_space_member_removed,
+      app_created: m.audit_action_app_created,
+      app_updated: m.audit_action_app_updated,
+      app_deleted: m.audit_action_app_deleted,
+      app_executed: m.audit_action_app_executed,
+      file_uploaded: m.audit_action_file_uploaded,
+      file_deleted: m.audit_action_file_deleted,
+      website_crawled: m.audit_action_website_crawled,
+    };
+    return labels[action]?.() || action;
+  }
+
   // Action type options with better categorization
-  const actionOptions: Array<{ value: ActionType | "all"; label: string; category?: string }> = [
-    { value: "all", label: "All Actions" },
-    { value: "user_created", label: "User Created", category: "admin" },
-    { value: "user_updated", label: "User Updated", category: "admin" },
-    { value: "user_deleted", label: "User Deleted", category: "admin" },
-    { value: "role_modified", label: "Role Modified", category: "admin" },
-    { value: "permission_changed", label: "Permission Changed", category: "admin" },
-    { value: "tenant_settings_updated", label: "Tenant Settings Updated", category: "admin" },
-    { value: "assistant_created", label: "Assistant Created", category: "user" },
-    { value: "assistant_updated", label: "Assistant Updated", category: "user" },
-    { value: "assistant_deleted", label: "Assistant Deleted", category: "user" },
-    { value: "space_created", label: "Space Created", category: "user" },
-    { value: "space_updated", label: "Space Updated", category: "user" },
-    { value: "space_member_added", label: "Space Member Added", category: "user" },
-    { value: "space_member_removed", label: "Space Member Removed", category: "user" },
-    { value: "app_created", label: "App Created", category: "user" },
-    { value: "app_updated", label: "App Updated", category: "user" },
-    { value: "app_deleted", label: "App Deleted", category: "user" },
-    { value: "app_executed", label: "App Executed", category: "user" },
-    { value: "file_uploaded", label: "File Uploaded", category: "user" },
-    { value: "file_deleted", label: "File Deleted", category: "user" },
-    { value: "website_crawled", label: "Website Crawled", category: "system" },
-  ];
+  const actionOptions = $derived([
+    { value: "all" as const, label: m.audit_all_actions() },
+    { value: "user_created" as ActionType, label: m.audit_action_user_created(), category: "admin" },
+    { value: "user_updated" as ActionType, label: m.audit_action_user_updated(), category: "admin" },
+    { value: "user_deleted" as ActionType, label: m.audit_action_user_deleted(), category: "admin" },
+    { value: "role_modified" as ActionType, label: m.audit_action_role_modified(), category: "admin" },
+    { value: "permission_changed" as ActionType, label: m.audit_action_permission_changed(), category: "admin" },
+    { value: "tenant_settings_updated" as ActionType, label: m.audit_action_tenant_settings_updated(), category: "admin" },
+    { value: "assistant_created" as ActionType, label: m.audit_action_assistant_created(), category: "user" },
+    { value: "assistant_updated" as ActionType, label: m.audit_action_assistant_updated(), category: "user" },
+    { value: "assistant_deleted" as ActionType, label: m.audit_action_assistant_deleted(), category: "user" },
+    { value: "space_created" as ActionType, label: m.audit_action_space_created(), category: "user" },
+    { value: "space_updated" as ActionType, label: m.audit_action_space_updated(), category: "user" },
+    { value: "space_member_added" as ActionType, label: m.audit_action_space_member_added(), category: "user" },
+    { value: "space_member_removed" as ActionType, label: m.audit_action_space_member_removed(), category: "user" },
+    { value: "app_created" as ActionType, label: m.audit_action_app_created(), category: "user" },
+    { value: "app_updated" as ActionType, label: m.audit_action_app_updated(), category: "user" },
+    { value: "app_deleted" as ActionType, label: m.audit_action_app_deleted(), category: "user" },
+    { value: "app_executed" as ActionType, label: m.audit_action_app_executed(), category: "user" },
+    { value: "file_uploaded" as ActionType, label: m.audit_action_file_uploaded(), category: "user" },
+    { value: "file_deleted" as ActionType, label: m.audit_action_file_deleted(), category: "user" },
+    { value: "website_crawled" as ActionType, label: m.audit_action_website_crawled(), category: "system" },
+  ]);
 
   // Create store for Select component
   const actionStore = writable<{ value: ActionType | "all"; label: string }>({
     value: "all",
-    label: "All Actions"
+    label: m.audit_all_actions()
   });
 
   // Watch store changes
@@ -110,7 +142,7 @@
       }
     } else {
       selectedAction = "all";
-      actionStore.set({ value: "all", label: "All Actions" });
+      actionStore.set({ value: "all", label: m.audit_all_actions() });
     }
 
     // Set user from URL (if actor_id is present, we keep the selected user)
@@ -140,7 +172,7 @@
     const days = Math.floor(hours / 24);
 
     if (days > 7) {
-      return date.toLocaleDateString();
+      return date.toLocaleDateString(getLocale());
     } else if (days > 0) {
       return m.audit_days_ago({ count: days });
     } else if (hours > 0) {
@@ -153,7 +185,7 @@
   }
 
   function formatFullTimestamp(timestamp: string): string {
-    return new Date(timestamp).toLocaleString();
+    return new Date(timestamp).toLocaleString(getLocale());
   }
 
   function formatJsonWithSyntaxHighlighting(obj: any): string {
@@ -166,38 +198,19 @@
   }
 
   function getActionBadgeClass(action: string): string {
-    // Admin actions (security critical) - RED
+    // Admin/security actions (critical - needs attention) - RED
     const adminActions = ["user_created", "user_updated", "user_deleted", "role_modified", "permission_changed", "tenant_settings_updated"];
-
-    // App-related actions - PURPLE
-    const appActions = ["app_created", "app_updated", "app_deleted", "app_executed"];
-
-    // Assistant-related actions - BLUE
-    const assistantActions = ["assistant_created", "assistant_updated", "assistant_deleted"];
-
-    // Space-related actions - TEAL
-    const spaceActions = ["space_created", "space_updated", "space_member_added", "space_member_removed"];
-
-    // File-related actions - ORANGE
-    const fileActions = ["file_uploaded", "file_deleted"];
 
     // System actions - GRAY
     const systemActions = ["website_crawled"];
 
     if (adminActions.includes(action)) {
-      return "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 font-medium";
-    } else if (appActions.includes(action)) {
-      return "bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 font-medium";
-    } else if (assistantActions.includes(action)) {
-      return "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 font-medium";
-    } else if (spaceActions.includes(action)) {
-      return "bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-300 dark:border-teal-700 font-medium";
-    } else if (fileActions.includes(action)) {
-      return "bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300 border border-orange-300 dark:border-orange-700 font-medium";
+      return "bg-red-50 dark:bg-red-950 text-red-900 dark:text-red-300 border border-red-300 dark:border-red-700 font-medium";
     } else if (systemActions.includes(action)) {
-      return "bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 font-medium";
+      return "bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-300 border border-gray-300 dark:border-gray-700 font-medium";
     } else {
-      return "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 font-medium";
+      // All user content actions - BLUE (neutral, informational)
+      return "bg-blue-50 dark:bg-blue-950 text-blue-900 dark:text-blue-300 border border-blue-300 dark:border-blue-700 font-medium";
     }
   }
 
@@ -208,6 +221,18 @@
       expandedRows.add(logId);
     }
     expandedRows = new Set(expandedRows); // Trigger reactivity
+  }
+
+  async function copyJsonToClipboard(json: any, logId: string) {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(json, null, 2));
+      copiedRowId = logId;
+      setTimeout(() => {
+        copiedRowId = null;
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
   }
 
   function applyFilters() {
@@ -236,7 +261,7 @@
   function clearFilters() {
     dateRange = { start: undefined, end: undefined };
     selectedAction = "all";
-    actionStore.set({ value: "all", label: "All Actions" });
+    actionStore.set({ value: "all", label: m.audit_all_actions() });
     selectedUser = null;
     userSearchQuery = "";
     userSearchResults = [];
@@ -343,19 +368,14 @@
     }
   }
 
-  // Auto-apply filters on action change
+  // Auto-apply filters on any filter change (consolidated for performance)
   $effect(() => {
-    if (selectedAction !== undefined) {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        applyFilters();
-      }, 300);
-    }
-  });
+    // Track filter changes and apply with debounce
+    const hasDateFilter = dateRange?.start && dateRange?.end;
+    const hasActionFilter = selectedAction !== undefined && selectedAction !== "all";
 
-  // Auto-apply filters on date range change
-  $effect(() => {
-    if (dateRange?.start && dateRange?.end) {
+    // Only auto-apply if we're not in the initial load state
+    if (hasDateFilter || hasActionFilter) {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         applyFilters();
@@ -432,21 +452,21 @@
         <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
         <button
           onclick={() => setDatePreset(7)}
-          class="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+          class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
         >
           <Clock class="h-3.5 w-3.5" />
           {m.audit_last_7_days()}
         </button>
         <button
           onclick={() => setDatePreset(30)}
-          class="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+          class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
         >
           <Clock class="h-3.5 w-3.5" />
           {m.audit_last_30_days()}
         </button>
         <button
           onclick={() => setDatePreset(90)}
-          class="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
+          class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
         >
           <Clock class="h-3.5 w-3.5" />
           {m.audit_last_90_days()}
@@ -456,16 +476,18 @@
       <!-- Filter Grid -->
       <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
         <!-- Date Range Filter -->
-        <div>
-          <label class="mb-2 block text-xs font-medium text-default">{m.audit_date_range()}</label>
-          <Input.DateRange bind:value={dateRange} class="w-full" />
+        <div class="flex flex-col">
+          <span class="mb-2 block text-xs font-medium text-default">{m.audit_date_range()}</span>
+          <div class="h-10">
+            <Input.DateRange bind:value={dateRange} class="w-full h-full" />
+          </div>
         </div>
 
         <!-- Action Type Filter -->
-        <div>
-          <label class="mb-2 block text-xs font-medium text-default">{m.audit_action_type()}</label>
+        <div class="flex flex-col">
+          <span class="mb-2 block text-xs font-medium text-default">{m.audit_action_type()}</span>
           <Select.Root customStore={actionStore}>
-            <Select.Trigger class="w-full" placeholder="Select action type" />
+            <Select.Trigger class="w-full h-10" placeholder="Select action type" />
             <Select.Options>
               {#each actionOptions as option}
                 <Select.Item value={option.value} label={option.label} />
@@ -475,15 +497,15 @@
         </div>
 
         <!-- User Filter -->
-        <div class="relative">
-          <label class="mb-2 block text-xs font-medium text-default">{m.audit_user_filter()}</label>
-          <div class="relative">
+        <div class="flex flex-col">
+          <span class="mb-2 block text-xs font-medium text-default">{m.audit_user_filter()}</span>
+          <div class="relative h-10">
             <Input.Text
               bind:value={userSearchQuery}
               oninput={(e) => searchUsers(e.currentTarget.value)}
               onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
               placeholder={m.audit_user_filter_placeholder()}
-              class="w-full"
+              class="w-full h-full"
             />
             {#if selectedUser}
               <button
@@ -499,27 +521,29 @@
                 <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
               </div>
             {/if}
-          </div>
 
-          <!-- Dropdown Results -->
-          {#if showUserDropdown && userSearchResults.length > 0}
-            <div
-              class="absolute z-10 mt-1 w-full rounded-md border border-default bg-default shadow-lg max-h-60 overflow-auto"
-              transition:slide={{ duration: 150 }}
-            >
-              {#each userSearchResults as user}
-                <button
-                  onclick={() => selectUser(user)}
-                  class="w-full px-3 py-2 text-left text-sm hover:bg-hover transition-colors flex flex-col gap-1"
-                >
-                  <span class="font-medium text-default">{user.email}</span>
-                  {#if user.name}
-                    <span class="text-xs text-muted">{user.name}</span>
-                  {/if}
-                </button>
-              {/each}
-            </div>
-          {/if}
+            <!-- Dropdown Results -->
+            {#if showUserDropdown && userSearchResults.length > 0}
+              <div
+                class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
+                transition:fade={{ duration: 150 }}
+              >
+                {#each userSearchResults as user}
+                  <button
+                    onclick={() => selectUser(user)}
+                    class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
+                  >
+                    <div class="flex flex-col gap-0.5">
+                      <span class="text-sm font-medium text-default">{user.email}</span>
+                      {#if user.name}
+                        <span class="text-xs text-muted">{user.name}</span>
+                      {/if}
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
 
@@ -527,7 +551,7 @@
       {#if selectedUser}
         <div class="flex items-center gap-2 mt-2">
           <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
-            <span class="text-blue-700 dark:text-blue-300">
+            <span class="text-blue-900 dark:text-blue-300">
               {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
             </span>
             <button
@@ -574,22 +598,19 @@
           <thead class="sticky top-0 border-b border-default bg-subtle">
             <tr>
               <th class="w-8 px-4 py-3"></th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[12%]">
+              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
                 {m.audit_timestamp()}
               </th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
                 {m.audit_action()}
               </th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[40%]">
+              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[45%]">
                 {m.audit_description()}
               </th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[18%]">
                 {m.audit_actor()}
               </th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[10%]">
-                {m.audit_entity()}
-              </th>
-              <th class="px-4 py-3 text-center text-xs font-semibold text-default uppercase tracking-wider w-[5%]">
+              <th class="px-4 py-3 text-center text-xs font-semibold text-default uppercase tracking-wider w-[7%]">
                 {m.audit_status()}
               </th>
             </tr>
@@ -597,7 +618,7 @@
           <tbody class="divide-y divide-default bg-primary">
             {#if data.logs.length === 0}
               <tr>
-                <td colspan="7" class="px-4 py-16 text-center">
+                <td colspan="6" class="px-4 py-16 text-center">
                   <div class="flex flex-col items-center gap-3">
                     <IconCalendar class="h-12 w-12 text-muted opacity-50" />
                     <div>
@@ -637,13 +658,13 @@
                         {formatTimestamp(log.timestamp)}
                       </span>
                       <span class="text-xs text-muted">
-                        {new Date(log.timestamp).toLocaleTimeString()}
+                        {new Date(log.timestamp).toLocaleTimeString(getLocale())}
                       </span>
                     </div>
                   </td>
                   <td class="px-4 py-3">
                     <span class={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${getActionBadgeClass(log.action)}`}>
-                      {log.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      {getActionLabel(log.action as ActionType)}
                     </span>
                   </td>
                   <td class="px-4 py-3">
@@ -664,20 +685,15 @@
                     </div>
                   </td>
                   <td class="px-4 py-3">
-                    <span class="inline-flex rounded bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300">
-                      {log.entity_type}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3">
                     {#if log.outcome === "success"}
-                      <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+                      <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-900 dark:text-green-300 border border-green-200 dark:border-green-800">
                         <CircleCheck class="h-3.5 w-3.5" />
-                        Success
+                        {m.audit_success()}
                       </span>
                     {:else}
-                      <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                      <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-900 dark:text-red-300 border border-red-200 dark:border-red-800">
                         <CircleX class="h-3.5 w-3.5" />
-                        Failed
+                        {m.audit_failure()}
                       </span>
                     {/if}
                   </td>
@@ -685,8 +701,8 @@
 
                 <!-- Expanded Metadata Row -->
                 {#if isExpanded}
-                  <tr transition:slide>
-                    <td colspan="7" class="bg-subtle px-4 py-4">
+                  <tr transition:fade={{ duration: 150 }}>
+                    <td colspan="6" class="bg-subtle px-4 py-4">
                       <div class="mx-auto max-w-5xl space-y-3">
                         <h4 class="text-xs font-semibold text-default uppercase tracking-wider">{m.audit_full_details()}</h4>
                         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -696,12 +712,27 @@
                           </div>
                           <div class="rounded-lg border border-default bg-primary p-3">
                             <p class="text-xs font-medium text-muted mb-1">{m.audit_outcome()}</p>
-                            <p class="text-sm text-default capitalize">{log.outcome}</p>
+                            <p class="text-sm text-default">{log.outcome === "success" ? m.audit_success() : m.audit_failure()}</p>
                           </div>
                         </div>
                         {#if log.metadata && Object.keys(log.metadata).length > 0}
                           <div class="rounded-lg border border-default bg-primary p-3">
-                            <p class="text-xs font-medium text-muted mb-2">{m.audit_metadata_json()}</p>
+                            <div class="flex items-center justify-between mb-2">
+                              <p class="text-xs font-medium text-muted">{m.audit_metadata_json()}</p>
+                              <button
+                                onclick={() => copyJsonToClipboard(log.metadata, log.id || index.toString())}
+                                class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-muted hover:bg-hover hover:text-default transition-colors"
+                                aria-label={m.audit_copy_json()}
+                              >
+                                {#if copiedRowId === (log.id || index.toString())}
+                                  <IconCheck class="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                                  <span class="text-green-600 dark:text-green-400">{m.audit_json_copied()}</span>
+                                {:else}
+                                  <IconCopy class="h-3.5 w-3.5" />
+                                  {m.audit_copy_json()}
+                                {/if}
+                              </button>
+                            </div>
                             <pre class="text-xs text-gray-800 dark:text-gray-200 rounded bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono">{@html formatJsonWithSyntaxHighlighting(log.metadata)}</pre>
                           </div>
                         {/if}
