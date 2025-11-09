@@ -3,28 +3,8 @@
 !.vscode/tasks.json
 !.vscode/launch.json
 
-# Python
+# cpython
 *.pyc
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
 # cassettes
 **/cassettes/*
@@ -57,4 +37,3 @@ install-claude.sh
 devcontainer.json
 specs/
 .serena/
-.speckit/
