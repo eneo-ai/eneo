@@ -269,9 +269,42 @@ async def publish_app(
     published: bool,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.app_service()
     assembler = container.app_assembler()
+    user = container.user()
 
+    # Publish/unpublish app
     app, permissions = await service.publish_app(app_id=id, publish=published)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.APP_PUBLISHED,
+        entity_type=EntityType.APP,
+        entity_id=id,
+        description=f"{'Published' if published else 'Unpublished'} app",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "app_id": str(id),
+                "app_name": app.name,
+                "published": published,
+            },
+        },
+    )
 
     return assembler.from_app_to_model(app=app, permissions=permissions)

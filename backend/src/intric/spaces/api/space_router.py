@@ -223,9 +223,44 @@ async def delete_space(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.space_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.space_service()
+    user = container.user()
+
+    # Get space info before deletion
+    space = await service.get_space(id)
+
+    # Delete space
     await service.delete_space(id=id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SPACE_DELETED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Deleted space '{space.name}'",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "space_id": str(id),
+                "space_name": space.name,
+            },
+        },
+    )
 
 
 @router.get(
@@ -331,10 +366,43 @@ async def create_group_chat(
     group_chat_in: GroupChatCreate,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()
+    user = container.user()
 
+    # Create group chat
     group_chat = await service.create_group_chat(space_id=id, name=group_chat_in.name)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.GROUP_CHAT_CREATED,
+        entity_type=EntityType.GROUP_CHAT,
+        entity_id=group_chat.id,
+        description=f"Created group chat '{group_chat.name}' in space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "group_chat_id": str(group_chat.id),
+                "group_chat_name": group_chat.name,
+                "space_id": str(id),
+            },
+        },
+    )
 
     return assembler.from_domain_to_model(group_chat=group_chat)
 
@@ -449,14 +517,48 @@ async def create_space_groups(
     group: CreateSpaceGroupsRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     svc = container.collection_crud_service()
+    user = container.user()
     embedding_model_id = group.embedding_model.id if group.embedding_model else None
 
+    # Create collection
     created_collection = await svc.create_collection(
         name=group.name,
         space_id=id,
         embedding_model_id=embedding_model_id,
     )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.COLLECTION_CREATED,
+        entity_type=EntityType.COLLECTION,
+        entity_id=created_collection.id,
+        description=f"Created collection '{created_collection.name}' in space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "collection_id": str(created_collection.id),
+                "collection_name": created_collection.name,
+                "space_id": str(id),
+            },
+        },
+    )
+
     return CollectionPublic.from_domain(created_collection)
   
 
@@ -494,9 +596,16 @@ async def create_space_websites(
     website: WebsiteCreate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.website_crud_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-    website = await service.create_website(
+    service = container.website_crud_service()
+    user = container.user()
+
+    # Create website
+    created_website = await service.create_website(
         space_id=id,
         name=website.name,
         url=website.url,
@@ -508,7 +617,34 @@ async def create_space_websites(
         http_auth_password=website.http_auth_password,
     )
 
-    return WebsitePublic.from_domain(website)
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_CREATED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=created_website.id,
+        description=f"Created website crawler '{created_website.url}' in space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "website_id": str(created_website.id),
+                "url": created_website.url,
+                "name": created_website.name,
+                "space_id": str(id),
+            },
+        },
+    )
+
+    return WebsitePublic.from_domain(created_website)
 
 
 @router.post(
@@ -612,11 +748,53 @@ async def change_role_of_member(
     user_id: UUID,
     update_space_member_req: UpdateSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
-    
-):
-    service = container.space_service()
 
-    return await service.change_role_of_member(id, user_id, update_space_member_req.role)
+):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    service = container.space_service()
+    current_user = container.user()
+
+    # Get current member to track old role
+    current_member = await service.get_space_member(id, user_id)
+    old_role = current_member.role
+
+    # Change role
+    updated_member = await service.change_role_of_member(id, user_id, update_space_member_req.role)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ROLE_MODIFIED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Changed role of member from {old_role} to {update_space_member_req.role}",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "space_id": str(id),
+                "member_id": str(user_id),
+            },
+            "changes": {
+                "old_role": old_role,
+                "new_role": update_space_member_req.role,
+            },
+        },
+    )
+
+    return updated_member
 
 
 @router.delete(

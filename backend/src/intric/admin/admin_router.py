@@ -863,5 +863,40 @@ async def get_predefined_roles(container: Container = Depends(get_container(with
 async def update_privacy_policy(
     url: PrivacyPolicy, container: Container = Depends(get_container(with_user=True))
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.admin_service()
-    return await service.update_privacy_policy(url)
+    user = container.user()
+
+    # Update privacy policy
+    updated_tenant = await service.update_privacy_policy(url)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description="Updated privacy policy URL",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "tenant_id": str(user.tenant_id),
+                "privacy_policy_url": url.url,
+            },
+        },
+    )
+
+    return updated_tenant

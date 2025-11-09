@@ -604,13 +604,13 @@ async def enable_completion_model(
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=id,
-        description=f"Sysadmin enabled completion model '{model.model_name}' for tenant",
+        description=f"Sysadmin enabled completion model '{model.name}' for tenant",
         metadata={
             "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
             "target": {
                 "tenant_id": str(id),
                 "model_id": str(completion_model_id),
-                "model_name": model.model_name,
+                "model_name": model.name,
                 "is_org_enabled": data.is_org_enabled,
             },
         },
@@ -660,13 +660,13 @@ async def enable_embedding_model(
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=id,
-        description=f"Sysadmin enabled embedding model '{model.model_name}' for tenant",
+        description=f"Sysadmin enabled embedding model '{model.name}' for tenant",
         metadata={
             "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
             "target": {
                 "tenant_id": str(id),
                 "model_id": str(embedding_model_id),
-                "model_name": model.model_name,
+                "model_name": model.name,
                 "is_org_enabled": data.is_org_enabled,
             },
         },
