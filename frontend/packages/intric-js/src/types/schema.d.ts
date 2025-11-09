@@ -1474,6 +1474,73 @@ export interface paths {
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
   };
+  "/api/v1/audit/logs": {
+    /**
+     * List Audit Logs
+     * @description List audit logs for the authenticated user's tenant.
+     *
+     * Access Control:
+     * - Regular users: See only their own actions
+     * - Admins: See all actions in their tenant
+     * - Compliance officers: See all actions in their tenant
+     *
+     * Requires: Authentication (JWT token or API key)
+     */
+    get: operations["list_audit_logs_api_v1_audit_logs_get"];
+  };
+  "/api/v1/audit/logs/user/{user_id}": {
+    /**
+     * Get User Logs
+     * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+     *
+     * Returns audit logs involving the user in any capacity.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Security: Only returns logs for the authenticated user's tenant
+     */
+    get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
+  };
+  "/api/v1/audit/logs/export": {
+    /**
+     * Export Audit Logs
+     * @description Export audit logs to CSV format.
+     *
+     * Use user_id for GDPR Article 15 data subject access requests.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Security: Only exports logs for the authenticated user's tenant
+     */
+    get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
+  };
+  "/api/v1/audit/retention-policy": {
+    /**
+     * Get Retention Policy
+     * @description Get the current retention policy for your tenant.
+     *
+     * Returns the number of days audit logs are retained before automatic purging.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     */
+    get: operations["get_retention_policy_api_v1_audit_retention_policy_get"];
+    /**
+     * Update Retention Policy
+     * @description Update the retention policy for your tenant.
+     *
+     * Configure how long audit logs are kept before automatic purging.
+     *
+     * Constraints:
+     * - Minimum: 1 day (Recommended: 90+ days for compliance)
+     * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+     * - Default: 365 days (Swedish Arkivlagen)
+     *
+     * The system automatically runs a daily job to soft-delete logs older than
+     * the retention period.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    put: operations["update_retention_policy_api_v1_audit_retention_policy_put"];
+  };
   "/api/v1/integrations/": {
     /** Get Integrations */
     get: operations["get_integrations_api_v1_integrations__get"];
@@ -1664,6 +1731,75 @@ export interface paths {
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
+  "/api/v1/sysadmin/completion-models/create": {
+    /**
+     * Create Completion Model
+     * @description Create a new completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}/metadata": {
+    /**
+     * Update Completion Model Metadata
+     * @description Update completion model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}": {
+    /**
+     * Delete Completion Model
+     * @description Delete a completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     * Set force=true to delete even if model is in use (may break references).
+     */
+    delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
+  };
+  "/api/v1/sysadmin/embedding-models/create": {
+    /**
+     * Create Embedding Model
+     * @description Create a new embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}/metadata": {
+    /**
+     * Update Embedding Model Metadata
+     * @description Update embedding model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}": {
+    /**
+     * Delete Embedding Model
+     * @description Delete an embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     */
+    delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     /**
      * Set tenant API credential
@@ -1794,6 +1930,45 @@ export interface components {
       /** Token Type */
       token_type: string;
     };
+    /**
+     * ActionType
+     * @description Standardized vocabulary of auditable actions
+     * @enum {string}
+     */
+    ActionType:
+      | "user_created"
+      | "user_deleted"
+      | "user_updated"
+      | "role_modified"
+      | "permission_changed"
+      | "tenant_settings_updated"
+      | "credentials_updated"
+      | "federation_updated"
+      | "assistant_created"
+      | "assistant_deleted"
+      | "assistant_updated"
+      | "space_created"
+      | "space_updated"
+      | "space_member_added"
+      | "space_member_removed"
+      | "app_created"
+      | "app_deleted"
+      | "app_updated"
+      | "app_executed"
+      | "session_started"
+      | "session_ended"
+      | "file_uploaded"
+      | "file_deleted"
+      | "website_crawled"
+      | "retention_policy_applied"
+      | "encryption_key_rotated"
+      | "system_maintenance";
+    /**
+     * ActorType
+     * @description Categorize who performed the action
+     * @enum {string}
+     */
+    ActorType: "user" | "system" | "api_key";
     /** AddSpaceMemberRequest */
     AddSpaceMemberRequest: {
       /**
@@ -2689,6 +2864,83 @@ export interface components {
       /** Max In Question */
       max_in_question: number;
     };
+    /**
+     * AuditLogListResponse
+     * @description Schema for audit log list response.
+     */
+    AuditLogListResponse: {
+      /** Logs */
+      logs: components["schemas"]["AuditLogResponse"][];
+      /** Total Count */
+      total_count: number;
+      /** Page */
+      page: number;
+      /** Page Size */
+      page_size: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * AuditLogResponse
+     * @description Schema for audit log response.
+     */
+    AuditLogResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Actor Id
+       * Format: uuid
+       */
+      actor_id: string;
+      actor_type: components["schemas"]["ActorType"];
+      action: components["schemas"]["ActionType"];
+      entity_type: components["schemas"]["EntityType"];
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /**
+       * Timestamp
+       * Format: date-time
+       */
+      timestamp: string;
+      /** Description */
+      description: string;
+      /** Metadata */
+      metadata: {
+        [key: string]: unknown;
+      };
+      outcome: components["schemas"]["Outcome"];
+      /** Ip Address */
+      ip_address?: string | null;
+      /** User Agent */
+      user_agent?: string | null;
+      /** Request Id */
+      request_id?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Deleted At */
+      deleted_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
     /** AuthCallbackParams */
     AuthCallbackParams: {
       /** Auth Code */
@@ -2870,6 +3122,39 @@ export interface components {
        */
       is_org_default?: boolean;
     };
+    /** CompletionModelCreate */
+    CompletionModelCreate: {
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      family: components["schemas"]["ModelFamily"];
+      /** Token Limit */
+      token_limit: number;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision: boolean;
+      /** Reasoning */
+      reasoning: boolean;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
     /** CompletionModelPublic */
     CompletionModelPublic: {
       /** Created At */
@@ -2931,6 +3216,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** CompletionModelPublicAppTemplate */
@@ -3010,6 +3297,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -3415,6 +3704,31 @@ export interface components {
       /** Success */
       success: boolean;
     };
+    /** EmbeddingModelCreate */
+    EmbeddingModelCreate: {
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
     /**
      * EmbeddingModelFamily
      * @enum {string}
@@ -3498,6 +3812,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -3553,6 +3869,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
     };
     /** EmbeddingModelSecurityStatus */
     EmbeddingModelSecurityStatus: {
@@ -3593,6 +3911,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -3601,6 +3921,40 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
+    };
+    /** EmbeddingModelSparse */
+    EmbeddingModelSparse: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -3623,6 +3977,21 @@ export interface components {
        */
       is_org_enabled?: boolean | null;
     };
+    /**
+     * EntityType
+     * @description Categorize what type of entity was affected
+     * @enum {string}
+     */
+    EntityType:
+      | "user"
+      | "assistant"
+      | "space"
+      | "app"
+      | "file"
+      | "website"
+      | "tenant_settings"
+      | "credential"
+      | "federation_config";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -4768,6 +5137,12 @@ export interface components {
       /** Nonce */
       nonce?: string | null;
     };
+    /**
+     * Outcome
+     * @description Indicate success or failure of audited action
+     * @enum {string}
+     */
+    Outcome: "success" | "failure";
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -5123,6 +5498,19 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[PredefinedRolePublic] */
+    PaginatedResponse_PredefinedRolePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PredefinedRolePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -5130,6 +5518,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[RolePublic] */
+    PaginatedResponse_RolePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RolePublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -5404,6 +5805,68 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
+    /** PartialCompletionModelUpdate */
+    PartialCompletionModelUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Nickname */
+      nickname?: string | null;
+      family?: components["schemas"]["ModelFamily"] | null;
+      /** Token Limit */
+      token_limit?: number | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision?: boolean | null;
+      /** Reasoning */
+      reasoning?: boolean | null;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
+    /** PartialEmbeddingModelUpdate */
+    PartialEmbeddingModelUpdate: {
+      /** Name */
+      name?: string | null;
+      family?: components["schemas"]["EmbeddingModelFamily"] | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
       predefined_role?: components["schemas"]["ModelId"] | null;
@@ -5460,21 +5923,11 @@ export interface components {
       | "admin"
       | "websites"
       | "integration_knowledge_list";
-    /** PredefinedRoleInDB */
-    PredefinedRoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
+    /** PermissionPublic */
+    PermissionPublic: {
+      name: components["schemas"]["Permission"];
+      /** Description */
+      description: string;
     };
     /** PredefinedRoleInDB */
     PredefinedRoleInDB: {
@@ -5625,26 +6078,12 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
+    /** RoleCreateRequest */
+    RoleCreateRequest: {
       /** Name */
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
     };
     /** RoleInDB */
     RoleInDB: {
@@ -5682,6 +6121,18 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+    };
+    /** RoleUpdateRequest */
+    RoleUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Permissions */
+      permissions?: components["schemas"]["Permission"][] | null;
+    };
+    /** RolesPaginatedResponse */
+    RolesPaginatedResponse: {
+      roles: components["schemas"]["PaginatedResponse_RolePublic_"];
+      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -6188,6 +6639,11 @@ export interface components {
        * @default false
        */
       using_templates?: boolean;
+      /**
+       * Tenant Credentials Enabled
+       * @default false
+       */
+      tenant_credentials_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -6867,6 +7323,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6912,6 +7370,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -8760,8 +9220,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -9371,6 +9833,8 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9672,6 +10136,8 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -14409,8 +14875,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -15202,6 +15670,190 @@ export interface operations {
       403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Audit Logs
+   * @description List audit logs for the authenticated user's tenant.
+   *
+   * Access Control:
+   * - Regular users: See only their own actions
+   * - Admins: See all actions in their tenant
+   * - Compliance officers: See all actions in their tenant
+   *
+   * Requires: Authentication (JWT token or API key)
+   */
+  list_audit_logs_api_v1_audit_logs_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Logs
+   * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+   *
+   * Returns audit logs involving the user in any capacity.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Security: Only returns logs for the authenticated user's tenant
+   */
+  get_user_logs_api_v1_audit_logs_user__user_id__get: {
+    parameters: {
+      query?: {
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+      path: {
+        /** @description User ID for GDPR export */
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Export Audit Logs
+   * @description Export audit logs to CSV format.
+   *
+   * Use user_id for GDPR Article 15 data subject access requests.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Security: Only exports logs for the authenticated user's tenant
+   */
+  export_audit_logs_api_v1_audit_logs_export_get: {
+    parameters: {
+      query?: {
+        /** @description User ID for GDPR export */
+        user_id?: string | null;
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Retention Policy
+   * @description Get the current retention policy for your tenant.
+   *
+   * Returns the number of days audit logs are retained before automatic purging.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   */
+  get_retention_policy_api_v1_audit_retention_policy_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /**
+   * Update Retention Policy
+   * @description Update the retention policy for your tenant.
+   *
+   * Configure how long audit logs are kept before automatic purging.
+   *
+   * Constraints:
+   * - Minimum: 1 day (Recommended: 90+ days for compliance)
+   * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+   * - Default: 365 days (Swedish Arkivlagen)
+   *
+   * The system automatically runs a daily job to soft-delete logs older than
+   * the retention period.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  update_retention_policy_api_v1_audit_retention_policy_put: {
+    parameters: {
+      query: {
+        /** @description Days to retain logs (1 min, 2555 max = 7 years). Recommended: 90+ days */
+        retention_days: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -16110,6 +16762,285 @@ export interface operations {
       500: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Completion Model
+   * @description Create a new completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+   */
+  create_completion_model_api_v1_sysadmin_completion_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Completion Model Metadata
+   * @description Update completion model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Completion Model
+   * @description Delete a completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   * Set force=true to delete even if model is in use (may break references).
+   */
+  delete_completion_model_api_v1_sysadmin_completion_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Embedding Model
+   * @description Create a new embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+   */
+  create_embedding_model_api_v1_sysadmin_embedding_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Embedding Model Metadata
+   * @description Update embedding model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Embedding Model
+   * @description Delete an embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   */
+  delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

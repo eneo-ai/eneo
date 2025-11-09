@@ -123,18 +123,20 @@ async def purge_old_audit_logs(container: Container):
     logger = get_logger(__name__)
     session = container.session()
 
-    retention_service = RetentionService(session)
-    purge_stats = await retention_service.purge_all_tenants()
+    # Worker sessions need explicit transaction
+    async with session.begin():
+        retention_service = RetentionService(session)
+        purge_stats = await retention_service.purge_all_tenants()
 
-    total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
+        total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
 
-    logger.info(
-        "Audit log retention purge completed",
-        extra={
-            "total_tenants": len(purge_stats),
-            "total_purged": total_purged,
-            "purge_stats": purge_stats,
-        },
-    )
+        logger.info(
+            "Audit log retention purge completed",
+            extra={
+                "total_tenants": len(purge_stats),
+                "total_purged": total_purged,
+                "purge_stats": purge_stats,
+            },
+        )
 
-    return purge_stats
+        return purge_stats
