@@ -1,6 +1,5 @@
 """Unit tests for async audit logging."""
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -90,7 +89,7 @@ async def test_log_async_with_optional_params():
     with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
         request_id = uuid4()
 
-        job_id = await service.log_async(
+        await service.log_async(
             tenant_id=uuid4(),
             actor_id=uuid4(),
             action=ActionType.ASSISTANT_CREATED,

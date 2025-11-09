@@ -1,5 +1,7 @@
 """Audit logging worker task."""
 
+from sqlalchemy.exc import IntegrityError
+
 from intric.audit.application.audit_task_params import AuditLogTaskParams
 from intric.audit.domain.audit_log import AuditLog
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
@@ -49,7 +51,22 @@ async def log_audit_event_task(
 
     # Persist to database
     repository = AuditLogRepositoryImpl(session)
-    created_log = await repository.create(audit_log)
+
+    try:
+        created_log = await repository.create(audit_log)
+    except IntegrityError as e:
+        error_detail = str(e)
+        # Gracefully handle case where tenant doesn't exist (during registration or after deletion)
+        if "audit_logs_tenant_id_fkey" in error_detail:
+            logger.warning(
+                f"Skipping audit log for non-existent tenant. "
+                f"tenant_id={audit_log.tenant_id}, action={audit_log.action.value}, "
+                f"entity_type={audit_log.entity_type.value}. "
+                f"Tenant may have been deleted or not yet created."
+            )
+            return {"audit_log_id": None, "skipped": True, "reason": "tenant_not_found"}
+        # Re-raise other integrity errors (actor_id FK, unique constraints, etc.)
+        raise
 
     logger.info(
         "Audit log created",
