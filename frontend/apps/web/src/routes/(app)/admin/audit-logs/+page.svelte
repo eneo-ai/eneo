@@ -377,7 +377,7 @@
     </div>
 
     <!-- Audit Logs Table -->
-    <div class="overflow-hidden rounded-lg border border-default shadow-sm">
+    <div class="rounded-lg border border-default shadow-sm">
       <div class="overflow-x-auto">
         <table class="w-full">
           <thead class="sticky top-0 border-b border-default bg-subtle">
