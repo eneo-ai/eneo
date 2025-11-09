@@ -128,7 +128,7 @@ async def update_space(
     current_user = container.user()
 
     # Get old state
-    old_space, _ = await service.get_space(id)
+    old_space = await service.get_space(id)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
         if models is None:
