@@ -403,7 +403,7 @@ async def set_tenant_credential(
             "target": {
                 "tenant_id": str(tenant_id),
                 "tenant_name": tenant.name,
-                "provider": provider.value,
+                "provider": str(provider),
                 "masked_key": masked_key,
             },
         },
@@ -482,7 +482,7 @@ async def delete_tenant_credential(
             "target": {
                 "tenant_id": str(tenant_id),
                 "tenant_name": tenant.name,
-                "provider": provider.value,
+                "provider": str(provider),
                 "action": "deleted",
             },
         },
