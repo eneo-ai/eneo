@@ -6,6 +6,7 @@
   import { Button, Input, Select } from "@intric/ui";
   import * as m from "$lib/paraglide/messages";
   import type { components } from "@intric/intric-js/types/schema";
+  import type { UserSparse } from "@intric/intric-js";
   import type { CalendarDate } from "@internationalized/date";
   import { parseDate, today, getLocalTimeZone } from "@internationalized/date";
   import { IconChevronDown } from "@intric/icons/chevron-down";
@@ -14,11 +15,14 @@
   import { IconDownload } from "@intric/icons/download";
   import { IconInfo } from "@intric/icons/info";
   import { slide } from "svelte/transition";
+  import { getIntric } from "$lib/core/Intric";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
 
   let { data } = $props();
+
+  const intric = getIntric();
 
   // Expandable row state
   let expandedRows = $state<Set<string>>(new Set());
@@ -29,7 +33,13 @@
     end: undefined
   });
   let selectedAction = $state<ActionType | "all">("all");
+  let selectedUser = $state<UserSparse | null>(null);
+  let userSearchQuery = $state("");
+  let userSearchResults = $state<UserSparse[]>([]);
+  let isSearchingUsers = $state(false);
+  let showUserDropdown = $state(false);
   let debounceTimer: ReturnType<typeof setTimeout>;
+  let userSearchTimer: ReturnType<typeof setTimeout>;
   let isExporting = $state(false);
 
   // Action type options with better categorization
@@ -74,6 +84,7 @@
     const fromDate = url.searchParams.get("from_date");
     const toDate = url.searchParams.get("to_date");
     const action = url.searchParams.get("action");
+    const actorId = url.searchParams.get("actor_id");
 
     // Set date range from URL
     if (fromDate && toDate) {
@@ -99,6 +110,13 @@
     } else {
       selectedAction = "all";
       actionStore.set({ value: "all", label: "All Actions" });
+    }
+
+    // Set user from URL (if actor_id is present, we keep the selected user)
+    // Note: We rely on user selecting from search, not parsing from URL
+    if (!actorId) {
+      selectedUser = null;
+      userSearchQuery = "";
     }
   });
 
@@ -174,6 +192,10 @@
       params.set("action", selectedAction);
     }
 
+    if (selectedUser) {
+      params.set("actor_id", selectedUser.id);
+    }
+
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
     goto(url, { noScroll: true, keepFocus: true });
   }
@@ -182,7 +204,57 @@
     dateRange = { start: undefined, end: undefined };
     selectedAction = "all";
     actionStore.set({ value: "all", label: "All Actions" });
+    selectedUser = null;
+    userSearchQuery = "";
+    userSearchResults = [];
     goto("/admin/audit-logs", { noScroll: true });
+  }
+
+  // User search with debounce
+  async function searchUsers(query: string) {
+    userSearchQuery = query;
+
+    if (query.length < 3) {
+      userSearchResults = [];
+      showUserDropdown = false;
+      return;
+    }
+
+    clearTimeout(userSearchTimer);
+    userSearchTimer = setTimeout(async () => {
+      try {
+        isSearchingUsers = true;
+        const response = await intric.users.list({
+          includeDetails: true,
+          search_email: query,
+          page: 1,
+          page_size: 10,
+        });
+        userSearchResults = response.items || [];
+        showUserDropdown = true;
+      } catch (err) {
+        console.error("User search failed:", err);
+        userSearchResults = [];
+      } finally {
+        isSearchingUsers = false;
+      }
+    }, 300);
+  }
+
+  function selectUser(user: UserSparse) {
+    selectedUser = user;
+    userSearchQuery = user.email;
+    userSearchResults = [];
+    showUserDropdown = false;
+    applyFilters();
+  }
+
+  function clearUserFilter() {
+    selectedUser = null;
+    userSearchQuery = "";
+    userSearchResults = [];
+    showUserDropdown = false;
+    applyFilters();
   }
 
   function nextPage() {
@@ -259,7 +331,11 @@
   });
 
   // Count active filters
-  let activeFilterCount = $derived((dateRange?.start && dateRange?.end ? 1 : 0) + (selectedAction !== "all" ? 1 : 0));
+  let activeFilterCount = $derived(
+    (dateRange?.start && dateRange?.end ? 1 : 0) +
+    (selectedAction !== "all" ? 1 : 0) +
+    (selectedUser ? 1 : 0)
+  );
 </script>
 
 <svelte:head>
@@ -329,7 +405,7 @@
       </div>
 
       <!-- Filter Grid -->
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
         <!-- Date Range Filter -->
         <div>
           <label class="mb-2 block text-xs font-medium text-default">{m.audit_date_range()}</label>
@@ -348,7 +424,73 @@
             </Select.Options>
           </Select.Root>
         </div>
+
+        <!-- User Filter -->
+        <div class="relative">
+          <label class="mb-2 block text-xs font-medium text-default">{m.audit_user_filter()}</label>
+          <div class="relative">
+            <Input.Text
+              bind:value={userSearchQuery}
+              oninput={(e) => searchUsers(e.currentTarget.value)}
+              onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
+              placeholder={m.audit_user_filter_placeholder()}
+              class="w-full"
+            />
+            {#if selectedUser}
+              <button
+                onclick={clearUserFilter}
+                class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                aria-label="Clear user filter"
+              >
+                <IconXMark class="h-4 w-4 text-muted" />
+              </button>
+            {/if}
+            {#if isSearchingUsers}
+              <div class="absolute right-2 top-1/2 -translate-y-1/2">
+                <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Dropdown Results -->
+          {#if showUserDropdown && userSearchResults.length > 0}
+            <div
+              class="absolute z-10 mt-1 w-full rounded-md border border-default bg-default shadow-lg max-h-60 overflow-auto"
+              transition:slide={{ duration: 150 }}
+            >
+              {#each userSearchResults as user}
+                <button
+                  onclick={() => selectUser(user)}
+                  class="w-full px-3 py-2 text-left text-sm hover:bg-hover transition-colors flex flex-col gap-1"
+                >
+                  <span class="font-medium text-default">{user.email}</span>
+                  {#if user.name}
+                    <span class="text-xs text-muted">{user.name}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
+
+      <!-- Selected User Chip -->
+      {#if selectedUser}
+        <div class="flex items-center gap-2 mt-2">
+          <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
+            <span class="text-blue-700 dark:text-blue-300">
+              {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
+            </span>
+            <button
+              onclick={clearUserFilter}
+              class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
+              aria-label="Clear user filter"
+            >
+              <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+            </button>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- Results Summary -->

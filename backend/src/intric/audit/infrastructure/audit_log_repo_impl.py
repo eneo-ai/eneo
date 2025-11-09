@@ -1,5 +1,7 @@
 """SQLAlchemy implementation of audit log repository."""
 
+import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
@@ -14,6 +16,8 @@ from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
+
+logger = logging.getLogger(__name__)
 
 
 class AuditLogRepositoryImpl(AuditLogRepository):
@@ -115,16 +119,28 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Get total count
         count_query = sa.select(sa.func.count()).select_from(query.subquery())
+        count_start = time.time()
         total_count = await self.session.scalar(count_query)
+        count_time = (time.time() - count_start) * 1000  # ms
 
-        # Apply ordering and pagination
-        query = query.order_by(AuditLogTable.timestamp.desc())
+        # Apply ordering with stable pagination (timestamp DESC, id DESC)
+        # Secondary id sort prevents row instability when timestamps are identical
+        query = query.order_by(AuditLogTable.timestamp.desc(), AuditLogTable.id.desc())
         query = query.limit(min(page_size, 1000))  # Max 1000 records per page
         query = query.offset((page - 1) * page_size)
 
-        # Execute query
+        # Execute query with performance logging
+        query_start = time.time()
         results = await self.session.scalars(query)
         logs = [self._to_domain(result) for result in results]
+        query_time = (time.time() - query_start) * 1000  # ms
+
+        logger.info(
+            f"get_logs: tenant={tenant_id}, page={page}, page_size={page_size}, "
+            f"actor_id={actor_id}, action={action.value if action else None}, "
+            f"results={len(logs)}, total={total_count}, "
+            f"count_time={count_time:.2f}ms, query_time={query_time:.2f}ms"
+        )
 
         return logs, total_count or 0
 
@@ -169,16 +185,26 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Get total count
         count_query = sa.select(sa.func.count()).select_from(query.subquery())
+        count_start = time.time()
         total_count = await self.session.scalar(count_query)
+        count_time = (time.time() - count_start) * 1000  # ms
 
-        # Apply ordering and pagination
-        query = query.order_by(AuditLogTable.timestamp.desc())
+        # Apply ordering with stable pagination (timestamp DESC, id DESC)
+        query = query.order_by(AuditLogTable.timestamp.desc(), AuditLogTable.id.desc())
         query = query.limit(min(page_size, 1000))
         query = query.offset((page - 1) * page_size)
 
-        # Execute query
+        # Execute query with performance logging
+        query_start = time.time()
         results = await self.session.scalars(query)
         logs = [self._to_domain(result) for result in results]
+        query_time = (time.time() - query_start) * 1000  # ms
+
+        logger.info(
+            f"get_user_logs: tenant={tenant_id}, user_id={user_id}, "
+            f"results={len(logs)}, total={total_count}, "
+            f"count_time={count_time:.2f}ms, query_time={query_time:.2f}ms"
+        )
 
         return logs, total_count or 0
 
