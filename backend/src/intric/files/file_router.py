@@ -58,7 +58,7 @@ async def upload_file(
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,
-        description=f"Uploaded file '{file.filename}'",
+        description=f"Uploaded file '{file.name}'",
         metadata={
             "actor": {
                 "id": str(current_user.id),
@@ -67,7 +67,7 @@ async def upload_file(
             },
             "target": {
                 "id": str(file.id),
-                "filename": file.filename,
+                "filename": file.name,
                 "size": file.size,
             },
         },
@@ -135,7 +135,7 @@ async def delete_file(
         action=ActionType.FILE_DELETED,
         entity_type=EntityType.FILE,
         entity_id=id,
-        description=f"Deleted file '{file.filename}'",
+        description=f"Deleted file '{file.name}'",
         metadata={
             "actor": {
                 "id": str(current_user.id),
@@ -144,7 +144,7 @@ async def delete_file(
             },
             "target": {
                 "id": str(file.id),
-                "filename": file.filename,
+                "filename": file.name,
             },
         },
     )

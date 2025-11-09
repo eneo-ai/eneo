@@ -773,6 +773,7 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
+        group_service=group_service,
     )
     assistant_service = providers.Factory(
         AssistantService,

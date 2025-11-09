@@ -148,6 +148,36 @@ async def add_info_blobs(
         info_blob_updated = await service.update_info_blob_size(info_blob.id)
         info_blobs_updated.append(info_blob_updated)
 
+    # Audit logging for info blob additions
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=id,  # Group ID
+        description=f"Added {len(info_blobs_updated)} info blobs to collection/group",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "group_id": str(id),
+                "blobs_count": len(info_blobs_updated),
+            },
+        },
+    )
+
     info_blobs_public = [
         info_blob_protocol.to_info_blob_public(blob) for blob in info_blobs_updated
     ]
@@ -185,12 +215,46 @@ async def upload_file(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Starts a job, use the job operations to keep track of this job"""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     group_service = container.group_service()
+    current_user = container.user()
 
-    return await group_service.add_file_to_group(
+    # Upload file to group
+    result = await group_service.add_file_to_group(
         group_id=id, file=file.file, mimetype=file.content_type, filename=file.filename
     )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=id,  # Use group ID as entity
+        description=f"Uploaded file '{file.filename}' to collection/group",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "group_id": str(id),
+                "filename": file.filename,
+                "content_type": file.content_type,
+            },
+        },
+    )
+
+    return result
 
 
 @router.post(

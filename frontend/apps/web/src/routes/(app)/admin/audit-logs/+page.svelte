@@ -57,6 +57,8 @@
       role_modified: m.audit_action_role_modified,
       permission_changed: m.audit_action_permission_changed,
       tenant_settings_updated: m.audit_action_tenant_settings_updated,
+      credentials_updated: m.audit_action_credentials_updated,
+      federation_updated: m.audit_action_federation_updated,
       assistant_created: m.audit_action_assistant_created,
       assistant_updated: m.audit_action_assistant_updated,
       assistant_deleted: m.audit_action_assistant_deleted,
@@ -68,9 +70,31 @@
       app_updated: m.audit_action_app_updated,
       app_deleted: m.audit_action_app_deleted,
       app_executed: m.audit_action_app_executed,
+      session_started: m.audit_action_session_started,
+      session_ended: m.audit_action_session_ended,
       file_uploaded: m.audit_action_file_uploaded,
       file_deleted: m.audit_action_file_deleted,
       website_crawled: m.audit_action_website_crawled,
+      website_created: m.audit_action_website_created,
+      website_updated: m.audit_action_website_updated,
+      website_deleted: m.audit_action_website_deleted,
+      website_transferred: m.audit_action_website_transferred,
+      api_key_generated: m.audit_action_api_key_generated,
+      retention_policy_applied: m.audit_action_retention_policy_applied,
+      role_created: m.audit_action_role_created,
+      role_deleted: m.audit_action_role_deleted,
+      assistant_transferred: m.audit_action_assistant_transferred,
+      assistant_published: m.audit_action_assistant_published,
+      app_published: m.audit_action_app_published,
+      app_run_deleted: m.audit_action_app_run_deleted,
+      space_deleted: m.audit_action_space_deleted,
+      group_chat_created: m.audit_action_group_chat_created,
+      collection_created: m.audit_action_collection_created,
+      template_created: m.audit_action_template_created,
+      template_updated: m.audit_action_template_updated,
+      template_deleted: m.audit_action_template_deleted,
+      module_added: m.audit_action_module_added,
+      module_added_to_tenant: m.audit_action_module_added_to_tenant,
     };
     return labels[action]?.() || action;
   }
@@ -84,6 +108,9 @@
     { value: "role_modified" as ActionType, label: m.audit_action_role_modified(), category: "admin" },
     { value: "permission_changed" as ActionType, label: m.audit_action_permission_changed(), category: "admin" },
     { value: "tenant_settings_updated" as ActionType, label: m.audit_action_tenant_settings_updated(), category: "admin" },
+    { value: "credentials_updated" as ActionType, label: m.audit_action_credentials_updated(), category: "admin" },
+    { value: "federation_updated" as ActionType, label: m.audit_action_federation_updated(), category: "admin" },
+    { value: "api_key_generated" as ActionType, label: m.audit_action_api_key_generated(), category: "admin" },
     { value: "assistant_created" as ActionType, label: m.audit_action_assistant_created(), category: "user" },
     { value: "assistant_updated" as ActionType, label: m.audit_action_assistant_updated(), category: "user" },
     { value: "assistant_deleted" as ActionType, label: m.audit_action_assistant_deleted(), category: "user" },
@@ -95,9 +122,30 @@
     { value: "app_updated" as ActionType, label: m.audit_action_app_updated(), category: "user" },
     { value: "app_deleted" as ActionType, label: m.audit_action_app_deleted(), category: "user" },
     { value: "app_executed" as ActionType, label: m.audit_action_app_executed(), category: "user" },
+    { value: "session_started" as ActionType, label: m.audit_action_session_started(), category: "user" },
+    { value: "session_ended" as ActionType, label: m.audit_action_session_ended(), category: "user" },
     { value: "file_uploaded" as ActionType, label: m.audit_action_file_uploaded(), category: "user" },
     { value: "file_deleted" as ActionType, label: m.audit_action_file_deleted(), category: "user" },
     { value: "website_crawled" as ActionType, label: m.audit_action_website_crawled(), category: "system" },
+    { value: "website_created" as ActionType, label: m.audit_action_website_created(), category: "user" },
+    { value: "website_updated" as ActionType, label: m.audit_action_website_updated(), category: "user" },
+    { value: "website_deleted" as ActionType, label: m.audit_action_website_deleted(), category: "user" },
+    { value: "website_transferred" as ActionType, label: m.audit_action_website_transferred(), category: "user" },
+    { value: "role_created" as ActionType, label: m.audit_action_role_created(), category: "admin" },
+    { value: "role_deleted" as ActionType, label: m.audit_action_role_deleted(), category: "admin" },
+    { value: "assistant_transferred" as ActionType, label: m.audit_action_assistant_transferred(), category: "user" },
+    { value: "assistant_published" as ActionType, label: m.audit_action_assistant_published(), category: "user" },
+    { value: "app_published" as ActionType, label: m.audit_action_app_published(), category: "user" },
+    { value: "app_run_deleted" as ActionType, label: m.audit_action_app_run_deleted(), category: "user" },
+    { value: "space_deleted" as ActionType, label: m.audit_action_space_deleted(), category: "user" },
+    { value: "group_chat_created" as ActionType, label: m.audit_action_group_chat_created(), category: "user" },
+    { value: "collection_created" as ActionType, label: m.audit_action_collection_created(), category: "user" },
+    { value: "template_created" as ActionType, label: m.audit_action_template_created(), category: "admin" },
+    { value: "template_updated" as ActionType, label: m.audit_action_template_updated(), category: "admin" },
+    { value: "template_deleted" as ActionType, label: m.audit_action_template_deleted(), category: "admin" },
+    { value: "module_added" as ActionType, label: m.audit_action_module_added(), category: "system" },
+    { value: "module_added_to_tenant" as ActionType, label: m.audit_action_module_added_to_tenant(), category: "system" },
+    { value: "retention_policy_applied" as ActionType, label: m.audit_action_retention_policy_applied(), category: "system" },
   ]);
 
   // Create store for Select component
@@ -122,9 +170,12 @@
     // Set date range from URL
     if (fromDate && toDate) {
       try {
+        // Subtract 1 day from end date when reading from URL
+        // (We add 1 day in applyFilters to make it inclusive)
+        const endDateFromUrl = parseDate(toDate).subtract({ days: 1 });
         dateRange = {
           start: parseDate(fromDate),
-          end: parseDate(toDate)
+          end: endDateFromUrl
         };
       } catch (e) {
         dateRange = { start: undefined, end: undefined };
@@ -156,7 +207,7 @@
   // Date preset functions
   function setDatePreset(days: number) {
     const tz = getLocalTimeZone();
-    const endDate = today(tz).add({ days: 1 }); // Add 1 day to include full current day
+    const endDate = today(tz); // Set to current day (applyFilters will add 1 day to make it inclusive)
     const startDate = today(tz).subtract({ days: days - 1 }); // Subtract days-1 to get actual range
     dateRange = { start: startDate, end: endDate };
     applyFilters();
@@ -243,7 +294,9 @@
 
     if (dateRange?.start && dateRange?.end) {
       params.set("from_date", dateRange.start.toString());
-      params.set("to_date", dateRange.end.toString());
+      // Add 1 day to end date to make it inclusive (include full selected day)
+      const inclusiveEndDate = dateRange.end.add({ days: 1 });
+      params.set("to_date", inclusiveEndDate.toString());
     }
 
     if (selectedAction !== "all") {

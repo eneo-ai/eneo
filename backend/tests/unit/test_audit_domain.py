@@ -78,6 +78,20 @@ def test_action_types_enum():
     assert ActionType.USER_CREATED == "user_created"
     assert ActionType.ASSISTANT_DELETED == "assistant_deleted"
     assert ActionType.SPACE_MEMBER_ADDED == "space_member_added"
+    assert ActionType.API_KEY_GENERATED == "api_key_generated"
+    assert ActionType.ROLE_MODIFIED == "role_modified"
+    assert ActionType.WEBSITE_CRAWLED == "website_crawled"
+    # Test new action types
+    assert ActionType.ROLE_CREATED == "role_created"
+    assert ActionType.ROLE_DELETED == "role_deleted"
+    assert ActionType.ASSISTANT_TRANSFERRED == "assistant_transferred"
+    assert ActionType.ASSISTANT_PUBLISHED == "assistant_published"
+    assert ActionType.SPACE_DELETED == "space_deleted"
+    assert ActionType.APP_PUBLISHED == "app_published"
+    assert ActionType.TEMPLATE_CREATED == "template_created"
+    assert ActionType.WEBSITE_CREATED == "website_created"
+    assert ActionType.GROUP_CHAT_CREATED == "group_chat_created"
+    assert ActionType.COLLECTION_CREATED == "collection_created"
 
 
 def test_entity_types_enum():
@@ -85,6 +99,15 @@ def test_entity_types_enum():
     assert EntityType.USER == "user"
     assert EntityType.ASSISTANT == "assistant"
     assert EntityType.SPACE == "space"
+    assert EntityType.API_KEY == "api_key"
+    assert EntityType.WEBSITE == "website"
+    # Test new entity types
+    assert EntityType.ROLE == "role"
+    assert EntityType.MODULE == "module"
+    assert EntityType.TEMPLATE == "template"
+    assert EntityType.GROUP_CHAT == "group_chat"
+    assert EntityType.COLLECTION == "collection"
+    assert EntityType.APP_RUN == "app_run"
 
 
 def test_actor_types_enum():

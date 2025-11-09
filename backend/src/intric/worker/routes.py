@@ -117,7 +117,12 @@ async def purge_old_audit_logs(container: Container):
     Returns:
         Dictionary with purge statistics per tenant
     """
+    from intric.audit.application.audit_service import AuditService
     from intric.audit.application.retention_service import RetentionService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
     from intric.main.logging import get_logger
 
     logger = get_logger(__name__)
@@ -129,6 +134,35 @@ async def purge_old_audit_logs(container: Container):
         purge_stats = await retention_service.purge_all_tenants()
 
         total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
+
+        # Audit logging for retention policy application (one log per tenant)
+        audit_repo = AuditLogRepositoryImpl(session)
+        audit_service = AuditService(audit_repo)
+
+        for tenant_id_str, stats in purge_stats.items():
+            from uuid import UUID
+
+            tenant_id = UUID(tenant_id_str)
+
+            # Only log if logs were actually purged
+            if stats["purged_count"] > 0:
+                await audit_service.log_async(
+                    tenant_id=tenant_id,
+                    actor_id=tenant_id,  # System actor
+                    actor_type=ActorType.SYSTEM,
+                    action=ActionType.RETENTION_POLICY_APPLIED,
+                    entity_type=EntityType.TENANT_SETTINGS,
+                    entity_id=tenant_id,
+                    description=f"Retention policy purged {stats['purged_count']} audit logs",
+                    metadata={
+                        "actor": {"type": "system", "via": "cron_job"},
+                        "target": {
+                            "tenant_id": tenant_id_str,
+                            "purged_count": stats["purged_count"],
+                            "retention_days": stats.get("retention_days", 365),
+                        },
+                    },
+                )
 
         logger.info(
             "Audit log retention purge completed",

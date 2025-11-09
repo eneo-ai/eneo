@@ -540,8 +540,43 @@ async def generate_api_key(
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
     after which only the truncated key will be shown."""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.user_service()
-    return await service.generate_api_key(current_user.id)
+
+    # Generate API key
+    api_key = await service.generate_api_key(current_user.id)
+
+    # Audit logging for API key generation
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.API_KEY_GENERATED,
+        entity_type=EntityType.API_KEY,
+        entity_id=current_user.id,  # Use user ID as entity ID for user API keys
+        description="User generated new API key",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "user_id": str(current_user.id),
+                "truncated_key": api_key.truncated_key,
+                "key_type": "user",
+            },
+        },
+    )
+
+    return api_key
 
 
 @router.get(
