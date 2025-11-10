@@ -21,14 +21,28 @@ class AioHttpClient:
         async def on_dns_end(session, trace_config_ctx, params):
             if hasattr(trace_config_ctx, "_dns_start_time"):
                 dns_duration_ms = (time.perf_counter() - trace_config_ctx._dns_start_time) * 1000
-                logger.debug(
-                    f"DNS resolution completed for {params.host}",
-                    extra={
-                        "event": "dns_resolution",
-                        "host": params.host,
-                        "duration_ms": int(dns_duration_ms),
-                    },
-                )
+
+                # Warn if DNS resolution is slow (>2s indicates infrastructure issues)
+                if dns_duration_ms > 2000:
+                    logger.warning(
+                        f"SLOW DNS resolution detected for {params.host}",
+                        extra={
+                            "event": "dns_slow",
+                            "host": params.host,
+                            "duration_ms": int(dns_duration_ms),
+                            "threshold_ms": 2000,
+                            "recommendation": "Check DNS server configuration (/etc/resolv.conf) for unreachable nameservers",
+                        },
+                    )
+                else:
+                    logger.debug(
+                        f"DNS resolution completed for {params.host}",
+                        extra={
+                            "event": "dns_resolution",
+                            "host": params.host,
+                            "duration_ms": int(dns_duration_ms),
+                        },
+                    )
 
         async def on_conn_start(session, trace_config_ctx, params):
             trace_config_ctx._conn_start_time = time.perf_counter()

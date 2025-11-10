@@ -44,12 +44,21 @@ PyJWKClient = JWKClient  # Backwards compatibility alias for tests/monkeypatchin
 
 # HTTP timeout configuration for IdP requests
 # Per-endpoint timeouts based on expected response times
+#
+# NOTE: 'connect' timeout includes DNS resolution time
+# Token endpoint has higher timeout to accommodate:
+#   - Slow DNS infrastructure (up to ~8s in some environments)
+#   - TCP connection establishment (1-2s)
+#   - TLS handshake (1-2s)
+#   - IdP load balancer redirects (1-2s)
+# These are MAXIMUM timeouts - connections complete as fast as possible
 OIDC_TIMEOUTS = {
     "discovery": aiohttp.ClientTimeout(total=3.0, connect=1.5),
     "jwks": aiohttp.ClientTimeout(total=3.0, connect=1.5),
     "token": aiohttp.ClientTimeout(
-        total=10.0, connect=5.0
-    ),  # Increased for load balancer redirects
+        total=15.0,   # Increase from 10s to 15s (allows slow DNS + token exchange)
+        connect=12.0  # Increase from 5s to 12s (allows 8s DNS + 4s TCP/TLS)
+    ),  # Tolerant of slow DNS infrastructure (no artificial delay)
 }
 
 # Sensitive keys that should NEVER be logged
@@ -1874,15 +1883,24 @@ async def auth_callback(
 
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 # Network error already logged by wrapper
+                error_extra = {
+                    "tenant_id": str(tenant_id),
+                    "token_endpoint": token_endpoint,
+                    "error_kind": "network_error",
+                    "exception_class": e.__class__.__name__,
+                    "correlation_id": correlation_id,
+                }
+
+                # Add diagnostic hint for connection/DNS timeouts
+                if isinstance(e, (asyncio.TimeoutError, aiohttp.ServerTimeoutError)):
+                    error_extra["diagnostic_hint"] = (
+                        "Connection timeout may indicate slow DNS resolution. "
+                        "Check 'dns_slow' events in logs or DNS server configuration."
+                    )
+
                 logger.error(
                     "Token exchange - network error",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "token_endpoint": token_endpoint,
-                        "error_kind": "network_error",
-                        "exception_class": e.__class__.__name__,
-                        "correlation_id": correlation_id,
-                    },
+                    extra=error_extra,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
