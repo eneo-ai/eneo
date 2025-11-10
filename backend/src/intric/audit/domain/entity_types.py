@@ -20,3 +20,4 @@ class EntityType(str, Enum):
     GROUP_CHAT = "group_chat"
     COLLECTION = "collection"
     APP_RUN = "app_run"
+    SECURITY_CLASSIFICATION = "security_classification"

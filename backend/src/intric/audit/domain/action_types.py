@@ -51,6 +51,14 @@ class ActionType(str, Enum):
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"
 
+    # Security Classification Actions
+    SECURITY_CLASSIFICATION_CREATED = "security_classification_created"
+    SECURITY_CLASSIFICATION_UPDATED = "security_classification_updated"
+    SECURITY_CLASSIFICATION_DELETED = "security_classification_deleted"
+    SECURITY_CLASSIFICATION_LEVELS_UPDATED = "security_classification_levels_updated"
+    SECURITY_CLASSIFICATION_ENABLED = "security_classification_enabled"
+    SECURITY_CLASSIFICATION_DISABLED = "security_classification_disabled"
+
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"

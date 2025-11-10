@@ -92,6 +92,8 @@ def test_action_types_enum():
     assert ActionType.WEBSITE_CREATED == "website_created"
     assert ActionType.GROUP_CHAT_CREATED == "group_chat_created"
     assert ActionType.COLLECTION_CREATED == "collection_created"
+    assert ActionType.SECURITY_CLASSIFICATION_CREATED == "security_classification_created"
+    assert ActionType.SECURITY_CLASSIFICATION_ENABLED == "security_classification_enabled"
 
 
 def test_entity_types_enum():
@@ -108,6 +110,7 @@ def test_entity_types_enum():
     assert EntityType.GROUP_CHAT == "group_chat"
     assert EntityType.COLLECTION == "collection"
     assert EntityType.APP_RUN == "app_run"
+    assert EntityType.SECURITY_CLASSIFICATION == "security_classification"
 
 
 def test_actor_types_enum():

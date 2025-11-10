@@ -41,13 +41,48 @@ async def create_security_classification(
     Raises:
         400: If the request is invalid. Names must be unique.
     """
-    service = container.security_classification_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.security_classification_service()
+    user = container.user()
+
+    # Create security classification
     security_classification = await service.create_security_classification(
         name=request.name,
         description=request.description,
         set_lowest_security=request.set_lowest_security,
     )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SECURITY_CLASSIFICATION_CREATED,
+        entity_type=EntityType.SECURITY_CLASSIFICATION,
+        entity_id=security_classification.id,
+        description=f"Created security classification '{security_classification.name}'",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "id": str(security_classification.id),
+                "name": security_classification.name,
+                "description": security_classification.description,
+                "security_level": security_classification.security_level,
+            },
+        },
+    )
+
     return SecurityClassificationPublic.from_domain(
         security_classification, return_none_if_not_enabled=False
     )
@@ -127,10 +162,43 @@ async def update_security_classification_levels(
         403: If the user doesn't have permission to update the security classification.
         404: If the security classification doesn't exist or belongs to a different tenant.
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.security_classification_service()
+    user = container.user()
 
     sc_ids = [model.id for model in request.security_classifications]
     security_classifications = await service.update_security_levels(security_classifications=sc_ids)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED,
+        entity_type=EntityType.SECURITY_CLASSIFICATION,
+        entity_id=user.tenant_id,  # Use tenant as entity since multiple classifications affected
+        description=f"Updated security classification levels (reordered {len(security_classifications)} classifications)",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "tenant_id": str(user.tenant_id),
+                "classifications_count": len(security_classifications),
+                "new_order": [str(sc_id) for sc_id in sc_ids],
+            },
+        },
+    )
+
     return SecurityClassificationsListPublic(
         security_classifications=[
             SecurityClassificationPublic.from_domain(sc, return_none_if_not_enabled=False)
@@ -155,9 +223,45 @@ async def delete_security_classification(
         403: If the user doesn't have permission to delete the security classification.
         404: If the security classification doesn't exist.
     """
-    service = container.security_classification_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.security_classification_service()
+    user = container.user()
+
+    # Get security classification info before deletion
+    security_classification = await service.get_security_classification(id)
+
+    # Delete security classification
     await service.delete_security_classification(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SECURITY_CLASSIFICATION_DELETED,
+        entity_type=EntityType.SECURITY_CLASSIFICATION,
+        entity_id=id,
+        description=f"Deleted security classification '{security_classification.name}'",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "id": str(id),
+                "name": security_classification.name,
+                "security_level": security_classification.security_level,
+            },
+        },
+    )
 
 
 @router.patch(
@@ -187,10 +291,53 @@ async def update_security_classification(
         403: If the user doesn't have permission to update the classification
         404: If the security classification doesn't exist
     """
-    service = container.security_classification_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.security_classification_service()
+    user = container.user()
+
+    # Get old state for change tracking
+    old_sc = await service.get_security_classification(id)
+
+    # Update security classification
     security_classification = await service.update_security_classification(
         id=id, name=request.name, description=request.description
+    )
+
+    # Track changes
+    changes = {}
+    if request.name and request.name != old_sc.name:
+        changes["name"] = {"old": old_sc.name, "new": request.name}
+    if request.description is not None and request.description != old_sc.description:
+        changes["description"] = {"old": old_sc.description, "new": request.description}
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SECURITY_CLASSIFICATION_UPDATED,
+        entity_type=EntityType.SECURITY_CLASSIFICATION,
+        entity_id=id,
+        description=f"Updated security classification '{security_classification.name}'",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "id": str(id),
+                "name": security_classification.name,
+            },
+            "changes": changes,
+        },
     )
 
     return SecurityClassificationPublic.from_domain(
@@ -219,8 +366,47 @@ async def toggle_security_classifications(
         400: If the request is invalid.
         403: If the user doesn't have permission to update tenant settings.
     """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.security_classification_service()
+    user = container.user()
+
+    # Toggle security classifications
     tenant = await service.toggle_security_on_tenant(enabled=request.enabled)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    action = (
+        ActionType.SECURITY_CLASSIFICATION_ENABLED
+        if request.enabled
+        else ActionType.SECURITY_CLASSIFICATION_DISABLED
+    )
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=action,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description=f"{'Enabled' if request.enabled else 'Disabled'} security classifications for tenant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "tenant_id": str(user.tenant_id),
+                "security_enabled": request.enabled,
+            },
+        },
+    )
 
     return SecurityEnableResponse(
         tenant_id=tenant.id,

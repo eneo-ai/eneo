@@ -95,6 +95,12 @@
       template_deleted: m.audit_action_template_deleted,
       module_added: m.audit_action_module_added,
       module_added_to_tenant: m.audit_action_module_added_to_tenant,
+      security_classification_created: m.audit_action_security_classification_created,
+      security_classification_updated: m.audit_action_security_classification_updated,
+      security_classification_deleted: m.audit_action_security_classification_deleted,
+      security_classification_levels_updated: m.audit_action_security_classification_levels_updated,
+      security_classification_enabled: m.audit_action_security_classification_enabled,
+      security_classification_disabled: m.audit_action_security_classification_disabled,
     };
     return labels[action]?.() || action;
   }
@@ -145,6 +151,12 @@
     { value: "template_deleted" as ActionType, label: m.audit_action_template_deleted(), category: "admin" },
     { value: "module_added" as ActionType, label: m.audit_action_module_added(), category: "system" },
     { value: "module_added_to_tenant" as ActionType, label: m.audit_action_module_added_to_tenant(), category: "system" },
+    { value: "security_classification_created" as ActionType, label: m.audit_action_security_classification_created(), category: "admin" },
+    { value: "security_classification_updated" as ActionType, label: m.audit_action_security_classification_updated(), category: "admin" },
+    { value: "security_classification_deleted" as ActionType, label: m.audit_action_security_classification_deleted(), category: "admin" },
+    { value: "security_classification_levels_updated" as ActionType, label: m.audit_action_security_classification_levels_updated(), category: "admin" },
+    { value: "security_classification_enabled" as ActionType, label: m.audit_action_security_classification_enabled(), category: "admin" },
+    { value: "security_classification_disabled" as ActionType, label: m.audit_action_security_classification_disabled(), category: "admin" },
     { value: "retention_policy_applied" as ActionType, label: m.audit_action_retention_policy_applied(), category: "system" },
   ]);
 
