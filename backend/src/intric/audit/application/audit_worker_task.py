@@ -31,8 +31,10 @@ async def log_audit_event_task(
     task_params = AuditLogTaskParams(**params)
 
     # Create audit log
+    from uuid import uuid4
+
     audit_log = AuditLog(
-        id=task_params.entity_id,  # Reuse for simplicity, or generate new
+        id=uuid4(),  # Generate unique ID for each audit log
         tenant_id=task_params.tenant_id,
         actor_id=task_params.actor_id,
         actor_type=task_params.actor_type,
