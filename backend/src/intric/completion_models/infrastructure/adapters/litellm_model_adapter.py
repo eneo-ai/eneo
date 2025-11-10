@@ -28,6 +28,57 @@ logger = get_logger(__name__)
 TOKENS_RESERVED_FOR_COMPLETION = 1000
 
 
+class SecurityError(Exception):
+    """Raised when a security violation is detected."""
+    pass
+
+
+class MCPToolExecutionGuard:
+    """Security boundary for MCP tool execution.
+
+    This class provides explicit validation that tool calls are authorized
+    before execution, acting as a defense-in-depth measure alongside
+    database-level filtering.
+    """
+
+    def __init__(self, allowed_tool_map: dict[str, tuple]):
+        """Initialize the guard with allowed tools.
+
+        Args:
+            allowed_tool_map: Dictionary mapping tool names to (MCPServer, original_tool_name) tuples
+        """
+        self.allowed_tool_map = allowed_tool_map
+        self.allowed_tools = set(allowed_tool_map.keys())
+
+    def validate_and_route(self, tool_name: str) -> tuple:
+        """Validates tool is allowed and returns routing information.
+
+        Args:
+            tool_name: The tool name to validate
+
+        Returns:
+            Tuple of (MCPServer, original_tool_name) for routing
+
+        Raises:
+            SecurityError: If tool is not in the allowed list
+        """
+        if tool_name not in self.allowed_tools:
+            logger.warning(
+                f"[SECURITY] Blocked unauthorized tool call attempt: {tool_name}",
+                extra={
+                    "tool_name": tool_name,
+                    "allowed_tools": list(self.allowed_tools),
+                    "alert_type": "unauthorized_tool_access"
+                }
+            )
+            raise SecurityError(
+                f"Tool '{tool_name}' is not in the allowed tool list. "
+                f"Please contact your administrator to enable this tool."
+            )
+
+        return self.allowed_tool_map[tool_name]
+
+
 class LiteLLMModelAdapter(CompletionModelAdapter):
     def _mask_sensitive_kwargs(self, kwargs: dict) -> dict:
         """Return copy of kwargs with masked API key for safe logging."""
@@ -268,9 +319,10 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                         (already filtered by tenant→space→assistant hierarchy)
 
         Returns:
-            Tuple of (tools, tool_to_server_map) where:
+            Tuple of (tools, tool_to_server_map, execution_guard) where:
                 - tools: List of OpenAI-formatted tool definitions
                 - tool_to_server_map: Dict mapping sanitized tool names to (server, original_tool_name) tuples
+                - execution_guard: MCPToolExecutionGuard instance for validating tool calls
         """
         tools = []
         tool_to_server_map = {}
@@ -314,7 +366,11 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             logger.info(f"[MCP] Loaded {enabled_count} enabled tools from {mcp_server.name} (from DB)")
 
         logger.info(f"[MCP] Setup complete: {len(tools)} total tools from {len(mcp_servers)} server(s)")
-        return tools, tool_to_server_map
+
+        # Create execution guard for security validation
+        execution_guard = MCPToolExecutionGuard(tool_to_server_map) if tool_to_server_map else None
+
+        return tools, tool_to_server_map, execution_guard
 
     async def get_response(
         self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_servers: list = []
@@ -364,14 +420,15 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         # Load MCP tools from database (no server connections during setup)
         tools = []
         tool_to_server_map = {}
+        execution_guard = None
         if mcp_servers:
-            tools, tool_to_server_map = await self.setup_mcp_tools(mcp_servers)
+            tools, tool_to_server_map, execution_guard = await self.setup_mcp_tools(mcp_servers)
 
         if tools:
             kwargs['tools'] = tools
-            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools from {len(tool_to_server_map) // 2} server(s)")
+            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools from {len(mcp_servers)} server(s)")
 
-        mcp_session = (tool_to_server_map, tools) if tool_to_server_map else None
+        mcp_session = (tool_to_server_map, tools, execution_guard) if tool_to_server_map else None
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making completion request with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
@@ -456,90 +513,206 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     ]
                 })
 
-                # Execute each tool call using direct server routing
-                tool_to_server_map, _ = mcp_session
+                # Execute each tool call using connection pooling and security validation
+                tool_to_server_map, _, execution_guard = mcp_session
 
+                # Create connection pool for reuse across all tool calls
+                # Map server ID to MCPClient instance
+                server_clients = {}
+
+                # Identify unique servers needed for these tool calls
+                servers_needed = set()
                 for tool_call in message.tool_calls:
-                    sanitized_tool_name = tool_call.function.name
-                    logger.info(f"[MCP] Executing tool: {sanitized_tool_name}")
-
-                    # Look up server and original tool name using routing map
-                    server_info = tool_to_server_map.get(sanitized_tool_name)
-
-                    if not server_info:
-                        logger.error(f"[MCP] No server found for tool: {sanitized_tool_name}")
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": f"Tool {sanitized_tool_name} not available"})
-                        })
-                        continue
-
-                    # Unpack server and original tool name
-                    mcp_server, original_tool_name = server_info
-
-                    # Get auth value for MCPClient
-                    auth_value = None
-                    if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
-                        auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
-
-                    # Connect directly to the correct server
                     try:
-                        client = MCPClient(
-                            server_url=mcp_server.http_url,
-                            transport_type=getattr(mcp_server, 'transport_type', 'http'),
-                            auth_type=getattr(mcp_server, 'http_auth_type', None),
-                            auth_value=auth_value,
-                            timeout=10.0
+                        # Validate tool is allowed and get routing info
+                        mcp_server, _ = execution_guard.validate_and_route(tool_call.function.name)
+                        servers_needed.add(id(mcp_server))
+                    except SecurityError as e:
+                        # Log security violation - will handle in loop below
+                        logger.error(f"[SECURITY] {str(e)}")
+
+                # Connect to all needed servers ONCE (connection pooling)
+                for tool_call in message.tool_calls:
+                    try:
+                        mcp_server, _ = execution_guard.validate_and_route(tool_call.function.name)
+                        server_id = id(mcp_server)
+
+                        if server_id not in server_clients:
+                            # Get auth value for MCPClient
+                            auth_value = None
+                            if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
+                                auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
+
+                            # Create client (will connect on first use)
+                            client = MCPClient(
+                                server_url=mcp_server.http_url,
+                                transport_type=getattr(mcp_server, 'transport_type', 'http'),
+                                auth_type=getattr(mcp_server, 'http_auth_type', None),
+                                auth_value=auth_value,
+                                timeout=10.0
+                            )
+                            server_clients[server_id] = (client, mcp_server)
+                    except SecurityError:
+                        # Already logged above
+                        pass
+
+                # Connect all clients in parallel for maximum performance
+                import asyncio
+                import time
+
+                async def connect_client(client):
+                    """Connect a single client."""
+                    await client.__aenter__()
+
+                connection_start = time.time()
+                if server_clients:
+                    await asyncio.gather(*[
+                        connect_client(client) for client, _ in server_clients.values()
+                    ], return_exceptions=True)
+                    connection_time = (time.time() - connection_start) * 1000
+                    logger.info(f"[MCP] Connected to {len(server_clients)} server(s) in {connection_time:.0f}ms")
+
+                # Execute tool calls in parallel (reusing pooled connections)
+                async def execute_single_tool(tool_call):
+                    """Execute a single tool call with security validation and audit logging."""
+                    tool_name = tool_call.function.name
+                    execution_start = time.time()
+
+                    try:
+                        # SECURITY: Validate tool is allowed
+                        mcp_server, original_tool_name = execution_guard.validate_and_route(tool_name)
+                        server_id = id(mcp_server)
+
+                        # Check if we have a connection to this server
+                        if server_id not in server_clients:
+                            logger.error(f"[MCP] No connection for tool: {tool_name}")
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps({"error": f"Server not connected for tool {tool_name}"})
+                            }
+
+                        client, _ = server_clients[server_id]
+
+                        # Parse tool arguments
+                        arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+
+                        # Execute tool (use original name without prefix) - REUSING connection
+                        result = await client.call_tool(
+                            MCPCallToolRequestParams(
+                                name=original_tool_name,
+                                arguments=arguments
+                            )
                         )
 
-                        async with client:
-                            # Parse tool arguments
-                            arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                        execution_time = (time.time() - execution_start) * 1000
 
-                            # Execute tool (use original name without prefix)
-                            result = await client.call_tool(
-                                MCPCallToolRequestParams(
-                                    name=original_tool_name,
-                                    arguments=arguments
-                                )
+                        # Handle error results
+                        if result.isError:
+                            error_msg = ""
+                            if hasattr(result, 'content') and result.content:
+                                for content_item in result.content:
+                                    if hasattr(content_item, 'text'):
+                                        error_msg += content_item.text
+
+                            # AUDIT: Log failed execution
+                            logger.warning(
+                                "[MCP AUDIT] Tool execution failed",
+                                extra={
+                                    "tool_name": tool_name,
+                                    "original_tool_name": original_tool_name,
+                                    "server_name": mcp_server.name,
+                                    "duration_ms": execution_time,
+                                    "success": False,
+                                    "error": error_msg
+                                }
                             )
 
-                            # Handle error results
-                            if result.isError:
-                                error_msg = ""
-                                if hasattr(result, 'content') and result.content:
-                                    for content_item in result.content:
-                                        if hasattr(content_item, 'text'):
-                                            error_msg += content_item.text
-                                logger.warning(f"[MCP] Tool {original_tool_name} returned error: {error_msg}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps({"error": error_msg or "Tool execution failed"})
-                                })
-                            else:
-                                # Extract text content from successful result
-                                result_text = ""
-                                if hasattr(result, 'content') and result.content:
-                                    for content_item in result.content:
-                                        if hasattr(content_item, 'text'):
-                                            result_text += content_item.text
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps({"error": error_msg or "Tool execution failed"})
+                            }
+                        else:
+                            # Extract text content from successful result
+                            result_text = ""
+                            if hasattr(result, 'content') and result.content:
+                                for content_item in result.content:
+                                    if hasattr(content_item, 'text'):
+                                        result_text += content_item.text
 
-                                logger.info(f"[MCP] Tool {original_tool_name} executed successfully on {mcp_server.name}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": result_text
-                                })
+                            # AUDIT: Log successful execution
+                            logger.info(
+                                "[MCP AUDIT] Tool execution succeeded",
+                                extra={
+                                    "tool_name": tool_name,
+                                    "original_tool_name": original_tool_name,
+                                    "server_name": mcp_server.name,
+                                    "duration_ms": execution_time,
+                                    "success": True,
+                                    "result_length": len(result_text)
+                                }
+                            )
+
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": result_text
+                            }
+
+                    except SecurityError as e:
+                        # AUDIT: Log security violation
+                        execution_time = (time.time() - execution_start) * 1000
+                        logger.error(
+                            "[MCP AUDIT] Security violation",
+                            extra={
+                                "tool_name": tool_name,
+                                "duration_ms": execution_time,
+                                "success": False,
+                                "error": str(e),
+                                "violation_type": "unauthorized_tool"
+                            }
+                        )
+
+                        return {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": str(e)})
+                        }
 
                     except Exception as e:
-                        logger.exception(f"[MCP] Failed to execute tool {original_tool_name} on {mcp_server.name}: {e}")
-                        messages.append({
+                        # AUDIT: Log unexpected error
+                        execution_time = (time.time() - execution_start) * 1000
+                        logger.exception(
+                            "[MCP AUDIT] Tool execution exception",
+                            extra={
+                                "tool_name": tool_name,
+                                "duration_ms": execution_time,
+                                "success": False,
+                                "error": str(e)
+                            }
+                        )
+
+                        return {
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
-                        })
+                        }
+
+                # PERFORMANCE: Execute all tools in parallel
+                tool_results = await asyncio.gather(*[
+                    execute_single_tool(tc) for tc in message.tool_calls
+                ])
+
+                # Add all results to messages
+                messages.extend(tool_results)
+
+                # Close all connections
+                for client, _ in server_clients.values():
+                    try:
+                        await client.__aexit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"[MCP] Error closing connection: {e}")
 
                 # Make second completion request with tool results
                 logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up request with tool results")
@@ -672,8 +845,9 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         # Load MCP tools from database (no server connections during setup)
         tools = []
         tool_to_server_map = {}
+        execution_guard = None
         if mcp_servers:
-            tools, tool_to_server_map = await self.setup_mcp_tools(mcp_servers)
+            tools, tool_to_server_map, execution_guard = await self.setup_mcp_tools(mcp_servers)
 
         if tools:
             kwargs['tools'] = tools
@@ -695,7 +869,8 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 'kwargs': kwargs,
                 'has_tools': bool(tools),
                 'tool_to_server_map': tool_to_server_map,  # Store routing map for tool execution
-                'tools_metadata': tools  # Store tool metadata for display purposes
+                'tools_metadata': tools,  # Store tool metadata for display purposes
+                'execution_guard': execution_guard  # Store security guard for tool validation
             }
             return stream
 
@@ -889,90 +1064,193 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     ]
                 })
 
-                # Execute tools using direct server routing
-                tool_to_server_map = stream._eneo_context.get('tool_to_server_map', {})
+                # Execute tools using connection pooling and security validation (streaming)
+                execution_guard = stream._eneo_context.get('execution_guard')
 
+                # Create connection pool for reuse across all tool calls
+                server_clients = {}
+
+                # Identify and connect to unique servers needed
                 for tool_call in tool_calls:
-                    sanitized_tool_name = tool_call.function.name
-                    logger.info(f"[MCP] Executing tool: {sanitized_tool_name}")
-
-                    # Look up server and original tool name using routing map
-                    server_info = tool_to_server_map.get(sanitized_tool_name)
-
-                    if not server_info:
-                        logger.error(f"[MCP] No server found for tool: {sanitized_tool_name}")
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": f"Tool {sanitized_tool_name} not available"})
-                        })
-                        continue
-
-                    # Unpack server and original tool name
-                    mcp_server, original_tool_name = server_info
-
-                    # Get auth value for MCPClient
-                    auth_value = None
-                    if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
-                        auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
-
-                    # Connect directly to the correct server
                     try:
-                        client = MCPClient(
-                            server_url=mcp_server.http_url,
-                            transport_type=getattr(mcp_server, 'transport_type', 'http'),
-                            auth_type=getattr(mcp_server, 'http_auth_type', None),
-                            auth_value=auth_value,
-                            timeout=10.0
+                        # Validate tool is allowed and get routing info
+                        mcp_server, _ = execution_guard.validate_and_route(tool_call.function.name)
+                        server_id = id(mcp_server)
+
+                        if server_id not in server_clients:
+                            # Get auth value for MCPClient
+                            auth_value = None
+                            if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
+                                auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
+
+                            # Create client
+                            client = MCPClient(
+                                server_url=mcp_server.http_url,
+                                transport_type=getattr(mcp_server, 'transport_type', 'http'),
+                                auth_type=getattr(mcp_server, 'http_auth_type', None),
+                                auth_value=auth_value,
+                                timeout=10.0
+                            )
+                            server_clients[server_id] = (client, mcp_server)
+                    except SecurityError:
+                        # Will handle in execution loop
+                        pass
+
+                # Connect all clients in parallel
+                import asyncio
+                import time
+
+                async def connect_client(client):
+                    await client.__aenter__()
+
+                connection_start = time.time()
+                if server_clients:
+                    await asyncio.gather(*[
+                        connect_client(client) for client, _ in server_clients.values()
+                    ], return_exceptions=True)
+                    connection_time = (time.time() - connection_start) * 1000
+                    logger.info(f"[MCP] Connected to {len(server_clients)} server(s) in {connection_time:.0f}ms (streaming)")
+
+                # Execute tool calls in parallel (reusing connections)
+                async def execute_single_tool_streaming(tool_call):
+                    """Execute a single tool call with security validation and audit logging (streaming)."""
+                    tool_name = tool_call.function.name
+                    execution_start = time.time()
+
+                    try:
+                        # SECURITY: Validate tool is allowed
+                        mcp_server, original_tool_name = execution_guard.validate_and_route(tool_name)
+                        server_id = id(mcp_server)
+
+                        if server_id not in server_clients:
+                            logger.error(f"[MCP] No connection for tool: {tool_name}")
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps({"error": f"Server not connected for tool {tool_name}"})
+                            }
+
+                        client, _ = server_clients[server_id]
+
+                        # Parse tool arguments
+                        arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+
+                        # Execute tool (REUSING connection)
+                        result = await client.call_tool(
+                            MCPCallToolRequestParams(
+                                name=original_tool_name,
+                                arguments=arguments
+                            )
                         )
 
-                        async with client:
-                            # Parse tool arguments
-                            arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                        execution_time = (time.time() - execution_start) * 1000
 
-                            # Execute tool (use original name without prefix)
-                            result = await client.call_tool(
-                                MCPCallToolRequestParams(
-                                    name=original_tool_name,
-                                    arguments=arguments
-                                )
+                        # Handle error results
+                        if result.isError:
+                            error_msg = ""
+                            if hasattr(result, 'content') and result.content:
+                                for content_item in result.content:
+                                    if hasattr(content_item, 'text'):
+                                        error_msg += content_item.text
+
+                            # AUDIT: Log failed execution
+                            logger.warning(
+                                "[MCP AUDIT] Tool execution failed (streaming)",
+                                extra={
+                                    "tool_name": tool_name,
+                                    "original_tool_name": original_tool_name,
+                                    "server_name": mcp_server.name,
+                                    "duration_ms": execution_time,
+                                    "success": False,
+                                    "error": error_msg
+                                }
                             )
 
-                            # Handle error results
-                            if result.isError:
-                                error_msg = ""
-                                if hasattr(result, 'content') and result.content:
-                                    for content_item in result.content:
-                                        if hasattr(content_item, 'text'):
-                                            error_msg += content_item.text
-                                logger.warning(f"[MCP] Tool {original_tool_name} returned error: {error_msg}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps({"error": error_msg or "Tool execution failed"})
-                                })
-                            else:
-                                # Extract text content from successful result
-                                result_text = ""
-                                if hasattr(result, 'content') and result.content:
-                                    for content_item in result.content:
-                                        if hasattr(content_item, 'text'):
-                                            result_text += content_item.text
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps({"error": error_msg or "Tool execution failed"})
+                            }
+                        else:
+                            # Extract text content from successful result
+                            result_text = ""
+                            if hasattr(result, 'content') and result.content:
+                                for content_item in result.content:
+                                    if hasattr(content_item, 'text'):
+                                        result_text += content_item.text
 
-                                logger.info(f"[MCP] Tool {original_tool_name} executed successfully on {mcp_server.name}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": result_text
-                                })
+                            # AUDIT: Log successful execution
+                            logger.info(
+                                "[MCP AUDIT] Tool execution succeeded (streaming)",
+                                extra={
+                                    "tool_name": tool_name,
+                                    "original_tool_name": original_tool_name,
+                                    "server_name": mcp_server.name,
+                                    "duration_ms": execution_time,
+                                    "success": True,
+                                    "result_length": len(result_text)
+                                }
+                            )
+
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": result_text
+                            }
+
+                    except SecurityError as e:
+                        # AUDIT: Log security violation
+                        execution_time = (time.time() - execution_start) * 1000
+                        logger.error(
+                            "[MCP AUDIT] Security violation (streaming)",
+                            extra={
+                                "tool_name": tool_name,
+                                "duration_ms": execution_time,
+                                "success": False,
+                                "error": str(e),
+                                "violation_type": "unauthorized_tool"
+                            }
+                        )
+
+                        return {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": str(e)})
+                        }
 
                     except Exception as e:
-                        logger.exception(f"[MCP] Failed to execute tool {original_tool_name} on {mcp_server.name}: {e}")
-                        messages.append({
+                        # AUDIT: Log unexpected error
+                        execution_time = (time.time() - execution_start) * 1000
+                        logger.exception(
+                            "[MCP AUDIT] Tool execution exception (streaming)",
+                            extra={
+                                "tool_name": tool_name,
+                                "duration_ms": execution_time,
+                                "success": False,
+                                "error": str(e)
+                            }
+                        )
+
+                        return {
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
-                        })
+                        }
+
+                # PERFORMANCE: Execute all tools in parallel
+                tool_results = await asyncio.gather(*[
+                    execute_single_tool_streaming(tc) for tc in tool_calls
+                ])
+
+                # Add all results to messages
+                messages.extend(tool_results)
+
+                # Close all connections
+                for client, _ in server_clients.values():
+                    try:
+                        await client.__aexit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"[MCP] Error closing connection (streaming): {e}")
 
                 # Make follow-up streaming request with tool results
                 logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up streaming request with tool results")

@@ -26,10 +26,20 @@ def add_two_numbers(a: int, b: int) -> int:
     """Add two numbers."""
     return a + b
 
+config = {
+    "mcpServers": {
+        "math": {
+            "url": "http://host.docker.internal:8080/mcp",
+            "transport": "sse"
+        },
+    }
+}
 
 # Create MCP ASGI app
 # Set path to match where it will be accessed
 mcp_app = mcp.http_app(path="/mcp", transport="streamable-http")
+
+
 
 # Combine both lifecycles
 @asynccontextmanager
