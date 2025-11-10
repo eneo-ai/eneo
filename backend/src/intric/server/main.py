@@ -1,14 +1,16 @@
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from fastmcp import FastMCP
 
 from intric.allowed_origins.get_origin_callback import get_origin
 from intric.authentication import auth_dependencies
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.server import api_documentation
-from intric.server.dependencies.lifespan import lifespan
+from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.middleware.request_context import RequestContextMiddleware
@@ -17,11 +19,40 @@ from intric.server.routers import router as api_router
 
 logger = get_logger(__name__)
 
+mcp = FastMCP("mcp proxy")
+
+@mcp.tool
+def add_two_numbers(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+
+# Create MCP ASGI app
+# Set path to match where it will be accessed
+mcp_app = mcp.http_app(path="/mcp", transport="streamable-http")
+
+# Combine both lifecycles
+@asynccontextmanager
+async def combined_lifespan(app: FastAPI):
+    async with app_lifespan(app):
+        async with mcp_app.lifespan(app):
+            yield
+
 
 def get_application():
     app = FastAPI(
-        lifespan=lifespan,
+        lifespan=combined_lifespan,
     )
+
+    @app.middleware("http")
+    async def log_mcp_requests(request, call_next):
+        if "/mcp" in request.url.path:
+            logger.info(f"MCP request: {request.method} {request.url.path}")
+            logger.info(f"Headers: {dict(request.headers)}")
+        response = await call_next(request)
+        if "/mcp" in request.url.path:
+            logger.info(f"MCP response status: {response.status_code}")
+        return response
 
     app.add_middleware(RequestContextMiddleware)
 
@@ -31,8 +62,12 @@ def get_application():
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],  # Expose all headers including session-related ones
         callback=get_origin,
     )
+
+    # Mount MCP before including API router to avoid conflicts
+    app.mount(get_settings().api_prefix, mcp_app)
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
 
@@ -166,12 +201,11 @@ def get_application():
 
 app = get_application()
 
-
 def start():
     uvicorn.run(
         "intric.server.main:app",
         host="0.0.0.0",
         port=8123,
         reload=True,
-        reload_dirs="./src/",
+        reload_dirs="./src/"
     )
