@@ -92,6 +92,14 @@ def test_action_types_enum():
     assert ActionType.WEBSITE_CREATED == "website_created"
     assert ActionType.GROUP_CHAT_CREATED == "group_chat_created"
     assert ActionType.COLLECTION_CREATED == "collection_created"
+    assert ActionType.COLLECTION_UPDATED == "collection_updated"
+    assert ActionType.COLLECTION_DELETED == "collection_deleted"
+    assert ActionType.INTEGRATION_ADDED == "integration_added"
+    assert ActionType.INTEGRATION_CONNECTED == "integration_connected"
+    assert ActionType.INTEGRATION_KNOWLEDGE_CREATED == "integration_knowledge_created"
+    assert ActionType.COMPLETION_MODEL_UPDATED == "completion_model_updated"
+    assert ActionType.EMBEDDING_MODEL_UPDATED == "embedding_model_updated"
+    assert ActionType.TRANSCRIPTION_MODEL_UPDATED == "transcription_model_updated"
     assert ActionType.SECURITY_CLASSIFICATION_CREATED == "security_classification_created"
     assert ActionType.SECURITY_CLASSIFICATION_ENABLED == "security_classification_enabled"
 
@@ -111,6 +119,11 @@ def test_entity_types_enum():
     assert EntityType.COLLECTION == "collection"
     assert EntityType.APP_RUN == "app_run"
     assert EntityType.SECURITY_CLASSIFICATION == "security_classification"
+    assert EntityType.INTEGRATION == "integration"
+    assert EntityType.INTEGRATION_KNOWLEDGE == "integration_knowledge"
+    assert EntityType.COMPLETION_MODEL == "completion_model"
+    assert EntityType.EMBEDDING_MODEL == "embedding_model"
+    assert EntityType.TRANSCRIPTION_MODEL == "transcription_model"
 
 
 def test_actor_types_enum():

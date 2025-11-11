@@ -53,15 +53,63 @@ async def update_completion_model(
     update_flags: CompletionModelUpdateFlags,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from intric.main.models import NOT_PROVIDED
+
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
+    user = container.user()
 
+    # Get old state for change tracking
+    old_model = await service.get_completion_model(id)
+
+    # Update model
     completion_model = await service.update_completion_model(
         model_id=id,
         is_org_enabled=update_flags.is_org_enabled,
         is_org_default=update_flags.is_org_default,
         security_classification=update_flags.security_classification,
     )
+
+    # Track security classification changes
+    if update_flags.security_classification is not NOT_PROVIDED:
+        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
+        new_sc_name = completion_model.security_classification.name if completion_model.security_classification else None
+
+        if old_sc_name != new_sc_name:
+            # Audit logging
+            session = container.session()
+            audit_repo = AuditLogRepositoryImpl(session)
+            audit_service = AuditService(audit_repo)
+
+            await audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.COMPLETION_MODEL_UPDATED,
+                entity_type=EntityType.COMPLETION_MODEL,
+                entity_id=id,
+                description=f"Updated security classification for {completion_model.name}",
+                metadata={
+                    "actor": {
+                        "id": str(user.id),
+                        "name": user.username,
+                        "email": user.email,
+                    },
+                    "target": {
+                        "model_id": str(id),
+                        "model_name": completion_model.name,
+                    },
+                    "changes": {
+                        "security_classification": {
+                            "old": old_sc_name,
+                            "new": new_sc_name,
+                        }
+                    },
+                },
+            )
 
     return assembler.from_completion_model_to_model(completion_model=completion_model)
 

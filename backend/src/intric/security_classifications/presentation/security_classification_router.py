@@ -308,10 +308,12 @@ async def update_security_classification(
     )
 
     # Track changes
+    from intric.main.models import NOT_PROVIDED
+
     changes = {}
-    if request.name and request.name != old_sc.name:
+    if request.name is not NOT_PROVIDED and request.name != old_sc.name:
         changes["name"] = {"old": old_sc.name, "new": request.name}
-    if request.description is not None and request.description != old_sc.description:
+    if request.description is not NOT_PROVIDED and request.description != old_sc.description:
         changes["description"] = {"old": old_sc.description, "new": request.description}
 
     # Audit logging

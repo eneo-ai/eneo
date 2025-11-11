@@ -88,8 +88,45 @@ async def update_group(
     group: CollectionUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.collection_crud_service()
+    current_user = container.user()
+
+    # Update collection
     collection_updated = await service.update_collection(collection_id=id, name=group.name)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.COLLECTION_UPDATED,
+        entity_type=EntityType.COLLECTION,
+        entity_id=collection_updated.id,
+        description=f"Updated collection '{collection_updated.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "collection_id": str(collection_updated.id),
+                "collection_name": collection_updated.name,
+                "space_id": str(collection_updated.space_id),
+            },
+            "changes": {
+                "name": group.name,
+            },
+        },
+    )
 
     return CollectionPublic.from_domain(collection=collection_updated)
 
@@ -101,8 +138,46 @@ async def update_group(
 async def delete_group_by_id(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    # Get collection info BEFORE deletion
+    collection_service = container.collection_crud_service()
+    current_user = container.user()
+    collection = await collection_service.get_collection(id)
+
+    # Delete collection
     service = container.group_service()
     await service.delete_group(group_id=id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.COLLECTION_DELETED,
+        entity_type=EntityType.COLLECTION,
+        entity_id=id,
+        description=f"Deleted collection '{collection.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "collection_id": str(id),
+                "collection_name": collection.name,
+                "space_id": str(collection.space_id),
+            },
+        },
+    )
+
     return JSONResponse({"id": str(id), "deletion_info": {"success": True}}, status_code=200)
 
 @router.post(

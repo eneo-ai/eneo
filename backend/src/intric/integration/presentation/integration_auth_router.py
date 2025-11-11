@@ -45,4 +45,36 @@ async def on_auth_callback(
         tenant_integration_id=params.tenant_integration_id,
         auth_code=params.auth_code,
     )
+
+    # Audit logging
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_CONNECTED,
+        entity_type=EntityType.INTEGRATION,
+        entity_id=integration.id,
+        description=f"Connected {integration.tenant_integration.integration.name} integration",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "user_integration_id": str(integration.id),
+                "integration_name": integration.tenant_integration.integration.name,
+                "integration_type": integration.integration_type,
+            },
+        },
+    )
+
     return assembler.from_domain_to_model(item=integration)
