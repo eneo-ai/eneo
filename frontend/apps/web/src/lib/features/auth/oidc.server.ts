@@ -6,11 +6,19 @@
 import { env } from "$env/dynamic/private";
 import { getCorrelationId, isDebugMode, sanitizeHeaders, setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
+import { getRequestEvent } from "$app/server";
 
 export async function loginWithOidc(code: string, state: string): Promise<boolean> {
   const startTime = performance.now();
+
   if (!env.INTRIC_BACKEND_URL) {
     console.error("[OIDC] Missing INTRIC_BACKEND_URL configuration");
+    return false;
+  }
+
+  const event = getRequestEvent();
+  if (!event) {
+    console.error("[OIDC] No request event available - cannot proceed with authentication");
     return false;
   }
 
@@ -24,7 +32,7 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
   });
 
   try {
-    const response = await fetch(backendUrl, {
+    const response = await event.fetch(backendUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -32,7 +40,8 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
       body: JSON.stringify({
         code,
         state
-      })
+      }),
+      signal: AbortSignal.timeout(30000) // 30 second timeout
     });
 
     if (!response.ok) {
@@ -48,7 +57,9 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
       const errorKind = response.headers.get("x-error-kind") || undefined;
       const rawDetail = typeof errorDetails === 'object' && errorDetails?.detail
         ? errorDetails.detail
-        : undefined;
+        : typeof errorDetails === 'string'
+          ? errorDetails
+          : undefined;
 
       // Debug mode: Log response metadata
       if (isDebugMode()) {
@@ -120,6 +131,17 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
           statusCode: response.status,
           rawDetail
         });
+      } else if (response.status === 502) {
+        console.error(
+          `[OIDC] Bad Gateway (502) - check backend health and proxy configuration. ` +
+          `This may indicate: backend service down, network routing issues, or proxy timeout. ` +
+          `Backend correlation_id: ${correlationId || "N/A"}`
+        );
+        throw new LoginError("oidc", "SERVER_ERROR", "", {
+          correlationId,
+          statusCode: response.status,
+          rawDetail
+        });
       }
 
       // Fallback for unknown status codes
@@ -144,6 +166,9 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
     // Set frontend auth cookie (backend returns "access_token", frontend calls it "id_token")
     await setFrontendAuthCookie({ id_token: access_token });
 
+    // Clear any lingering "acc" cookie from previous sessions to prevent header overflow
+    event.cookies.delete("acc", { path: "/" });
+
     console.debug("[OIDC] Login complete, auth cookie set", { totalDurationMs: Math.round(performance.now() - startTime) });
     return true;
   } catch (error) {
@@ -153,6 +178,31 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
     if (error instanceof LoginError) {
       console.error("[OIDC] Login failed (LoginError)", { durationMs: duration, code: error.code });
       throw error;
+    }
+
+    // Handle timeout errors
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error("[OIDC] Request timeout after 30 seconds", {
+        durationMs: duration,
+        backendUrl: env.INTRIC_BACKEND_URL
+      });
+      throw new LoginError("oidc", "NETWORK_ERROR", "", {
+        statusCode: 0,
+        rawDetail: "Request timeout - backend took longer than 30 seconds to respond"
+      });
+    }
+
+    // Handle network errors (DNS, connection refused, etc.)
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      console.error("[OIDC] Network error during fetch", {
+        durationMs: duration,
+        error: error.message,
+        backendUrl: env.INTRIC_BACKEND_URL
+      });
+      throw new LoginError("oidc", "NETWORK_ERROR", "", {
+        statusCode: 0,
+        rawDetail: `Network error: ${error.message}. Check DNS resolution, network connectivity, and backend availability.`
+      });
     }
 
     console.error("[OIDC] Unexpected error during callback", {
