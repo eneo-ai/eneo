@@ -21,3 +21,8 @@ class EntityType(str, Enum):
     COLLECTION = "collection"
     APP_RUN = "app_run"
     SECURITY_CLASSIFICATION = "security_classification"
+    INTEGRATION = "integration"
+    INTEGRATION_KNOWLEDGE = "integration_knowledge"
+    COMPLETION_MODEL = "completion_model"
+    EMBEDDING_MODEL = "embedding_model"
+    TRANSCRIPTION_MODEL = "transcription_model"

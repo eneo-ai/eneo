@@ -1990,9 +1990,23 @@ export interface components {
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
+      | "collection_updated"
+      | "collection_deleted"
+      | "integration_added"
+      | "integration_removed"
+      | "integration_connected"
+      | "integration_disconnected"
+      | "integration_knowledge_created"
+      | "integration_knowledge_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
+      | "security_classification_created"
+      | "security_classification_updated"
+      | "security_classification_deleted"
+      | "security_classification_levels_updated"
+      | "security_classification_enabled"
+      | "security_classification_disabled"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance";
@@ -3997,7 +4011,10 @@ export interface components {
       | "template"
       | "group_chat"
       | "collection"
-      | "app_run";
+      | "app_run"
+      | "security_classification"
+      | "integration"
+      | "integration_knowledge";
     /**
      * ErrorCodes
      * @enum {integer}

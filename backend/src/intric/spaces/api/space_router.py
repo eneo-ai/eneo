@@ -661,6 +661,9 @@ async def create_space_integration_knowledge(
     service = container.integration_knowledge_service()
     assembler = container.integration_knowledge_assembler()
 
+    user = container.user()
+
+    # Create integration knowledge
     knowledge = await service.create_space_integration_knowledge(
         user_integration_id=user_integration_id,
         name=data.name,
@@ -669,6 +672,40 @@ async def create_space_integration_knowledge(
         url=data.url,
         key=data.key,
     )
+
+    # Audit logging
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=knowledge.id,
+        description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "knowledge_id": str(knowledge.id),
+                "knowledge_name": knowledge.name,
+                "integration_type": knowledge.integration_type,
+                "space_id": str(id),
+                "url": knowledge.url,
+            },
+        },
+    )
+
     return assembler.to_space_knowledge_model(item=knowledge)
 
 
@@ -681,8 +718,48 @@ async def delete_space_integration_knowledge(
     integration_knowledge_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.integration_knowledge_service()
+    user = container.user()
+
+    # Get integration knowledge info BEFORE deletion
+    space_repo = container.space_repo()
+    space = await space_repo.one(id=id)
+    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+
+    # Delete integration knowledge
     await service.remove_knowledge(space_id=id, integration_knowledge_id=integration_knowledge_id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_KNOWLEDGE_DELETED,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=integration_knowledge_id,
+        description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "knowledge_id": str(integration_knowledge_id),
+                "knowledge_name": knowledge.name,
+                "integration_type": knowledge.integration_type,
+                "space_id": str(id),
+            },
+        },
+    )
 
 
 @router.post(

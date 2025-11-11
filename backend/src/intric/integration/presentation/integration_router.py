@@ -63,9 +63,43 @@ async def add_tenant_integration(
     integration_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.tenant_integration_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.tenant_integration_service()
+    user = container.user()
+
+    # Add tenant integration
     tenant_integration = await service.create_tenant_integration(integration_id=integration_id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_ADDED,
+        entity_type=EntityType.INTEGRATION,
+        entity_id=tenant_integration.id,
+        description=f"Added {tenant_integration.integration.name} integration to tenant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "tenant_integration_id": str(tenant_integration.id),
+                "integration_name": tenant_integration.integration.name,
+                "integration_type": tenant_integration.integration_type,
+            },
+        },
+    )
+
     assembler = container.tenant_integration_assembler()
     return assembler.from_domain_to_model(item=tenant_integration)
 
@@ -78,9 +112,46 @@ async def remove_tenant_integration(
     tenant_integration_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.tenant_integration_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.tenant_integration_service()
+    user = container.user()
+
+    # Get tenant integration info BEFORE deletion
+    tenant_integration_repo = container.tenant_integration_repo()
+    tenant_integration = await tenant_integration_repo.one(id=tenant_integration_id)
+
+    # Delete tenant integration
     await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_REMOVED,
+        entity_type=EntityType.INTEGRATION,
+        entity_id=tenant_integration_id,
+        description=f"Removed {tenant_integration.integration.name} integration from tenant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "tenant_integration_id": str(tenant_integration_id),
+                "integration_name": tenant_integration.integration.name,
+                "integration_type": tenant_integration.integration_type,
+            },
+        },
+    )
 
 
 @router.get(
@@ -108,9 +179,46 @@ async def disconnect_user_integration(
     user_integration_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.user_integration_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.user_integration_service()
+    user = container.user()
+
+    # Get user integration info BEFORE deletion
+    user_integration_repo = container.user_integration_repo()
+    user_integration = await user_integration_repo.one(id=user_integration_id)
+
+    # Disconnect integration
     await service.disconnect_integration(user_integration_id=user_integration_id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_DISCONNECTED,
+        entity_type=EntityType.INTEGRATION,
+        entity_id=user_integration_id,
+        description=f"Disconnected {user_integration.tenant_integration.integration.name} integration",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "user_integration_id": str(user_integration_id),
+                "integration_name": user_integration.tenant_integration.integration.name,
+                "integration_type": user_integration.integration_type,
+            },
+        },
+    )
 
 
 @router.get(
