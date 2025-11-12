@@ -7,7 +7,6 @@ import hashlib
 import json
 import random
 import secrets
-import socket
 import time
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -325,33 +324,6 @@ async def _make_idp_http_request(
             session = aiohttp_client()
             if session is None:
                 raise RuntimeError("aiohttp ClientSession not started")
-
-            # DIAGNOSTIC: Log aiohttp client configuration for IPv4/DNS debugging
-            # Use getattr for mock compatibility (test mocks may not have connector/private attributes)
-            connector = getattr(session, 'connector', None)
-            if connector:
-                # Safely access private attributes (may not exist in mocks)
-                family = getattr(connector, '_family', None)
-                family_name = (
-                    "AF_INET" if family == socket.AF_INET
-                    else "AF_INET6" if family == socket.AF_INET6
-                    else f"UNKNOWN({family})" if family is not None
-                    else "NO_FAMILY"
-                )
-                logger.debug(
-                    f"DIAGNOSTIC: aiohttp session config for {endpoint_type} endpoint",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                        "endpoint_type": endpoint_type,
-                        "connector_type": type(connector).__name__,
-                        "connector_family": family,
-                        "connector_family_name": family_name,
-                        "use_dns_cache": getattr(connector, '_use_dns_cache', None),
-                        "ttl_dns_cache": getattr(connector, '_ttl_dns_cache', None),
-                        "session_closed": getattr(session, 'closed', None),
-                    },
-                )
 
             async with session.request(
                 method=method,
