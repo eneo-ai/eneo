@@ -1,6 +1,4 @@
-"""Unit tests for aiohttp client configuration (IPv4 forcing and DNS caching)."""
-
-import socket
+"""Unit tests for aiohttp client configuration (DNS caching and observability)."""
 
 import pytest
 
@@ -17,35 +15,15 @@ async def http_client():
 
 
 @pytest.mark.asyncio
-async def test_aiohttp_client_forces_ipv4(http_client):
-    """Verify TCPConnector is configured with AF_INET to force IPv4-only connections."""
+async def test_aiohttp_client_dns_caching(http_client):
+    """Verify TCPConnector has DNS caching enabled."""
     assert http_client.session is not None, "Session should be initialized"
     assert http_client.session.connector is not None, "Connector should be present"
-
-    # Verify IPv4 forcing
-    assert (
-        http_client.session.connector._family == socket.AF_INET
-    ), f"Expected AF_INET ({socket.AF_INET}), got {http_client.session.connector._family}"
 
     # Verify DNS caching is enabled (public attribute)
     assert (
         http_client.session.connector.use_dns_cache is True
     ), "DNS caching should be enabled"
-
-
-@pytest.mark.asyncio
-async def test_connector_configured_for_ipv4_dns(http_client):
-    """
-    Verify connector is configured to use AF_INET for IPv4-only DNS resolution.
-
-    This is a simple configuration check. Integration tests verify the actual
-    runtime behavior with real network interactions.
-    """
-    # Verify IPv4-only configuration
-    assert http_client.session.connector._family == socket.AF_INET, (
-        f"Connector should be configured with AF_INET ({socket.AF_INET}), "
-        f"got {http_client.session.connector._family}"
-    )
 
 
 @pytest.mark.asyncio

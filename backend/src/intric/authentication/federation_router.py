@@ -7,7 +7,6 @@ import hashlib
 import json
 import random
 import secrets
-import socket
 import time
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -19,7 +18,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
-from intric.authentication.jwks_cache import get_jwks
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -325,33 +323,6 @@ async def _make_idp_http_request(
             session = aiohttp_client()
             if session is None:
                 raise RuntimeError("aiohttp ClientSession not started")
-
-            # DIAGNOSTIC: Log aiohttp client configuration for IPv4/DNS debugging
-            # Use getattr for mock compatibility (test mocks may not have connector/private attributes)
-            connector = getattr(session, 'connector', None)
-            if connector:
-                # Safely access private attributes (may not exist in mocks)
-                family = getattr(connector, '_family', None)
-                family_name = (
-                    "AF_INET" if family == socket.AF_INET
-                    else "AF_INET6" if family == socket.AF_INET6
-                    else f"UNKNOWN({family})" if family is not None
-                    else "NO_FAMILY"
-                )
-                logger.debug(
-                    f"DIAGNOSTIC: aiohttp session config for {endpoint_type} endpoint",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                        "endpoint_type": endpoint_type,
-                        "connector_type": type(connector).__name__,
-                        "connector_family": family,
-                        "connector_family_name": family_name,
-                        "use_dns_cache": getattr(connector, '_use_dns_cache', None),
-                        "ttl_dns_cache": getattr(connector, '_ttl_dns_cache', None),
-                        "session_closed": getattr(session, 'closed', None),
-                    },
-                )
 
             async with session.request(
                 method=method,
@@ -1972,117 +1943,24 @@ async def auth_callback(
                 },
             )
 
-            # Try to decode ID token header for logging (non-fatal if fails)
-            kid = None
-            alg = None
             try:
-                unverified_header = pyjwt.get_unverified_header(id_token)
-                kid = unverified_header.get("kid")
-                alg = unverified_header.get("alg")
-
+                jwk_client = JWKClient(jwks_uri)
+                signing_key = jwk_client.get_signing_key_from_jwt(
+                    id_token
+                ).key  # Extract raw key from PyJWK wrapper
                 logger.debug(
-                    "ID token header decoded",
+                    "JWKS fetched successfully",
                     extra={
                         "tenant_id": str(tenant_id),
-                        "kid": kid,
-                        "alg": alg,
                         "correlation_id": correlation_id,
                     },
                 )
-            except Exception:
-                # Header decoding is only for logging, don't fail if it doesn't work
-                # JWKClient will handle validation
-                pass
-
-            try:
-                # Create fetch function for JWKS cache
-                async def fetch_jwks_func():
-                    return await _make_idp_http_request(
-                        method="GET",
-                        url=jwks_uri,
-                        endpoint_type="jwks",
-                        correlation_id=correlation_id,
-                        tenant_id=tenant_id,
-                        provider=federation_config.get("provider", "unknown"),
-                        redis_client=redis_client,
-                        retry_enabled=True,
-                    )
-
-                # Get JWKS with caching (Redis-based, 1 hour TTL like PyJWKClient)
-                jwks_data = await get_jwks(
-                    jwks_uri=jwks_uri,
-                    tenant_id=tenant_id,
-                    correlation_id=correlation_id,
-                    provider=federation_config.get("provider", "unknown"),
-                    redis_client=redis_client,
-                    fetch_function=fetch_jwks_func,
-                )
-
-                # Extract signing key matching kid from ID token
-                from jwt import PyJWKSet
-
-                jwk_set = PyJWKSet.from_dict(jwks_data)
-                signing_key = None
-
-                # Try to find key by kid if kid is present
-                if kid:
-                    for jwk in jwk_set.keys:
-                        if jwk.key_id == kid:
-                            signing_key = jwk.key
-                            break
-
-                # Fallback: if kid missing or not found, use single key if available
-                if not signing_key:
-                    if len(jwk_set.keys) == 1:
-                        # Only one key available - use it (common in test/dev environments)
-                        signing_key = jwk_set.keys[0].key
-                        logger.debug(
-                            "Using single available key from JWKS (kid not matched)",
-                            extra={
-                                "tenant_id": str(tenant_id),
-                                "jwks_uri": jwks_uri,
-                                "kid": kid,
-                                "correlation_id": correlation_id,
-                            },
-                        )
-                    else:
-                        logger.error(
-                            "KID not found in JWKS",
-                            extra={
-                                "tenant_id": str(tenant_id),
-                                "jwks_uri": jwks_uri,
-                                "kid": kid,
-                                "available_kids": [j.key_id for j in jwk_set.keys],
-                                "correlation_id": correlation_id,
-                            },
-                        )
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Signing key not found in JWKS",
-                            headers={"X-Correlation-ID": correlation_id},
-                        )
-
-                logger.debug(
-                    "JWKS fetched and signing key extracted",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "kid": kid,
-                        "jwks_uri": jwks_uri,
-                        "correlation_id": correlation_id,
-                    },
-                )
-
-            except HTTPException:
-                # Re-raise HTTP exceptions as-is
-                raise
             except Exception as e:
-                # Catch any other errors (PyJWT parsing, etc.)
                 logger.error(
-                    "Failed to process JWKS or extract signing key",
+                    "Failed to fetch JWKS or extract signing key",
                     extra={
                         "tenant_id": str(tenant_id),
                         "jwks_uri": jwks_uri,
-                        "kid": kid,
                         "error": str(e),
                         "error_type": type(e).__name__,
                         "correlation_id": correlation_id,
@@ -2112,8 +1990,6 @@ async def auth_callback(
                     "tenant_id": str(tenant_id),
                     "iss": payload.get("iss"),
                     "aud": payload.get("aud"),
-                    "kid": kid if "kid" in locals() else None,
-                    "alg": alg if "alg" in locals() else None,
                     "correlation_id": correlation_id,
                 },
             )

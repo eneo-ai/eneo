@@ -356,12 +356,6 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 
     assert result == {"access_token": "access-token"}
 
-    # Verify JWKS was cached in Redis (expected behavior after our caching implementation)
-    # Cache key format: "jwks:{jwks_uri}"
-    jwks_cache_keys = [k for k in redis_client._store.keys() if k.startswith("jwks:")]
-    assert len(jwks_cache_keys) == 1, "Should have cached JWKS in Redis"
-    assert "https://idp.example.com/jwks" in jwks_cache_keys[0]
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_email", ["@example.com", "user@@example.com"])
