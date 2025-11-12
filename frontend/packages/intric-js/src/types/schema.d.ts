@@ -1517,7 +1517,11 @@ export interface paths {
   "/api/v1/audit/logs/export": {
     /**
      * Export Audit Logs
-     * @description Export audit logs to CSV format.
+     * @description Export audit logs to CSV or JSON Lines format.
+     *
+     * Supported formats:
+     * - csv: Comma-separated values (default, Excel-compatible)
+     * - json: JSON Lines format (one JSON object per line, for large exports)
      *
      * Use user_id for GDPR Article 15 data subject access requests.
      *
@@ -1998,6 +2002,9 @@ export interface components {
       | "integration_disconnected"
       | "integration_knowledge_created"
       | "integration_knowledge_deleted"
+      | "completion_model_updated"
+      | "embedding_model_updated"
+      | "transcription_model_updated"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -4014,7 +4021,10 @@ export interface components {
       | "app_run"
       | "security_classification"
       | "integration"
-      | "integration_knowledge";
+      | "integration_knowledge"
+      | "completion_model"
+      | "embedding_model"
+      | "transcription_model";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -15968,7 +15978,11 @@ export interface operations {
   };
   /**
    * Export Audit Logs
-   * @description Export audit logs to CSV format.
+   * @description Export audit logs to CSV or JSON Lines format.
+   *
+   * Supported formats:
+   * - csv: Comma-separated values (default, Excel-compatible)
+   * - json: JSON Lines format (one JSON object per line, for large exports)
    *
    * Use user_id for GDPR Article 15 data subject access requests.
    *
@@ -15988,6 +16002,8 @@ export interface operations {
         from_date?: string | null;
         /** @description Filter to date */
         to_date?: string | null;
+        /** @description Export format: csv or json */
+        format?: string;
       };
     };
     responses: {

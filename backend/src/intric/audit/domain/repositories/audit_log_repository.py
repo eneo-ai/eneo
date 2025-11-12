@@ -18,8 +18,8 @@ class AuditLogRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_by_id(self, audit_log_id: UUID) -> Optional[AuditLog]:
-        """Get audit log by ID."""
+    async def get_by_id(self, audit_log_id: UUID, tenant_id: UUID) -> Optional[AuditLog]:
+        """Get audit log by ID with tenant isolation."""
         pass
 
     @abstractmethod

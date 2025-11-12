@@ -1,10 +1,10 @@
 """Retention policy service for audit logs."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,9 @@ from intric.database.tables.audit_retention_policy_table import AuditRetentionPo
 
 
 class RetentionPolicyModel(BaseModel):
-    """Retention policy model."""
+    """Retention policy model for audit log retention configuration."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     tenant_id: UUID
     retention_days: int
@@ -20,9 +22,6 @@ class RetentionPolicyModel(BaseModel):
     purge_count: int = 0
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class RetentionService:
@@ -94,7 +93,7 @@ class RetentionService:
         query = (
             update(AuditRetentionPolicy)
             .where(AuditRetentionPolicy.tenant_id == tenant_id)
-            .values(retention_days=retention_days, updated_at=datetime.utcnow())
+            .values(retention_days=retention_days, updated_at=datetime.now(timezone.utc))
             .returning(AuditRetentionPolicy)
         )
 
@@ -143,7 +142,7 @@ class RetentionService:
                 update(AuditRetentionPolicy)
                 .where(AuditRetentionPolicy.tenant_id == tenant_id)
                 .values(
-                    last_purge_at=datetime.utcnow(),
+                    last_purge_at=datetime.now(timezone.utc),
                     purge_count=AuditRetentionPolicy.purge_count + 1,
                 )
             )

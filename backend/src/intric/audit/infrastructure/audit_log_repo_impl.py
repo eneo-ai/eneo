@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -76,9 +76,14 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         result = await self.session.scalar(query)
         return self._to_domain(result)
 
-    async def get_by_id(self, audit_log_id: UUID) -> Optional[AuditLog]:
-        """Get audit log by ID."""
-        query = sa.select(AuditLogTable).where(AuditLogTable.id == audit_log_id)
+    async def get_by_id(self, audit_log_id: UUID, tenant_id: UUID) -> Optional[AuditLog]:
+        """Get audit log by ID with tenant isolation."""
+        query = sa.select(AuditLogTable).where(
+            sa.and_(
+                AuditLogTable.id == audit_log_id,
+                AuditLogTable.tenant_id == tenant_id,
+            )
+        )
         result = await self.session.scalar(query)
 
         if result is None:
@@ -135,7 +140,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         logs = [self._to_domain(result) for result in results]
         query_time = (time.time() - query_start) * 1000  # ms
 
-        logger.info(
+        logger.debug(
             f"get_logs: tenant={tenant_id}, page={page}, page_size={page_size}, "
             f"actor_id={actor_id}, action={action.value if action else None}, "
             f"results={len(logs)}, total={total_count}, "
@@ -172,16 +177,18 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             )
         )
 
-        # Combine with UNION
-        combined_query = sa.union(actor_query, target_query).subquery()
-        query = sa.select(AuditLogTable).select_from(combined_query)
+        # Combine with UNION and create alias to prevent cross join
+        combined = sa.union(actor_query, target_query).alias("user_logs")
 
-        # Apply date filters
+        # Build query from the aliased subquery (prevents cartesian product)
+        query = sa.select(combined.c)
+
+        # Apply date filters using subquery columns
         if from_date:
-            query = query.where(AuditLogTable.timestamp >= from_date)
+            query = query.where(combined.c.timestamp >= from_date)
 
         if to_date:
-            query = query.where(AuditLogTable.timestamp <= to_date)
+            query = query.where(combined.c.timestamp <= to_date)
 
         # Get total count
         count_query = sa.select(sa.func.count()).select_from(query.subquery())
@@ -190,17 +197,42 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         count_time = (time.time() - count_start) * 1000  # ms
 
         # Apply ordering with stable pagination (timestamp DESC, id DESC)
-        query = query.order_by(AuditLogTable.timestamp.desc(), AuditLogTable.id.desc())
+        query = query.order_by(combined.c.timestamp.desc(), combined.c.id.desc())
         query = query.limit(min(page_size, 1000))
         query = query.offset((page - 1) * page_size)
 
         # Execute query with performance logging
         query_start = time.time()
-        results = await self.session.scalars(query)
-        logs = [self._to_domain(result) for result in results]
+        results = await self.session.execute(query)
+        # Convert Row objects to domain models (subquery returns rows, not ORM objects)
+        logs = []
+        for row in results:
+            # Reconstruct AuditLogTable from row columns
+            # Note: Column is named "metadata" in DB, but "log_metadata" in ORM
+            table_obj = AuditLogTable(
+                id=row.id,
+                tenant_id=row.tenant_id,
+                actor_id=row.actor_id,
+                actor_type=row.actor_type,
+                action=row.action,
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
+                timestamp=row.timestamp,
+                description=row.description,
+                log_metadata=row.metadata,  # DB column is "metadata", ORM is "log_metadata"
+                outcome=row.outcome,
+                ip_address=row.ip_address,
+                user_agent=row.user_agent,
+                request_id=row.request_id,
+                error_message=row.error_message,
+                deleted_at=row.deleted_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            logs.append(self._to_domain(table_obj))
         query_time = (time.time() - query_start) * 1000  # ms
 
-        logger.info(
+        logger.debug(
             f"get_user_logs: tenant={tenant_id}, user_id={user_id}, "
             f"results={len(logs)}, total={total_count}, "
             f"count_time={count_time:.2f}ms, query_time={query_time:.2f}ms"
@@ -226,11 +258,10 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                     AuditLogTable.deleted_at.is_(None),
                 )
             )
-            .values(deleted_at=datetime.utcnow())
+            .values(deleted_at=datetime.now(timezone.utc))
         )
 
         result = await self.session.execute(query)
-        await self.session.commit()
         return result.rowcount
 
     async def soft_delete_old_logs(
@@ -239,7 +270,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         retention_days: int,
     ) -> int:
         """Soft delete logs older than retention period."""
-        cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
         query = (
             sa.update(AuditLogTable)
@@ -250,9 +281,8 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                     AuditLogTable.deleted_at.is_(None),
                 )
             )
-            .values(deleted_at=datetime.utcnow())
+            .values(deleted_at=datetime.now(timezone.utc))
         )
 
         result = await self.session.execute(query)
-        await self.session.commit()
         return result.rowcount

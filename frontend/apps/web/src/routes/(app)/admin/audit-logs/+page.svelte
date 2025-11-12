@@ -3,7 +3,7 @@
   import { page } from "$app/stores";
   import { writable } from "svelte/store";
   import { Page } from "$lib/components/layout";
-  import { Button, Input, Select } from "@intric/ui";
+  import { Button, Input, Select, Dropdown } from "@intric/ui";
   import * as m from "$lib/paraglide/messages";
   import type { components } from "@intric/intric-js/types/schema";
   import type { UserSparse } from "@intric/intric-js";
@@ -414,10 +414,11 @@
     goto(`/admin/audit-logs?${params.toString()}`, { noScroll: true });
   }
 
-  async function exportToCSV() {
+  async function exportLogs(format: "csv" | "json") {
     try {
       isExporting = true;
       const params = new URLSearchParams($page.url.search);
+      params.set("format", format);
 
       const response = await fetch(`/admin/audit-logs/export?${params.toString()}`, {
         method: "GET",
@@ -431,7 +432,8 @@
       const dateStr = (dateRange?.start && dateRange?.end)
         ? `${dateRange.start.toString()}_to_${dateRange.end.toString()}`
         : new Date().toISOString().split('T')[0];
-      const filename = `audit_logs_${dateStr}.csv`;
+      const extension = format === "json" ? "jsonl" : "csv";
+      const filename = `audit_logs_${dateStr}.${extension}`;
 
       if (window.showSaveFilePicker) {
         const handle = await window.showSaveFilePicker({ suggestedName: filename });
@@ -485,19 +487,34 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.audit_logs()}></Page.Title>
-    <Button onclick={exportToCSV} variant="outlined" disabled={isExporting}>
-      {#if isExporting}
-        <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-        {m.audit_exporting()}
-      {:else}
-        <IconDownload class="h-4 w-4" />
-        {#if activeFilterCount > 0}
-          {m.audit_export_csv()} ({data.total_count})
+    <div class="flex gap-[1px]">
+      <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
+        {#if isExporting}
+          <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+          {m.audit_exporting()}
         {:else}
-          {m.audit_export_csv()} ({data.total_count})
+          <IconDownload class="h-4 w-4" />
+          Export ({data.total_count})
         {/if}
-      {/if}
-    </Button>
+      </Button>
+      <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
+        <Dropdown.Trigger asFragment let:trigger>
+          <Button padding="icon" variant="primary" is={trigger} disabled={isExporting} class="!rounded-l-none">
+            <IconChevronDown></IconChevronDown>
+          </Button>
+        </Dropdown.Trigger>
+        <Dropdown.Menu let:item>
+          <Button is={item} onclick={() => exportLogs("csv")}>
+            <IconDownload size="sm"></IconDownload>
+            Download as CSV
+          </Button>
+          <Button is={item} onclick={() => exportLogs("json")}>
+            <IconDownload size="sm"></IconDownload>
+            Download as JSON
+          </Button>
+        </Dropdown.Menu>
+      </Dropdown.Root>
+    </div>
   </Page.Header>
 
   <Page.Main>
