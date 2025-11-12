@@ -116,10 +116,15 @@ async def export_audit_logs(
     action: Optional[ActionType] = Query(None, description="Filter by action type"),
     from_date: Optional[datetime] = Query(None, description="Filter from date"),
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
+    format: str = Query("csv", description="Export format: csv or json"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
-    Export audit logs to CSV format.
+    Export audit logs to CSV or JSON Lines format.
+
+    Supported formats:
+    - csv: Comma-separated values (default, Excel-compatible)
+    - json: JSON Lines format (one JSON object per line, for large exports)
 
     Use user_id for GDPR Article 15 data subject access requests.
 
@@ -128,26 +133,50 @@ async def export_audit_logs(
     """
     current_user = container.user()
     session = container.session()
-    
+
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
 
-    csv_content = await audit_service.export_csv(
-        tenant_id=current_user.tenant_id,
-        user_id=user_id,
-        actor_id=actor_id,
-        action=action,
-        from_date=from_date,
-        to_date=to_date,
-    )
+    # Normalize format
+    export_format = format.lower().strip()
+    if export_format not in ["csv", "json"]:
+        export_format = "csv"  # Default to CSV for invalid formats
 
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename=audit_logs_{datetime.utcnow().isoformat()}.csv"
-        },
-    )
+    # Generate timestamp for filename
+    timestamp = datetime.now().isoformat().split('T')[0]
+
+    if export_format == "json":
+        content = await audit_service.export_jsonl(
+            tenant_id=current_user.tenant_id,
+            user_id=user_id,
+            actor_id=actor_id,
+            action=action,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        return Response(
+            content=content,
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition": f"attachment; filename=audit_logs_{timestamp}.jsonl"
+            },
+        )
+    else:
+        content = await audit_service.export_csv(
+            tenant_id=current_user.tenant_id,
+            user_id=user_id,
+            actor_id=actor_id,
+            action=action,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        return Response(
+            content=content,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=audit_logs_{timestamp}.csv"
+            },
+        )
 
 
 
