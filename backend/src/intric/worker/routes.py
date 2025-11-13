@@ -111,8 +111,11 @@ async def purge_old_audit_logs(container: Container):
 
     For each tenant:
     - Retrieves retention policy (default: 365 days)
-    - Soft-deletes logs older than retention period
+    - PERMANENTLY DELETES logs older than retention period (hard delete)
     - Updates purge statistics
+
+    Note: Deleted logs cannot be recovered. This ensures compliance with
+    data retention regulations that require true deletion.
 
     Returns:
         Dictionary with purge statistics per tenant

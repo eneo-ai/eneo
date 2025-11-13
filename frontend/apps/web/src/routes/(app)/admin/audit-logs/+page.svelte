@@ -16,10 +16,11 @@
   import { IconInfo } from "@intric/icons/info";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
-  import { Clock, CircleCheck, CircleX } from "lucide-svelte";
+  import { Clock, CircleCheck, CircleX, Calendar, Shield } from "lucide-svelte";
   import { slide, fade } from "svelte/transition";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { onMount } from "svelte";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
@@ -46,6 +47,13 @@
   let debounceTimer: ReturnType<typeof setTimeout>;
   let userSearchTimer: ReturnType<typeof setTimeout>;
   let isExporting = $state(false);
+
+  // Retention policy state
+  let retentionDays = $state<number>(365);
+  let isEditingRetention = $state(false);
+  let retentionInputValue = $state<number>(365);
+  let isSavingRetention = $state(false);
+  let retentionError = $state<string | null>(null);
 
   // Get translated label for action type
   function getActionLabel(action: ActionType | "all"): string {
@@ -478,6 +486,59 @@
     (selectedAction !== "all" ? 1 : 0) +
     (selectedUser ? 1 : 0)
   );
+
+  // Retention policy functions
+  async function fetchRetentionPolicy() {
+    try {
+      const policy = await intric.audit.getRetentionPolicy();
+      retentionDays = policy.retention_days;
+      retentionInputValue = policy.retention_days;
+    } catch (err) {
+      console.error("Failed to fetch retention policy:", err);
+    }
+  }
+
+  async function saveRetentionPolicy() {
+    try {
+      isSavingRetention = true;
+      retentionError = null;
+
+      if (retentionInputValue < 1 || retentionInputValue > 2555) {
+        retentionError = "Retention period must be between 1 and 2555 days";
+        return;
+      }
+
+      const updated = await intric.audit.updateRetentionPolicy({
+        retention_days: retentionInputValue
+      });
+
+      retentionDays = updated.retention_days;
+      isEditingRetention = false;
+    } catch (err) {
+      console.error("Failed to save retention policy:", err);
+      retentionError = "Failed to update retention policy. Please try again.";
+    } finally {
+      isSavingRetention = false;
+    }
+  }
+
+  function cancelRetentionEdit() {
+    retentionInputValue = retentionDays;
+    isEditingRetention = false;
+    retentionError = null;
+  }
+
+  // Calculate cutoff date for retention
+  function getRetentionCutoffDate(days: number): string {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return cutoff.toLocaleDateString("sv-SE");
+  }
+
+  // Load retention policy on mount
+  onMount(() => {
+    fetchRetentionPolicy();
+  });
 </script>
 
 <svelte:head>
@@ -523,6 +584,109 @@
       <p class="text-sm text-muted">
         {m.audit_logs_description()}
       </p>
+    </div>
+
+    <!-- Retention Policy Section -->
+    <div class="mb-6 space-y-3 rounded-lg border border-default bg-subtle p-5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <Shield class="h-4 w-4 text-accent" />
+          <h3 class="text-sm font-semibold text-default">{m.audit_retention_policy()}</h3>
+        </div>
+        {#if !isEditingRetention}
+          <Button onclick={() => (isEditingRetention = true)} variant="ghost" size="sm">
+            {m.audit_retention_edit()}
+          </Button>
+        {/if}
+      </div>
+
+      {#if !isEditingRetention}
+        <!-- Display Mode -->
+        <div class="space-y-2 text-sm">
+          <div class="flex items-center gap-6">
+            <div class="flex items-center gap-2">
+              <Calendar class="h-4 w-4 text-muted" />
+              <span class="text-default">
+                <span class="font-medium">{m.audit_retention_current({ days: retentionDays })}</span>
+                <span class="text-muted">
+                  ({retentionDays === 365 ? `1 ${m.audit_retention_year()}` : retentionDays === 730 ? `2 ${m.audit_retention_years()}` : retentionDays === 90 ? `3 ${m.audit_retention_months()}` : retentionDays === 2555 ? `7 ${m.audit_retention_years()}` : ''})
+                </span>
+              </span>
+            </div>
+          </div>
+          <p class="text-muted text-xs">
+            {m.audit_retention_cutoff({ date: getRetentionCutoffDate(retentionDays) })}
+          </p>
+        </div>
+      {:else}
+        <!-- Edit Mode -->
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-default">{m.audit_retention_period_label()}</label>
+            <div class="flex items-center gap-2">
+              <Input.Text
+                bind:value={retentionInputValue}
+                type="number"
+                min="1"
+                max="2555"
+                class="w-32"
+                inputClass="text-center"
+              />
+              <span class="text-sm text-muted">{m.audit_retention_days_unit()}</span>
+            </div>
+            <div class="flex gap-2">
+              <Button onclick={() => (retentionInputValue = 90)} variant="ghost" size="sm">90d</Button>
+              <Button onclick={() => (retentionInputValue = 365)} variant="ghost" size="sm">365d (1y)</Button>
+              <Button onclick={() => (retentionInputValue = 730)} variant="ghost" size="sm">730d (2y)</Button>
+              <Button onclick={() => (retentionInputValue = 2555)} variant="ghost" size="sm">2555d (7y)</Button>
+            </div>
+          </div>
+
+          {#if retentionInputValue !== retentionDays}
+            <div class="border-default rounded-md border bg-subtle p-3.5 text-sm">
+              {#if retentionInputValue < retentionDays}
+                <div class="flex items-start gap-2.5">
+                  <IconInfo class="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                  <div class="space-y-1">
+                    <p class="font-semibold text-default">{m.audit_retention_warning_title()}</p>
+                    <p class="text-muted leading-relaxed">
+                      {m.audit_retention_warning_desc({ date: getRetentionCutoffDate(retentionInputValue) })}
+                    </p>
+                  </div>
+                </div>
+              {:else}
+                <div class="flex items-start gap-2.5">
+                  <IconInfo class="h-4 w-4 text-accent flex-shrink-0 mt-0.5" />
+                  <div class="space-y-1">
+                    <p class="font-semibold text-default">{m.audit_retention_info_title()}</p>
+                    <p class="text-muted leading-relaxed">
+                      {m.audit_retention_info_desc()}
+                    </p>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          {#if retentionError}
+            <div class="text-xs text-red-600 dark:text-red-400">
+              {retentionError}
+            </div>
+          {/if}
+
+          <div class="flex items-center justify-between pt-2">
+            <p class="text-xs text-muted">{m.audit_retention_range()}</p>
+            <div class="flex gap-2">
+              <Button onclick={cancelRetentionEdit} variant="ghost" size="sm" disabled={isSavingRetention}>
+                {m.audit_retention_cancel()}
+              </Button>
+              <Button onclick={saveRetentionPolicy} variant="primary" size="sm" disabled={isSavingRetention || retentionInputValue === retentionDays}>
+                {isSavingRetention ? m.audit_retention_saving() : m.audit_retention_save()}
+              </Button>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- Error State -->

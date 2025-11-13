@@ -245,20 +245,23 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         tenant_id: UUID,
         user_id: UUID,
     ) -> int:
-        """Soft delete all logs for a user (GDPR erasure)."""
-        query = (
-            sa.update(AuditLogTable)
-            .where(
-                sa.and_(
-                    AuditLogTable.tenant_id == tenant_id,
-                    sa.or_(
-                        AuditLogTable.actor_id == user_id,
-                        AuditLogTable.log_metadata["target"]["id"].astext == str(user_id),
-                    ),
-                    AuditLogTable.deleted_at.is_(None),
-                )
+        """Permanently delete all logs for a user (GDPR Article 17 - Right to Erasure).
+
+        Note: This is a HARD delete - logs are permanently removed from the database
+        and cannot be recovered. This ensures true compliance with GDPR erasure requirements.
+
+        Finds and deletes logs where the user is either:
+        - The actor (performed the action)
+        - The target (was affected by the action)
+        """
+        query = sa.delete(AuditLogTable).where(
+            sa.and_(
+                AuditLogTable.tenant_id == tenant_id,
+                sa.or_(
+                    AuditLogTable.actor_id == user_id,
+                    AuditLogTable.log_metadata["target"]["id"].astext == str(user_id),
+                ),
             )
-            .values(deleted_at=datetime.now(timezone.utc))
         )
 
         result = await self.session.execute(query)
@@ -269,19 +272,19 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         tenant_id: UUID,
         retention_days: int,
     ) -> int:
-        """Soft delete logs older than retention period."""
+        """Permanently delete logs older than retention period.
+
+        Note: This is a HARD delete - logs are permanently removed from the database
+        and cannot be recovered. This ensures compliance with data retention regulations
+        that require true deletion after the retention period expires.
+        """
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
-        query = (
-            sa.update(AuditLogTable)
-            .where(
-                sa.and_(
-                    AuditLogTable.tenant_id == tenant_id,
-                    AuditLogTable.created_at < cutoff_date,
-                    AuditLogTable.deleted_at.is_(None),
-                )
+        query = sa.delete(AuditLogTable).where(
+            sa.and_(
+                AuditLogTable.tenant_id == tenant_id,
+                AuditLogTable.created_at < cutoff_date,
             )
-            .values(deleted_at=datetime.now(timezone.utc))
         )
 
         result = await self.session.execute(query)
