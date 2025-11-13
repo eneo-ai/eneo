@@ -94,13 +94,14 @@ export function initIntegrations(client) {
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
        *
+       * @returns {Promise<Job>} The background job processing this import
        * @throws {IntricError}
        * */
       import: async ({ integration, preview, space, embedding_model }) => {
         const { id: user_integration_id } = integration;
         const { id } = space;
         const { key, name, url, folder_id, folder_path, type } = preview;
-        await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/", {
+        const job = await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/", {
           method: "post",
           params: {
             path: { user_integration_id, id }
@@ -117,6 +118,7 @@ export function initIntegrations(client) {
             }
           }
         });
+        return job;
       },
 
       /**
@@ -166,6 +168,24 @@ export function initIntegrations(client) {
        * */
       list: async () => {
         const res = await client.fetch("/api/v1/integrations/me/", { method: "get" });
+        return res.items.sort((a, b) => a.name.localeCompare(b.name));
+      },
+
+      /**
+       * List integrations available for a specific space, filtered by space type and auth type.
+       * - Personal spaces: Only user OAuth integrations
+       * - Shared/Organization spaces: Only tenant app integrations
+       * @param {{id: string}} space The space to get available integrations for
+       * @throws {IntricError}
+       * */
+      listForSpace: async (space) => {
+        const { id: space_id } = space;
+        const res = await client.fetch("/api/v1/integrations/spaces/{space_id}/available/", {
+          method: "get",
+          params: {
+            path: { space_id }
+          }
+        });
         return res.items.sort((a, b) => a.name.localeCompare(b.name));
       },
 
@@ -221,6 +241,48 @@ export function initIntegrations(client) {
         });
 
         return res;
+      }
+    },
+
+    admin: {
+      sharepoint: {
+        /**
+         * List all SharePoint webhook subscriptions
+         * @throws {IntricError}
+         * */
+        listSubscriptions: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/", {
+            method: "get"
+          });
+          return res;
+        },
+
+        /**
+         * Renew all expired SharePoint subscriptions
+         * @throws {IntricError}
+         * */
+        renewExpiredSubscriptions: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/renew-expired/", {
+            method: "post"
+          });
+          return res;
+        },
+
+        /**
+         * Recreate a specific SharePoint subscription
+         * @param {{id: string}} subscription The subscription to recreate
+         * @throws {IntricError}
+         * */
+        recreateSubscription: async (subscription) => {
+          const { id } = subscription;
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{id}/recreate/", {
+            method: "post",
+            params: {
+              path: { id }
+            }
+          });
+          return res;
+        }
       }
     }
   };

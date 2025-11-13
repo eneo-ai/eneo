@@ -39,7 +39,9 @@ class SharePointSubscriptionService:
         settings = get_settings()
         self.notification_url = settings.sharepoint_webhook_notification_url
         self.client_state = settings.sharepoint_webhook_client_state
-        self.subscription_lifetime_minutes = settings.sharepoint_subscription_lifetime_minutes or 1440
+        # Microsoft Graph allows up to 42,300 minutes (29.375 days) for driveItem subscriptions
+        # We use 42,000 minutes (~29 days) to stay safely under the limit
+        self.subscription_lifetime_minutes = 42000
 
     async def ensure_subscription_for_site(
         self,
@@ -74,11 +76,34 @@ class SharePointSubscriptionService:
         )
 
         if existing:
-            logger.info(
-                f"Reusing existing subscription {existing.subscription_id} "
-                f"for user_integration={user_integration_id}, site={site_id[:30]}..."
-            )
-            return existing
+            # Check if subscription is expired (happens during local development
+            # or server downtime > 24h)
+            if existing.is_expired():
+                logger.warning(
+                    f"Subscription {existing.subscription_id} for site {site_id[:30]}... has expired. "
+                    f"Attempting automatic recreation to preserve integration relationships."
+                )
+                success = await self.recreate_expired_subscription(
+                    subscription=existing,
+                    token=token
+                )
+                if success:
+                    logger.info(
+                        f"Successfully recreated expired subscription for site {site_id[:30]}..."
+                    )
+                    return existing  # Same DB object, updated with new subscription_id
+                else:
+                    logger.error(
+                        f"Failed to recreate expired subscription for site {site_id[:30]}..., "
+                        f"returning expired subscription (webhooks will not work until recreated)"
+                    )
+                    return existing  # Return expired subscription - better than None
+            else:
+                logger.info(
+                    f"Reusing existing subscription {existing.subscription_id} "
+                    f"for user_integration={user_integration_id}, site={site_id[:30]}..."
+                )
+                return existing
 
         # Create new subscription
         logger.info(
@@ -118,6 +143,68 @@ class SharePointSubscriptionService:
         )
 
         return saved
+
+    async def recreate_expired_subscription(
+        self,
+        subscription: SharePointSubscription,
+        token: SharePointToken,
+    ) -> bool:
+        """Recreate an expired subscription in-place.
+
+        When a subscription has expired (server downtime > 24h), Microsoft Graph
+        won't allow renewal via PATCH. This method creates a new subscription
+        and updates the existing DB record with the new subscription_id and expires_at.
+
+        This preserves all FK relationships to integration_knowledge, so all
+        assistants using this SharePoint integration continue to work.
+
+        Args:
+            subscription: Expired subscription to recreate
+            token: OAuth token for Microsoft Graph API
+
+        Returns:
+            True if recreation successful, False otherwise
+        """
+        logger.info(
+            f"Recreating expired subscription {subscription.subscription_id} "
+            f"for site {subscription.site_id[:30]}..."
+        )
+
+        # Step 1: Try to delete old subscription from Microsoft Graph (may already be gone)
+        await self._delete_graph_subscription(
+            subscription_id=subscription.subscription_id,
+            token=token
+        )
+        # Note: We don't check the result - expired subscriptions may already be
+        # deleted by Microsoft Graph automatically
+
+        # Step 2: Create new subscription in Microsoft Graph
+        new_subscription_id = await self._create_graph_subscription(
+            token=token,
+            site_id=subscription.site_id,
+            drive_id=subscription.drive_id,
+        )
+
+        if not new_subscription_id:
+            logger.error(
+                f"Failed to create new subscription for expired subscription {subscription.id}"
+            )
+            return False
+
+        # Step 3: Update existing DB record with new subscription_id and expiration
+        new_expiration = datetime.now(timezone.utc) + timedelta(minutes=self.subscription_lifetime_minutes)
+        subscription.subscription_id = new_subscription_id
+        subscription.expires_at = new_expiration
+        await self.subscription_repo.update(subscription)
+
+        logger.info(
+            f"Successfully recreated subscription {subscription.id}: "
+            f"old_id={subscription.subscription_id[:20]}..., "
+            f"new_id={new_subscription_id[:20]}..., "
+            f"expires={new_expiration.isoformat()}"
+        )
+
+        return True
 
     async def renew_subscription(
         self,
@@ -167,6 +254,19 @@ class SharePointSubscriptionService:
                             f"for site {subscription.site_id[:30]}... until {new_expiration.isoformat()}"
                         )
                         return True
+                    elif response.status == 404:
+                        # Subscription not found in Microsoft Graph - likely due to DB rollback
+                        # or Microsoft deleted it. Automatically recreate to recover.
+                        logger.warning(
+                            f"Subscription {subscription.subscription_id} not found in Microsoft Graph "
+                            f"(404 response). Automatically recreating to recover from potential DB rollback "
+                            f"or sync issue for site {subscription.site_id[:30]}..."
+                        )
+                        # Recreate subscription in-place (preserves all FK relationships)
+                        return await self.recreate_expired_subscription(
+                            subscription=subscription,
+                            token=token
+                        )
                     else:
                         error_text = await response.text()
                         logger.error(
@@ -373,7 +473,13 @@ class SharePointSubscriptionService:
         Uses SharePointContentClient to get default drive ID.
         """
         try:
-            content_client = SharePointContentClient(token=token)
+            # Extract base_url and access_token from token object
+            # Support both SharePointToken (has base_url property) and SimpleToken (just has access_token)
+            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
+            content_client = SharePointContentClient(
+                base_url=base_url,
+                api_token=token.access_token
+            )
             drive_id = await content_client.get_default_drive_id(site_id=site_id)
             return drive_id
         except Exception as exc:

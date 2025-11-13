@@ -38,6 +38,12 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.user_integration_repo import (
         UserIntegrationRepository,
     )
+    from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
+        TenantSharePointAppRepository,
+    )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
     from intric.integration.infrastructure.oauth_token_service import (
         OauthTokenService,
     )
@@ -46,6 +52,16 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+class SimpleSharePointToken:
+    """Simple token wrapper for SharePoint API calls.
+
+    Used for tenant_app integrations where we don't have an OauthToken
+    in the database, but need a token object with access_token attribute.
+    """
+    def __init__(self, access_token: str):
+        self.access_token = access_token
 
 
 class SharePointContentService:
@@ -60,6 +76,8 @@ class SharePointContentService:
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         oauth_token_service: "OauthTokenService",
         session: "AsyncSession",
+        tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
+        tenant_app_auth_service: "TenantAppAuthService",
         sync_log_repo: "SyncLogRepository" = None,
         change_key_service: "OfficeChangeKeyService" = None,
     ):
@@ -72,14 +90,17 @@ class SharePointContentService:
         self.integration_knowledge_repo = integration_knowledge_repo
         self.oauth_token_service = oauth_token_service
         self.session = session
+        self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
+        self.tenant_app_auth_service = tenant_app_auth_service
         self.sync_log_repo = sync_log_repo
         self.change_key_service = change_key_service
 
     async def pull_content(
         self,
-        token_id: UUID,
-        integration_knowledge_id: UUID,
-        site_id: str,
+        token_id: Optional[UUID] = None,
+        tenant_app_id: Optional[UUID] = None,
+        integration_knowledge_id: UUID = None,
+        site_id: str = None,
         folder_id: Optional[str] = None,
         folder_path: Optional[str] = None,
     ) -> str:
@@ -87,7 +108,20 @@ class SharePointContentService:
         started_at = datetime.now(timezone.utc)
 
         try:
-            token = await self.oauth_token_repo.one(id=token_id)
+            # Get token based on auth type
+            if tenant_app_id:
+                # Tenant app integration: get token from tenant app credentials
+                tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
+                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                token = SimpleSharePointToken(access_token=access_token)
+                oauth_token_id = None  # No oauth token ID for tenant_app
+            elif token_id:
+                # User OAuth integration: get token from oauth_tokens table
+                token = await self.oauth_token_repo.one(id=token_id)
+                oauth_token_id = token.id
+            else:
+                raise ValueError("Either token_id or tenant_app_id must be provided")
+
             stats = self._initialize_stats()
 
             # Load integration knowledge and set folder context BEFORE pulling content
@@ -109,6 +143,7 @@ class SharePointContentService:
 
             await self._pull_content(
                 token=token,
+                oauth_token_id=oauth_token_id,
                 integration_knowledge_id=integration_knowledge_id,
                 site_id=site_id,
                 stats=stats,
@@ -131,11 +166,13 @@ class SharePointContentService:
             # Initialize delta token if this is the first sync
             if not integration_knowledge.delta_token:
                 try:
+                    # For SimpleSharePointToken, use default base_url and None for token_id
+                    base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
                     async with SharePointContentClient(
-                        base_url=token.base_url,
+                        base_url=base_url,
                         api_token=token.access_token,
-                        token_id=token.id,
-                        token_refresh_callback=self.token_refresh_callback,
+                        token_id=oauth_token_id,
+                        token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
                     ) as content_client:
                         drive_id = await content_client.get_default_drive_id(site_id)
                         if drive_id:
@@ -193,14 +230,28 @@ class SharePointContentService:
 
     async def process_delta_changes(
         self,
-        token_id: UUID,
-        integration_knowledge_id: UUID,
-        site_id: str,
+        token_id: Optional[UUID] = None,
+        tenant_app_id: Optional[UUID] = None,
+        integration_knowledge_id: UUID = None,
+        site_id: str = None,
     ) -> str:
         started_at = datetime.now(timezone.utc)
 
         try:
-            token = await self.oauth_token_repo.one(id=token_id)
+            # Get token based on auth type
+            if tenant_app_id:
+                # Tenant app integration: get token from tenant app credentials
+                tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
+                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                token = SimpleSharePointToken(access_token=access_token)
+                oauth_token_id = None
+            elif token_id:
+                # User OAuth integration: get token from oauth_tokens table
+                token = await self.oauth_token_repo.one(id=token_id)
+                oauth_token_id = token.id
+            else:
+                raise ValueError("Either token_id or tenant_app_id must be provided")
+
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
@@ -212,17 +263,20 @@ class SharePointContentService:
                 )
                 return await self.pull_content(
                     token_id=token_id,
+                    tenant_app_id=tenant_app_id,
                     integration_knowledge_id=integration_knowledge_id,
                     site_id=site_id,
                 )
 
             stats = self._initialize_stats()
 
+            # For SimpleSharePointToken, use default base_url
+            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
             async with SharePointContentClient(
-                base_url=token.base_url,
+                base_url=base_url,
                 api_token=token.access_token,
-                token_id=token.id,
-                token_refresh_callback=self.token_refresh_callback,
+                token_id=oauth_token_id,
+                token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
             ) as content_client:
                 drive_id = await content_client.get_default_drive_id(site_id)
                 if not drive_id:
@@ -446,7 +500,8 @@ class SharePointContentService:
 
     async def _pull_content(
         self,
-        token: "SharePointToken",
+        token,
+        oauth_token_id: Optional[UUID],
         integration_knowledge_id: UUID,
         site_id: str,
         stats: Dict[str, int],
@@ -456,7 +511,8 @@ class SharePointContentService:
         then processes accordingly.
 
         Args:
-            token: SharePoint token for authentication
+            token: SharePoint token for authentication (SharePointToken or SimpleSharePointToken)
+            oauth_token_id: OAuth token ID for user_oauth integrations, None for tenant_app
             integration_knowledge_id: ID of the integration knowledge object
             site_id: The SharePoint site ID to process
         """
@@ -465,11 +521,13 @@ class SharePointContentService:
         )
 
         try:
+            # For SimpleSharePointToken, use default base_url
+            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
             async with SharePointContentClient(
-                base_url=token.base_url,
+                base_url=base_url,
                 api_token=token.access_token,
-                token_id=token.id,
-                token_refresh_callback=self.token_refresh_callback,
+                token_id=oauth_token_id,
+                token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
             ) as content_client:
                 drive_id = await content_client.get_default_drive_id(site_id)
 
@@ -993,7 +1051,7 @@ class SharePointContentService:
         return file_extension_to_type(item.get("name", ""))
 
     async def _get_file_content(
-        self, token: "SharePointToken", item: Dict[str, Any]
+        self, token, item: Dict[str, Any]
     ) -> Optional[str]:
         item_id = item.get("id")
         item_name = item.get("name", "").lower()
@@ -1004,11 +1062,14 @@ class SharePointContentService:
             return None
 
         try:
+            # For SimpleSharePointToken, use default base_url and None for token_id
+            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
+            token_id = getattr(token, 'id', None)
             async with SharePointContentClient(
-                base_url=token.base_url,
+                base_url=base_url,
                 api_token=token.access_token,
-                token_id=token.id,
-                token_refresh_callback=self.token_refresh_callback,
+                token_id=token_id,
+                token_refresh_callback=self.token_refresh_callback if token_id else None,
             ) as content_client:
                 content, _ = await content_client.get_file_content_by_id(
                     drive_id=drive_id, item_id=item_id

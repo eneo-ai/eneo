@@ -7,6 +7,7 @@ from intric.assistants.api.assistant_models import AssistantPublic
 from intric.authentication.auth_dependencies import require_permission
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse
 from intric.server import protocol
@@ -373,7 +374,8 @@ async def create_space_websites(
 
 @router.post(
     "/{id}/knowledge/integrations/{user_integration_id}/",
-    status_code=200,
+    response_model=JobPublic,
+    status_code=202,  # Changed to 202 Accepted since job is queued
 )
 async def create_space_integration_knowledge(
     id: UUID,
@@ -382,9 +384,8 @@ async def create_space_integration_knowledge(
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.integration_knowledge_service()
-    assembler = container.integration_knowledge_assembler()
 
-    knowledge = await service.create_space_integration_knowledge(
+    knowledge, job = await service.create_space_integration_knowledge(
         user_integration_id=user_integration_id,
         name=data.name,
         space_id=id,
@@ -395,7 +396,9 @@ async def create_space_integration_knowledge(
         folder_path=data.folder_path,
         selected_item_type=data.selected_item_type,
     )
-    return assembler.to_space_knowledge_model(item=knowledge)
+    # Return job for frontend to track progress (like file upload does)
+    # FastAPI automatically converts JobInDb -> JobPublic via response_model
+    return job
 
 
 @router.delete(

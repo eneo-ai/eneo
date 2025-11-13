@@ -8,9 +8,10 @@ from intric.integration.presentation.models import (
     ConfluenceContentTaskParam,
     SharepointContentTaskParam,
 )
-from intric.jobs.job_models import Task
+from intric.jobs.job_models import JobInDb, Task
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
+from intric.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
@@ -24,6 +25,12 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.user_integration_repo import (
         UserIntegrationRepository,
     )
+    from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
+        TenantSharePointAppRepository,
+    )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
     from intric.jobs.job_service import JobService
     from intric.spaces.space import Space
     from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
@@ -32,6 +39,16 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+class SimpleToken:
+    """Simple token wrapper for subscription service compatibility.
+
+    Used for tenant_app integrations where we don't have an OauthToken
+    in the database, but need a token object with access_token attribute.
+    """
+    def __init__(self, access_token: str):
+        self.access_token = access_token
 
 
 class IntegrationKnowledgeService:
@@ -46,6 +63,8 @@ class IntegrationKnowledgeService:
         user_integration_repo: "UserIntegrationRepository",
         actor_manager: "ActorManager",
         sharepoint_subscription_service: "SharePointSubscriptionService",
+        tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
+        tenant_app_auth_service: "TenantAppAuthService",
     ):
         self.job_service = job_service
         self.user = user
@@ -56,6 +75,8 @@ class IntegrationKnowledgeService:
         self.user_integration_repo = user_integration_repo
         self.actor_manager = actor_manager
         self.sharepoint_subscription_service = sharepoint_subscription_service
+        self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
+        self.tenant_app_auth_service = tenant_app_auth_service
 
     async def create_space_integration_knowledge(
         self,
@@ -68,12 +89,21 @@ class IntegrationKnowledgeService:
         folder_id: str = None,
         folder_path: str = None,
         selected_item_type: str = None,
-    ) -> IntegrationKnowledge:
+    ) -> tuple[IntegrationKnowledge, "JobInDb"]:
         space = await self.space_repo.one(id=space_id)
         if not space.is_embedding_model_in_space(embedding_model_id=embedding_model_id):
             raise BadRequestException("No valid embedding model")
 
         user_integration = await self.user_integration_repo.one(id=user_integration_id)
+
+        # SECURITY: tenant_app integrations (Sites.Read.All) require admin permission
+        if user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to import from organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         embedding_model = await self.embedding_model_repo.one(model_id=embedding_model_id)
         site_id_value = key if user_integration.integration_type == "sharepoint" else None
         obj = IntegrationKnowledge(
@@ -90,31 +120,44 @@ class IntegrationKnowledgeService:
         )
         knowledge = await self.integration_knowledge_repo.add(obj=obj)
 
-        # Distribute to child spaces if created on org space
         await self._distribute_knowledge_if_org_space(knowledge, space)
 
-        token = await self.oauth_token_repo.one(user_integration_id=user_integration_id)
+        if user_integration.auth_type == "tenant_app":
+            if not user_integration.tenant_app_id:
+                raise BadRequestException("Tenant app ID is required for tenant_app integrations")
 
-        if token.token_type.is_confluence:
-            await self.job_service.queue_job(
+            tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
+            access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+            token = SimpleToken(access_token=access_token)
+            token_id = None
+            tenant_app_id = tenant_app.id
+        else:
+            oauth_token = await self.oauth_token_repo.one(user_integration_id=user_integration_id)
+            token = oauth_token
+            token_id = oauth_token.id
+            tenant_app_id = None
+
+        if hasattr(token, 'token_type') and token.token_type.is_confluence:
+            job = await self.job_service.queue_job(
                 task=Task.PULL_CONFLUENCE_CONTENT,
                 name=name,
                 task_params=ConfluenceContentTaskParam(
                     user_id=self.user.id,
                     id=user_integration_id,
-                    token_id=token.id,
+                    token_id=token_id,
                     space_key=key,
                     integration_knowledge_id=knowledge.id,
                 ),
             )
-        elif token.token_type.is_sharepoint:
-            await self.job_service.queue_job(
+        elif user_integration.integration_type == "sharepoint":
+            job = await self.job_service.queue_job(
                 task=Task.PULL_SHAREPOINT_CONTENT,
                 name=name,
                 task_params=SharepointContentTaskParam(
                     user_id=self.user.id,
                     id=user_integration_id,
-                    token_id=token.id,
+                    token_id=token_id,
+                    tenant_app_id=tenant_app_id,
                     integration_knowledge_id=knowledge.id,
                     site_id=key,
                     folder_id=folder_id,
@@ -155,7 +198,8 @@ class IntegrationKnowledgeService:
         else:
             raise ValueError("Unknown integration type")
 
-        return knowledge
+        # Return both knowledge and job for frontend to track progress
+        return knowledge, job
 
     async def _distribute_knowledge_if_org_space(
         self, knowledge: IntegrationKnowledge, space: "Space"
@@ -233,6 +277,14 @@ class IntegrationKnowledgeService:
         if not actor.can_delete_integration_knowledge_list():
             raise UnauthorizedException()
 
+        # Check if knowledge belongs to this space
+        # Only allow deletion from the space where it was created
+        if knowledge.space_id != space.id:
+            raise UnauthorizedException(
+                "Cannot delete knowledge from this space. "
+                "This knowledge belongs to another space and must be deleted from there."
+            )
+
         # Remove distribution records if this is an org space
         if space.tenant_space_id is None:
             await self.space_repo.session.execute(
@@ -241,13 +293,22 @@ class IntegrationKnowledgeService:
                 )
             )
 
-        # Cleanup site-level subscription if this was a SharePoint integration
         subscription_id = knowledge.sharepoint_subscription_id
         if subscription_id and knowledge.integration_type == "sharepoint":
             try:
-                token = await self.oauth_token_repo.one(
-                    user_integration_id=knowledge.user_integration.id
-                )
+                user_integration = knowledge.user_integration
+                if user_integration.auth_type == "tenant_app":
+                    if not user_integration.tenant_app_id:
+                        raise BadRequestException("Tenant app ID is required for tenant_app integrations")
+
+                    tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
+                    access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                    token = SimpleToken(access_token=access_token)
+                else:
+                    token = await self.oauth_token_repo.one(
+                        user_integration_id=knowledge.user_integration.id
+                    )
+
                 await self.sharepoint_subscription_service.delete_subscription_if_unused(
                     subscription_id=subscription_id,
                     token=token

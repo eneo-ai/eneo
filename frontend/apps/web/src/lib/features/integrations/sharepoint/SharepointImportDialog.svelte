@@ -33,7 +33,7 @@
     state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
-  const { startFastUpdatePolling, updateJobs } = getJobManager();
+  const { addJob, startFastUpdatePolling } = getJobManager();
 
   let availableResources = $state<PreviewOption[] | null>(null);
   let filteredResources = $derived.by(() => {
@@ -98,7 +98,7 @@
 
       if (selectedItem) {
         importData.preview = {
-          key: selectedSite.key, // Use site ID, not file ID
+          key: selectedSite?.key, // Use site ID, not file ID
           name: selectedItem.name,
           type: selectedItem.type,
           url: selectedItem.web_url || selectedItem.path,
@@ -109,11 +109,11 @@
         importData.preview = selectedSite;
       }
 
-      await intric.integrations.knowledge.import(importData);
+      const job = await intric.integrations.knowledge.import(importData);
 
-      // Close dialog immediately - job runs in background
+      // Add job to JobManager for real-time tracking and close dialog
+      addJob(job);
       refreshCurrentSpace();
-      updateJobs();
       startFastUpdatePolling(); // Use fast polling for quicker UI updates
       $inputValue = "";
       selectedSite = null;
@@ -224,6 +224,7 @@
           {#if !selectedItem}
             <SharePointFolderTree
               userIntegrationId={integration.id || ""}
+              spaceId={$currentSpace.id}
               siteId={selectedSite.key}
               onSelect={handleFolderSelect}
             />

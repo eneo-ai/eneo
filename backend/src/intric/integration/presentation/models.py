@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Dict, Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
@@ -68,6 +68,8 @@ class UserIntegration(Integration):
     id: Optional[UUID] = None
     tenant_integration_id: UUID
     connected: bool
+    auth_type: str = "user_oauth"  # "user_oauth" or "tenant_app"
+    tenant_app_id: Optional[UUID] = None
 
 
 class UserIntegrationList(BaseListModel[UserIntegration]):
@@ -96,7 +98,8 @@ class ConfluenceContentTaskParam(ResourceTaskParams):
 
 
 class SharepointContentTaskParam(ResourceTaskParams):
-    token_id: UUID
+    token_id: Optional[UUID] = None  # For user_oauth integrations
+    tenant_app_id: Optional[UUID] = None  # For tenant_app integrations
     integration_knowledge_id: UUID
     site_id: str
     folder_id: Optional[str] = None
@@ -141,6 +144,46 @@ class IntegrationKnowledgeMetaData(BaseModel):
     size: int
     last_sync_summary: Optional[Dict[str, int]] = None
     last_synced_at: Optional[datetime] = None
+    sharepoint_subscription_expires_at: Optional[datetime] = Field(
+        None,
+        description="When the SharePoint webhook subscription expires (only for SharePoint integrations)"
+    )
+
+    @property
+    def subscription_status(self) -> Optional[str]:
+        """Compute subscription status for SharePoint integrations.
+
+        Returns:
+            "active" | "expiring_soon" | "expired" | None
+        """
+        if not self.sharepoint_subscription_expires_at:
+            return None
+
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        expires_at = self.sharepoint_subscription_expires_at
+
+        if expires_at <= now:
+            return "expired"
+        elif expires_at <= now + timedelta(hours=48):
+            return "expiring_soon"
+        else:
+            return "active"
+
+    @property
+    def subscription_expires_in_hours(self) -> Optional[int]:
+        """Hours until subscription expires.
+
+        Returns:
+            Number of hours (0 if expired), or None if no subscription
+        """
+        if not self.sharepoint_subscription_expires_at:
+            return None
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        delta = self.sharepoint_subscription_expires_at - now
+        return max(0, int(delta.total_seconds() / 3600))
 
 
 class IntegrationKnowledgePublic(BaseModel):

@@ -26,26 +26,86 @@ class SharePointTreeService:
         folder_id: Optional[str] = None,
         folder_path: str = "",
     ) -> dict:
+        logger.info(
+            "Infrastructure SharePoint tree service called",
+            extra={
+                "site_id": site_id,
+                "folder_id": folder_id,
+                "folder_path": folder_path,
+                "has_token": bool(token.access_token),
+                "token_id": str(token.id) if token.id else None,
+            }
+        )
+
         async with SharePointContentClient(
             base_url=token.base_url,
             api_token=token.access_token,
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
         ) as content_client:
-            drive_id = await content_client.get_default_drive_id(site_id)
-            if not drive_id:
-                logger.error(f"Could not get drive ID for site {site_id}")
-                raise ValueError(f"Could not get drive ID for site {site_id}")
+            # Step 1: Get drive ID
+            logger.debug("Fetching drive ID for site", extra={"site_id": site_id})
+            try:
+                drive_id = await content_client.get_default_drive_id(site_id)
+                if not drive_id:
+                    logger.error(
+                        "No drive ID returned for site",
+                        extra={"site_id": site_id}
+                    )
+                    raise ValueError(f"Could not get drive ID for site {site_id}")
+                logger.info(
+                    "Drive ID obtained",
+                    extra={"site_id": site_id, "drive_id": drive_id}
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to get drive ID: {type(e).__name__}: {str(e)}",
+                    extra={"site_id": site_id},
+                    exc_info=True
+                )
+                raise ValueError(f"Failed to get drive ID for site {site_id}: {str(e)}") from e
 
             if folder_id is None:
                 folder_id = "root"
+                logger.debug("Using root folder")
 
-            items = await content_client.get_folder_items(
-                site_id=site_id,
-                drive_id=drive_id,
-                folder_id=folder_id,
+            # Step 2: Get folder items
+            logger.debug(
+                "Fetching folder items",
+                extra={
+                    "site_id": site_id,
+                    "drive_id": drive_id,
+                    "folder_id": folder_id,
+                }
             )
+            try:
+                items = await content_client.get_folder_items(
+                    site_id=site_id,
+                    drive_id=drive_id,
+                    folder_id=folder_id,
+                )
+                logger.info(
+                    "Folder items fetched",
+                    extra={
+                        "item_count": len(items),
+                        "folder_id": folder_id,
+                    }
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to get folder items: {type(e).__name__}: {str(e)}",
+                    extra={
+                        "site_id": site_id,
+                        "drive_id": drive_id,
+                        "folder_id": folder_id,
+                    },
+                    exc_info=True
+                )
+                raise ValueError(
+                    f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
+                ) from e
 
+            # Step 3: Transform items to tree format
             tree_items = []
             for item in items:
                 item_name = item.get("name", "")
@@ -68,22 +128,50 @@ class SharePointTreeService:
                 }
                 tree_items.append(tree_item)
 
+            logger.debug(
+                "Transformed items to tree format",
+                extra={"tree_item_count": len(tree_items)}
+            )
+
+            # Step 4: Get parent folder ID if not at root
             parent_id = None
             if folder_id != "root":
                 try:
+                    logger.debug(
+                        "Fetching parent folder metadata",
+                        extra={"folder_id": folder_id}
+                    )
                     metadata = await content_client.get_file_metadata(
                         drive_id=drive_id,
                         item_id=folder_id,
                     )
                     parent_ref = metadata.get("parentReference", {})
                     parent_id = parent_ref.get("id")
+                    logger.debug(
+                        "Parent folder ID obtained",
+                        extra={"parent_id": parent_id}
+                    )
                 except Exception as e:
-                    logger.warning(f"Could not get parent folder ID: {e}")
+                    logger.warning(
+                        f"Could not get parent folder ID: {type(e).__name__}: {str(e)}",
+                        extra={"folder_id": folder_id}
+                    )
 
-            return {
+            result = {
                 "items": tree_items,
                 "current_path": folder_path or "/",
                 "parent_id": parent_id,
                 "drive_id": drive_id,
                 "site_id": site_id,
             }
+
+            logger.info(
+                "SharePoint tree successfully built",
+                extra={
+                    "item_count": len(tree_items),
+                    "current_path": result["current_path"],
+                    "has_parent": parent_id is not None,
+                }
+            )
+
+            return result

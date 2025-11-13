@@ -10,7 +10,11 @@
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
 
-  export let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = null;
+  interface Props {
+    onSelectIntegrationForSyncHistory?: (integration: IntegrationKnowledge) => void;
+  }
+
+  let { onSelectIntegrationForSyncHistory }: Props = $props();
 
   const {
     state: { currentSpace }
@@ -18,12 +22,13 @@
 
   const knowledge = derived(
     currentSpace,
-    ($currentSpace) => $currentSpace.knowledge.integrationKnowledge
+    ($currentSpace) => $currentSpace.knowledge.integrationKnowledge.filter(k => k.space_id === $currentSpace.id)
   );
 
   const embeddingModels = derived(currentSpace, ($currentSpace) => {
     const modelsInSpace = $currentSpace.embedding_models.map((model) => model.id);
-    const modelsInIntegrationKnowledge = $currentSpace.knowledge.integrationKnowledge.map(
+    const ownedKnowledge = $currentSpace.knowledge.integrationKnowledge.filter(k => k.space_id === $currentSpace.id);
+    const modelsInIntegrationKnowledge = ownedKnowledge.map(
       (collection) => {
         return {
           ...collection.embedding_model,
@@ -62,7 +67,9 @@
         return createRender(IntegrationSyncStatusCell, {
           knowledge: item.value,
           onShowSyncHistory: () => {
-            selectedIntegrationForSyncHistory = item.value;
+            if (onSelectIntegrationForSyncHistory) {
+              onSelectIntegrationForSyncHistory(item.value);
+            }
           }
         });
       }

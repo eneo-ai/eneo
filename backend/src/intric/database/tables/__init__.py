@@ -14,6 +14,8 @@ import intric.database.tables.files_table
 import intric.database.tables.group_chats_table
 import intric.database.tables.info_blob_chunk_table
 import intric.database.tables.info_blobs_table
+import intric.database.tables.sharepoint_subscription_table
+import intric.database.tables.tenant_sharepoint_app_table
 import intric.database.tables.integration_table
 import intric.database.tables.job_table
 import intric.database.tables.logging_table

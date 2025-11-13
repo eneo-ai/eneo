@@ -30,6 +30,12 @@ class IntegrationKnowledgeAssembler:
             task = Task.PULL_SHAREPOINT_CONTENT
         else:
             raise ValueError("Unknown integration type")
+
+        # Populate sharepoint_subscription_expires_at from relationship
+        sharepoint_subscription_expires_at = None
+        if integration_type == "sharepoint" and item.sharepoint_subscription:
+            sharepoint_subscription_expires_at = item.sharepoint_subscription.expires_at
+
         return IntegrationKnowledgePublic(
             id=item.id,
             name=item.name,
@@ -48,6 +54,7 @@ class IntegrationKnowledgeAssembler:
                 size=item.size,
                 last_sync_summary=getattr(item, "last_sync_summary", None),
                 last_synced_at=getattr(item, "last_synced_at", None),
+                sharepoint_subscription_expires_at=sharepoint_subscription_expires_at,
             ),
             integration_type=integration_type,
             task=task,

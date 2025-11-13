@@ -18,11 +18,12 @@
 
   interface Props {
     userIntegrationId: string;
+    spaceId: string;
     siteId: string;
     onSelect: (item: TreeItem) => void;
   }
 
-  let { userIntegrationId, siteId, onSelect }: Props = $props();
+  let { userIntegrationId, spaceId, siteId, onSelect }: Props = $props();
 
   const intric = getIntric();
 
@@ -40,6 +41,7 @@
     try {
       // Build query params, only including defined values
       const queryParams: Record<string, string> = {
+        space_id: spaceId,
         site_id: siteId
       };
 

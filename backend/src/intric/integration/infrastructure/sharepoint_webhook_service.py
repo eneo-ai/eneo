@@ -177,43 +177,106 @@ class SharepointWebhookService:
                 )
                 continue
 
-            token = await self.oauth_token_repo.one_or_none(
-                user_integration_id=user_integration_db.id
-            )
-            if not token:
-                logger.warning(
-                    "No OAuth token found for user integration %s; skipping",
-                    user_integration_db.id,
+            # Validate that user_integration_db.id is not None before proceeding
+            if user_integration_db.id is None:
+                logger.error(
+                    "user_integration_db.id is None for knowledge %s; skipping",
+                    knowledge_db.id,
                 )
                 continue
 
+            # Determine authentication method and fetch appropriate credentials
+            # For tenant_app integrations: use tenant_app_id, no OAuth token
+            # For user_oauth integrations: use OAuth token, no tenant_app_id
+            token_id: Optional[UUID] = None
+            tenant_app_id: Optional[UUID] = None
+
+            if user_integration_db.auth_type == "tenant_app":
+                # Tenant app integration - no OAuth token needed
+                # The worker task will fetch tenant app credentials using tenant_app_id
+                tenant_app_id = user_integration_db.tenant_app_id
+                if not tenant_app_id:
+                    logger.warning(
+                        "Tenant app integration %s has no tenant_app_id; skipping",
+                        user_integration_db.id,
+                    )
+                    continue
+                logger.info(
+                    f"Using tenant app {tenant_app_id} for integration {user_integration_db.id}"
+                )
+            else:
+                # User OAuth integration - fetch OAuth token
+                token = await self.oauth_token_repo.one_or_none(
+                    user_integration_id=user_integration_db.id
+                )
+                if not token:
+                    logger.warning(
+                        "No OAuth token found for user integration %s; skipping",
+                        user_integration_db.id,
+                    )
+                    continue
+                token_id = token.id
+                logger.info(
+                    f"Using OAuth token {token_id} for integration {user_integration_db.id}"
+                )
+
+            # Determine which user to use for job creation
+            # For tenant_app integrations (user_id=None), use a tenant admin
+            # For user_oauth integrations, use the specific user
+            if user_integration_db.user_id is None:
+                # Tenant app integration - person-independent
+                # Use a tenant admin for job creation
+                cache_key = f"tenant_admin_{user_integration_db.tenant_id}"
+                if cache_key not in user_cache:
+                    try:
+                        admin_user = await self._get_tenant_admin(user_integration_db.tenant_id)
+                        user_cache[cache_key] = admin_user
+                        logger.info(
+                            f"Using tenant admin {admin_user.id} for tenant_app integration {user_integration_db.id}"
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not load tenant admin for tenant %s: %s",
+                            user_integration_db.tenant_id,
+                            exc,
+                        )
+                        continue
+                user_for_job = user_cache[cache_key]
+                user_id_for_job = user_for_job.id
+                job_service_key = cache_key
+            else:
+                # User OAuth integration - use the specific user
+                user_id_str = str(user_integration_db.user_id)
+                if user_id_str not in user_cache:
+                    try:
+                        user_cache[user_id_str] = await self.user_repo.get_user_by_id(
+                            id=user_integration_db.user_id
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not load user %s for SharePoint webhook notification: %s",
+                            user_integration_db.user_id,
+                            exc,
+                        )
+                        continue
+                user_for_job = user_cache[user_id_str]
+                user_id_for_job = user_integration_db.user_id
+                job_service_key = user_id_str
+
             params = SharepointContentTaskParam(
-                user_id=user_integration_db.user_id,
+                user_id=user_id_for_job,
                 id=user_integration_db.id,
-                token_id=token.id,
+                token_id=token_id,  # None for tenant_app, UUID for user_oauth
+                tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
                 integration_knowledge_id=knowledge_db.id,
                 site_id=knowledge_db.site_id or site_id,
                 folder_id=knowledge_db.folder_id,
                 folder_path=knowledge_db.folder_path,
             )
 
-            user_id_str = str(user_integration_db.user_id)
-            if user_id_str not in user_cache:
-                try:
-                    user_cache[user_id_str] = await self.user_repo.get_user_by_id(
-                        id=user_integration_db.user_id
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Could not load user %s for SharePoint webhook notification: %s",
-                        user_integration_db.user_id,
-                        exc,
-                    )
-                    continue
-
-            if user_id_str not in job_services:
-                job_services[user_id_str] = JobService(
-                    user=user_cache[user_id_str],
+            if job_service_key not in job_services:
+                job_services[job_service_key] = JobService(
+                    user=user_for_job,
                     job_repo=self.job_repo,
                 )
 
@@ -224,7 +287,7 @@ class SharepointWebhookService:
                 else Task.PULL_SHAREPOINT_CONTENT
             )
 
-            await job_services[user_id_str].queue_job(
+            await job_services[job_service_key].queue_job(
                 task=task_type,
                 name=knowledge_db.name or f"SharePoint ({site_id})",
                 task_params=params,
@@ -235,6 +298,28 @@ class SharepointWebhookService:
                 f"Queued {task_type.value} task for integration knowledge {knowledge_id_str} "
                 f"(site_id={site_id})"
             )
+
+    async def _get_tenant_admin(self, tenant_id: UUID) -> UserInDB:
+        """Get a tenant admin user for creating jobs for tenant_app integrations.
+
+        Tenant app integrations are person-independent (user_id=None), but jobs
+        still require a user context. We use a tenant admin for this purpose.
+
+        Args:
+            tenant_id: The tenant ID
+
+        Returns:
+            A tenant admin user
+
+        Raises:
+            Exception: If no admin user is found for the tenant
+        """
+        admins = await self.user_repo.list_tenant_admins(tenant_id=tenant_id)
+        if not admins:
+            raise Exception(f"No admin users found for tenant {tenant_id}")
+
+        # Return the first admin (any admin will do for job creation)
+        return admins[0]
 
     async def _fetch_knowledge_by_site(
         self, site_id: str

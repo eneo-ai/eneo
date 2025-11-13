@@ -103,6 +103,13 @@ from intric.integration.infrastructure.auth_service.confluence_auth_service impo
 from intric.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
+from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+    TenantAppAuthService,
+)
+from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
+from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
+from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import TenantSharePointAppRepositoryImpl
+from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import TenantSharePointAppMapper
 from intric.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
 from intric.integration.infrastructure.office_change_key_service import OfficeChangeKeyService
 from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
@@ -416,6 +423,12 @@ class Container(containers.DeclarativeContainer):
     sync_log_mapper = providers.Factory(SyncLogMapper)
     sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
 
+    # SharePoint app mapper uses the same encryption service as tenant credentials
+    tenant_sharepoint_app_mapper = providers.Factory(
+        TenantSharePointAppMapper,
+        encryption_service=encryption_service
+    )
+
     # HTTP auth encryption service
     http_auth_encryption_service = providers.Factory(HttpAuthEncryptionService)
 
@@ -465,6 +478,11 @@ class Container(containers.DeclarativeContainer):
         SharePointSubscriptionRepositoryImpl,
         session=session,
         mapper=sharepoint_subscription_mapper,
+    )
+    tenant_sharepoint_app_repo = providers.Factory(
+        TenantSharePointAppRepositoryImpl,
+        session=session,
+        mapper=tenant_sharepoint_app_mapper,
     )
     integration_repo = providers.Factory(
         IntegrationRepoImpl, session=session, mapper=integration_mapper
@@ -887,9 +905,23 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         tenant_integration_repo=tenant_integration_repo,
         user=user,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
     )
     confluence_auth_service = providers.Factory(ConfluenceAuthService)
-    sharepoint_auth_service = providers.Factory(SharepointAuthService)
+
+    # Tenant app authentication services (partial setup)
+    tenant_app_auth_service = providers.Singleton(TenantAppAuthService)
+    tenant_sharepoint_app_service = providers.Factory(
+        TenantSharePointAppService,
+        tenant_app_repo=tenant_sharepoint_app_repo,
+    )
+
+    # SharePoint auth service with tenant app support
+    sharepoint_auth_service = providers.Factory(
+        SharepointAuthService,
+        tenant_sharepoint_app_service=tenant_sharepoint_app_service,
+    )
+
     oauth2_service = providers.Factory(
         Oauth2Service,
         confluence_auth_service=confluence_auth_service,
@@ -904,6 +936,15 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
+    )
+
+    # SharePoint auth router (after oauth_token_service)
+    sharepoint_auth_router = providers.Factory(
+        SharePointAuthRouter,
+        user_oauth_service=sharepoint_auth_service,
+        tenant_app_service=tenant_sharepoint_app_service,
+        tenant_app_auth_service=tenant_app_auth_service,
+        oauth_token_service=oauth_token_service,
     )
 
     sharepoint_subscription_service = providers.Factory(
@@ -923,6 +964,8 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         actor_manager=actor_manager,
         sharepoint_subscription_service=sharepoint_subscription_service,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
     )
 
     confluence_content_service = providers.Factory(
@@ -951,6 +994,8 @@ class Container(containers.DeclarativeContainer):
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
     )
@@ -969,6 +1014,7 @@ class Container(containers.DeclarativeContainer):
     sharepoint_preview_service = providers.Factory(
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
+        tenant_app_auth_service=tenant_app_auth_service,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,
@@ -976,12 +1022,13 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         confluence_preview_service=confluence_preview_service,
         sharepoint_preview_service=sharepoint_preview_service,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
     )
     sharepoint_tree_service = providers.Factory(
         AppSharePointTreeService,
-        oauth_token_repo=oauth_token_repo,
         user_integration_repo=user_integration_repo,
-        oauth_token_service=oauth_token_service,
+        sharepoint_auth_router=sharepoint_auth_router,
+        space_repo=space_repo,
     )
     # Completion
     service_runner = providers.Factory(

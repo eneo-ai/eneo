@@ -16,6 +16,11 @@ class IntegrationKnowledgeFactory:
     def create_entity(
         cls, record: "IntegrationKnowledgeDBModel", embedding_model: "EmbeddingModel"
     ) -> IntegrationKnowledge:
+        # Don't lazy load - causes greenlet errors
+        sharepoint_subscription = None
+        if hasattr(record, "__dict__") and "sharepoint_subscription" in record.__dict__:
+            sharepoint_subscription = getattr(record, "sharepoint_subscription", None)
+
         return IntegrationKnowledge(
             id=record.id,
             name=record.name,
@@ -31,7 +36,7 @@ class IntegrationKnowledgeFactory:
             last_synced_at=record.last_synced_at,
             last_sync_summary=record.last_sync_summary,
             sharepoint_subscription_id=getattr(record, "sharepoint_subscription_id", None),
-            sharepoint_subscription=None,  # Don't lazy load - causes greenlet errors
+            sharepoint_subscription=sharepoint_subscription,
             delta_token=getattr(record, "delta_token", None),
             folder_id=getattr(record, "folder_id", None),
             folder_path=getattr(record, "folder_path", None),

@@ -1,12 +1,14 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
 import { createContext } from "$lib/core/context";
-import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
 import type { Intric, Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
 
 import { m } from "$lib/paraglide/messages";
-export { getJobManager, initJobManager };
+export { getJobManager, initJobManager, jobCompletionEvents };
+
+// Global store for job completion events (can be subscribed to from any component)
+const jobCompletionEvents = writable<{ timestamp: number; jobId: string } | null>(null);
 
 const [getJobManager, setJobManager] =
   createContext<ReturnType<typeof createJobManager>>("Handles jobs");
@@ -39,6 +41,7 @@ function createJobManager(data: { intric: Intric }) {
     let jobs: Job[] = [];
     try {
       jobs = await intric.jobs.list();
+      console.log("JobManager: Fetched jobs from server:", jobs.map(j => ({ id: j.id, name: j.name, status: j.status })));
       // Reset errors on success
       jobUpdateErrors = 0;
     } catch (error) {
@@ -54,21 +57,38 @@ function createJobManager(data: { intric: Intric }) {
       return [];
     }
     const updatedJobs = new Map(
-      // Keep failed jobs so that we can show their messages in the UI
+      // Keep failed and completed jobs so we can show their status in the UI
+      // Backend returns completed jobs for 5 minutes to allow UI to detect completion
       jobs
-        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed")
+        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed" || job.status === "complete")
         .map((job) => [job.id, job])
     );
-    if (updatedJobs.size < currentJobs.size) {
+
+    // Detect if any jobs changed from active to complete
+    let jobsCompleted = false;
+    for (const [id, newJob] of updatedJobs) {
+      const oldJob = currentJobs.get(id);
+      if (oldJob &&
+          (oldJob.status === "in progress" || oldJob.status === "queued") &&
+          newJob.status === "complete") {
+        console.log(`JobManager: Job completed - ${newJob.name} (${id}), old status: ${oldJob.status}, new status: ${newJob.status}`);
+        jobsCompleted = true;
+        break;
+      }
+    }
+
+    // Also check if jobs were removed (size decreased)
+    const jobsRemoved = updatedJobs.size < currentJobs.size;
+
+    if (jobsCompleted || jobsRemoved) {
       // Some jobs have finished: refresh related data
+      console.log("JobManager: Jobs completed or removed, refreshing space and blobs");
       if (browser) {
+        // Invalidate data dependencies to trigger SvelteKit page data refresh
         invalidate("blobs:list");
-        try {
-          const spacesManager = getSpacesManager();
-          spacesManager.refreshCurrentSpace();
-        } catch (error) {
-          console.warn("JobManager: could not refresh current space", error);
-        }
+        // Emit job completion event that components can subscribe to
+        jobCompletionEvents.set({ timestamp: Date.now(), jobId: "any" });
+        console.log("JobManager: Emitted job completion event");
       }
     }
     currentJobs = updatedJobs;
@@ -99,34 +119,37 @@ function createJobManager(data: { intric: Intric }) {
 
   async function startFastUpdatePolling() {
     // Use fast polling for recently added jobs
-    if (updateJobsRunning === false) {
-      updateJobsRunning = true;
-      lastJobAddedTime = Date.now();
-      await updateJobs();
-
-      updateJobsInterval = setInterval(async () => {
-        const jobs = await updateJobs();
-        const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
-        const timeSinceJobAdded = Date.now() - lastJobAddedTime;
-
-        // Switch to slow polling after 15 seconds or if no active jobs
-        if (!hasActiveJobs || timeSinceJobAdded > fastPollDuration_ms) {
-          if (!hasActiveJobs) {
-            stopUpdatePolling();
-          } else {
-            // Switch to slow polling
-            clearInterval(updateJobsInterval);
-            updateJobsInterval = setInterval(async () => {
-              const jobs = await updateJobs();
-              const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
-              if (!hasActiveJobs) {
-                stopUpdatePolling();
-              }
-            }, updateJobsFrequency_ms);
-          }
-        }
-      }, updateJobsFrequency_fast_ms);
+    // Stop any existing polling to allow fast polling to take over
+    if (updateJobsRunning) {
+      clearInterval(updateJobsInterval);
     }
+
+    updateJobsRunning = true;
+    lastJobAddedTime = Date.now();
+    await updateJobs();
+
+    updateJobsInterval = setInterval(async () => {
+      const jobs = await updateJobs();
+      const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+      const timeSinceJobAdded = Date.now() - lastJobAddedTime;
+
+      // Switch to slow polling after 15 seconds or if no active jobs
+      if (!hasActiveJobs || timeSinceJobAdded > fastPollDuration_ms) {
+        if (!hasActiveJobs) {
+          stopUpdatePolling();
+        } else {
+          // Switch to slow polling
+          clearInterval(updateJobsInterval);
+          updateJobsInterval = setInterval(async () => {
+            const jobs = await updateJobs();
+            const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+            if (!hasActiveJobs) {
+              stopUpdatePolling();
+            }
+          }, updateJobsFrequency_ms);
+        }
+      }
+    }, updateJobsFrequency_fast_ms);
   }
 
   // Entry point
@@ -277,6 +300,7 @@ function createJobManager(data: { intric: Intric }) {
       currentlyRunningJobs,
       showJobManagerPanel
     },
+    addJob,
     queueUploads,
     clearFinishedUploads,
     updateJobs,

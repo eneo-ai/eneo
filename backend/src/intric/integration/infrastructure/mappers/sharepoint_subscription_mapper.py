@@ -9,16 +9,21 @@ from intric.integration.domain.entities.sharepoint_subscription import SharePoin
 
 class SharePointSubscriptionMapper(EntityMapper[SharePointSubscription, SharePointSubscriptionDBModel]):
     def to_db_dict(self, entity: SharePointSubscription) -> Dict[str, Any]:
-        return {
+        result = {
             "id": entity.id,
             "user_integration_id": entity.user_integration_id,
             "site_id": entity.site_id,
             "subscription_id": entity.subscription_id,
             "drive_id": entity.drive_id,
             "expires_at": entity.expires_at,
-            "created_at": entity.created_at,
-            "updated_at": entity.updated_at,
         }
+        # Only include timestamps if they're set (not None)
+        # This allows database defaults to apply for new entities
+        if entity.created_at is not None:
+            result["created_at"] = entity.created_at
+        if entity.updated_at is not None:
+            result["updated_at"] = entity.updated_at
+        return result
 
     def to_entity(self, db_model: SharePointSubscriptionDBModel) -> SharePointSubscription:
         return SharePointSubscription(

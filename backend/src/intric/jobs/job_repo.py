@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
-from arq.jobs import JobStatus
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
@@ -38,21 +37,24 @@ class JobRepository:
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
+        five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
 
         stmt = (
             sa.select(Jobs)
             .where(Jobs.user_id == user_id)
             .where(Jobs.created_at >= one_week_ago)
+            .where(
+                # Include running, queued, failed, OR recently completed jobs
+                sa.or_(
+                    Jobs.status.in_(["in progress", "queued", "failed"]),
+                    sa.and_(
+                        Jobs.status == "complete",
+                        Jobs.finished_at >= five_minutes_ago
+                    )
+                )
+            )
             .order_by(Jobs.created_at)
         )
 
         jobs_db = await self.delegate.get_models_from_query(stmt)
-
-        running_jobs = [
-            job
-            for job in jobs_db
-            if await self._job_manager.get_job_status(job.id)
-            not in [JobStatus.not_found, JobStatus.complete]
-        ]
-
-        return running_jobs
+        return jobs_db

@@ -65,7 +65,7 @@
         >
           {#if integrations.length > 0}
             <IntegrationGrid>
-              {#each integrations as integration (integration.tenant_integration_id)}
+              {#each integrations as integration (`${integration.tenant_integration_id}-${integration.auth_type || 'user_oauth'}`)}
                 <IntegrationCard {integration}>
                   {#snippet action()}
                     {#if integration.connected && integration.id}
@@ -92,7 +92,7 @@
                 {m.no_integrations_enabled()}
                 {#if user.hasPermission("admin")}
                   <br />{m.enable_integrations_admin()}
-                  <a href="/admin/integrations" class="underline">{m.integrations_admin_menu()}</a>.
+                  <a href="/admin/integrations?tab=providers" class="underline">{m.integrations_admin_menu()}</a>.
                 {/if}
               </div>
             </div>

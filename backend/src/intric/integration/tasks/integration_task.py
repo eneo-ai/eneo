@@ -96,6 +96,7 @@ async def pull_sharepoint_content(
 
             result = await service.pull_content(
                 token_id=params.token_id,
+                tenant_app_id=params.tenant_app_id,
                 integration_knowledge_id=knowledge.id,
                 site_id=params.site_id,
                 folder_id=params.folder_id,
@@ -166,6 +167,7 @@ async def sync_sharepoint_delta(
 
             result = await service.process_delta_changes(
                 token_id=params.token_id,
+                tenant_app_id=params.tenant_app_id,
                 integration_knowledge_id=knowledge.id,
                 site_id=params.site_id,
             )

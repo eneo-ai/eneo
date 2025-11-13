@@ -1,7 +1,7 @@
 """ARQ background worker for SharePoint subscription maintenance.
 
 This worker handles:
-1. Subscription renewal - runs every 3 hours to renew expiring subscriptions
+1. Subscription renewal - runs every 12 hours to renew expiring subscriptions
 2. Orphaned subscription cleanup - runs daily to remove unused subscriptions
 """
 
@@ -14,14 +14,14 @@ logger = get_logger(__name__)
 worker = Worker()
 
 
-@worker.cron_job(minute={0, 180, 360, 540})  # Every 3 hours (0, 3, 6, 9, 12, 15, 18, 21)
+@worker.cron_job(minute=0, hour={0, 12})  # Every 12 hours (midnight and noon)
 async def renew_expiring_subscriptions(container: Container):
-    """Renew SharePoint subscriptions expiring within the next 4 hours.
+    """Renew SharePoint subscriptions expiring within the next 48 hours.
 
-    Microsoft Graph subscriptions expire after 24 hours max. We renew them
-    4 hours before expiration to ensure continuous webhook notifications.
+    Microsoft Graph subscriptions expire after ~29 days max. We renew them
+    48 hours (2 days) before expiration to ensure continuous webhook notifications.
 
-    Runs every 3 hours to catch all subscriptions before they expire.
+    Runs every 12 hours to catch all subscriptions before they expire.
     """
     logger.info("Starting SharePoint subscription renewal job")
 
@@ -29,8 +29,8 @@ async def renew_expiring_subscriptions(container: Container):
     oauth_token_service = container.oauth_token_service()
 
     async with container.session().begin():
-        # Find subscriptions expiring in next 4 hours
-        expiring = await sharepoint_subscription_service.list_expiring_subscriptions(hours=4)
+        # Find subscriptions expiring in next 48 hours (2 days)
+        expiring = await sharepoint_subscription_service.list_expiring_subscriptions(hours=48)
 
         if not expiring:
             logger.info("No subscriptions need renewal")
@@ -44,7 +44,7 @@ async def renew_expiring_subscriptions(container: Container):
         for subscription in expiring:
             try:
                 # Get token for this user integration
-                token = await oauth_token_service.get_token_for_user_integration(
+                token = await oauth_token_service.get_oauth_token_by_user_integration(
                     user_integration_id=subscription.user_integration_id
                 )
 
@@ -52,6 +52,25 @@ async def renew_expiring_subscriptions(container: Container):
                     logger.warning(
                         f"No token found for subscription {subscription.subscription_id}, "
                         f"user_integration={subscription.user_integration_id}"
+                    )
+                    failed_count += 1
+                    continue
+
+                # Ensure it's a SharePoint token
+                if not token.token_type.is_sharepoint:
+                    logger.warning(
+                        f"Token for subscription {subscription.subscription_id} is not a SharePoint token"
+                    )
+                    failed_count += 1
+                    continue
+
+                # Refresh token if needed (expired tokens can't be used)
+                try:
+                    token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
+                    logger.debug(f"Refreshed OAuth token for subscription {subscription.subscription_id}")
+                except Exception as refresh_error:
+                    logger.error(
+                        f"Failed to refresh token for subscription {subscription.subscription_id}: {refresh_error}"
                     )
                     failed_count += 1
                     continue
@@ -130,7 +149,7 @@ async def cleanup_orphaned_subscriptions(container: Container):
                 )
 
                 # Get token for deletion
-                token = await oauth_token_service.get_token_for_user_integration(
+                token = await oauth_token_service.get_oauth_token_by_user_integration(
                     user_integration_id=subscription.user_integration_id
                 )
 
@@ -138,6 +157,25 @@ async def cleanup_orphaned_subscriptions(container: Container):
                     logger.warning(
                         f"No token found for subscription {subscription.subscription_id}, "
                         f"cannot delete from Microsoft Graph"
+                    )
+                    failed_count += 1
+                    continue
+
+                # Ensure it's a SharePoint token
+                if not token.token_type.is_sharepoint:
+                    logger.warning(
+                        f"Token for subscription {subscription.subscription_id} is not a SharePoint token"
+                    )
+                    failed_count += 1
+                    continue
+
+                # Refresh token if needed (expired tokens can't be used)
+                try:
+                    token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
+                    logger.debug(f"Refreshed OAuth token for subscription {subscription.subscription_id}")
+                except Exception as refresh_error:
+                    logger.error(
+                        f"Failed to refresh token for subscription {subscription.subscription_id}: {refresh_error}"
                     )
                     failed_count += 1
                     continue
