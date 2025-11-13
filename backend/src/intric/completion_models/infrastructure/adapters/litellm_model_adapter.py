@@ -95,7 +95,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
     def _detect_provider(self, litellm_model_name: str) -> str:
         """
-        Detect provider from model name.
+        Detect provider from model name using shared registry logic.
 
         Args:
             litellm_model_name: The LiteLLM model name (e.g., 'azure/gpt-4', 'anthropic/claude-3')
@@ -103,23 +103,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         Returns:
             Provider name (openai, azure, anthropic, berget, gdm, mistral, ovhcloud, vllm)
         """
-        if litellm_model_name.startswith("azure/"):
-            return "azure"
-        elif litellm_model_name.startswith("anthropic/"):
-            return "anthropic"
-        elif litellm_model_name.startswith("berget/"):
-            return "berget"
-        elif litellm_model_name.startswith("gdm/"):
-            return "gdm"
-        elif litellm_model_name.startswith("mistral/"):
-            return "mistral"
-        elif litellm_model_name.startswith("ovhcloud/"):
-            return "ovhcloud"
-        elif litellm_model_name.startswith("vllm/"):
-            return "vllm"
-        else:
-            # Default to OpenAI for unprefixed models
-            return "openai"
+        return LiteLLMProviderRegistry.detect_provider_from_model_name(litellm_model_name)
 
     def _get_kwargs(self, kwargs: ModelKwargs | None):
         if kwargs is None:

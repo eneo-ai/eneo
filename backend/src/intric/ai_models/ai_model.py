@@ -56,6 +56,17 @@ class AIModel(Entity):
         self.is_org_enabled = is_org_enabled
         self.security_classification = security_classification
 
+    def get_credential_provider_name(self) -> str:
+        """
+        Get the credential provider name for this model.
+        Base implementation uses family value with special handling for Claude.
+        Subclasses can override to check litellm_model_name prefix.
+        """
+        # Claude models use 'anthropic' credentials
+        if self.family == ModelFamily.CLAUDE:
+            return "anthropic"
+        return self.family.value
+
     @property
     def is_locked(self):
         if self.hosting == ModelHostingLocation.EU:
@@ -80,8 +91,7 @@ class AIModel(Entity):
 
         # Check if tenant credentials are missing
         if get_settings().tenant_credentials_enabled:
-            # Use family value as provider name (claude → anthropic is special case)
-            provider = "anthropic" if self.family == ModelFamily.CLAUDE else self.family.value
+            provider = self.get_credential_provider_name()
             if not self.user.tenant or not self.user.tenant.api_credentials:
                 return "credentials"
             if provider not in self.user.tenant.api_credentials:

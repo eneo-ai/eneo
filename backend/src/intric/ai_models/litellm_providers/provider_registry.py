@@ -22,6 +22,38 @@ class LiteLLMProviderRegistry:
         return cls._default_provider
     
     @classmethod
+    def detect_provider_from_model_name(cls, litellm_model_name: Optional[str]) -> str:
+        """
+        Detect provider from litellm model name.
+
+        Args:
+            litellm_model_name: The LiteLLM model name (e.g., 'azure/gpt-4', 'gdm/gemma3-27b-it')
+
+        Returns:
+            Provider name (azure, anthropic, berget, gdm, mistral, ovhcloud, vllm, openai)
+        """
+        if not litellm_model_name:
+            return "openai"  # Default
+
+        if litellm_model_name.startswith("azure/"):
+            return "azure"
+        elif litellm_model_name.startswith("anthropic/"):
+            return "anthropic"
+        elif litellm_model_name.startswith("berget/"):
+            return "berget"
+        elif litellm_model_name.startswith("gdm/"):
+            return "gdm"
+        elif litellm_model_name.startswith("mistral/"):
+            return "mistral"
+        elif litellm_model_name.startswith("ovhcloud/"):
+            return "ovhcloud"
+        elif litellm_model_name.startswith("vllm/"):
+            return "vllm"
+        else:
+            # Default to OpenAI for unprefixed models
+            return "openai"
+
+    @classmethod
     def get_provider_for_model(cls, litellm_model_name: Optional[str]) -> BaseLiteLLMProvider:
         """
         Get provider by examining litellm_model_name prefix.
