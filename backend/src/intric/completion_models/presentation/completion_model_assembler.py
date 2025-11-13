@@ -37,6 +37,7 @@ class CompletionModelAssembler:
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
             is_locked=completion_model.is_locked,
+            lock_reason=completion_model.lock_reason,
             reasoning=completion_model.reasoning,
             base_url=completion_model.base_url,
             security_classification=SecurityClassificationPublic.from_domain(

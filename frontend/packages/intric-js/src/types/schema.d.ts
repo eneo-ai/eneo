@@ -1664,6 +1664,75 @@ export interface paths {
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
+  "/api/v1/sysadmin/completion-models/create": {
+    /**
+     * Create Completion Model
+     * @description Create a new completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}/metadata": {
+    /**
+     * Update Completion Model Metadata
+     * @description Update completion model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}": {
+    /**
+     * Delete Completion Model
+     * @description Delete a completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     * Set force=true to delete even if model is in use (may break references).
+     */
+    delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
+  };
+  "/api/v1/sysadmin/embedding-models/create": {
+    /**
+     * Create Embedding Model
+     * @description Create a new embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}/metadata": {
+    /**
+     * Update Embedding Model Metadata
+     * @description Update embedding model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}": {
+    /**
+     * Delete Embedding Model
+     * @description Delete an embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     */
+    delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     /**
      * Set tenant API credential
@@ -2870,6 +2939,39 @@ export interface components {
        */
       is_org_default?: boolean;
     };
+    /** CompletionModelCreate */
+    CompletionModelCreate: {
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      family: components["schemas"]["ModelFamily"];
+      /** Token Limit */
+      token_limit: number;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision: boolean;
+      /** Reasoning */
+      reasoning: boolean;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
     /** CompletionModelPublic */
     CompletionModelPublic: {
       /** Created At */
@@ -2931,6 +3033,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** CompletionModelPublicAppTemplate */
@@ -3010,6 +3114,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -3415,6 +3521,31 @@ export interface components {
       /** Success */
       success: boolean;
     };
+    /** EmbeddingModelCreate */
+    EmbeddingModelCreate: {
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
     /**
      * EmbeddingModelFamily
      * @enum {string}
@@ -3498,6 +3629,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -3553,6 +3686,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
     };
     /** EmbeddingModelSecurityStatus */
     EmbeddingModelSecurityStatus: {
@@ -3593,6 +3728,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -3601,6 +3738,40 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
+    };
+    /** EmbeddingModelSparse */
+    EmbeddingModelSparse: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -5123,6 +5294,19 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[PredefinedRolePublic] */
+    PaginatedResponse_PredefinedRolePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PredefinedRolePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -5130,6 +5314,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[RolePublic] */
+    PaginatedResponse_RolePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RolePublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -5404,6 +5601,68 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
+    /** PartialCompletionModelUpdate */
+    PartialCompletionModelUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Nickname */
+      nickname?: string | null;
+      family?: components["schemas"]["ModelFamily"] | null;
+      /** Token Limit */
+      token_limit?: number | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision?: boolean | null;
+      /** Reasoning */
+      reasoning?: boolean | null;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
+    /** PartialEmbeddingModelUpdate */
+    PartialEmbeddingModelUpdate: {
+      /** Name */
+      name?: string | null;
+      family?: components["schemas"]["EmbeddingModelFamily"] | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
       predefined_role?: components["schemas"]["ModelId"] | null;
@@ -5460,21 +5719,11 @@ export interface components {
       | "admin"
       | "websites"
       | "integration_knowledge_list";
-    /** PredefinedRoleInDB */
-    PredefinedRoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
+    /** PermissionPublic */
+    PermissionPublic: {
+      name: components["schemas"]["Permission"];
+      /** Description */
+      description: string;
     };
     /** PredefinedRoleInDB */
     PredefinedRoleInDB: {
@@ -5625,26 +5874,12 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
+    /** RoleCreateRequest */
+    RoleCreateRequest: {
       /** Name */
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
     };
     /** RoleInDB */
     RoleInDB: {
@@ -5682,6 +5917,18 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+    };
+    /** RoleUpdateRequest */
+    RoleUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Permissions */
+      permissions?: components["schemas"]["Permission"][] | null;
+    };
+    /** RolesPaginatedResponse */
+    RolesPaginatedResponse: {
+      roles: components["schemas"]["PaginatedResponse_RolePublic_"];
+      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -6188,6 +6435,11 @@ export interface components {
        * @default false
        */
       using_templates?: boolean;
+      /**
+       * Tenant Credentials Enabled
+       * @default false
+       */
+      tenant_credentials_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -6867,6 +7119,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6912,6 +7166,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -8760,8 +9016,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -9371,6 +9629,8 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9672,6 +9932,8 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -14409,8 +14671,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -16110,6 +16374,285 @@ export interface operations {
       500: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Completion Model
+   * @description Create a new completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+   */
+  create_completion_model_api_v1_sysadmin_completion_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Completion Model Metadata
+   * @description Update completion model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Completion Model
+   * @description Delete a completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   * Set force=true to delete even if model is in use (may break references).
+   */
+  delete_completion_model_api_v1_sysadmin_completion_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Embedding Model
+   * @description Create a new embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+   */
+  create_embedding_model_api_v1_sysadmin_embedding_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Embedding Model Metadata
+   * @description Update embedding model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Embedding Model
+   * @description Delete an embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   */
+  delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
