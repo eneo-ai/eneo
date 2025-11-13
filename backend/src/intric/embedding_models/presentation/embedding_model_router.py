@@ -8,6 +8,7 @@ from intric.embedding_models.presentation.embedding_model_models import (
 )
 from intric.main.container.container import Container
 from intric.main.models import PaginatedResponse
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
@@ -58,8 +59,12 @@ async def update_embedding_model(
     service = container.embedding_model_crud_service()
     user = container.user()
 
-    # Get old state for change tracking
-    old_model = await service.get_embedding_model(id)
+    # Validate admin permissions first
+    validate_permission(user, Permission.ADMIN)
+
+    # Get old state for change tracking (bypass access check since admin is already validated)
+    embedding_model_repo = container.embedding_model_repo2()
+    old_model = await embedding_model_repo.one(model_id=id)
 
     # Update model
     model = await service.update_embedding_model(
