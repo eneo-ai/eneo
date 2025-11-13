@@ -67,7 +67,9 @@ class AuditLogRepository(ABC):
         user_id: UUID,
     ) -> int:
         """
-        Soft delete all logs for a user (GDPR erasure).
+        Permanently delete all logs for a user (GDPR Article 17 - Right to Erasure).
+
+        This is a HARD delete - logs are permanently removed and cannot be recovered.
 
         Returns:
             Number of logs deleted
@@ -81,7 +83,10 @@ class AuditLogRepository(ABC):
         retention_days: int,
     ) -> int:
         """
-        Soft delete logs older than retention period.
+        Permanently delete logs older than retention period.
+
+        This is a HARD delete - logs are permanently removed and cannot be recovered.
+        Ensures compliance with data retention regulations.
 
         Returns:
             Number of logs deleted
