@@ -66,15 +66,6 @@ class AIModel(Entity):
             if Modules.SWE_HOSTING not in self.user.modules:
                 return True
 
-        # Check if tenant credentials are missing when TENANT_CREDENTIALS_ENABLED=true
-        if get_settings().tenant_credentials_enabled:
-            # Use family value as provider name (claude → anthropic is special case)
-            provider = "anthropic" if self.family == ModelFamily.CLAUDE else self.family.value
-            if not self.user.tenant or not self.user.tenant.api_credentials:
-                return True
-            if provider not in self.user.tenant.api_credentials:
-                return True
-
         return False
 
     @property
