@@ -58,14 +58,16 @@ async def update_completion_model(
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
     from intric.main.models import NOT_PROVIDED
-
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
     user = container.user()
 
-    # Get old state for change tracking
-    old_model = await service.get_completion_model(id)
+    # Validate admin permissions first
+    validate_permission(user, Permission.ADMIN)
 
+    # Get old state for change tracking (bypass access check since admin is already validated)
+    completion_model_repo = container.completion_model_repo2()
+    old_model = await completion_model_repo.one(model_id=id)
     # Update model
     completion_model = await service.update_completion_model(
         model_id=id,
