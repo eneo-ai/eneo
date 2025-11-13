@@ -35,23 +35,14 @@ class LiteLLMProviderRegistry:
         if not litellm_model_name:
             return "openai"  # Default
 
-        if litellm_model_name.startswith("azure/"):
-            return "azure"
-        elif litellm_model_name.startswith("anthropic/"):
-            return "anthropic"
-        elif litellm_model_name.startswith("berget/"):
-            return "berget"
-        elif litellm_model_name.startswith("gdm/"):
-            return "gdm"
-        elif litellm_model_name.startswith("mistral/"):
-            return "mistral"
-        elif litellm_model_name.startswith("ovhcloud/"):
-            return "ovhcloud"
-        elif litellm_model_name.startswith("vllm/"):
-            return "vllm"
-        else:
-            # Default to OpenAI for unprefixed models
-            return "openai"
+        # If the model name has a "/" prefix, extract the provider from it
+        # Examples: "azure/gpt-4" → "azure", "gdm/gemma3-27b-it" → "gdm"
+        if "/" in litellm_model_name:
+            provider = litellm_model_name.split("/")[0]
+            return provider.lower()
+
+        # Default to OpenAI for unprefixed models (e.g., "gpt-4", "gpt-3.5-turbo")
+        return "openai"
 
     @classmethod
     def get_provider_for_model(cls, litellm_model_name: Optional[str]) -> BaseLiteLLMProvider:
