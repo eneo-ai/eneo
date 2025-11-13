@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from intric.main.container.container import Container
 from intric.main.models import PaginatedResponse
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.transcription_models.presentation.transcription_model_models import (
@@ -49,8 +50,12 @@ async def update_transcription_model(
     service = container.transcription_model_crud_service()
     user = container.user()
 
-    # Get old state for change tracking
-    old_model = await service.get_transcription_model(id)
+    # Validate admin permissions first
+    validate_permission(user, Permission.ADMIN)
+
+    # Get old state for change tracking (bypass access check since admin is already validated)
+    transcription_model_repo = container.transcription_model_repo()
+    old_model = await transcription_model_repo.one(model_id=id)
 
     # Update model
     transcription_model = await service.update_transcription_model(
