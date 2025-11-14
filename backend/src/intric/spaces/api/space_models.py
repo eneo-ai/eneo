@@ -104,6 +104,19 @@ class UpdateSpaceRequest(BaseModel):
         ),
     )
 
+    data_retention_days: Union[int, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        ge=1,
+        le=2555,
+        description=(
+            "Number of days to retain conversation history for this space. "
+            "Applies to all assistants and apps in the space that don't have "
+            "their own retention policy. Set to null to disable space-level retention. "
+            "Omit to keep the current retention policy unchanged. "
+            "Valid range: 1-2555 days (1 day to 7 years)."
+        ),
+    )
+
 
 class UpdateSpaceDryRunResponse(BaseModel):
     assistants: list[AssistantSparse]
@@ -134,7 +147,8 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     name: str
     description: Optional[str]
     personal: bool
-    organization: bool 
+    organization: bool
+    data_retention_days: Optional[int] = None 
 
 
 class SpaceDashboard(SpaceSparse):

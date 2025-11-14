@@ -1,6 +1,6 @@
 """Database table for audit retention policies."""
 
-from sqlalchemy import Column, Integer, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, Integer, ForeignKey, TIMESTAMP, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 
 from intric.database.tables.base_class import TimestampMixin, BaseWithTableName
@@ -19,8 +19,12 @@ class AuditRetentionPolicy(TimestampMixin, BaseWithTableName):
         nullable=False,
     )
 
-    # Retention Configuration
+    # Audit Log Retention Configuration
     retention_days = Column(Integer, nullable=False, default=365)
+
+    # Conversation History Retention Configuration
+    conversation_retention_enabled = Column(Boolean, nullable=False, default=False)
+    conversation_retention_days = Column(Integer, nullable=True)
 
     # Purge Tracking
     last_purge_at = Column(TIMESTAMP(timezone=True), nullable=True)
