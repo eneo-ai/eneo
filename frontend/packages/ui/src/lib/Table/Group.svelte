@@ -85,16 +85,19 @@
       {#if title}
         <tr>
           <td colspan="99" class={tableCell({ groupHeader: true })}>
-            <Button
-              on:click={() => ($open = !$open)}
-              padding="icon-leading"
-              class="font-mono font-medium"
-            >
-              <div class="flex w-full gap-2">
-                <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
-                <span>{title}</span>
-              </div>
-            </Button>
+            <div class="flex w-full items-center justify-between">
+              <Button
+                on:click={() => ($open = !$open)}
+                padding="icon-leading"
+                class="font-mono font-medium"
+              >
+                <div class="flex items-center gap-2">
+                  <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+                  <span>{title}</span>
+                </div>
+              </Button>
+              <slot name="title-suffix" />
+            </div>
           </td>
         </tr>
       {/if}
@@ -130,17 +133,18 @@
     </tbody>
   {:else}
     {#if title}
-      <div class="!border-b-default flex border-b pt-4 pb-2 !pl-2.5">
+      <div class="!border-b-default flex w-full items-center justify-between border-b pt-4 pb-2 !pl-2.5 pr-4">
         <Button
           on:click={() => ($open = !$open)}
           padding="icon-leading"
           class="font-mono font-medium"
         >
-          <div class="flex w-full gap-2">
+          <div class="flex items-center gap-2">
             <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
             <span>{title}</span>
           </div>
         </Button>
+        <slot name="title-suffix" />
       </div>
     {/if}
     {#if $open}

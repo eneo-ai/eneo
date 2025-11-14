@@ -16,9 +16,19 @@
   import ModelActions from "./ModelActions.svelte";
   import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
+  import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { browser } from "$app/environment";
 
   export let completionModels: CompletionModel[];
+  export let credentials:
+    | {
+        provider: string;
+        masked_key: string;
+        config: Record<string, any>;
+      }[]
+    | undefined = undefined;
+  export let tenantCredentialsEnabled: boolean = false;
   const table = Table.createWithResource(completionModels);
 
   const viewModel = table.createViewModel([
@@ -111,22 +121,47 @@
     };
   }
 
-  function listOrgs(models: CompletionModel[]) {
+  function listOrgs(models: CompletionModel[], creds: typeof credentials, enabled: boolean) {
     const uniqueOrgs = new Set<string>();
 
+    // Add providers from models
     for (const model of models) {
       if (model.org) uniqueOrgs.add(model.org);
+    }
+
+    // If tenant credentials enabled, also add providers from credentials (even if no models)
+    if (enabled && creds) {
+      for (const cred of creds) {
+        uniqueOrgs.add(cred.provider);
+      }
     }
 
     return uniqueOrgs;
   }
 
-  $: uniqueOrgs = listOrgs(completionModels);
+  function getCredentialForProvider(provider: string) {
+    if (!credentials) return undefined;
+    // Case-insensitive provider matching
+    const cred = credentials.find((c) => c.provider.toLowerCase() === provider.toLowerCase());
+    if (!cred) return undefined;
+    return {
+      masked_key: cred.masked_key,
+      config: cred.config
+    };
+  }
+
+  $: uniqueOrgs = listOrgs(completionModels, credentials, tenantCredentialsEnabled);
   $: table.update(completionModels);
 </script>
 
 <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
   {#each uniqueOrgs.values() as org (org)}
-    <Table.Group filterFn={createOrgFilter(org)} title={org} />
+    <Table.Group filterFn={createOrgFilter(org)} title={org}>
+      <svelte:fragment slot="title-suffix">
+        {#if browser && tenantCredentialsEnabled}
+          <ProviderCredentialIcon provider={org} credential={getCredentialForProvider(org)} />
+        {/if}
+      </svelte:fragment>
+    </Table.Group>
   {/each}
 </Table.Root>

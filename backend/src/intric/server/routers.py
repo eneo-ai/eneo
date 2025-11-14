@@ -68,6 +68,9 @@ from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.tenants.presentation.tenant_credentials_router import (
     router as tenant_credentials_router,
 )
+from intric.tenants.presentation.tenant_self_credentials_router import (
+    router as tenant_self_credentials_router,
+)
 from intric.tenants.presentation.tenant_federation_router import (
     router as tenant_federation_router,
 )
@@ -90,6 +93,7 @@ router.include_router(services_router, prefix="/services", tags=["services"])
 router.include_router(logging_router, prefix="/logging", tags=["logging"])
 router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
+router.include_router(tenant_self_credentials_router, prefix="/admin", tags=["admin"])
 router.include_router(assistant_template_admin_router, prefix="", tags=["admin-templates"])
 router.include_router(app_template_admin_router, prefix="", tags=["admin-templates"])
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])

@@ -32,7 +32,11 @@
   </Page.Header>
   <Page.Main>
     <Page.Tab id="completion_models">
-      <CompletionModelsTable completionModels={data.models.completionModels} />
+      <CompletionModelsTable
+        completionModels={data.models.completionModels}
+        credentials={data.credentials}
+        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
+      />
     </Page.Tab>
     <Page.Tab id="embedding_models">
       <EmbeddingModelsTable embeddingModels={data.models.embeddingModels} />
