@@ -5907,6 +5907,11 @@ export interface components {
        * @description ID of the security classification to apply to this space. Set to null to remove the security classification. Omit to keep the current security classification unchanged.
        */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Data Retention Days
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       */
+      data_retention_days?: number | null;
     };
     /**
      * Permission
@@ -6615,6 +6620,8 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
       applications: components["schemas"]["Applications"];
     };
     /** SpaceMember */
@@ -6661,6 +6668,8 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
       applications: components["schemas"]["Applications"];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
@@ -6710,6 +6719,8 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
     };
     /**
      * StateFilter

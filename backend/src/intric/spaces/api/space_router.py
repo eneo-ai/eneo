@@ -136,7 +136,7 @@ async def update_space(
 
         return [model.id for model in models]
 
-    # Get original request dict to check if security_classification_id was actually provided
+    # Get original request dict to check if fields were actually provided
     # (partial_model may have turned NOT_PROVIDED into None)
     original_request = update_space_req.model_dump(exclude_unset=True)
 
@@ -144,6 +144,11 @@ async def update_space(
         security_classification = NOT_PROVIDED
     else:
         security_classification = update_space_req.security_classification
+
+    if "data_retention_days" not in original_request:
+        data_retention_days = NOT_PROVIDED
+    else:
+        data_retention_days = update_space_req.data_retention_days
 
     space = await service.update_space(
         id=id,
@@ -153,6 +158,7 @@ async def update_space(
         completion_model_ids=_get_model_ids_or_none(update_space_req.completion_models),
         transcription_model_ids=_get_model_ids_or_none(update_space_req.transcription_models),
         security_classification=security_classification,
+        data_retention_days=data_retention_days,
     )
 
     # Track changes
@@ -161,6 +167,11 @@ async def update_space(
         changes["name"] = {"old": old_space.name, "new": update_space_req.name}
     if update_space_req.description is not None:
         changes["description"] = {"old": old_space.description, "new": update_space_req.description}
+    if data_retention_days is not NOT_PROVIDED and data_retention_days != old_space.data_retention_days:
+        changes["data_retention_days"] = {
+            "old": old_space.data_retention_days,
+            "new": data_retention_days
+        }
 
     # Audit logging
     session = container.session()
