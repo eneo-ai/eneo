@@ -127,8 +127,15 @@ async def update_website(
     website_update: WebsiteUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.website_crud_service()
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    service = container.website_crud_service()
+    user = container.user()
+
+    # Update website
     website = await service.update_website(
         id=id,
         url=website_update.url,
@@ -140,13 +147,77 @@ async def update_website(
         http_auth_password=website_update.http_auth_password,
     )
 
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_UPDATED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=id,
+        description=f"Updated website '{website.url}'",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "website_id": str(id),
+                "url": website.url,
+                "name": website.name,
+            },
+        },
+    )
+
     return WebsitePublic.from_domain(website)
 
 
 @router.delete("/{id}/", status_code=200, responses=responses.get_responses([404]))
 async def delete_website(id: UUID, container: Container = Depends(get_container(with_user=True))):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.website_crud_service()
+    user = container.user()
+
+    # Get website info before deletion
+    website = await service.get_website(id)
+
+    # Delete website
     await service.delete_website(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_DELETED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=id,
+        description=f"Deleted website '{website.url}'",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "website_id": str(id),
+                "url": website.url,
+                "name": website.name,
+            },
+        },
+    )
+
     return {"id": id, "deletion_info": {"success": True}}
 
 @router.post(
@@ -196,8 +267,45 @@ async def transfer_website_to_space(
     transfer_req: TransferRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    # Transfer website (do this FIRST to avoid DI issues)
     service = container.resource_mover_service()
     await service.link_website_to_space(website_id=id, space_id=transfer_req.target_space_id)
+
+    # Get user and website info AFTER transfer for audit logging
+    user = container.user()
+    website_service = container.website_crud_service()
+    website = await website_service.get_website(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_TRANSFERRED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=id,
+        description="Transferred website to new space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "website_id": str(id),
+                "url": website.url,
+                "target_space_id": str(transfer_req.target_space_id),
+            },
+        },
+    )
 
 
 @router.get(

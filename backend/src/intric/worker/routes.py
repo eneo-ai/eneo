@@ -9,6 +9,7 @@ from intric.worker.usage_stats_tasks import (
     recalculate_all_tenants_usage_stats,
     recalculate_tenant_usage_stats,
 )
+from intric.audit.application.audit_worker_task import log_audit_event_task
 
 worker = Worker()
 
@@ -83,3 +84,96 @@ async def recalculate_tenant_usage_stats_job(job_id: str, params: dict, containe
 async def recalculate_usage_stats(container: Container):
     """Nightly recalculation of all tenant usage statistics"""
     return await recalculate_all_tenants_usage_stats(container=container)
+
+
+@worker.function(with_user=False)
+async def log_audit_event(job_id: str, params: dict, container: Container):
+    """Worker function for async audit logging.
+
+    Args:
+        job_id: ARQ job ID
+        params: Audit log parameters (dict)
+        container: Dependency injection container
+
+    Returns:
+        Dictionary with audit_log_id
+    """
+    session = container.session()
+    return await log_audit_event_task(job_id=job_id, params=params, session=session)
+
+
+@worker.cron_job(hour=2, minute=0)  # Daily at 02:00 UTC
+async def purge_old_audit_logs(container: Container):
+    """
+    Daily cron job to purge old audit logs based on retention policies.
+
+    Runs at 02:00 UTC (3:00 AM Swedish time) to minimize user impact.
+
+    For each tenant:
+    - Retrieves retention policy (default: 365 days)
+    - PERMANENTLY DELETES logs older than retention period (hard delete)
+    - Updates purge statistics
+
+    Note: Deleted logs cannot be recovered. This ensures compliance with
+    data retention regulations that require true deletion.
+
+    Returns:
+        Dictionary with purge statistics per tenant
+    """
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.application.retention_service import RetentionService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from intric.main.logging import get_logger
+
+    logger = get_logger(__name__)
+    session = container.session()
+
+    # Worker sessions need explicit transaction
+    async with session.begin():
+        retention_service = RetentionService(session)
+        purge_stats = await retention_service.purge_all_tenants()
+
+        total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
+
+        # Audit logging for retention policy application (one log per tenant)
+        audit_repo = AuditLogRepositoryImpl(session)
+        audit_service = AuditService(audit_repo)
+
+        for tenant_id_str, stats in purge_stats.items():
+            from uuid import UUID
+
+            tenant_id = UUID(tenant_id_str)
+
+            # Only log if logs were actually purged
+            if stats["purged_count"] > 0:
+                await audit_service.log_async(
+                    tenant_id=tenant_id,
+                    actor_id=tenant_id,  # System actor
+                    actor_type=ActorType.SYSTEM,
+                    action=ActionType.RETENTION_POLICY_APPLIED,
+                    entity_type=EntityType.TENANT_SETTINGS,
+                    entity_id=tenant_id,
+                    description=f"Retention policy purged {stats['purged_count']} audit logs",
+                    metadata={
+                        "actor": {"type": "system", "via": "cron_job"},
+                        "target": {
+                            "tenant_id": tenant_id_str,
+                            "purged_count": stats["purged_count"],
+                            "retention_days": stats.get("retention_days", 365),
+                        },
+                    },
+                )
+
+        logger.info(
+            "Audit log retention purge completed",
+            extra={
+                "total_tenants": len(purge_stats),
+                "total_purged": total_purged,
+                "purge_stats": purge_stats,
+            },
+        )
+
+        return purge_stats

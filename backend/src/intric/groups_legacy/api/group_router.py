@@ -88,8 +88,45 @@ async def update_group(
     group: CollectionUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.collection_crud_service()
+    current_user = container.user()
+
+    # Update collection
     collection_updated = await service.update_collection(collection_id=id, name=group.name)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.COLLECTION_UPDATED,
+        entity_type=EntityType.COLLECTION,
+        entity_id=collection_updated.id,
+        description=f"Updated collection '{collection_updated.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "collection_id": str(collection_updated.id),
+                "collection_name": collection_updated.name,
+                "space_id": str(collection_updated.space_id),
+            },
+            "changes": {
+                "name": group.name,
+            },
+        },
+    )
 
     return CollectionPublic.from_domain(collection=collection_updated)
 
@@ -101,8 +138,46 @@ async def update_group(
 async def delete_group_by_id(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    # Get collection info BEFORE deletion
+    collection_service = container.collection_crud_service()
+    current_user = container.user()
+    collection = await collection_service.get_collection(id)
+
+    # Delete collection
     service = container.group_service()
     await service.delete_group(group_id=id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.COLLECTION_DELETED,
+        entity_type=EntityType.COLLECTION,
+        entity_id=id,
+        description=f"Deleted collection '{collection.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "collection_id": str(id),
+                "collection_name": collection.name,
+                "space_id": str(collection.space_id),
+            },
+        },
+    )
+
     return JSONResponse({"id": str(id), "deletion_info": {"success": True}}, status_code=200)
 
 @router.post(
@@ -148,6 +223,36 @@ async def add_info_blobs(
         info_blob_updated = await service.update_info_blob_size(info_blob.id)
         info_blobs_updated.append(info_blob_updated)
 
+    # Audit logging for info blob additions
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=id,  # Group ID
+        description=f"Added {len(info_blobs_updated)} info blobs to collection/group",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "group_id": str(id),
+                "blobs_count": len(info_blobs_updated),
+            },
+        },
+    )
+
     info_blobs_public = [
         info_blob_protocol.to_info_blob_public(blob) for blob in info_blobs_updated
     ]
@@ -185,12 +290,46 @@ async def upload_file(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Starts a job, use the job operations to keep track of this job"""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     group_service = container.group_service()
+    current_user = container.user()
 
-    return await group_service.add_file_to_group(
+    # Upload file to group
+    result = await group_service.add_file_to_group(
         group_id=id, file=file.file, mimetype=file.content_type, filename=file.filename
     )
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=id,  # Use group ID as entity
+        description=f"Uploaded file '{file.filename}' to collection/group",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "group_id": str(id),
+                "filename": file.filename,
+                "content_type": file.content_type,
+            },
+        },
+    )
+
+    return result
 
 
 @router.post(

@@ -54,14 +54,46 @@ async def create_assistant(
     assistant: AssistantCreatePublic,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     assistant_service = container.assistant_service()
     assembler = container.assistant_assembler()
+    current_user = container.user()
 
-    assistant, permissions = await assistant_service.create_assistant(
+    # Create assistant
+    created_assistant, permissions = await assistant_service.create_assistant(
         name=assistant.name, space_id=assistant.space_id
     )
 
-    return assembler.from_assistant_to_model(assistant, permissions=permissions)
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ASSISTANT_CREATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=created_assistant.id,
+        description=f"Created assistant '{created_assistant.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(created_assistant.id),
+                "name": created_assistant.name,
+            },
+        },
+    )
+
+    return assembler.from_assistant_to_model(created_assistant, permissions=permissions)
 
 
 @router.get("/", response_model=PaginatedResponse[AssistantPublic])
@@ -113,8 +145,17 @@ async def update_assistant(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Omitted fields are not updated"""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.assistant_service()
     assembler = container.assistant_assembler()
+    current_user = container.user()
+
+    # Get old state for change tracking
+    old_assistant, _ = await service.get_assistant(assistant_id=id)
 
     attachment_ids = None
     if assistant.attachments is not None:
@@ -153,7 +194,7 @@ async def update_assistant(
     if "metadata_json" not in request_dict:
         metadata_json = NOT_PROVIDED
 
-    assistant, permissions = await service.update_assistant(
+    updated_assistant, permissions = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
         prompt=assistant.prompt,
@@ -170,7 +211,40 @@ async def update_assistant(
         metadata_json=metadata_json,
     )
 
-    return assembler.from_assistant_to_model(assistant, permissions=permissions)
+    # Track changes
+    changes = {}
+    if assistant.name and assistant.name != old_assistant.name:
+        changes["name"] = {"old": old_assistant.name, "new": assistant.name}
+    if assistant.prompt and assistant.prompt != old_assistant.prompt:
+        changes["prompt"] = {"old": "...", "new": "..."}  # Don't log full prompts
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Updated assistant '{updated_assistant.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(updated_assistant.id),
+                "name": updated_assistant.name,
+            },
+            "changes": changes,
+        },
+    )
+
+    return assembler.from_assistant_to_model(updated_assistant, permissions=permissions)
 
 
 @router.delete(
@@ -182,8 +256,44 @@ async def delete_assistant(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.assistant_service()
+    current_user = container.user()
+
+    # Get assistant details BEFORE deletion
+    assistant, _ = await service.get_assistant(id)
+
+    # Delete assistant
     await service.delete_assistant(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ASSISTANT_DELETED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Deleted assistant '{assistant.name}'",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "id": str(assistant.id),
+                "name": assistant.name,
+            },
+        },
+    )
 
 
 @router.post(
@@ -199,7 +309,13 @@ async def ask_assistant(
     db_session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.assistant_service()
+    user = container.user()
 
     file_ids = [file.id for file in ask.files]
     tool_assistant_id = None
@@ -212,6 +328,35 @@ async def ask_assistant(
         stream=ask.stream,
         tool_assistant_id=tool_assistant_id,
         version=version,
+    )
+
+    # Audit logging for new session started
+    session_id = response.session_id
+    assistant, _ = await service.get_assistant(id)
+
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SESSION_STARTED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description="Started new session with assistant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "assistant_id": str(id),
+                "assistant_name": assistant.name,
+                "session_id": str(session_id),
+            },
+        },
     )
 
     return await assistant_protocol.to_response(
@@ -277,8 +422,46 @@ async def delete_assistant_session(
     session_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     session_service = container.session_service()
+    assistant_service = container.assistant_service()
+    user = container.user()
+
+    # Delete session
     session = await session_service.delete(session_id, assistant_id=id)
+
+    # Get assistant info for audit log
+    assistant, _ = await assistant_service.get_assistant(id)
+
+    # Audit logging for session ended
+    db_session = container.session()
+    audit_repo = AuditLogRepositoryImpl(db_session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.SESSION_ENDED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description="Ended session with assistant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "assistant_id": str(id),
+                "assistant_name": assistant.name,
+                "session_id": str(session_id),
+            },
+        },
+    )
 
     return to_session_public(session)
 
@@ -346,8 +529,48 @@ async def generate_read_only_assistant_key(
 
     This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
     and `POST /api/v1/assistants/{id}/sessions/{session_id}/`."""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.assistant_service()
-    return await service.generate_api_key(id)
+    user = container.user()
+
+    # Generate API key
+    api_key = await service.generate_api_key(id)
+
+    # Get assistant info for audit log
+    assistant, _ = await service.get_assistant(id)
+
+    # Audit logging for API key generation
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.API_KEY_GENERATED,
+        entity_type=EntityType.API_KEY,
+        entity_id=id,  # Use assistant ID as entity ID for assistant API keys
+        description="Generated read-only API key for assistant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "assistant_id": str(id),
+                "assistant_name": assistant.name,
+                "truncated_key": api_key.truncated_key,
+                "key_type": "assistant",
+            },
+        },
+    )
+
+    return api_key
 
 
 @router.post("/{id}/transfer/", status_code=204)
@@ -356,11 +579,49 @@ async def transfer_assistant_to_space(
     transfer_req: TransferApplicationRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+    # Transfer assistant (do this FIRST to avoid DI issues)
     service = container.resource_mover_service()
     await service.move_assistant_to_space(
         assistant_id=id,
         space_id=transfer_req.target_space_id,
         move_resources=transfer_req.move_resources,
+    )
+
+    # Get user and assistant info AFTER transfer for audit logging
+    user = container.user()
+    assistant_service = container.assistant_service()
+    assistant, _ = await assistant_service.get_assistant(id)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.ASSISTANT_TRANSFERRED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description="Transferred assistant to new space",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "assistant_id": str(id),
+                "assistant_name": assistant.name,
+                "target_space_id": str(transfer_req.target_space_id),
+                "move_resources": transfer_req.move_resources,
+            },
+        },
     )
 
 
@@ -389,10 +650,43 @@ async def publish_assistant(
     published: bool,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
     service = container.assistant_service()
     assembler = container.assistant_assembler()
+    user = container.user()
 
+    # Publish/unpublish assistant
     assistant, permissions = await service.publish_assistant(assistant_id=id, publish=published)
+
+    # Audit logging
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.ASSISTANT_PUBLISHED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"{'Published' if published else 'Unpublished'} assistant",
+        metadata={
+            "actor": {
+                "id": str(user.id),
+                "name": user.username,
+                "email": user.email,
+            },
+            "target": {
+                "assistant_id": str(id),
+                "assistant_name": assistant.name,
+                "published": published,
+            },
+        },
+    )
 
     return assembler.from_assistant_to_model(assistant=assistant, permissions=permissions)
 

@@ -661,6 +661,44 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
                     await session.execute(stmt)
 
+            # Audit logging for website crawl
+            from intric.audit.application.audit_service import AuditService
+            from intric.audit.domain.action_types import ActionType
+            from intric.audit.domain.entity_types import EntityType
+            from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+
+            audit_repo = AuditLogRepositoryImpl(session)
+            audit_service = AuditService(audit_repo)
+
+            # Determine actor (crawl is typically triggered by a user or system)
+            # Use website owner or system actor
+            actor_id = website.user_id if hasattr(website, 'user_id') and website.user_id else current_tenant.id
+
+            await audit_service.log_async(
+                tenant_id=current_tenant.id,
+                actor_id=actor_id,
+                action=ActionType.WEBSITE_CRAWLED,
+                entity_type=EntityType.WEBSITE,
+                entity_id=params.website_id,
+                description=f"Website crawled: {website.url} - {'Success' if crawl_successful else 'Failed'}",
+                metadata={
+                    "target": {
+                        "website_id": str(params.website_id),
+                        "url": website.url,
+                        "name": getattr(website, 'name', website.url),
+                    },
+                    "crawl_stats": {
+                        "pages_crawled": num_pages,
+                        "pages_failed": num_failed_pages,
+                        "files_downloaded": num_files,
+                        "files_failed": num_failed_files,
+                        "files_skipped": num_skipped_files,
+                        "blobs_deleted": num_deleted_blobs,
+                        "successful": crawl_successful,
+                    },
+                },
+            )
+
             task_manager.result_location = (
                 f"/api/v1/websites/{params.website_id}/info-blobs/"
             )

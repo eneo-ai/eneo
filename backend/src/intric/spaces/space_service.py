@@ -146,6 +146,7 @@ class SpaceService:
         completion_model_ids: list[UUID] = None,
         transcription_model_ids: list[UUID] = None,
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
+        data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
         space = await self.get_space(id)
         actor = self._get_actor(space)
@@ -201,6 +202,7 @@ class SpaceService:
                 if security_classification is not NOT_PROVIDED
                 else NOT_PROVIDED
             ),
+            data_retention_days=data_retention_days,
         )
 
         return await self.repo.update(space)

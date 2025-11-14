@@ -16,6 +16,7 @@
   import { writable } from "svelte/store";
   import { getIntric } from "$lib/core/Intric.js";
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
+  import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
@@ -77,17 +78,23 @@
         <SpaceStorageOverview></SpaceStorageOverview>
       </Settings.Group>
       {/if}
-      <Settings.Group title={m.advanced_settings()}>
-        {#if data.isSecurityEnabled}
-          <ChangeSecurityClassification
-            classifications={data.classifications}
-            onUpdateDone={async () => {
-              // If the classification was changed we update the models to get their availability
-              models = await intric.models.list({ space: $currentSpace });
-            }}
-          ></ChangeSecurityClassification>
-        {/if}
+      {#if !isOrgSpace}
+        <Settings.Group title={m.security_and_privacy()}>
+          {#if data.isSecurityEnabled}
+            <ChangeSecurityClassification
+              classifications={data.classifications}
+              onUpdateDone={async () => {
+                // If the classification was changed we update the models to get their availability
+                models = await intric.models.list({ space: $currentSpace });
+              }}
+            ></ChangeSecurityClassification>
+          {/if}
 
+          <EditRetentionPolicy />
+        </Settings.Group>
+      {/if}
+
+      <Settings.Group title={m.advanced_settings()}>
         <SelectCompletionModels selectableModels={completionModels}></SelectCompletionModels>
 
         <SelectEmbeddingModels selectableModels={embeddingModels}></SelectEmbeddingModels>
