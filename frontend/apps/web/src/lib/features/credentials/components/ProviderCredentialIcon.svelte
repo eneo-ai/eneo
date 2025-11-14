@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button, Tooltip } from "@intric/ui";
-	import { KeyRound, ShieldCheck, ShieldAlert } from "lucide-svelte";
+	import { IconKey } from "@intric/icons/key";
+	import { IconLockClosed } from "@intric/icons/lock-closed";
 	import { writable } from "svelte/store";
 	import ProviderCredentialDialog from "./ProviderCredentialDialog.svelte";
 
@@ -23,29 +24,20 @@
 	$: tooltipText = isConfigured
 		? `API Key configured: ${credential?.masked_key}\nClick to update`
 		: `No credentials configured\nClick to add`;
-	$: iconClass = isConfigured
-		? "text-green-600 hover:text-green-700 bg-green-50 rounded"
-		: "text-amber-500 hover:text-amber-600";
-
-	// Debug logging
-	$: if (credential) {
-		console.log(`[ProviderCredentialIcon] ${provider}:`, credential);
-	}
 </script>
 
 <div class="inline-flex items-center">
 	<Tooltip text={tooltipText}>
 		<Button
-			variant="ghost"
+			variant="on-fill"
 			padding="icon"
-			size="sm"
 			on:click={openDialog}
-			class="ml-2 h-6 w-6 {iconClass}"
+			class={isConfigured ? "" : "opacity-60"}
 		>
 			{#if isConfigured}
-				<ShieldCheck size={16} class="fill-green-100" />
+				<IconKey />
 			{:else}
-				<ShieldAlert size={16} />
+				<IconLockClosed />
 			{/if}
 		</Button>
 	</Tooltip>

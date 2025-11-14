@@ -18,6 +18,7 @@
 
   export let title: string | undefined | null = undefined;
   export let filterFn: (value: T) => boolean = () => true;
+  export let forceShow: boolean = false; // Show header even when no rows
 
   const open = writable(true);
   // Original is not exposed on the type but present on the store...
@@ -79,7 +80,7 @@
   );
 </script>
 
-{#if $filteredRows.length > 0}
+{#if $filteredRows.length > 0 || forceShow}
   {#if $displayType === "list"}
     <tbody {...$tableBodyAttrs}>
       {#if title}
@@ -101,7 +102,7 @@
           </td>
         </tr>
       {/if}
-      {#if $open}
+      {#if $open && $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
             <tr {...rowAttrs} class="hover:bg-hover-dimmer relative h-16">
@@ -147,7 +148,7 @@
         <slot name="title-suffix" />
       </div>
     {/if}
-    {#if $open}
+    {#if $open && $filteredRows.length > 0}
       <div style="column-gap: {gapX}rem; row-gap: {gapY}rem;" class={cardLayout({ layout })}>
         {#each $filteredRows as row (row.id)}
           {@const cell = getCardCell(row)}
