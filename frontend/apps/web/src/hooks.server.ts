@@ -59,7 +59,24 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
     });
   });
 
-export const handle = sequence(paraglideHandle, authHandle);
+const headerFilterHandle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event);
+
+  // Filter oversized Link header to prevent HAProxy 502 Bad Gateway
+  // HAProxy buffer limit: 16KB-64KB (effective header space = bufsize - maxrewrite)
+  const linkHeader = response.headers.get('link');
+  if (linkHeader && linkHeader.length > 12000) {
+    console.warn(
+      `[Headers] Link header too large (${linkHeader.length} bytes) - removing to prevent HAProxy 502. ` +
+      `Consider disabling modulePreload in vite.config.ts.`
+    );
+    response.headers.delete('link');
+  }
+
+  return response;
+};
+
+export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;
@@ -81,15 +98,39 @@ export const handleError: HandleServerError = async ({ error, status, message })
 };
 
 export const handleFetch: HandleFetch = async ({ request, fetch }) => {
+  const startTime = performance.now();
+
   if (
     env.INTRIC_BACKEND_SERVER_URL &&
     env.INTRIC_BACKEND_URL &&
     request.url.startsWith(env.INTRIC_BACKEND_URL)
   ) {
-    request = new Request(
-      request.url.replace(env.INTRIC_BACKEND_URL, env.INTRIC_BACKEND_SERVER_URL),
-      request
-    );
+    const originalUrl = request.url;
+    const rewrittenUrl = request.url.replace(env.INTRIC_BACKEND_URL, env.INTRIC_BACKEND_SERVER_URL);
+
+    console.log(`[handleFetch] Rewriting backend URL: ${originalUrl} -> ${rewrittenUrl}`);
+
+    request = new Request(rewrittenUrl, request);
+
+    try {
+      const response = await fetch(request);
+      const duration = Math.round(performance.now() - startTime);
+
+      console.log(`[handleFetch] Response: ${response.status} ${response.statusText} (${duration}ms)`);
+
+      if (duration > 5000) {
+        console.warn(`[handleFetch] Slow response: ${duration}ms for ${rewrittenUrl}`);
+      }
+
+      return response;
+    } catch (error) {
+      const duration = Math.round(performance.now() - startTime);
+      console.error(`[handleFetch] Fetch failed after ${duration}ms:`, {
+        url: rewrittenUrl,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
   }
 
   return fetch(request);

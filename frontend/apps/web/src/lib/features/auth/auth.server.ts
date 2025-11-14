@@ -154,3 +154,63 @@ export function decodeState<T extends LoginStateParam | LogoutStateParam>(
   }
   return null;
 }
+
+/**
+ * Extract correlation ID from HTTP response headers.
+ * Normalizes header case sensitivity across different providers.
+ *
+ * @param response - Fetch API Response object
+ * @returns Correlation ID if present, null otherwise
+ */
+export function getCorrelationId(response: Response): string | null {
+  // HTTP headers are case-insensitive, but this ensures consistency
+  return response.headers.get("x-correlation-id");
+}
+
+/**
+ * Check if debug/verbose logging is enabled.
+ * Enabled in development mode or via ENABLE_VERBOSE_FRONTEND_LOGGING environment variable.
+ *
+ * Note: This function is used in .server.ts files (server-side only).
+ * To enable in production: set ENABLE_VERBOSE_FRONTEND_LOGGING=true and restart.
+ *
+ * @returns true if verbose logging should be enabled
+ */
+export function isDebugMode(): boolean {
+  try {
+    // Check development mode first
+    // @ts-ignore - import.meta.env exists in Vite
+    if (import.meta.env?.DEV) return true;
+
+    // Check environment variable (requires server restart to take effect)
+    // Note: This is a server-side function, so we can't import from $env here
+    // without causing circular dependencies. Use process.env directly.
+    if (typeof process !== "undefined" && process.env?.ENABLE_VERBOSE_FRONTEND_LOGGING === "true") {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sanitize HTTP headers for safe logging.
+ * Removes sensitive headers and truncates long values.
+ *
+ * @param headers - Fetch API Headers object
+ * @returns Sanitized header key-value pairs
+ */
+export function sanitizeHeaders(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  const blocked = ["set-cookie", "cookie", "authorization", "proxy-authorization"];
+
+  for (const [k, v] of headers.entries()) {
+    if (blocked.includes(k.toLowerCase())) continue;
+    // Truncate long header values
+    out[k] = v.length > 512 ? v.slice(0, 512) + "..." : v;
+  }
+
+  return out;
+}

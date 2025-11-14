@@ -1760,7 +1760,22 @@ export interface paths {
     get: operations["get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get"];
     /**
      * Set tenant federation config
-     * @description Configure custom identity provider for tenant. System admin only.
+     * @description Configure custom OIDC identity provider for a tenant.
+     *
+     * **What this endpoint does:**
+     * - Validates the IdP's OIDC discovery endpoint
+     * - Encrypts and stores client_secret (Fernet encryption)
+     * - Sets or auto-generates tenant slug (required for frontend login selector)
+     * - Returns the effective slug in the response
+     *
+     * **Field Guide:**
+     * - `provider`: IdP type (e.g., 'entra_id', 'auth0', 'mobilityguard', 'okta')
+     * - `slug`: Optional. Tenant identifier for routing. Auto-generated from tenant name if omitted
+     * - `canonical_public_origin`: Tenant's public URL. Used to construct redirect_uri for IdP
+     * - `discovery_endpoint`: OIDC .well-known/openid-configuration URL from your IdP
+     * - `client_id` & `client_secret`: OAuth credentials from IdP application registration
+     * - `allowed_domains`: Email domain whitelist (e.g., ["sundsvall.se", "ange.se"])
+     * - `redirect_path`: Optional. Callback path (defaults to "/auth/callback")
      */
     put: operations["set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put"];
     /**
@@ -1816,24 +1831,6 @@ export interface paths {
      * @description Returns the complete OpenAPI 3.0 specification for this API. Compatible with WSO2 API Manager.
      */
     get: operations["get_api_documentation_api_v1_api_docs_get"];
-  };
-  "/api/v1/roles/permissions/": {
-    /** Get Permissions */
-    get: operations["get_permissions_api_v1_roles_permissions__get"];
-  };
-  "/api/v1/roles/": {
-    /** Get Roles */
-    get: operations["get_roles_api_v1_roles__get"];
-    /** Create Role */
-    post: operations["create_role_api_v1_roles__post"];
-  };
-  "/api/v1/roles/{role_id}/": {
-    /** Get Role By Id */
-    get: operations["get_role_by_id_api_v1_roles__role_id___get"];
-    /** Update Role */
-    post: operations["update_role_api_v1_roles__role_id___post"];
-    /** Delete Role By Id */
-    delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
   };
   "/api/healthz": {
     /** Get Healthz */
@@ -2835,7 +2832,7 @@ export interface components {
     };
     /**
      * CallbackRequest
-     * @description OIDC callback with authorization code.
+     * @description OIDC callback with authorization code or error from IdP.
      * @example {
      *   "code": "authorization_code_from_idp",
      *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
@@ -2843,11 +2840,15 @@ export interface components {
      */
     CallbackRequest: {
       /** Code */
-      code: string;
+      code?: string | null;
       /** State */
       state: string;
       /** Code Verifier */
       code_verifier?: string | null;
+      /** Error */
+      error?: string | null;
+      /** Error Description */
+      error_description?: string | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -4248,7 +4249,8 @@ export interface components {
      * @description Response with IdP authorization URL.
      * @example {
      *   "authorization_url": "https://idp.example.com/authorize?client_id=abc123&...",
-     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     *   "state": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     *   "tenant_slug": "example-tenant"
      * }
      */
     InitiateAuthResponse: {
@@ -4256,6 +4258,8 @@ export interface components {
       authorization_url: string;
       /** State */
       state: string;
+      /** Tenant Slug */
+      tenant_slug: string;
     };
     /** InputField */
     InputField: {
@@ -5725,22 +5729,6 @@ export interface components {
       /** Description */
       description: string;
     };
-    /** PredefinedRoleInDB */
-    PredefinedRoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-    };
     /** PredefinedRolePublic */
     PredefinedRolePublic: {
       /** Created At */
@@ -5880,27 +5868,6 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-    };
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
     };
     /** RolePublic */
     RolePublic: {
@@ -6366,6 +6333,18 @@ export interface components {
     /**
      * SetFederationRequest
      * @description Request model for setting tenant federation config.
+     * @example {
+     *   "allowed_domains": [
+     *     "sundsvall.se",
+     *     "ange.se"
+     *   ],
+     *   "canonical_public_origin": "https://sundsvall.eneo.se",
+     *   "client_id": "abc123-def456-ghi789",
+     *   "client_secret": "your-secret-value",
+     *   "discovery_endpoint": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration",
+     *   "provider": "entra_id",
+     *   "slug": "sundsvall"
+     * }
      */
     SetFederationRequest: {
       /**
@@ -6390,19 +6369,24 @@ export interface components {
       client_secret: string;
       /**
        * Allowed Domains
-       * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
+       * @description Email domain whitelist for user authentication (e.g., ['sundsvall.se', 'ange.se']). Only users with emails from these domains can log into this tenant. Leave empty to allow all domains (not recommended for production)
        */
       allowed_domains?: string[];
       /**
        * Canonical Public Origin
-       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required for multi-tenant federation to construct redirect_uri
+       * @description Tenant's public URL (e.g., https://sundsvall.eneo.se). Used to construct redirect_uri for IdP. Must match the redirect_uri registered in your IdP application. Required for multi-tenant federation
        */
       canonical_public_origin?: string | null;
       /**
        * Redirect Path
-       * @description Optional custom redirect path starting with /
+       * @description Optional custom callback path (defaults to '/auth/callback'). Most deployments can omit this field and use the default
        */
       redirect_path?: string | null;
+      /**
+       * Slug
+       * @description URL-safe tenant identifier for federation routing (e.g., 'sundsvall'). Required for tenant to appear in login selector. Auto-generated from tenant name if omitted. Must be lowercase alphanumeric + hyphens, max 63 chars.
+       */
+      slug?: string | null;
     };
     /**
      * SetFederationResponse
@@ -6420,6 +6404,11 @@ export interface components {
       masked_secret: string;
       /** Message */
       message: string;
+      /**
+       * Slug
+       * @description Effective slug (custom or auto-generated) for this tenant
+       */
+      slug?: string | null;
     };
     /** SettingsPublic */
     SettingsPublic: {
@@ -16782,7 +16771,22 @@ export interface operations {
   };
   /**
    * Set tenant federation config
-   * @description Configure custom identity provider for tenant. System admin only.
+   * @description Configure custom OIDC identity provider for a tenant.
+   *
+   * **What this endpoint does:**
+   * - Validates the IdP's OIDC discovery endpoint
+   * - Encrypts and stores client_secret (Fernet encryption)
+   * - Sets or auto-generates tenant slug (required for frontend login selector)
+   * - Returns the effective slug in the response
+   *
+   * **Field Guide:**
+   * - `provider`: IdP type (e.g., 'entra_id', 'auth0', 'mobilityguard', 'okta')
+   * - `slug`: Optional. Tenant identifier for routing. Auto-generated from tenant name if omitted
+   * - `canonical_public_origin`: Tenant's public URL. Used to construct redirect_uri for IdP
+   * - `discovery_endpoint`: OIDC .well-known/openid-configuration URL from your IdP
+   * - `client_id` & `client_secret`: OAuth credentials from IdP application registration
+   * - `allowed_domains`: Email domain whitelist (e.g., ["sundsvall.se", "ange.se"])
+   * - `redirect_path`: Optional. Callback path (defaults to "/auth/callback")
    */
   set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
     parameters: {
@@ -17024,145 +17028,6 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-        };
-      };
-    };
-  };
-  /** Get Permissions */
-  get_permissions_api_v1_roles_permissions__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["PermissionPublic"][];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  /** Get Roles */
-  get_roles_api_v1_roles__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolesPaginatedResponse"];
-        };
-      };
-    };
-  };
-  /** Create Role */
-  create_role_api_v1_roles__post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["RoleCreateRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolePublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Get Role By Id */
-  get_role_by_id_api_v1_roles__role_id___get: {
-    parameters: {
-      path: {
-        role_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolePublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Update Role */
-  update_role_api_v1_roles__role_id___post: {
-    parameters: {
-      path: {
-        role_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["RoleUpdateRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolePublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Delete Role By Id */
-  delete_role_by_id_api_v1_roles__role_id___delete: {
-    parameters: {
-      path: {
-        role_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RolePublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

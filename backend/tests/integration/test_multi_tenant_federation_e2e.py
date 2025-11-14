@@ -85,7 +85,8 @@ async def _configure_federation(
     redirect_path: str,
     allowed_domains: list[str],
     client_id: str,
-) -> None:
+    slug: str | None = None,
+) -> dict:
     payload = {
         "provider": "entra",
         "client_id": client_id,
@@ -98,12 +99,15 @@ async def _configure_federation(
         "redirect_path": redirect_path,
         "allowed_domains": allowed_domains,
     }
+    if slug is not None:
+        payload["slug"] = slug
     response = await client.put(
         f"/api/v1/sysadmin/tenants/{tenant_id}/federation",
         json=payload,
         headers={"X-API-Key": super_api_key},
     )
     assert response.status_code == 200, response.text
+    return response.json()
 
 
 async def _initiate(client: AsyncClient, slug: str) -> dict:
@@ -770,3 +774,413 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
     )
 
     assert response.status_code == 200
+
+
+# ============================================================================
+# SLUG FUNCTIONALITY TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federation_with_custom_slug(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+):
+    """Test that custom slug is set when provided in federation config."""
+    # Create tenant
+    tenant = await _create_tenant(client, super_admin_token, "Custom Slug Tenant")
+    tenant_id = tenant["id"]
+
+    # Remove slug to simulate old tenant (using proper session management)
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            await session.execute(
+                sa.update(Tenants.__table__)
+                .where(Tenants.__table__.c.id == UUID(tenant_id))
+                .values(slug=None)
+            )
+
+    # Configure federation WITH custom slug
+    slug_base = "my-custom-slug"
+    discovery_endpoint = f"https://idp.{slug_base}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug_base}.local/authorize"
+    token_endpoint = f"https://idp.{slug_base}.local/token"
+    jwks_uri = f"https://idp.{slug_base}.local/jwks"
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": f"https://idp.{slug_base}.local",
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={},
+    )
+
+    response = await _configure_federation(
+        client,
+        super_admin_token,
+        tenant_id,
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin="https://custom.eneo.se",
+        redirect_path="/auth/callback",
+        allowed_domains=["custom.se"],
+        client_id="custom-client",
+        slug="my-custom-slug",
+    )
+
+    # Verify slug in response
+    assert response["slug"] == "my-custom-slug"
+
+    # Verify tenant appears in /auth/tenants (requires slug)
+    tenants_response = await client.get("/api/v1/auth/tenants")
+    assert tenants_response.status_code == 200
+    tenants_list = tenants_response.json()["tenants"]
+    tenant_slugs = [t["slug"] for t in tenants_list]
+    assert "my-custom-slug" in tenant_slugs
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federation_auto_generates_slug_if_missing(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+):
+    """Test that slug is auto-generated if not provided."""
+    # Create tenant
+    tenant = await _create_tenant(client, super_admin_token, "Auto Gen Tenant")
+    tenant_id = tenant["id"]
+
+    # Remove slug to simulate old tenant (using proper session management)
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            await session.execute(
+                sa.update(Tenants.__table__)
+                .where(Tenants.__table__.c.id == UUID(tenant_id))
+                .values(slug=None)
+            )
+
+    # Configure federation WITHOUT slug
+    slug_base = "autogen"
+    discovery_endpoint = f"https://idp.{slug_base}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug_base}.local/authorize"
+    token_endpoint = f"https://idp.{slug_base}.local/token"
+    jwks_uri = f"https://idp.{slug_base}.local/jwks"
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": f"https://idp.{slug_base}.local",
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={},
+    )
+
+    response = await _configure_federation(
+        client,
+        super_admin_token,
+        tenant_id,
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin="https://autogen.eneo.se",
+        redirect_path="/auth/callback",
+        allowed_domains=["autogen.se"],
+        client_id="autogen-client",
+        # No slug parameter
+    )
+
+    # Verify slug was auto-generated
+    assert response["slug"] is not None
+    assert response["slug"] == "auto-gen-tenant"  # Generated from name
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federation_slug_uniqueness_validation(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+):
+    """Test that duplicate slug returns HTTP 409 Conflict."""
+    # Create two tenants
+    tenant1 = await _create_tenant(client, super_admin_token, "Tenant One")
+    tenant2 = await _create_tenant(client, super_admin_token, "Tenant Two")
+
+    # Set up OIDC mock
+    slug_base = "shared"
+    discovery_endpoint = f"https://idp.{slug_base}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug_base}.local/authorize"
+    token_endpoint = f"https://idp.{slug_base}.local/token"
+    jwks_uri = f"https://idp.{slug_base}.local/jwks"
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": f"https://idp.{slug_base}.local",
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={},
+    )
+
+    # Configure tenant1 with slug "shared-slug"
+    await _configure_federation(
+        client,
+        super_admin_token,
+        tenant1["id"],
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin="https://tenant1.eneo.se",
+        redirect_path="/auth/callback",
+        allowed_domains=["tenant1.se"],
+        client_id="tenant1-client",
+        slug="shared-slug",
+    )
+
+    # Try to configure tenant2 with SAME slug - should fail
+    payload = {
+        "provider": "entra",
+        "client_id": "tenant2-client",
+        "client_secret": "super-secret",
+        "discovery_endpoint": discovery_endpoint,
+        "canonical_public_origin": "https://tenant2.eneo.se",
+        "redirect_path": "/auth/callback",
+        "allowed_domains": ["tenant2.se"],
+        "slug": "shared-slug",  # Duplicate!
+    }
+    response = await client.put(
+        f"/api/v1/sysadmin/tenants/{tenant2['id']}/federation",
+        json=payload,
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    # Verify 409 Conflict
+    assert response.status_code == 409
+    assert "already in use" in response.json()["detail"].lower()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federation_slug_update_is_logged(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    caplog,
+):
+    """Test that slug changes are logged with audit trail."""
+    import logging
+    from intric.tenants.presentation.tenant_federation_router import logger as federation_logger
+
+    # Create tenant
+    tenant = await _create_tenant(client, super_admin_token, "Logged Tenant")
+    tenant_id = tenant["id"]
+
+    # Set up OIDC mock
+    slug_base = "logged"
+    discovery_endpoint = f"https://idp.{slug_base}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug_base}.local/authorize"
+    token_endpoint = f"https://idp.{slug_base}.local/token"
+    jwks_uri = f"https://idp.{slug_base}.local/jwks"
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": f"https://idp.{slug_base}.local",
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={},
+    )
+
+    # Attach caplog handler to capture logs
+    with caplog.at_level(logging.WARNING):
+        federation_logger.addHandler(caplog.handler)
+        try:
+            # First configuration with slug "initial-slug"
+            await _configure_federation(
+                client,
+                super_admin_token,
+                tenant_id,
+                discovery_endpoint=discovery_endpoint,
+                authorization_endpoint=authorization_endpoint,
+                token_endpoint=token_endpoint,
+                jwks_uri=jwks_uri,
+                canonical_origin="https://logged.eneo.se",
+                redirect_path="/auth/callback",
+                allowed_domains=["logged.se"],
+                client_id="logged-client",
+                slug="initial-slug",
+            )
+
+            # Clear logs
+            caplog.clear()
+
+            # Update with new slug "updated-slug"
+            await _configure_federation(
+                client,
+                super_admin_token,
+                tenant_id,
+                discovery_endpoint=discovery_endpoint,
+                authorization_endpoint=authorization_endpoint,
+                token_endpoint=token_endpoint,
+                jwks_uri=jwks_uri,
+                canonical_origin="https://logged.eneo.se",
+                redirect_path="/auth/callback",
+                allowed_domains=["logged.se"],
+                client_id="logged-client",
+                slug="updated-slug",
+            )
+
+            # Verify warning was logged
+            assert any(
+                "slug changed" in record.message.lower() and record.levelname == "WARNING"
+                for record in caplog.records
+            )
+
+            # Verify log contains old and new slug
+            log_messages = " ".join([r.message for r in caplog.records])
+            assert "initial-slug" in log_messages
+            assert "updated-slug" in log_messages
+        finally:
+            federation_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_slug_change_does_not_break_oidc_flow(
+    client: AsyncClient,
+    super_admin_token: str,
+    patch_auth_service_jwt,
+    oidc_mock,
+    jwks_mock,
+    monkeypatch,
+    mock_transcription_models,
+):
+    """Test that changing slug doesn't break OIDC federation flow."""
+    # Create tenant
+    slug = f"oidcflow-{uuid4().hex[:6]}"
+    tenant = await _create_tenant(client, super_admin_token, slug)
+    tenant_id = tenant["id"]
+
+    # Set up OIDC mock with tokens for callback
+    discovery_endpoint = f"https://idp.{slug}.local/.well-known/openid-configuration"
+    authorization_endpoint = f"https://idp.{slug}.local/authorize"
+    token_endpoint = f"https://idp.{slug}.local/token"
+    jwks_uri = f"https://idp.{slug}.local/jwks"
+
+    oidc_mock(
+        discovery={
+            discovery_endpoint: {
+                "issuer": f"https://idp.{slug}.local",
+                "authorization_endpoint": authorization_endpoint,
+                "token_endpoint": token_endpoint,
+                "jwks_uri": jwks_uri,
+            }
+        },
+        tokens={
+            (token_endpoint, "code-oidc-flow"): {
+                "id_token": "id-token-original",
+                "access_token": "access-token-original",
+            },
+            (token_endpoint, "code-oidc-flow-2"): {
+                "id_token": "id-token-changed",
+                "access_token": "access-token-changed",
+            },
+        },
+    )
+    jwks_mock()
+
+    # Patch email extraction
+    def mock_get_payload(*args, **kwargs):
+        return {"email": "user@oidcflow.se", "sub": "user-123", "name": "Test User"}
+
+    monkeypatch.setattr(
+        "intric.authentication.auth_service.AuthService.get_payload_from_openid_jwt",
+        mock_get_payload,
+    )
+
+    # Initial federation config with slug "original"
+    await _configure_federation(
+        client,
+        super_admin_token,
+        tenant_id,
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin="https://oidcflow.eneo.se",
+        redirect_path="/auth/callback",
+        allowed_domains=["oidcflow.se"],
+        client_id="oidc-client",
+        slug="original",
+    )
+
+    # Create user
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant_id,
+        "user@oidcflow.se",
+        "password123",
+    )
+
+    # Initiate OIDC flow with original slug
+    state_payload = await _initiate(client, "original")
+    assert state_payload["tenant_slug"] == "original"
+
+    # NOW CHANGE THE SLUG
+    await _configure_federation(
+        client,
+        super_admin_token,
+        tenant_id,
+        discovery_endpoint=discovery_endpoint,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+        canonical_origin="https://oidcflow.eneo.se",
+        redirect_path="/auth/callback",
+        allowed_domains=["oidcflow.se"],
+        client_id="oidc-client",
+        slug="changed",  # NEW SLUG
+    )
+
+    # Verify old state token still works (state uses tenant_id UUID, not slug)
+    # This demonstrates slug is NOT in OIDC trust chain
+    response = await _callback(
+        client,
+        code="code-oidc-flow",
+        state=state_payload["state"],
+    )
+
+    # OIDC flow should still succeed despite slug change
+    assert response.status_code == 200
+
+    # Verify new slug works for future logins
+    new_state_payload = await _initiate(client, "changed")
+    assert new_state_payload["tenant_slug"] == "changed"
+
+    response2 = await _callback(
+        client,
+        code="code-oidc-flow-2",
+        state=new_state_payload["state"],
+    )
+    assert response2.status_code == 200

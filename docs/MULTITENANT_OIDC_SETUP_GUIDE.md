@@ -1,6 +1,6 @@
 # Multi-Tenant OIDC Setup Guide
 
-**Updated:** 2025-10-18  
+**Updated:** 2025-11-06  
 **Audience:** Platform & support engineers  
 **Goal:** Let each tenant authenticate against its own IdP while keeping a single Eneo deployment.
 
@@ -10,19 +10,32 @@
 - `FEDERATION_PER_TENANT_ENABLED=true` in backend `.env`
 - Super admin API key available (needed for every `/api/v1/sysadmin/...` call)
 - Redis running (recommended for the debug toggle; file fallback works)
-- Each tenant has a slug (`tenant.slug`). Backfill once with:
-  ```bash
-  cd backend
-  uv run python -m intric.cli.backfill_tenant_slugs
-  ```
+
+### What is a Tenant Slug?
+
+A **slug** is a URL-safe tenant identifier (like `sundsvall` or `ange`) that:
+- **Required** for OIDC login to appear in the frontend tenant selector
+- Enables direct tenant access via `?tenant=slug` URLs for SSO bookmarks
+- Auto-generates from tenant name if not provided during federation setup
+- Must be unique, lowercase, alphanumeric + hyphens, max 63 characters
+
+**Examples:**
+- "Municipality of Sundsvall" → auto-generates slug `municipality-of-sundsvall`
+- "Ånge Kommun" → auto-generates slug `nge-kommun` (special characters removed)
+
+**For existing deployments** (one-time backfill if needed):
+```bash
+cd backend
+uv run python -m intric.cli.backfill_tenant_slugs
+```
 
 Terminology
 - **tenant_id** – UUID in admin APIs (e.g., `123e4567-e89b-12d3-a456-426614174000`)
-- **tenant slug** – URL-safe label exposed to the frontend (e.g., `examplea`)
+- **slug** – URL-safe label for tenant routing (e.g., `sundsvall`, `ange`)
 
 ---
 
-## 2. Configure a Tenant IdP (Example: MunicipalityExampleA using Entra ID)
+## 2. Configure a Tenant IdP (Example: Municipality of Sundsvall using Entra ID)
 1. **Create/update federation config**
    ```bash
    curl -X PUT "https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federation" \
@@ -30,17 +43,28 @@ Terminology
      -H "Content-Type: application/json" \
      -d '{
        "provider": "entra_id",
-       "canonical_public_origin": "https://examplea.eneo.local",
+       "slug": "sundsvall",
+       "canonical_public_origin": "https://sundsvall.eneo.se",
        "discovery_endpoint": "https://login.microsoftonline.com/{azure-tenant-id}/v2.0/.well-known/openid-configuration",
        "client_id": "{azure-client-id}",
        "client_secret": "{azure-client-secret}",
-       "allowed_domains": ["examplea.gov"],
-       "scopes": ["openid", "email", "profile"]
+       "allowed_domains": ["sundsvall.se", "sundsvall.gov.se"]
      }'
    ```
 
-2. **Register redirect URI with the IdP** (must match `canonical_public_origin`):  
-   `https://examplea.eneo.local/auth/callback`
+   **Note:** The `slug` field is optional. If omitted, the system auto-generates one from the tenant name. The response includes the effective slug:
+   ```json
+   {
+     "tenant_id": "34fd71ee-0b38-41ee-92c1-4436f637e920",
+     "provider": "entra_id",
+     "slug": "sundsvall",
+     "masked_secret": "...xyz9",
+     "message": "Federation config for entra_id set successfully"
+   }
+   ```
+
+2. **Register redirect URI with the IdP** (must match `canonical_public_origin`):
+   `https://sundsvall.eneo.se/auth/callback`
 
 3. **Smoke test** the configuration (dry run; no user interaction):
    ```bash
@@ -49,7 +73,29 @@ Terminology
      https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federation/test
    ```
 
-Repeat for each tenant (e.g., MunicipalityExampleB with Auth0, MunicipalityExampleC with Okta). Only the IdP-specific fields change.
+Repeat for each tenant (e.g., Ånge with MobilityGuard, another municipality with Entra ID). Only the IdP-specific fields change.
+
+---
+
+## 2.5 Direct Tenant Access
+
+Users can bookmark tenant-specific URLs to skip the tenant selector:
+
+**Format:**
+```
+https://yourdomain.com/?tenant={slug}
+```
+
+**Examples:**
+- Sundsvall: `https://eneo.sundsvall.se/?tenant=sundsvall`
+- Ånge: `https://eneo.ange.se/?tenant=ange`
+
+**Benefits:**
+- Direct SSO login (bypasses tenant selection screen)
+- Bookmark-friendly for municipality intranets
+- Consistent user experience for single-tenant users
+
+When users visit these URLs, they're automatically directed to their tenant's IdP login.
 
 ---
 

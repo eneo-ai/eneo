@@ -85,6 +85,10 @@ from testcontainers.redis import RedisContainer
 
 from cryptography.fernet import Fernet
 
+# Module-level storage for JWKS mock coordination between jwks_mock and oidc_mock fixtures
+# This allows jwks_mock to store real JWKS data that oidc_mock can return for HTTP requests
+_JWKS_MOCK_DATA: dict | None = None
+
 from init_db import add_tenant_user
 from intric.database.database import sessionmanager
 from intric.main.config import Settings, reset_settings, set_settings
@@ -781,15 +785,68 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
 
 @pytest.fixture
 def jwks_mock(monkeypatch):
-    """Stub out PyJWKClient so tests never fetch real JWKS documents.
+    """Configure JWKS mock for HTTP-based JWKS fetching.
 
-    Patches both jwt.PyJWKClient and the federation_router's JWKClient alias
-    to ensure the mock is used even though the module has already imported and bound the name.
+    Converts PEM public keys to proper JWKS format and stores them in module-level
+    storage so oidc_mock can return the correct JWKS for HTTP requests.
+
+    Also patches PyJWKClient for backward compatibility (though it's no longer used).
     """
+    import base64
     import jwt as jwt_lib
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.backends import default_backend
 
     def _configure(signing_keys: dict[str, str] | None = None, default_key: str = "test-signing-key"):
+        global _JWKS_MOCK_DATA
         keys = signing_keys or {}
+
+        # Convert PEM public key to JWKS format if provided
+        if default_key and default_key.startswith("-----BEGIN"):
+            # Parse PEM public key
+            public_key = serialization.load_pem_public_key(
+                default_key.encode(), backend=default_backend()
+            )
+
+            # Extract RSA public numbers
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            if isinstance(public_key, rsa.RSAPublicKey):
+                numbers = public_key.public_numbers()
+
+                # Convert to base64url (JWKS standard) - without padding
+                def _int_to_base64url(n: int) -> str:
+                    byte_length = (n.bit_length() + 7) // 8
+                    n_bytes = n.to_bytes(byte_length, byteorder='big')
+                    return base64.urlsafe_b64encode(n_bytes).decode('utf-8').rstrip('=')
+
+                n_b64 = _int_to_base64url(numbers.n)
+                e_b64 = _int_to_base64url(numbers.e)
+
+                # Store proper JWKS format in module-level storage
+                _JWKS_MOCK_DATA = {
+                    "keys": [{
+                        "kid": "test-kid",
+                        "kty": "RSA",
+                        "use": "sig",
+                        "alg": "RS256",
+                        "n": n_b64,
+                        "e": e_b64,
+                    }]
+                }
+            else:
+                raise ValueError(f"Unsupported key type: {type(public_key)}")
+        else:
+            # Non-PEM key (legacy test string) - store simple JWKS
+            _JWKS_MOCK_DATA = {
+                "keys": [{
+                    "kid": "test-kid",
+                    "kty": "RSA",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "test-n-value",
+                    "e": "AQAB",
+                }]
+            }
 
         class _Key:
             def __init__(self, key: str):
@@ -802,7 +859,7 @@ def jwks_mock(monkeypatch):
             def get_signing_key_from_jwt(self, token: str):
                 return _Key(keys.get(token, default_key))
 
-        # Patch the jwt module's PyJWKClient
+        # Patch the jwt module's PyJWKClient (backward compatibility)
         monkeypatch.setattr(jwt_lib, "PyJWKClient", _FakePyJWKClient)
 
         # CRITICAL: Also patch the federation_router's module-level JWKClient alias
@@ -846,6 +903,9 @@ def oidc_mock(monkeypatch):
             def __init__(self, payload: dict, status: int = 200):
                 self._payload = payload
                 self.status = status
+                self.headers = {"content-type": "application/json"}
+                # Pre-encode body bytes for read() method (new wrapper requirement)
+                self._body_bytes = json.dumps(self._payload).encode("utf-8")
 
             async def __aenter__(self):
                 return self
@@ -859,10 +919,48 @@ def oidc_mock(monkeypatch):
             async def text(self):
                 return json.dumps(self._payload)
 
+            async def read(self):
+                """Return response body as bytes (required by new wrapper function)."""
+                return self._body_bytes
+
         class _FakeClient:
+            """Fake aiohttp client that supports async context manager protocol."""
+
+            async def __aenter__(self):
+                """Support 'async with aiohttp_client() as session' pattern."""
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                """Support async context manager exit."""
+                return False  # Don't suppress exceptions
+
             def get(self, url: str, **kwargs):
                 """Accept headers, params, timeout, and other kwargs for compatibility."""
                 request_log.append(("GET", url))
+
+                # Check if this is a JWKS request (contains /jwks, /certs, etc.)
+                if "/jwks" in url or "/certs" in url or url.endswith(".jwks"):
+                    # Check if jwks_mock fixture has configured real JWKS data
+                    global _JWKS_MOCK_DATA
+                    if _JWKS_MOCK_DATA is not None:
+                        # Return the real JWKS from jwks_mock
+                        return _FakeResponse(_JWKS_MOCK_DATA, 200)
+
+                    # Otherwise return default fake JWKS for backward compatibility
+                    default_jwks = {
+                        "keys": [
+                            {
+                                "kid": "test-kid",
+                                "kty": "RSA",
+                                "use": "sig",
+                                "alg": "RS256",
+                                "n": "test-n-value",
+                                "e": "AQAB",
+                            }
+                        ]
+                    }
+                    return _FakeResponse(default_jwks, 200)
+
                 if url not in discovery_map:
                     raise AssertionError(f"Unmocked discovery URL: {url}")
                 payload, status = discovery_map[url]
@@ -879,6 +977,15 @@ def oidc_mock(monkeypatch):
                     raise AssertionError(f"Unmocked token request: {url} code={code}")
                 payload, status = token_map[key]
                 return _FakeResponse(payload, status)
+
+            def request(self, method: str, url: str, **kwargs):
+                """Support generic request() method (used by new wrapper function)."""
+                if method.upper() == "GET":
+                    return self.get(url, **kwargs)
+                elif method.upper() == "POST":
+                    return self.post(url, **kwargs)
+                else:
+                    raise AssertionError(f"Unsupported HTTP method: {method}")
 
         fake_client = _FakeClient()
 

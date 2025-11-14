@@ -52,21 +52,42 @@ class SetFederationRequest(BaseModel):
     client_secret: str = Field(..., min_length=8, description="OAuth client secret")
     allowed_domains: list[str] = Field(
         default_factory=list,
-        description="Email domains allowed for this tenant (e.g., ['stockholm.se'])",
-        examples=[["stockholm.se", "stockholm.gov.se"]],
+        description=(
+            "Email domain whitelist for user authentication (e.g., ['sundsvall.se', 'ange.se']). "
+            "Only users with emails from these domains can log into this tenant. "
+            "Leave empty to allow all domains (not recommended for production)"
+        ),
+        examples=[["sundsvall.se", "ange.se"]],
     )
     canonical_public_origin: str | None = Field(
         None,
         description=(
-            "Canonical public origin for this tenant (e.g., https://tenant.eneo.se). "
-            "Required for multi-tenant federation to construct redirect_uri"
+            "Tenant's public URL (e.g., https://sundsvall.eneo.se). "
+            "Used to construct redirect_uri for IdP. "
+            "Must match the redirect_uri registered in your IdP application. "
+            "Required for multi-tenant federation"
         ),
-        examples=["https://stockholm.eneo.se"],
+        examples=["https://sundsvall.eneo.se"],
     )
     redirect_path: str | None = Field(
         None,
-        description="Optional custom redirect path starting with /",
+        description=(
+            "Optional custom callback path (defaults to '/auth/callback'). "
+            "Most deployments can omit this field and use the default"
+        ),
         examples=["/auth/callback"],
+    )
+    slug: str | None = Field(
+        None,
+        description=(
+            "URL-safe tenant identifier for federation routing (e.g., 'sundsvall'). "
+            "Required for tenant to appear in login selector. "
+            "Auto-generated from tenant name if omitted. "
+            "Must be lowercase alphanumeric + hyphens, max 63 chars."
+        ),
+        examples=["sundsvall", "goteborg", "region-norr"],
+        max_length=63,
+        pattern=r"^[a-z0-9-]+$",
     )
 
     @field_validator("client_secret")
@@ -104,6 +125,44 @@ class SetFederationRequest(BaseModel):
             raise ValueError("redirect_path must start with /")
         return value
 
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, value: str | None) -> str | None:
+        """Validate and normalize slug."""
+        if value is None:
+            return None
+        import re
+
+        value = value.strip().lower()
+        if not value:
+            return None
+
+        # Validate format (already enforced by pattern, but explicit validation here)
+        if not re.match(r"^[a-z0-9-]+$", value):
+            raise ValueError(
+                "Slug must contain only lowercase letters, numbers, and hyphens"
+            )
+        if value.startswith("-") or value.endswith("-"):
+            raise ValueError("Slug cannot start or end with a hyphen")
+        if len(value) > 63:
+            raise ValueError("Slug cannot exceed 63 characters")
+
+        return value
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "provider": "entra_id",
+                "slug": "sundsvall",
+                "canonical_public_origin": "https://sundsvall.eneo.se",
+                "discovery_endpoint": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration",
+                "client_id": "abc123-def456-ghi789",
+                "client_secret": "your-secret-value",
+                "allowed_domains": ["sundsvall.se", "ange.se"],
+            }
+        }
+    }
+
 
 class SetFederationResponse(BaseModel):
     """Response model for setting federation config."""
@@ -112,6 +171,10 @@ class SetFederationResponse(BaseModel):
     provider: str
     masked_secret: str
     message: str
+    slug: str | None = Field(
+        None,
+        description="Effective slug (custom or auto-generated) for this tenant",
+    )
 
 
 class DeleteFederationResponse(BaseModel):
@@ -138,7 +201,23 @@ class FederationInfo(BaseModel):
     response_model=SetFederationResponse,
     status_code=status.HTTP_200_OK,
     summary="Set tenant federation config",
-    description="Configure custom identity provider for tenant. System admin only.",
+    description="""Configure custom OIDC identity provider for a tenant.
+
+**What this endpoint does:**
+- Validates the IdP's OIDC discovery endpoint
+- Encrypts and stores client_secret (Fernet encryption)
+- Sets or auto-generates tenant slug (required for frontend login selector)
+- Returns the effective slug in the response
+
+**Field Guide:**
+- `provider`: IdP type (e.g., 'entra_id', 'auth0', 'mobilityguard', 'okta')
+- `slug`: Optional. Tenant identifier for routing. Auto-generated from tenant name if omitted
+- `canonical_public_origin`: Tenant's public URL. Used to construct redirect_uri for IdP
+- `discovery_endpoint`: OIDC .well-known/openid-configuration URL from your IdP
+- `client_id` & `client_secret`: OAuth credentials from IdP application registration
+- `allowed_domains`: Email domain whitelist (e.g., ["sundsvall.se", "ange.se"])
+- `redirect_path`: Optional. Callback path (defaults to "/auth/callback")
+""",
 )
 async def set_tenant_federation(
     tenant_id: UUID,
@@ -170,6 +249,54 @@ async def set_tenant_federation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tenant {tenant_id} not found",
         )
+
+    # Handle slug assignment
+    effective_slug = None
+    if request.slug:
+        # User provided custom slug - validate uniqueness
+        normalized_slug = request.slug.strip().lower()
+        old_slug = tenant.slug  # Capture before update
+
+        # Check uniqueness (only if different from current slug)
+        if old_slug != normalized_slug:
+            existing = await tenant_repo.get_by_slug(normalized_slug)
+            if existing and existing.id != tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Slug '{normalized_slug}' is already in use by another tenant. Please choose a different slug.",
+                )
+
+            # Update slug
+            await tenant_repo.update_slug(tenant_id, normalized_slug)
+            logger.warning(
+                f"Tenant slug changed from '{old_slug}' to '{normalized_slug}'",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "tenant_name": tenant.name,
+                    "old_slug": old_slug,
+                    "new_slug": normalized_slug,
+                    "action": "slug_updated_via_federation_config",
+                },
+            )
+            effective_slug = normalized_slug
+        else:
+            # Slug unchanged
+            effective_slug = normalized_slug
+    elif not tenant.slug:
+        # No slug provided and tenant doesn't have one - auto-generate
+        effective_slug = await tenant_repo.generate_slug_for_tenant(tenant_id)
+        logger.info(
+            f"Auto-generated slug '{effective_slug}' for tenant {tenant.name}",
+            extra={
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "slug": effective_slug,
+                "action": "slug_auto_generated",
+            },
+        )
+    else:
+        # No slug provided but tenant already has one - keep existing
+        effective_slug = tenant.slug
 
     # Fetch OIDC discovery to validate config
     import aiohttp
@@ -282,9 +409,7 @@ async def set_tenant_federation(
             return "client_secret_basic"
         return normalized[0] if normalized else "client_secret_post"
 
-    token_endpoint_auth_method = _select_token_auth_method(
-        token_auth_methods_supported
-    )
+    token_endpoint_auth_method = _select_token_auth_method(token_auth_methods_supported)
 
     # Encrypt client_secret
     encrypted_secret = encryption_service.encrypt(request.client_secret)
@@ -352,6 +477,7 @@ async def set_tenant_federation(
         provider=request.provider,
         masked_secret=masked_secret,
         message=f"Federation config for {request.provider} set successfully",
+        slug=effective_slug,
     )
 
 

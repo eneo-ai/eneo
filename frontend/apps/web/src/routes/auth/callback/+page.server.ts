@@ -4,7 +4,7 @@ import { setFrontendAuthCookie } from "$lib/features/auth/auth.server";
 import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ url, fetch }) => {
+export const load: PageServerLoad = async ({ url, fetch, cookies }) => {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
 
@@ -64,11 +64,13 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 
     const data = await response.json();
 
-    // Set auth cookie with access token
+    // Set auth cookie with access token (following MobilityGuard/Password Login pattern)
     await setFrontendAuthCookie({
-      id_token: data.access_token,
-      access_token: data.access_token
+      id_token: data.access_token
     });
+
+    // Clear any lingering "acc" cookie from previous sessions to prevent header overflow
+    cookies.delete("acc", { path: "/" });
 
     console.debug("[Federation Callback] Authentication successful, redirecting");
 

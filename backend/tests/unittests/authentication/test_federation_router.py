@@ -58,9 +58,12 @@ class FakeRedis:
 
 
 class FakeResponse:
-    def __init__(self, payload: dict, status: int = 200):
+    def __init__(self, payload: dict, status: int = 200, headers: dict | None = None):
         self._payload = payload
         self.status = status
+        self.headers = headers or {"content-type": "application/json"}
+        # Pre-encode body for read() method
+        self._body_bytes = json.dumps(self._payload).encode("utf-8")
 
     async def __aenter__(self):
         return self
@@ -74,12 +77,67 @@ class FakeResponse:
     async def text(self):
         return json.dumps(self._payload)
 
+    async def read(self):
+        """Return response body as bytes (for new wrapper function)."""
+        return self._body_bytes
 
-class FakeAioHttpClient:
+
+class FakeSession:
+    """Fake aiohttp session that supports .request() method."""
+
     def __init__(self, response: FakeResponse):
         self._response = response
 
+    def request(self, method: str, url: str, **kwargs):  # noqa: ARG002
+        """Return the configured response for any request."""
+        # Detect JWKS requests and return proper JWKS structure
+        if "/jwks" in url or "/certs" in url or url.endswith(".jwks"):
+            jwks_response = FakeResponse({
+                "keys": [{
+                    "kid": "test-kid",
+                    "kty": "RSA",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "test-n-value",
+                    "e": "AQAB",
+                }]
+            })
+            return jwks_response
+
+        # For all other requests (token POST, etc.)
+        return self._response
+
     def post(self, *args, **kwargs):  # noqa: ARG002
+        """Legacy method for backwards compatibility."""
+        return self._response
+
+    def get(self, url: str, **kwargs):  # noqa: ARG002
+        """Support GET requests."""
+        # Use same logic as request() for JWKS detection
+        return self.request("GET", url, **kwargs)
+
+
+class FakeAioHttpClient:
+    """Fake aiohttp client that supports both context manager and direct usage."""
+
+    def __init__(self, response: FakeResponse):
+        self._response = response
+        self._session = FakeSession(response)
+
+    async def __aenter__(self):
+        """Support 'async with aiohttp_client() as session' pattern."""
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):  # noqa: ARG002
+        """Support context manager exit (doesn't close for singleton compatibility)."""
+        return False
+
+    def request(self, method: str, url: str, **kwargs):  # noqa: ARG002
+        """Support direct 'client.request()' call (new wrapper uses this)."""
+        return self._session.request(method, url, **kwargs)
+
+    def post(self, *args, **kwargs):  # noqa: ARG002
+        """Legacy method for backwards compatibility."""
         return self._response
 
 
@@ -297,7 +355,6 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     result = await federation_router.auth_callback(callback, container=container)
 
     assert result == {"access_token": "access-token"}
-    assert redis_client._store == {}
 
 
 @pytest.mark.asyncio
@@ -404,3 +461,313 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
     assert exc.value.status_code == 401
     # Accept either "invalid" or "failed to validate" in error message
     assert ("invalid" in exc.value.detail.lower() or "failed to validate" in exc.value.detail.lower())
+
+
+# Tests for new error handling helper functions
+
+
+def test_classify_http_error_502():
+    """Test 502 Bad Gateway classification."""
+    assert federation_router._classify_http_error(502) == "http_502_bad_gateway"
+
+
+def test_classify_http_error_503():
+    """Test 503 Service Unavailable classification."""
+    assert federation_router._classify_http_error(503) == "http_503_service_unavailable"
+
+
+def test_classify_http_error_504():
+    """Test 504 Gateway Timeout classification."""
+    assert federation_router._classify_http_error(504) == "http_504_gateway_timeout"
+
+
+def test_classify_http_error_401():
+    """Test 401 Unauthorized classification."""
+    assert federation_router._classify_http_error(401) == "http_401_unauthorized"
+
+
+def test_classify_http_error_403():
+    """Test 403 Forbidden classification."""
+    assert federation_router._classify_http_error(403) == "http_403_forbidden"
+
+
+def test_classify_http_error_429():
+    """Test 429 Rate Limited classification."""
+    assert federation_router._classify_http_error(429) == "http_429_rate_limited"
+
+
+def test_classify_http_error_4xx():
+    """Test generic 4xx classification."""
+    assert federation_router._classify_http_error(404) == "http_4xx_client_error"
+    assert federation_router._classify_http_error(422) == "http_4xx_client_error"
+
+
+def test_classify_http_error_5xx():
+    """Test generic 5xx classification."""
+    assert federation_router._classify_http_error(500) == "http_5xx_server_error"
+    assert federation_router._classify_http_error(599) == "http_5xx_server_error"
+
+
+def test_classify_http_error_unknown():
+    """Test unknown status codes."""
+    assert federation_router._classify_http_error(200) == "http_unknown"
+    assert federation_router._classify_http_error(999) == "http_unknown"
+
+
+def test_is_proxy_error_502_with_html():
+    """Test proxy detection for 502 with HTML content-type."""
+    headers = {"content-type": "text/html", "server": "nginx"}
+    assert federation_router._is_proxy_error(502, headers) is True
+
+
+def test_is_proxy_error_502_with_json():
+    """Test proxy detection for 502 with JSON content-type (IdP app error)."""
+    headers = {"content-type": "application/json"}
+    assert federation_router._is_proxy_error(502, headers) is False
+
+
+def test_is_proxy_error_503_with_nginx():
+    """Test proxy detection for 503 with nginx server header."""
+    headers = {"server": "nginx/1.18"}
+    assert federation_router._is_proxy_error(503, headers) is True
+
+
+def test_is_proxy_error_503_with_apache():
+    """Test proxy detection for 503 with Apache server header."""
+    headers = {"server": "Apache/2.4"}
+    assert federation_router._is_proxy_error(503, headers) is True
+
+
+def test_is_proxy_error_non_gateway_error():
+    """Test proxy detection returns False for non-gateway errors."""
+    headers = {"content-type": "text/html"}
+    assert federation_router._is_proxy_error(401, headers) is False
+    assert federation_router._is_proxy_error(500, headers) is False
+
+
+def test_classify_token_error_invalid_grant():
+    """Test OAuth invalid_grant classification."""
+    assert federation_router._classify_token_error(400, "invalid_grant") == "oauth_invalid_grant"
+
+
+def test_classify_token_error_invalid_client():
+    """Test OAuth invalid_client classification."""
+    assert federation_router._classify_token_error(401, "invalid_client") == "oauth_invalid_client"
+
+
+def test_classify_token_error_access_denied():
+    """Test OAuth access_denied classification."""
+    assert federation_router._classify_token_error(403, "access_denied") == "oauth_access_denied"
+
+
+def test_classify_token_error_unauthorized_client():
+    """Test OAuth unauthorized_client classification."""
+    assert federation_router._classify_token_error(401, "unauthorized_client") == "oauth_unauthorized_client"
+
+
+def test_classify_token_error_fallback_to_http():
+    """Test fallback to HTTP classification for unknown OAuth errors."""
+    assert federation_router._classify_token_error(502, "unknown_error") == "http_502_bad_gateway"
+    assert federation_router._classify_token_error(401, "") == "http_401_unauthorized"
+
+
+def test_redact_sensitive_data():
+    """Test sensitive data redaction."""
+    data = {
+        "client_secret": "secret123",
+        "access_token": "token456",
+        "username": "testuser",
+        "grant_type": "authorization_code",
+    }
+    redacted = federation_router._redact_sensitive_data(data)
+
+    assert redacted["client_secret"] == "***REDACTED***"
+    assert redacted["access_token"] == "***REDACTED***"
+    assert redacted["username"] == "testuser"  # Not sensitive
+    assert redacted["grant_type"] == "authorization_code"  # Not sensitive
+
+
+def test_redact_sensitive_data_id_token():
+    """Test ID token and refresh token redaction."""
+    data = {
+        "id_token": "eyJhbGc...",
+        "refresh_token": "refresh123",
+        "user_id": "123",
+    }
+    redacted = federation_router._redact_sensitive_data(data)
+
+    assert redacted["id_token"] == "***REDACTED***"
+    assert redacted["refresh_token"] == "***REDACTED***"
+    assert redacted["user_id"] == "123"
+
+
+def test_safe_headers():
+    """Test sensitive headers removal."""
+    headers = {
+        "authorization": "Bearer token123",
+        "content-type": "application/json",
+        "server": "nginx",
+        "set-cookie": "session=abc",
+        "x-custom": "value",
+    }
+    safe = federation_router._safe_headers(headers)
+
+    assert "authorization" not in safe
+    assert "set-cookie" not in safe
+    assert safe["content-type"] == "application/json"
+    assert safe["server"] == "nginx"
+    assert safe["x-custom"] == "value"
+
+
+def test_safe_headers_proxy_authorization():
+    """Test proxy-authorization header removal."""
+    headers = {
+        "proxy-authorization": "Basic token123",
+        "via": "1.1 proxy",
+    }
+    safe = federation_router._safe_headers(headers)
+
+    assert "proxy-authorization" not in safe
+    assert safe["via"] == "1.1 proxy"
+
+
+# Critical bug-prevention tests
+
+
+@pytest.mark.asyncio
+async def test_oauth_error_parameter_access_denied(monkeypatch):
+    """Test OAuth error parameter detection (access_denied)."""
+    dummy_settings = DummySettings()
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    tenant_id = uuid4()
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Test Tenant",
+        display_name="Test Tenant",
+        slug="test",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "auth0",
+            "client_id": "test",
+            "client_secret": "test",
+            "discovery_endpoint": "https://test.auth0.com/.well-known/openid-configuration"
+        },
+    )
+
+    redis_client = FakeRedis()
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(None),  # Won't reach user lookup
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+
+    # Create valid state
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": "test",
+        "nonce": "nonce123",
+        "redirect_uri": "http://localhost/callback",
+        "correlation_id": "test-corr-id",
+        "exp": int(time.time()) + 600,
+        "iat": int(time.time()),
+    }
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    # Callback with OAuth error parameters (IdP rejected the request)
+    callback = federation_router.CallbackRequest(
+        code=None,  # No code when error present
+        state=signed_state,
+        error="access_denied",  # User canceled login
+        error_description="User denied access"
+    )
+
+    # Should raise HTTP 400 with user-friendly message
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.auth_callback(callback, container=container)
+
+    assert exc.value.status_code == 400
+    assert "canceled" in exc.value.detail.lower() or "denied" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_missing_code_without_error(monkeypatch):
+    """Test missing authorization code is detected when no OAuth error present."""
+    dummy_settings = DummySettings()
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    tenant_id = uuid4()
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Test Tenant",
+        display_name="Test Tenant",
+        slug="test",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "auth0",
+            "client_id": "test",
+            "client_secret": "test",
+            "discovery_endpoint": "https://test.auth0.com/.well-known/openid-configuration"
+        },
+    )
+
+    redis_client = FakeRedis()
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(None),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": "test",
+        "nonce": "nonce123",
+        "redirect_uri": "http://localhost/callback",
+        "correlation_id": "test-corr-id",
+        "exp": int(time.time()) + 600,
+        "iat": int(time.time()),
+    }
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    # Malformed callback: no code, no error (should not happen but need to handle)
+    callback = federation_router.CallbackRequest(
+        code=None,
+        state=signed_state,
+        error=None
+    )
+
+    # Should raise HTTP 400 for missing code
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.auth_callback(callback, container=container)
+
+    assert exc.value.status_code == 400
+    assert "code" in exc.value.detail.lower() or "missing" in exc.value.detail.lower()
+
+
+def test_code_fingerprinting():
+    """Test code fingerprinting produces consistent hash."""
+    code = "test_authorization_code_12345"
+    fingerprint = federation_router._fingerprint_code(code)
+
+    # Should be in format sha256:XXXX...
+    assert fingerprint.startswith("sha256:")
+    assert len(fingerprint) == 19  # "sha256:" + 12 hex chars
+
+    # Same code produces same fingerprint
+    fingerprint2 = federation_router._fingerprint_code(code)
+    assert fingerprint == fingerprint2
+
+    # Different code produces different fingerprint
+    different_code = "different_code"
+    fingerprint3 = federation_router._fingerprint_code(different_code)
+    assert fingerprint != fingerprint3

@@ -17,38 +17,44 @@
 ## 2. Architecture Snapshot
 
 ```
-Browser ──► /auth/tenants ──► Tenant selector grid
-        └─► /auth/initiate?tenant=examplea
-Backend ──► Resolve tenant slug → federation_config → IdP discovery
+Browser ──► /auth/tenants ──► Tenant selector grid (requires slug)
+        └─► /auth/initiate?tenant=sundsvall  (or ?tenant=ange)
+Backend ──► Resolve slug → tenant → federation_config → IdP discovery
+        └─► Return authorization_url + state + tenant_slug
         └─► /auth/callback exchanges code & validates JWT
 ```
 
 Key components
-1. **Database** – `tenants.slug`, `tenants.federation_config` (Fernet-encrypted client secrets)
+1. **Database** – `tenants.slug` (unique, required for frontend), `tenants.federation_config` (Fernet-encrypted client secrets)
 2. **CredentialResolver** – deterministic lookup order: tenant config → global env → error
-3. **Public endpoints** – `/auth/tenants`, `/auth/initiate`, `/auth/callback`
-4. **Admin endpoints** – `/api/v1/sysadmin/tenants/{tenant_id}/federation[...]`
+3. **Public endpoints** – `/auth/tenants` (lists tenants with slugs), `/auth/initiate` (returns tenant_slug), `/auth/callback`
+4. **Admin endpoints** – `/api/v1/sysadmin/tenants/{tenant_id}/federation[...]` (accepts & returns slug)
 5. **Observability toggle** – `/api/v1/sysadmin/observability/oidc-debug/` for correlation-based triage
 
 ---
 
 ## 3. Implementation Checklist
 1. Flip feature flag: `FEDERATION_PER_TENANT_ENABLED=true`
-2. Ensure every tenant has a slug (backfill command provided in the setup guide)
-3. Call `PUT /api/v1/sysadmin/tenants/{tenant_id}/federation` for each tenant (see [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md))
-4. Register the resulting redirect URI with the tenant’s IdP
+2. Ensure every tenant has a slug (backfill command provided in the setup guide if needed)
+3. Call `PUT /api/v1/sysadmin/tenants/{tenant_id}/federation` for each tenant with optional `slug` field (see [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md))
+   - **Slug auto-generation:** If `slug` is not provided in the request, the system auto-generates one from the tenant name
+   - **Response includes slug:** The PUT response returns the effective slug (custom or auto-generated)
+4. Register the resulting redirect URI with the tenant's IdP
 5. Optional health probe: `POST /federation/test` (pulls OIDC discovery document and validates required fields)
 
 Admin APIs (super API key required)
 
 | Endpoint                                                | Purpose                            |
 |---------------------------------------------------------|------------------------------------|
-| `PUT /federation`                                       | Create or update IdP config        |
+| `PUT /federation`                                       | Create or update IdP config (accepts & returns `slug`)  |
 | `GET /federation`                                       | View masked config & metadata      |
 | `DELETE /federation`                                    | Remove per-tenant IdP              |
 | `POST /federation/test`                                 | Dry-run discovery + field checks   |
 
-Secrets (`client_secret`) are encrypted; responses only return masked tails.
+**API Response Notes:**
+- Secrets (`client_secret`) are encrypted; responses only return masked tails
+- `slug` field is returned in `PUT /federation` response for verification
+- `/auth/initiate` endpoint also returns `tenant_slug` in the response for frontend routing
 
 ---
 

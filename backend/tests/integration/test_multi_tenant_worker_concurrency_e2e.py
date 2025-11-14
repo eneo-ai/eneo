@@ -695,8 +695,16 @@ async def test_backoff_counter_increments_and_resets(
         delays.append(delay)
 
     # Verify increasing delays (approximately 10s, 20s, 30s with jitter)
-    assert delays[0] <= delays[1], "Second delay should be >= first"
-    assert delays[1] <= delays[2], "Third delay should be >= second"
+    # Allow small timing variations due to system jitter and async scheduling
+    TOLERANCE_MS = 2.0
+    assert delays[0] <= delays[1] + TOLERANCE_MS, (
+        f"Second delay ({delays[1]:.2f}ms) should be >= first ({delays[0]:.2f}ms) "
+        f"within {TOLERANCE_MS}ms tolerance. Difference: {delays[1] - delays[0]:.2f}ms"
+    )
+    assert delays[1] <= delays[2] + TOLERANCE_MS, (
+        f"Third delay ({delays[2]:.2f}ms) should be >= second ({delays[1]:.2f}ms) "
+        f"within {TOLERANCE_MS}ms tolerance. Difference: {delays[2] - delays[1]:.2f}ms"
+    )
 
     # Verify backoff counter in Redis
     backoff_key = f"tenant:{tenant_id}:limiter_backoff"

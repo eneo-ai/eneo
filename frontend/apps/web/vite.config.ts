@@ -29,6 +29,12 @@ export default defineConfig({
     intricIcons() as PluginOption,
     sveltekit() as PluginOption
   ],
+  build: {
+    // Disable automatic modulepreload to prevent massive Link headers (HAProxy 502 fix)
+    modulePreload: false,
+    // Reduce CSS code splitting to create fewer chunks (reduces Link header size)
+    cssCodeSplit: false
+  },
   test: {
     include: ["src/**/*.{test,spec}.{js,ts}"]
   },

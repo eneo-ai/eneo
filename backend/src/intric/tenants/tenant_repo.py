@@ -410,9 +410,35 @@ class TenantRepository:
                     .values(slug=check_slug, updated_at=datetime.now(timezone.utc))
                 )
                 await self.session.execute(stmt)
-                logger.info(f"Generated and saved slug '{check_slug}' for tenant {tenant.name}")
+                logger.info(
+                    f"Generated and saved slug '{check_slug}' for tenant {tenant.name}"
+                )
                 return check_slug
             counter += 1
+
+    async def update_slug(self, tenant_id: UUID, slug: str) -> None:
+        """Update tenant slug (for federation configuration).
+
+        Used when admin provides custom slug during federation setup.
+        Slug must already be validated and normalized by caller.
+
+        NOTE: Does not commit. Caller must commit the transaction.
+        This allows composing with other updates in the same transaction.
+
+        Args:
+            tenant_id: Tenant UUID
+            slug: New slug value (already validated and normalized)
+
+        Raises:
+            IntegrityError: If slug conflicts with existing tenant
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(slug=slug, updated_at=datetime.now(timezone.utc))
+        )
+        await self.session.execute(stmt)
+        # No commit - caller commits after all updates
 
     async def update_federation_config(
         self,
