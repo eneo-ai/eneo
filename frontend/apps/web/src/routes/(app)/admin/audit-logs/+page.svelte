@@ -551,7 +551,9 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.audit_logs()}></Page.Title>
+    <div class="flex items-center gap-4">
+      <Page.Title title={m.audit_logs()}></Page.Title>
+    </div>
     <div class="flex gap-[1px]">
       <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
         {#if isExporting}
@@ -583,22 +585,29 @@
   </Page.Header>
 
   <Page.Main>
-    <!-- Description -->
-    <div class="mb-6">
-      <p class="text-sm text-muted">
-        {m.audit_logs_description()}
-      </p>
-    </div>
+    <!-- Container for proper centering and padding -->
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <!-- Description with better spacing and visual treatment -->
+      <div class="mb-8 pb-6 border-b border-default">
+        <p class="text-sm text-muted leading-relaxed max-w-3xl">
+          {m.audit_logs_description()}
+        </p>
+      </div>
 
     <!-- Retention Policy Section -->
-    <div class="mb-6 space-y-3 rounded-lg border border-default bg-subtle p-5">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <Shield class="h-4 w-4 text-accent" />
-          <h3 class="text-sm font-semibold text-default">{m.audit_retention_policy()}</h3>
+    <div class="mb-12 rounded-xl border border-default bg-subtle p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="rounded-lg bg-accent/10 p-1.5">
+            <Shield class="h-5 w-5 text-accent" />
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-default">{m.audit_retention_policy()}</h3>
+            <p class="text-xs text-muted mt-0.5">Automatisk borttagning av gamla granskningsloggar</p>
+          </div>
         </div>
         {#if !isEditingRetention}
-          <Button onclick={() => (isEditingRetention = true)} variant="ghost" size="sm">
+          <Button onclick={() => (isEditingRetention = true)} variant="ghost" size="sm" class="min-w-[80px]">
             {m.audit_retention_edit()}
           </Button>
         {/if}
@@ -606,64 +615,112 @@
 
       {#if !isEditingRetention}
         <!-- Display Mode -->
-        <div class="space-y-2 text-sm">
-          <div class="flex items-center gap-6">
-            <div class="flex items-center gap-2">
-              <Calendar class="h-4 w-4 text-muted" />
-              <span class="text-default">
-                <span class="font-medium">{m.audit_retention_current({ days: retentionDays })}</span>
-                <span class="text-muted">
-                  ({retentionDays === 365 ? `1 ${m.audit_retention_year()}` : retentionDays === 730 ? `2 ${m.audit_retention_years()}` : retentionDays === 90 ? `3 ${m.audit_retention_months()}` : retentionDays === 2555 ? `7 ${m.audit_retention_years()}` : ''})
+        <div class="rounded-lg bg-primary p-4 space-y-2">
+          <div class="flex items-start gap-3">
+            <div class="rounded-md bg-accent/10 p-1.5">
+              <Calendar class="h-4 w-4 text-accent" />
+            </div>
+            <div class="flex-1">
+              <div class="flex items-baseline gap-2 mb-1">
+                <span class="text-lg font-semibold text-default">{retentionDays}</span>
+                <span class="text-xs text-muted">
+                  {retentionDays === 1 ? 'dag' : 'dagar'}
+                  {retentionDays === 365 ? ` (1 ${m.audit_retention_year()})` : retentionDays === 730 ? ` (2 ${m.audit_retention_years()})` : retentionDays === 90 ? ` (3 ${m.audit_retention_months()})` : retentionDays === 2555 ? ` (7 ${m.audit_retention_years()})` : ''}
                 </span>
-              </span>
+              </div>
+              <p class="text-xs text-muted leading-relaxed">
+                {m.audit_retention_cutoff({ date: getRetentionCutoffDate(retentionDays) })}
+              </p>
             </div>
           </div>
-          <p class="text-muted text-xs">
-            {m.audit_retention_cutoff({ date: getRetentionCutoffDate(retentionDays) })}
-          </p>
         </div>
       {:else}
         <!-- Edit Mode -->
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-default">{m.audit_retention_period_label()}</label>
-            <div class="flex items-center gap-2">
-              <Input.Text
-                bind:value={retentionInputValue}
-                type="number"
-                min="1"
-                max="2555"
-                class="w-32"
-                inputClass="text-center"
-              />
-              <span class="text-sm text-muted">{m.audit_retention_days_unit()}</span>
-            </div>
-            <div class="flex gap-2">
-              <Button onclick={() => (retentionInputValue = 90)} variant="ghost" size="sm">90d</Button>
-              <Button onclick={() => (retentionInputValue = 365)} variant="ghost" size="sm">365d (1y)</Button>
-              <Button onclick={() => (retentionInputValue = 730)} variant="ghost" size="sm">730d (2y)</Button>
-              <Button onclick={() => (retentionInputValue = 2555)} variant="ghost" size="sm">2555d (7y)</Button>
+        <div class="space-y-3">
+          <div class="rounded-lg bg-primary p-4 space-y-3">
+            <div class="max-w-xl">
+              <label class="text-xs font-semibold text-default block mb-2">{m.audit_retention_period_label()}</label>
+              <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
+                <div class="flex items-center gap-2">
+                  <Input.Text
+                    bind:value={retentionInputValue}
+                    type="number"
+                    min="1"
+                    max="2555"
+                    class="w-20"
+                    inputClass="text-center text-sm font-medium"
+                  />
+                  <span class="text-xs text-muted">
+                    {m.audit_retention_days_unit()}
+                  </span>
+                </div>
+                <div class="text-xs text-muted">
+                  {retentionInputValue === 365 ? `(1 ${m.audit_retention_year()})` : retentionInputValue === 730 ? `(2 ${m.audit_retention_years()})` : retentionInputValue === 90 ? `(3 ${m.audit_retention_months()})` : retentionInputValue === 2555 ? `(7 ${m.audit_retention_years()})` : ''}
+                </div>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                <Button
+                  onclick={() => (retentionInputValue = 90)}
+                  variant={retentionInputValue === 90 ? "primary" : "ghost"}
+                  size="sm"
+                  class="w-full text-sm font-medium"
+                >
+                  3 mån
+                </Button>
+                <Button
+                  onclick={() => (retentionInputValue = 365)}
+                  variant={retentionInputValue === 365 ? "primary" : "ghost"}
+                  size="sm"
+                  class="w-full text-sm font-medium"
+                >
+                  1 år
+                </Button>
+                <Button
+                  onclick={() => (retentionInputValue = 730)}
+                  variant={retentionInputValue === 730 ? "primary" : "ghost"}
+                  size="sm"
+                  class="w-full text-sm font-medium"
+                >
+                  2 år
+                </Button>
+                <Button
+                  onclick={() => (retentionInputValue = 2555)}
+                  variant={retentionInputValue === 2555 ? "primary" : "ghost"}
+                  size="sm"
+                  class="w-full text-sm font-medium"
+                >
+                  7 år
+                </Button>
+              </div>
             </div>
           </div>
 
           {#if retentionInputValue !== retentionDays}
-            <div class="border-default rounded-md border bg-subtle p-3.5 text-sm">
+            <div class={`rounded-lg p-2.5 text-xs transition-all border-l-4 ${
+              retentionInputValue < retentionDays
+                ? 'border-l-red-500 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50'
+                : 'border-l-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50'
+            }`}>
               {#if retentionInputValue < retentionDays}
                 <div class="flex items-start gap-2.5">
-                  <IconInfo class="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                  <div class="space-y-1">
-                    <p class="font-semibold text-default">{m.audit_retention_warning_title()}</p>
-                    <p class="text-muted leading-relaxed">
+                  <div class="rounded-full bg-red-100 dark:bg-red-900 p-1.5">
+                    <IconInfo class="h-4 w-4 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div class="flex-1 space-y-1">
+                    <p class="font-semibold text-red-900 dark:text-red-200 text-xs">{m.audit_retention_warning_title()}</p>
+                    <p class="text-red-800 dark:text-red-300 text-xs leading-[1.4]">
                       {m.audit_retention_warning_desc({ date: getRetentionCutoffDate(retentionInputValue) })}
                     </p>
                   </div>
                 </div>
               {:else}
                 <div class="flex items-start gap-2.5">
-                  <IconInfo class="h-4 w-4 text-accent flex-shrink-0 mt-0.5" />
-                  <div class="space-y-1">
-                    <p class="font-semibold text-default">{m.audit_retention_info_title()}</p>
-                    <p class="text-muted leading-relaxed">
+                  <div class="rounded-full bg-blue-100 dark:bg-blue-900 p-1.5">
+                    <IconInfo class="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div class="flex-1 space-y-1">
+                    <p class="font-semibold text-blue-900 dark:text-blue-200 text-xs">{m.audit_retention_info_title()}</p>
+                    <p class="text-blue-800 dark:text-blue-300 text-xs leading-[1.4]">
                       {m.audit_retention_info_desc()}
                     </p>
                   </div>
@@ -678,14 +735,23 @@
             </div>
           {/if}
 
-          <div class="flex items-center justify-between pt-2">
-            <p class="text-xs text-muted">{m.audit_retention_range()}</p>
-            <div class="flex gap-2">
-              <Button onclick={cancelRetentionEdit} variant="ghost" size="sm" disabled={isSavingRetention}>
+          <div class="border-t border-default pt-3 mt-3">
+            <p class="text-xs text-muted mb-2">
+              {m.audit_retention_range()}
+            </p>
+            <div class="flex items-center justify-end gap-2">
+              <Button onclick={cancelRetentionEdit} variant="ghost" disabled={isSavingRetention} class="min-w-[80px] text-sm font-medium">
                 {m.audit_retention_cancel()}
               </Button>
-              <Button onclick={saveRetentionPolicy} variant="primary" size="sm" disabled={isSavingRetention || retentionInputValue === retentionDays}>
-                {isSavingRetention ? m.audit_retention_saving() : m.audit_retention_save()}
+              <Button onclick={saveRetentionPolicy} variant="primary" disabled={isSavingRetention || retentionInputValue === retentionDays} class="min-w-[120px] text-sm font-medium">
+                {#if isSavingRetention}
+                  <div class="flex items-center gap-2">
+                    <div class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                    {m.audit_retention_saving()}
+                  </div>
+                {:else}
+                  {m.audit_retention_save()}
+                {/if}
               </Button>
             </div>
           </div>
@@ -838,33 +904,35 @@
       {/if}
     </div>
 
-    <!-- Results Summary -->
-    <div class="mb-4 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <p class="text-sm text-muted">
-          {m.audit_showing_results({ shown: data.logs.length, total: data.total_count })}
-        </p>
+    <!-- Results Summary and Top Pagination -->
+    <div class="mb-6 rounded-lg bg-subtle p-4">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <p class="text-sm font-medium text-default">
+            {m.audit_showing_results({ shown: data.logs.length, total: data.total_count })}
+          </p>
+          {#if data.total_pages > 1}
+            <span class="text-sm text-muted border-l border-default pl-3">
+              {m.audit_page_info({ current: data.page, total: data.total_pages })}
+            </span>
+          {/if}
+        </div>
+
         {#if data.total_pages > 1}
-          <span class="text-sm text-muted">
-            {m.audit_page_info({ current: data.page, total: data.total_pages })}
-          </span>
+          <div class="flex items-center gap-3">
+            <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" size="sm" class="min-w-[100px]">
+              {m.audit_previous()}
+            </Button>
+            <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" size="sm" class="min-w-[100px]">
+              {m.audit_next()}
+            </Button>
+          </div>
         {/if}
       </div>
-
-      {#if data.total_pages > 1}
-        <div class="flex items-center gap-2">
-          <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" size="sm">
-            {m.audit_previous()}
-          </Button>
-          <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" size="sm">
-            {m.audit_next()}
-          </Button>
-        </div>
-      {/if}
     </div>
 
     <!-- Audit Logs Table -->
-    <div class="rounded-lg border border-default shadow-sm">
+    <div class="rounded-lg border border-default shadow-sm bg-primary">
       <div class="overflow-x-auto">
         <table class="w-full">
           <thead class="sticky top-0 border-b border-default bg-subtle">
@@ -1021,17 +1089,20 @@
 
     <!-- Bottom Pagination -->
     {#if data.total_pages > 1}
-      <div class="mt-6 flex items-center justify-center gap-3">
-        <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" class="w-28">
-          {m.audit_previous()}
-        </Button>
-        <span class="text-sm text-muted">
-          {m.audit_page()} <span class="font-medium text-default">{data.page}</span> {m.audit_of()} <span class="font-medium text-default">{data.total_pages}</span>
-        </span>
-        <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" class="w-28">
-          {m.audit_next()}
-        </Button>
+      <div class="mt-8 rounded-lg bg-subtle p-4">
+        <div class="flex items-center justify-center gap-4">
+          <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" class="min-w-[120px]">
+            {m.audit_previous()}
+          </Button>
+          <span class="text-sm px-4 py-2 rounded-md bg-primary border border-default">
+            {m.audit_page()} <span class="font-semibold text-default">{data.page}</span> {m.audit_of()} <span class="font-semibold text-default">{data.total_pages}</span>
+          </span>
+          <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" class="min-w-[120px]">
+            {m.audit_next()}
+          </Button>
+        </div>
       </div>
     {/if}
+    </div> <!-- End of container div -->
   </Page.Main>
 </Page.Root>

@@ -1494,11 +1494,10 @@ export interface paths {
      * @description List audit logs for the authenticated user's tenant.
      *
      * Access Control:
-     * - Regular users: See only their own actions
-     * - Admins: See all actions in their tenant
-     * - Compliance officers: See all actions in their tenant
+     * - Admins only: View all actions in their tenant
      *
      * Requires: Authentication (JWT token or API key)
+     * Requires: Admin permissions
      */
     get: operations["list_audit_logs_api_v1_audit_logs_get"];
   };
@@ -1510,6 +1509,7 @@ export interface paths {
      * Returns audit logs involving the user in any capacity.
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
      * Security: Only returns logs for the authenticated user's tenant
      */
     get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
@@ -1526,6 +1526,7 @@ export interface paths {
      * Use user_id for GDPR Article 15 data subject access requests.
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
      * Security: Only exports logs for the authenticated user's tenant
      */
     get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
@@ -1535,28 +1536,27 @@ export interface paths {
      * Get Retention Policy
      * @description Get the current retention policy for your tenant.
      *
-     * Returns both audit log and conversation retention policies.
+     * Returns audit log retention policy configuration.
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
      */
     get: operations["get_retention_policy_api_v1_audit_retention_policy_get"];
     /**
      * Update Retention Policy
-     * @description Update the retention policy for your tenant.
+     * @description Update the audit log retention policy for your tenant.
      *
-     * Configure both audit log and conversation retention policies.
+     * Configure audit log retention for compliance and security tracking.
      *
      * Audit Log Retention:
      * - Minimum: 1 day (Recommended: 90+ days for compliance)
      * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
      * - Default: 365 days (Swedish Arkivlagen)
      *
-     * Conversation Retention:
-     * - Optional: Enable tenant-wide fallback policy
-     * - Hierarchy: Assistant/App → Space → Tenant → Keep forever
-     * - When enabled, requires retention_days (1-2555)
+     * Note: Conversation retention is configured at the Assistant, App, or Space level.
+     * Tenant-level conversation retention has been removed to prevent accidental data loss.
      *
-     * The system automatically runs a daily job to delete data older than
+     * The system automatically runs a daily job to delete audit logs older than
      * the retention period.
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
@@ -6094,7 +6094,10 @@ export interface components {
       | "insight_toggle";
     /**
      * RetentionPolicyResponse
-     * @description Schema for retention policy response.
+     * @description Schema for audit log retention policy response.
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level,
+     * not at the tenant level, to prevent accidental data loss.
      */
     RetentionPolicyResponse: {
       /**
@@ -6121,20 +6124,13 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
-      /**
-       * Conversation Retention Enabled
-       * @description Whether tenant-wide conversation retention is enabled as a fallback policy
-       */
-      conversation_retention_enabled: boolean;
-      /**
-       * Conversation Retention Days
-       * @description Days to retain conversation history when enabled (1-2555). Only applies when enabled.
-       */
-      conversation_retention_days?: number | null;
     };
     /**
      * RetentionPolicyUpdateRequest
-     * @description Schema for updating retention policy.
+     * @description Schema for updating audit log retention policy.
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level,
+     * not at the tenant level, to prevent accidental data loss.
      */
     RetentionPolicyUpdateRequest: {
       /**
@@ -6142,16 +6138,6 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
-      /**
-       * Conversation Retention Enabled
-       * @description Enable tenant-wide conversation retention policy. Acts as fallback when space/assistant/app have no policy.
-       */
-      conversation_retention_enabled?: boolean | null;
-      /**
-       * Conversation Retention Days
-       * @description Days to retain conversation history when enabled (1-2555). Required when conversation_retention_enabled is True.
-       */
-      conversation_retention_days?: number | null;
     };
     /** RoleCreateRequest */
     RoleCreateRequest: {
@@ -15977,11 +15963,10 @@ export interface operations {
    * @description List audit logs for the authenticated user's tenant.
    *
    * Access Control:
-   * - Regular users: See only their own actions
-   * - Admins: See all actions in their tenant
-   * - Compliance officers: See all actions in their tenant
+   * - Admins only: View all actions in their tenant
    *
    * Requires: Authentication (JWT token or API key)
+   * Requires: Admin permissions
    */
   list_audit_logs_api_v1_audit_logs_get: {
     parameters: {
@@ -16022,6 +16007,7 @@ export interface operations {
    * Returns audit logs involving the user in any capacity.
    *
    * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
    * Security: Only returns logs for the authenticated user's tenant
    */
   get_user_logs_api_v1_audit_logs_user__user_id__get: {
@@ -16067,6 +16053,7 @@ export interface operations {
    * Use user_id for GDPR Article 15 data subject access requests.
    *
    * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
    * Security: Only exports logs for the authenticated user's tenant
    */
   export_audit_logs_api_v1_audit_logs_export_get: {
@@ -16105,9 +16092,10 @@ export interface operations {
    * Get Retention Policy
    * @description Get the current retention policy for your tenant.
    *
-   * Returns both audit log and conversation retention policies.
+   * Returns audit log retention policy configuration.
    *
    * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
    */
   get_retention_policy_api_v1_audit_retention_policy_get: {
     responses: {
@@ -16121,21 +16109,19 @@ export interface operations {
   };
   /**
    * Update Retention Policy
-   * @description Update the retention policy for your tenant.
+   * @description Update the audit log retention policy for your tenant.
    *
-   * Configure both audit log and conversation retention policies.
+   * Configure audit log retention for compliance and security tracking.
    *
    * Audit Log Retention:
    * - Minimum: 1 day (Recommended: 90+ days for compliance)
    * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
    * - Default: 365 days (Swedish Arkivlagen)
    *
-   * Conversation Retention:
-   * - Optional: Enable tenant-wide fallback policy
-   * - Hierarchy: Assistant/App → Space → Tenant → Keep forever
-   * - When enabled, requires retention_days (1-2555)
+   * Note: Conversation retention is configured at the Assistant, App, or Space level.
+   * Tenant-level conversation retention has been removed to prevent accidental data loss.
    *
-   * The system automatically runs a daily job to delete data older than
+   * The system automatically runs a daily job to delete audit logs older than
    * the retention period.
    *
    * Requires: Authentication (JWT token or API key via X-API-Key header)

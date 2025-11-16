@@ -68,17 +68,19 @@ export function initAudit(client) {
     },
 
     /**
-     * Update retention policy for the current tenant. Requires admin privileges.
-     * @param {{retention_days: number}} policy
+     * Update audit log retention policy for the current tenant. Requires admin privileges.
+     * Note: Conversation retention is configured at Assistant/App/Space level, not here.
+     * @param {{retention_days: number}} policy - Audit log retention in days (1-2555)
      * @returns {Promise<{retention_days: number}>}
      * @throws {IntricError}
      * */
     updateRetentionPolicy: async (policy) => {
       const res = await client.fetch("/api/v1/audit/retention-policy", {
         method: "put",
-        params: {
-          query: {
+        requestBody: {
+          "application/json": {
             retention_days: policy.retention_days
+            // Conversation retention fields removed - only settable at Assistant/App/Space level
           }
         }
       });
