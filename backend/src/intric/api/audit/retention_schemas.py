@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RetentionPolicyResponse(BaseModel):
@@ -48,3 +48,26 @@ class RetentionPolicyUpdateRequest(BaseModel):
         le=2555,
         description="Days to retain conversation history when enabled (1-2555). Required when conversation_retention_enabled is True."
     )
+
+    @field_validator('conversation_retention_days')
+    @classmethod
+    def validate_retention_days_when_enabled(cls, v: Optional[int], info) -> Optional[int]:
+        """Validate conversation_retention_days based on conversation_retention_enabled.
+
+        Rules:
+        - If enabled=True, days must be provided (not None)
+        - If enabled=False, days must be None
+        """
+        enabled = info.data.get('conversation_retention_enabled')
+
+        if enabled is True and v is None:
+            raise ValueError(
+                'conversation_retention_days must be specified when conversation_retention_enabled is True'
+            )
+
+        if enabled is False and v is not None:
+            raise ValueError(
+                'conversation_retention_days must be null when conversation_retention_enabled is False'
+            )
+
+        return v

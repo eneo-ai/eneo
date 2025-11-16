@@ -464,13 +464,14 @@ async def create_app(
         metadata={
             "actor": {
                 "id": str(current_user.id),
-                "name": current_user.username,
+                "name": current_user.username or current_user.email.split('@')[0],
                 "email": current_user.email,
             },
             "target": {
                 "id": str(app.id),
                 "name": app.name,
                 "space_id": str(id),
+                "space_name": space.name if space else None,
             },
         },
     )

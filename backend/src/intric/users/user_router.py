@@ -613,6 +613,44 @@ async def invite_user(
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
 
+    # Build comprehensive metadata for user creation
+    target_metadata = {
+        "id": str(new_user.id),
+        "email": new_user.email,
+        "username": new_user.username,
+        "state": user_invite.state.value if user_invite.state else "invited",
+    }
+
+    # Fetch predefined role details if role was assigned
+    if user_invite.predefined_role:
+        from intric.database.tables.roles_table import PredefinedRoles
+        import sqlalchemy as sa
+
+        # Query for the predefined role details
+        role_query = sa.select(PredefinedRoles).where(PredefinedRoles.id == user_invite.predefined_role)
+        role_result = await session.execute(role_query)
+        predefined_role = role_result.scalar_one_or_none()
+
+        if predefined_role:
+            target_metadata["predefined_role"] = predefined_role.name
+            # Get permissions for this role
+            target_metadata["permissions"] = sorted([p.value for p in predefined_role.permissions])
+
+    # Check if user has relationships loaded, otherwise fetch them
+    if hasattr(new_user, 'predefined_roles') and new_user.predefined_roles:
+        target_metadata["predefined_roles"] = [role.name for role in new_user.predefined_roles]
+
+    if hasattr(new_user, 'roles') and new_user.roles:
+        target_metadata["roles"] = [role.name for role in new_user.roles]
+
+    # Add user groups if available
+    if hasattr(new_user, 'user_groups') and new_user.user_groups:
+        target_metadata["user_groups"] = [group.name for group in new_user.user_groups]
+
+    # Add quota limit if set
+    if hasattr(new_user, 'quota_limit') and new_user.quota_limit:
+        target_metadata["quota_limit"] = new_user.quota_limit
+
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -626,11 +664,7 @@ async def invite_user(
                 "name": current_user.username,
                 "email": current_user.email,
             },
-            "target": {
-                "id": str(new_user.id),
-                "email": new_user.email,
-                "username": new_user.username,
-            },
+            "target": target_metadata,
         },
     )
 
@@ -657,12 +691,69 @@ async def update_user(
     # Update user
     updated_user = await user_service.update_user(user_id=id, prop_user_update=user_update)
 
-    # Track what changed
+    # Track comprehensive changes
     changes = {}
-    if user_update.username and user_update.username != old_user.username:
+
+    # Basic field changes
+    if hasattr(user_update, 'username') and user_update.username and user_update.username != old_user.username:
         changes["username"] = {"old": old_user.username, "new": user_update.username}
-    if user_update.email and user_update.email != old_user.email:
+    if hasattr(user_update, 'email') and user_update.email and user_update.email != old_user.email:
         changes["email"] = {"old": old_user.email, "new": user_update.email}
+
+    # State change
+    if hasattr(user_update, 'state') and user_update.state:
+        old_state = old_user.state.value if hasattr(old_user, 'state') else None
+        if old_state and user_update.state.value != old_state:
+            changes["state"] = {"old": old_state, "new": user_update.state.value}
+
+    # Predefined role change (PropUserUpdate has single predefined_role)
+    if hasattr(user_update, 'predefined_role') and user_update.predefined_role:
+        old_roles = []
+        if hasattr(old_user, 'predefined_roles') and old_user.predefined_roles:
+            old_roles = [role.name for role in old_user.predefined_roles]
+
+        # After update, get the new roles
+        new_roles = []
+        if hasattr(updated_user, 'predefined_roles') and updated_user.predefined_roles:
+            new_roles = [role.name for role in updated_user.predefined_roles]
+
+        if old_roles != new_roles:
+            changes["predefined_roles"] = {"old": old_roles, "new": new_roles}
+
+    # Track permission changes (computed from role changes)
+    old_permissions = sorted([p.value for p in old_user.permissions]) if hasattr(old_user, 'permissions') else []
+    new_permissions = sorted([p.value for p in updated_user.permissions]) if hasattr(updated_user, 'permissions') else []
+
+    if old_permissions != new_permissions:
+        added_perms = list(set(new_permissions) - set(old_permissions))
+        removed_perms = list(set(old_permissions) - set(new_permissions))
+        if added_perms or removed_perms:
+            changes["permissions"] = {}
+            if added_perms:
+                changes["permissions"]["added"] = sorted(added_perms)
+            if removed_perms:
+                changes["permissions"]["removed"] = sorted(removed_perms)
+
+    # Build comprehensive target metadata
+    target_metadata = {
+        "id": str(updated_user.id),
+        "email": updated_user.email,
+        "username": updated_user.username,
+        "state": updated_user.state.value if hasattr(updated_user, 'state') else None,
+    }
+
+    # Add current role information
+    if hasattr(updated_user, 'predefined_roles') and updated_user.predefined_roles:
+        target_metadata["predefined_roles"] = [role.name for role in updated_user.predefined_roles]
+
+    if hasattr(updated_user, 'roles') and updated_user.roles:
+        target_metadata["roles"] = [role.name for role in updated_user.roles]
+
+    if hasattr(updated_user, 'user_groups') and updated_user.user_groups:
+        target_metadata["user_groups"] = [group.name for group in updated_user.user_groups]
+
+    if hasattr(updated_user, 'quota_limit') and updated_user.quota_limit:
+        target_metadata["quota_limit"] = updated_user.quota_limit
 
     # Audit logging
     session = container.session()
@@ -682,12 +773,8 @@ async def update_user(
                 "name": current_user.username,
                 "email": current_user.email,
             },
-            "target": {
-                "id": str(updated_user.id),
-                "email": updated_user.email,
-                "username": updated_user.username,
-            },
-            "changes": changes,
+            "target": target_metadata,
+            "changes": changes if changes else None,  # Only include if there are changes
         },
     )
 
@@ -717,6 +804,30 @@ async def delete_user(
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
 
+    # Build comprehensive target metadata for deleted user
+    target_metadata = {
+        "id": str(user_to_delete.id),
+        "email": user_to_delete.email,
+        "username": user_to_delete.username,
+        "state": user_to_delete.state.value if hasattr(user_to_delete, 'state') else None,
+    }
+
+    # Include full context of what was deleted
+    if hasattr(user_to_delete, 'predefined_roles') and user_to_delete.predefined_roles:
+        target_metadata["predefined_roles"] = [role.name for role in user_to_delete.predefined_roles]
+
+    if hasattr(user_to_delete, 'roles') and user_to_delete.roles:
+        target_metadata["roles"] = [role.name for role in user_to_delete.roles]
+
+    if hasattr(user_to_delete, 'permissions'):
+        target_metadata["permissions"] = sorted([p.value for p in user_to_delete.permissions])
+
+    if hasattr(user_to_delete, 'user_groups') and user_to_delete.user_groups:
+        target_metadata["user_groups"] = [group.name for group in user_to_delete.user_groups]
+
+    if hasattr(user_to_delete, 'quota_limit') and user_to_delete.quota_limit:
+        target_metadata["quota_limit"] = user_to_delete.quota_limit
+
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -730,11 +841,7 @@ async def delete_user(
                 "name": current_user.username,
                 "email": current_user.email,
             },
-            "target": {
-                "id": str(user_to_delete.id),
-                "email": user_to_delete.email,
-                "username": user_to_delete.username,
-            },
+            "target": target_metadata,
         },
     )
 

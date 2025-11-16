@@ -83,12 +83,22 @@ async def create_assistant(
         metadata={
             "actor": {
                 "id": str(current_user.id),
-                "name": current_user.username,
+                "name": current_user.username or current_user.email.split('@')[0],
                 "email": current_user.email,
             },
             "target": {
                 "id": str(created_assistant.id),
                 "name": created_assistant.name,
+                "space_id": str(created_assistant.space_id) if created_assistant.space_id else None,
+                "type": created_assistant.type.value if created_assistant.type else "standard",
+            },
+            "configuration": {
+                "model": created_assistant.completion_model.nickname if created_assistant.completion_model else None,
+                "temperature": created_assistant.completion_model_kwargs.temperature if created_assistant.completion_model_kwargs else None,
+                "top_p": created_assistant.completion_model_kwargs.top_p if created_assistant.completion_model_kwargs else None,
+                "data_retention_days": created_assistant.data_retention_days,
+                "insights_enabled": created_assistant.insight_enabled if hasattr(created_assistant, 'insight_enabled') else None,
+                "published": created_assistant.published,
             },
         },
     )
@@ -211,12 +221,204 @@ async def update_assistant(
         metadata_json=metadata_json,
     )
 
-    # Track changes
+    # Track ALL changes comprehensively
     changes = {}
+
+    # Name change
     if assistant.name and assistant.name != old_assistant.name:
         changes["name"] = {"old": old_assistant.name, "new": assistant.name}
-    if assistant.prompt and assistant.prompt != old_assistant.prompt:
-        changes["prompt"] = {"old": "...", "new": "..."}  # Don't log full prompts
+
+    # Prompt change
+    if assistant.prompt and assistant.prompt.text:
+        old_prompt_text = old_assistant.prompt.text if old_assistant.prompt else ""
+        if assistant.prompt.text != old_prompt_text:
+            prompt_preview = assistant.prompt.text[:50] + "..." if len(assistant.prompt.text) > 50 else assistant.prompt.text
+            changes["prompt"] = {
+                "changed": True,
+                "preview": prompt_preview
+            }
+
+    # Model change
+    if completion_model_id and old_assistant.completion_model and completion_model_id != old_assistant.completion_model.id:
+        changes["model"] = {
+            "old": old_assistant.completion_model.nickname if old_assistant.completion_model else None,
+            "new": updated_assistant.completion_model.nickname if updated_assistant.completion_model else None
+        }
+
+    # Temperature/Top-p changes
+    # Get temperature values from completion_model_kwargs
+    old_temperature = old_assistant.completion_model_kwargs.temperature if old_assistant.completion_model_kwargs else None
+    new_temperature = updated_assistant.completion_model_kwargs.temperature if updated_assistant.completion_model_kwargs else None
+    if old_temperature != new_temperature:
+        changes["temperature"] = {"old": old_temperature, "new": new_temperature}
+
+    old_top_p = old_assistant.completion_model_kwargs.top_p if old_assistant.completion_model_kwargs else None
+    new_top_p = updated_assistant.completion_model_kwargs.top_p if updated_assistant.completion_model_kwargs else None
+    if old_top_p != new_top_p:
+        changes["top_p"] = {"old": old_top_p, "new": new_top_p}
+
+    # Description change
+    if description is not NOT_PROVIDED and description != old_assistant.description:
+        old_desc_preview = (old_assistant.description[:50] + "...") if old_assistant.description and len(old_assistant.description) > 50 else old_assistant.description
+        new_desc_preview = (description[:50] + "...") if description and len(description) > 50 else description
+        changes["description"] = {"old": old_desc_preview, "new": new_desc_preview}
+
+    # Insights change
+    if assistant.insight_enabled != old_assistant.insight_enabled:
+        changes["insights_enabled"] = {"old": old_assistant.insight_enabled, "new": assistant.insight_enabled}
+
+    # Data retention change
+    if assistant.data_retention_days != old_assistant.data_retention_days:
+        changes["data_retention_days"] = {
+            "old": old_assistant.data_retention_days,
+            "new": assistant.data_retention_days
+        }
+
+    # Helper function to track added/removed items
+    def get_changes_for_list(old_list, new_list, name_attr='name', is_attachment=False, assistant_space_id=None):
+        """Compare two lists and return added/removed items with their IDs, names, and scope."""
+        old_items = {}
+        new_items = {}
+
+        def get_scope(item, assistant_space_id):
+            """Determine if knowledge is 'space' or 'organizational'"""
+            if not assistant_space_id or not hasattr(item, 'space_id'):
+                return None  # Cannot determine scope
+
+            # If the item's space_id matches the assistant's, it's space-scoped
+            # Otherwise, it's organizational (from parent/org space)
+            if item.space_id == assistant_space_id:
+                return "space"
+            else:
+                return "organizational"
+
+        def extract_item_info(item, assistant_space_id):
+            """Extract ID, name, and scope from an item, handling attachments specially."""
+            item_id = str(item.id) if hasattr(item, 'id') else str(item)
+
+            # Special handling for FileAttachment objects
+            if is_attachment:
+                # For attachments, extract just the filename and optionally blob ID
+                item_name = item.name if hasattr(item, 'name') else 'unknown_file'
+                # Add blob ID if it exists and is not None
+                if hasattr(item, 'blob') and item.blob:
+                    item_name = f"{item_name} (blob: {item.blob})"
+            else:
+                # For other types, use the specified attribute or a safe fallback
+                if hasattr(item, name_attr):
+                    item_name = getattr(item, name_attr)
+                elif hasattr(item, 'name'):
+                    item_name = item.name
+                else:
+                    # Only use str() for simple types, not complex objects
+                    item_name = f"{item.__class__.__name__}_{item_id}"
+
+            # Determine scope
+            scope = get_scope(item, assistant_space_id)
+
+            return item_id, item_name, scope
+
+        if old_list:
+            for item in old_list:
+                item_id, item_name, scope = extract_item_info(item, assistant_space_id)
+                old_items[item_id] = {"name": item_name, "scope": scope}
+
+        if new_list:
+            for item in new_list:
+                item_id, item_name, scope = extract_item_info(item, assistant_space_id)
+                new_items[item_id] = {"name": item_name, "scope": scope}
+
+        # Build added/removed lists with scope information
+        added = []
+        for k in new_items:
+            if k not in old_items:
+                item_data = {"id": k, "name": new_items[k]["name"]}
+                if new_items[k]["scope"]:
+                    item_data["scope"] = new_items[k]["scope"]
+                added.append(item_data)
+
+        removed = []
+        for k in old_items:
+            if k not in new_items:
+                item_data = {"id": k, "name": old_items[k]["name"]}
+                if old_items[k]["scope"]:
+                    item_data["scope"] = old_items[k]["scope"]
+                removed.append(item_data)
+
+        return added, removed
+
+    # Track knowledge source changes in detail
+    knowledge_changes = {}
+
+    # Collections
+    collections_added, collections_removed = get_changes_for_list(
+        old_assistant.collections, updated_assistant.collections,
+        assistant_space_id=updated_assistant.space_id
+    )
+    if collections_added or collections_removed:
+        knowledge_changes["collections"] = {}
+        if collections_added:
+            knowledge_changes["collections"]["added"] = collections_added
+        if collections_removed:
+            knowledge_changes["collections"]["removed"] = collections_removed
+
+    # Websites
+    websites_added, websites_removed = get_changes_for_list(
+        old_assistant.websites, updated_assistant.websites, name_attr='url',
+        assistant_space_id=updated_assistant.space_id
+    )
+    if websites_added or websites_removed:
+        knowledge_changes["websites"] = {}
+        if websites_added:
+            knowledge_changes["websites"]["added"] = websites_added
+        if websites_removed:
+            knowledge_changes["websites"]["removed"] = websites_removed
+
+    # Attachments
+    attachments_added, attachments_removed = get_changes_for_list(
+        old_assistant.attachments, updated_assistant.attachments, name_attr='name', is_attachment=True,
+        assistant_space_id=updated_assistant.space_id
+    )
+    if attachments_added or attachments_removed:
+        knowledge_changes["attachments"] = {}
+        if attachments_added:
+            knowledge_changes["attachments"]["added"] = attachments_added
+        if attachments_removed:
+            knowledge_changes["attachments"]["removed"] = attachments_removed
+
+    # Integration Knowledge
+    integrations_added, integrations_removed = get_changes_for_list(
+        old_assistant.integration_knowledge_list, updated_assistant.integration_knowledge_list,
+        assistant_space_id=updated_assistant.space_id
+    )
+    if integrations_added or integrations_removed:
+        knowledge_changes["integrations"] = {}
+        if integrations_added:
+            knowledge_changes["integrations"]["added"] = integrations_added
+        if integrations_removed:
+            knowledge_changes["integrations"]["removed"] = integrations_removed
+
+    if knowledge_changes:
+        changes["knowledge_sources"] = knowledge_changes
+
+    # Create summary of changes
+    change_summary = []
+    if "name" in changes:
+        change_summary.append("name")
+    if "prompt" in changes:
+        change_summary.append("prompt")
+    if "model" in changes:
+        change_summary.append("model")
+    if "temperature" in changes or "top_p" in changes:
+        change_summary.append("parameters")
+    if "description" in changes:
+        change_summary.append("description")
+    if "insights_enabled" in changes:
+        change_summary.append("insights")
+    if "data_retention_days" in changes:
+        change_summary.append("retention")
+    if "knowledge_sources" in changes:
+        change_summary.append("knowledge sources")
 
     # Audit logging
     session = container.session()
@@ -233,14 +435,17 @@ async def update_assistant(
         metadata={
             "actor": {
                 "id": str(current_user.id),
-                "name": current_user.username,
+                "name": current_user.username or current_user.email.split('@')[0],
                 "email": current_user.email,
             },
             "target": {
                 "id": str(updated_assistant.id),
                 "name": updated_assistant.name,
+                "space_id": str(updated_assistant.space_id) if updated_assistant.space_id else None,
+                "type": updated_assistant.type.value if updated_assistant.type else "standard",
             },
             "changes": changes,
+            "summary": f"Modified {', '.join(change_summary)}" if change_summary else "No changes detected",
         },
     )
 
@@ -285,12 +490,29 @@ async def delete_assistant(
         metadata={
             "actor": {
                 "id": str(current_user.id),
-                "name": current_user.username,
+                "name": current_user.username or current_user.email.split('@')[0],
                 "email": current_user.email,
             },
             "target": {
                 "id": str(assistant.id),
                 "name": assistant.name,
+                "space_id": str(assistant.space_id) if assistant.space_id else None,
+                "type": assistant.type.value if assistant.type else "standard",
+            },
+            "impact": {
+                "knowledge_sources": {
+                    "collections": len(assistant.collections) if assistant.collections else 0,
+                    "websites": len(assistant.websites) if assistant.websites else 0,
+                    "integrations": len(assistant.integration_knowledge_list) if assistant.integration_knowledge_list else 0,
+                },
+                "configuration": {
+                    "model": assistant.completion_model.nickname if assistant.completion_model else None,
+                    "temperature": assistant.completion_model_kwargs.temperature if assistant.completion_model_kwargs else None,
+                    "top_p": assistant.completion_model_kwargs.top_p if assistant.completion_model_kwargs else None,
+                    "data_retention_days": assistant.data_retention_days,
+                    "published": assistant.published,
+                },
+                "created_at": assistant.created_at.isoformat() if assistant.created_at else None,
             },
         },
     )

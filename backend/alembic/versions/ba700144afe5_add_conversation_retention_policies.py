@@ -52,7 +52,26 @@ def upgrade() -> None:
         'data_retention_days IS NULL OR (data_retention_days >= 1 AND data_retention_days <= 2555)'
     )
 
+    # Add performance indexes for retention cleanup queries
+    op.create_index(
+        'ix_questions_assistant_created',
+        'questions',
+        ['assistant_id', 'created_at'],
+        postgresql_using='btree',
+    )
+
+    op.create_index(
+        'ix_app_runs_app_created',
+        'app_runs',
+        ['app_id', 'created_at'],
+        postgresql_using='btree',
+    )
+
 def downgrade() -> None:
+    # Drop performance indexes
+    op.drop_index('ix_questions_assistant_created', table_name='questions')
+    op.drop_index('ix_app_runs_app_created', table_name='app_runs')
+
     # Drop CHECK constraints from apps
     op.drop_constraint('ck_apps_data_retention_days_range', 'apps', type_='check')
 

@@ -23,6 +23,10 @@ class RetentionPolicyModel(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Conversation retention fields
+    conversation_retention_enabled: bool = False
+    conversation_retention_days: Optional[int] = None
+
 
 class RetentionService:
     """Service for managing audit log retention policies."""
@@ -68,14 +72,20 @@ class RetentionService:
         return result.scalar_one()
 
     async def update_policy(
-        self, tenant_id: UUID, retention_days: int
+        self,
+        tenant_id: UUID,
+        retention_days: int,
+        conversation_retention_enabled: Optional[bool] = None,
+        conversation_retention_days: Optional[int] = None,
     ) -> RetentionPolicyModel:
         """
         Update retention policy for a tenant.
 
         Args:
             tenant_id: Tenant ID
-            retention_days: Number of days to retain audit logs (90-2555)
+            retention_days: Number of days to retain audit logs (1-2555)
+            conversation_retention_enabled: Enable tenant-wide conversation retention
+            conversation_retention_days: Days to retain conversations when enabled
 
         Returns:
             Updated retention policy
@@ -89,11 +99,30 @@ class RetentionService:
         if retention_days > 2555:  # ~7 years
             raise ValueError("Maximum retention period is 2555 days (7 years)")
 
+        # Validate conversation retention
+        if conversation_retention_days is not None:
+            if conversation_retention_days < 1:
+                raise ValueError("Minimum conversation retention period is 1 day")
+            if conversation_retention_days > 2555:
+                raise ValueError("Maximum conversation retention period is 2555 days")
+
+        # Build update values
+        update_values = {
+            "retention_days": retention_days,
+            "updated_at": datetime.now(timezone.utc),
+        }
+
+        if conversation_retention_enabled is not None:
+            update_values["conversation_retention_enabled"] = conversation_retention_enabled
+
+        if conversation_retention_days is not None:
+            update_values["conversation_retention_days"] = conversation_retention_days
+
         # Update policy
         query = (
             update(AuditRetentionPolicy)
             .where(AuditRetentionPolicy.tenant_id == tenant_id)
-            .values(retention_days=retention_days, updated_at=datetime.now(timezone.utc))
+            .values(**update_values)
             .returning(AuditRetentionPolicy)
         )
 
@@ -104,9 +133,18 @@ class RetentionService:
             # Create policy if it doesn't exist
             from sqlalchemy import insert
 
+            create_values = {
+                "tenant_id": tenant_id,
+                "retention_days": retention_days,
+            }
+            if conversation_retention_enabled is not None:
+                create_values["conversation_retention_enabled"] = conversation_retention_enabled
+            if conversation_retention_days is not None:
+                create_values["conversation_retention_days"] = conversation_retention_days
+
             query = (
                 insert(AuditRetentionPolicy)
-                .values(tenant_id=tenant_id, retention_days=retention_days)
+                .values(**create_values)
                 .returning(AuditRetentionPolicy)
             )
             result = await self.session.execute(query)

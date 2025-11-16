@@ -1533,6 +1533,8 @@
   "audit_action_completion_model_updated": "Kompletteringsmodell uppdaterad",
   "audit_action_embedding_model_updated": "Inbäddningsmodell uppdaterad",
   "audit_action_transcription_model_updated": "Transkriptionsmodell uppdaterad",
+  "audit_action_audit_log_viewed": "Granskningsloggar visade",
+  "audit_action_audit_log_exported": "Granskningsloggar exporterade",
   "audit_clear_filter": "Rensa {count} filter",
   "audit_showing_results": "Visar {shown} av {total} granskningsloggar",
   "audit_page_info": "(Sida {current} av {total})",

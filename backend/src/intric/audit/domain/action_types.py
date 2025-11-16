@@ -74,3 +74,7 @@ class ActionType(str, Enum):
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"
     SYSTEM_MAINTENANCE = "system_maintenance"
+
+    # Audit Access Actions
+    AUDIT_LOG_VIEWED = "audit_log_viewed"
+    AUDIT_LOG_EXPORTED = "audit_log_exported"

@@ -6,17 +6,65 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
+from intric.api.audit.retention_schemas import (
+    RetentionPolicyResponse,
+    RetentionPolicyUpdateRequest,
+)
 from intric.api.audit.schemas import (
     AuditLogListResponse,
     AuditLogResponse,
 )
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from intric.database.tables.users_table import Users
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+import sqlalchemy as sa
 
 router = APIRouter(prefix="/audit", tags=["audit"])
+
+
+async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
+    """
+    Enrich audit logs with actor information (name/email).
+
+    This adds actor details to the metadata for display in the UI.
+    """
+    if not logs:
+        return []
+
+    # Get unique actor IDs from logs
+    actor_ids = list(set(log.actor_id for log in logs if log.actor_id))
+
+    # Fetch user information for all actors
+    user_map = {}
+    if actor_ids:
+        query = sa.select(Users.id, Users.email, Users.username).where(
+            Users.id.in_(actor_ids)
+        )
+        results = await session.execute(query)
+        for user_id, email, username in results:
+            user_map[user_id] = {
+                "email": email,
+                "name": username or email.split('@')[0]  # Use username or email prefix
+            }
+
+    # Convert logs to response models and enrich with actor info
+    enriched_logs = []
+    for log in logs:
+        log_dict = AuditLogResponse.model_validate(log).model_dump()
+
+        # Add actor information to metadata if we have it
+        if log.actor_id in user_map:
+            if "metadata" not in log_dict:
+                log_dict["metadata"] = {}
+            log_dict["metadata"]["actor"] = user_map[log.actor_id]
+
+        enriched_logs.append(log_dict)
+
+    return enriched_logs
 
 
 @router.get("/logs", response_model=AuditLogListResponse)
@@ -41,10 +89,11 @@ async def list_audit_logs(
     """
     current_user = container.user()
     session = container.session()
-    
+
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
 
+    # Get the logs first to know how many records were actually returned
     logs, total_count = await audit_service.get_logs(
         tenant_id=current_user.tenant_id,
         actor_id=actor_id,
@@ -56,9 +105,72 @@ async def list_audit_logs(
     )
 
     total_pages = (total_count + page_size - 1) // page_size
+    records_returned = len(logs)
+
+    # Build comprehensive metadata for compliance tracking
+    metadata = {
+        # Core access information
+        "records_returned": records_returned,
+        "total_matching_records": total_count,
+        "viewing_page": page,
+        "total_pages": total_pages,
+        "has_more_pages": page < total_pages,
+    }
+
+    # Add applied filters (only non-default values to show intent)
+    filters_applied = {}
+    if actor_id:
+        filters_applied["actor_id"] = str(actor_id)
+    if action:
+        filters_applied["action_type"] = action.value
+    if from_date:
+        filters_applied["from_date"] = from_date.isoformat()
+    if to_date:
+        filters_applied["to_date"] = to_date.isoformat()
+
+    if filters_applied:
+        metadata["filters_applied"] = filters_applied
+        metadata["filtered_view"] = True
+    else:
+        metadata["filtered_view"] = False
+        metadata["access_type"] = "full_audit_review"
+
+    # Add context about what period of logs they're seeing
+    if logs:
+        oldest_log_date = logs[-1].created_at
+        newest_log_date = logs[0].created_at
+        metadata["date_range_viewed"] = {
+            "oldest": oldest_log_date.isoformat(),
+            "newest": newest_log_date.isoformat()
+        }
+
+    # Build concise, human-readable description
+    description_parts = ["Viewed audit logs"]
+    if filters_applied:
+        description_parts.append("(filtered")
+        if page > 1:
+            description_parts.append(f", page {page}")
+        description_parts.append(")")
+    elif page > 1:
+        description_parts.append(f"(page {page})")
+    description = " ".join(description_parts)
+
+    # Log the audit access with comprehensive metadata
+    await audit_service.log(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.AUDIT_LOG_VIEWED,
+        entity_type=EntityType.AUDIT_LOG,
+        entity_id=current_user.tenant_id,  # Use tenant_id as entity_id for audit logs
+        description=description,
+        metadata=metadata
+    )
+
+    # Enrich logs with actor information for UI display
+    enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
     return AuditLogListResponse(
-        logs=[AuditLogResponse.model_validate(log) for log in logs],
+        logs=enriched_logs,
         total_count=total_count,
         page=page,
         page_size=page_size,
@@ -85,10 +197,11 @@ async def get_user_logs(
     """
     current_user = container.user()
     session = container.session()
-    
+
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
 
+    # Get the logs first to know actual results
     logs, total_count = await audit_service.get_user_logs(
         tenant_id=current_user.tenant_id,
         user_id=user_id,
@@ -99,9 +212,54 @@ async def get_user_logs(
     )
 
     total_pages = (total_count + page_size - 1) // page_size
+    records_returned = len(logs)
+
+    # Build comprehensive metadata for compliance tracking
+    metadata = {
+        "target_user_id": str(user_id),
+        "purpose": "GDPR Article 15 data subject access request",
+        "records_returned": records_returned,
+        "total_matching_records": total_count,
+        "viewing_page": page,
+        "total_pages": total_pages,
+        "has_more_pages": page < total_pages,
+    }
+
+    if from_date:
+        metadata["from_date"] = from_date.isoformat()
+    if to_date:
+        metadata["to_date"] = to_date.isoformat()
+
+    # Add context about what period of logs they're seeing
+    if logs:
+        oldest_log_date = logs[-1].created_at
+        newest_log_date = logs[0].created_at
+        metadata["date_range_viewed"] = {
+            "oldest": oldest_log_date.isoformat(),
+            "newest": newest_log_date.isoformat()
+        }
+
+    # Build concise description for GDPR access
+    description = "GDPR export: Viewed user audit logs"
+    if page > 1:
+        description += f" (page {page})"
+
+    # Log the GDPR export access
+    await audit_service.log(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.AUDIT_LOG_VIEWED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=description,
+        metadata=metadata
+    )
+
+    # Enrich logs with actor information for UI display
+    enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
     return AuditLogListResponse(
-        logs=[AuditLogResponse.model_validate(log) for log in logs],
+        logs=enriched_logs,
         total_count=total_count,
         page=page,
         page_size=page_size,
@@ -142,6 +300,76 @@ async def export_audit_logs(
     if export_format not in ["csv", "json"]:
         export_format = "csv"  # Default to CSV for invalid formats
 
+    # Build comprehensive metadata for compliance tracking
+    metadata = {
+        "export_format": export_format.upper(),
+        "export_type": "GDPR_EXPORT" if user_id else "AUDIT_EXPORT",
+    }
+
+    # Add applied filters to show what was exported
+    filters_applied = {}
+    if user_id:
+        filters_applied["user_id"] = str(user_id)
+        metadata["purpose"] = "GDPR Article 15 data portability"
+    if actor_id:
+        filters_applied["actor_id"] = str(actor_id)
+    if action:
+        filters_applied["action_type"] = action.value
+    if from_date:
+        filters_applied["from_date"] = from_date.isoformat()
+    if to_date:
+        filters_applied["to_date"] = to_date.isoformat()
+
+    if filters_applied:
+        metadata["filters_applied"] = filters_applied
+        metadata["filtered_export"] = True
+    else:
+        metadata["filtered_export"] = False
+        metadata["export_scope"] = "full_audit_trail"
+
+    # Count records that will be exported (for compliance tracking)
+    if user_id:
+        export_logs, export_count = await audit_service.get_user_logs(
+            tenant_id=current_user.tenant_id,
+            user_id=user_id,
+            from_date=from_date,
+            to_date=to_date,
+            page=1,
+            page_size=1,  # Just get count
+        )
+    else:
+        export_logs, export_count = await audit_service.get_logs(
+            tenant_id=current_user.tenant_id,
+            actor_id=actor_id,
+            action=action,
+            from_date=from_date,
+            to_date=to_date,
+            page=1,
+            page_size=1,  # Just get count
+        )
+
+    metadata["total_records_exported"] = export_count
+
+    # Build concise description for export
+    if user_id:
+        description = f"GDPR export: User audit logs ({export_format.upper()})"
+    else:
+        description = f"Exported audit logs ({export_format.upper()}"
+        if filters_applied:
+            description += ", filtered"
+        description += ")"
+
+    # Log the export with comprehensive metadata
+    await audit_service.log(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.AUDIT_LOG_EXPORTED,
+        entity_type=EntityType.AUDIT_LOG,
+        entity_id=current_user.tenant_id,
+        description=description,
+        metadata=metadata
+    )
+
     # Generate timestamp for filename
     timestamp = datetime.now().isoformat().split('T')[0]
 
@@ -180,14 +408,14 @@ async def export_audit_logs(
 
 
 
-@router.get("/retention-policy", response_model=dict)
+@router.get("/retention-policy", response_model=RetentionPolicyResponse)
 async def get_retention_policy(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
     Get the current retention policy for your tenant.
 
-    Returns the number of days audit logs are retained before automatic purging.
+    Returns both audit log and conversation retention policies.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
     """
@@ -199,31 +427,31 @@ async def get_retention_policy(
     retention_service = RetentionService(session)
     policy = await retention_service.get_policy(current_user.tenant_id)
 
-    # policy is already a Pydantic model, just return its dict
-    return policy.model_dump()
+    # Map to response model (convert from RetentionPolicyModel to RetentionPolicyResponse)
+    return RetentionPolicyResponse.model_validate(policy.model_dump())
 
 
-@router.put("/retention-policy", response_model=dict)
+@router.put("/retention-policy", response_model=RetentionPolicyResponse)
 async def update_retention_policy(
-    retention_days: int = Query(
-        ...,
-        ge=1,
-        le=2555,
-        description="Days to retain logs (1 min, 2555 max = 7 years). Recommended: 90+ days",
-    ),
+    request: RetentionPolicyUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
     Update the retention policy for your tenant.
 
-    Configure how long audit logs are kept before automatic purging.
+    Configure both audit log and conversation retention policies.
 
-    Constraints:
+    Audit Log Retention:
     - Minimum: 1 day (Recommended: 90+ days for compliance)
     - Maximum: 2555 days (~7 years, Swedish statute of limitations)
     - Default: 365 days (Swedish Arkivlagen)
 
-    The system automatically runs a daily job to soft-delete logs older than
+    Conversation Retention:
+    - Optional: Enable tenant-wide fallback policy
+    - Hierarchy: Assistant/App → Space → Tenant → Keep forever
+    - When enabled, requires retention_days (1-2555)
+
+    The system automatically runs a daily job to delete data older than
     the retention period.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
@@ -235,7 +463,12 @@ async def update_retention_policy(
     session = container.session()
 
     retention_service = RetentionService(session)
-    policy = await retention_service.update_policy(current_user.tenant_id, retention_days)
+    policy = await retention_service.update_policy(
+        tenant_id=current_user.tenant_id,
+        retention_days=request.retention_days,
+        conversation_retention_enabled=request.conversation_retention_enabled,
+        conversation_retention_days=request.conversation_retention_days,
+    )
 
-    # policy is already a Pydantic model, just return its dict
-    return policy.model_dump()
+    # Map to response model (convert from RetentionPolicyModel to RetentionPolicyResponse)
+    return RetentionPolicyResponse.model_validate(policy.model_dump())
