@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Type, Any
+from typing import Type, Any
 from uuid import UUID
 
 import sqlalchemy as sa
