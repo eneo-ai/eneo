@@ -1521,7 +1521,7 @@ export interface paths {
      * Get Retention Policy
      * @description Get the current retention policy for your tenant.
      *
-     * Returns the number of days audit logs are retained before automatic purging.
+     * Returns both audit log and conversation retention policies.
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
      */
@@ -1530,14 +1530,19 @@ export interface paths {
      * Update Retention Policy
      * @description Update the retention policy for your tenant.
      *
-     * Configure how long audit logs are kept before automatic purging.
+     * Configure both audit log and conversation retention policies.
      *
-     * Constraints:
+     * Audit Log Retention:
      * - Minimum: 1 day (Recommended: 90+ days for compliance)
      * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
      * - Default: 365 days (Swedish Arkivlagen)
      *
-     * The system automatically runs a daily job to soft-delete logs older than
+     * Conversation Retention:
+     * - Optional: Enable tenant-wide fallback policy
+     * - Hierarchy: Assistant/App → Space → Tenant → Keep forever
+     * - When enabled, requires retention_days (1-2555)
+     *
+     * The system automatically runs a daily job to delete data older than
      * the retention period.
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
@@ -2002,7 +2007,9 @@ export interface components {
       | "security_classification_disabled"
       | "retention_policy_applied"
       | "encryption_key_rotated"
-      | "system_maintenance";
+      | "system_maintenance"
+      | "audit_log_viewed"
+      | "audit_log_exported";
     /**
      * ActorType
      * @description Categorize who performed the action
@@ -4044,7 +4051,8 @@ export interface components {
       | "integration_knowledge"
       | "completion_model"
       | "embedding_model"
-      | "transcription_model";
+      | "transcription_model"
+      | "audit_log";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -6136,6 +6144,67 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
+    /**
+     * RetentionPolicyResponse
+     * @description Schema for retention policy response.
+     */
+    RetentionPolicyResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Retention Days
+       * @description Days to retain audit logs (1-2555). Recommended: 90+
+       */
+      retention_days: number;
+      /** Last Purge At */
+      last_purge_at?: string | null;
+      /** Purge Count */
+      purge_count: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /**
+       * Conversation Retention Enabled
+       * @description Whether tenant-wide conversation retention is enabled as a fallback policy
+       */
+      conversation_retention_enabled: boolean;
+      /**
+       * Conversation Retention Days
+       * @description Days to retain conversation history when enabled (1-2555). Only applies when enabled.
+       */
+      conversation_retention_days?: number | null;
+    };
+    /**
+     * RetentionPolicyUpdateRequest
+     * @description Schema for updating retention policy.
+     */
+    RetentionPolicyUpdateRequest: {
+      /**
+       * Retention Days
+       * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
+       */
+      retention_days: number;
+      /**
+       * Conversation Retention Enabled
+       * @description Enable tenant-wide conversation retention policy. Acts as fallback when space/assistant/app have no policy.
+       */
+      conversation_retention_enabled?: boolean | null;
+      /**
+       * Conversation Retention Days
+       * @description Days to retain conversation history when enabled (1-2555). Required when conversation_retention_enabled is True.
+       */
+      conversation_retention_days?: number | null;
+    };
     /** RoleCreateRequest */
     RoleCreateRequest: {
       /** Name */
@@ -15877,7 +15946,7 @@ export interface operations {
    * Get Retention Policy
    * @description Get the current retention policy for your tenant.
    *
-   * Returns the number of days audit logs are retained before automatic purging.
+   * Returns both audit log and conversation retention policies.
    *
    * Requires: Authentication (JWT token or API key via X-API-Key header)
    */
@@ -15886,9 +15955,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["RetentionPolicyResponse"];
         };
       };
     };
@@ -15897,33 +15964,35 @@ export interface operations {
    * Update Retention Policy
    * @description Update the retention policy for your tenant.
    *
-   * Configure how long audit logs are kept before automatic purging.
+   * Configure both audit log and conversation retention policies.
    *
-   * Constraints:
+   * Audit Log Retention:
    * - Minimum: 1 day (Recommended: 90+ days for compliance)
    * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
    * - Default: 365 days (Swedish Arkivlagen)
    *
-   * The system automatically runs a daily job to soft-delete logs older than
+   * Conversation Retention:
+   * - Optional: Enable tenant-wide fallback policy
+   * - Hierarchy: Assistant/App → Space → Tenant → Keep forever
+   * - When enabled, requires retention_days (1-2555)
+   *
+   * The system automatically runs a daily job to delete data older than
    * the retention period.
    *
    * Requires: Authentication (JWT token or API key via X-API-Key header)
    * Requires: Admin permissions
    */
   update_retention_policy_api_v1_audit_retention_policy_put: {
-    parameters: {
-      query: {
-        /** @description Days to retain logs (1 min, 2555 max = 7 years). Recommended: 90+ days */
-        retention_days: number;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RetentionPolicyUpdateRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["RetentionPolicyResponse"];
         };
       };
       /** @description Validation Error */

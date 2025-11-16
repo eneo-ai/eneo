@@ -120,6 +120,8 @@
       completion_model_updated: m.audit_action_completion_model_updated,
       embedding_model_updated: m.audit_action_embedding_model_updated,
       transcription_model_updated: m.audit_action_transcription_model_updated,
+      audit_log_viewed: m.audit_action_audit_log_viewed,
+      audit_log_exported: m.audit_action_audit_log_exported,
     };
     return labels[action]?.() || action;
   }
@@ -188,6 +190,8 @@
     { value: "security_classification_enabled" as ActionType, label: m.audit_action_security_classification_enabled(), category: "admin" },
     { value: "security_classification_disabled" as ActionType, label: m.audit_action_security_classification_disabled(), category: "admin" },
     { value: "retention_policy_applied" as ActionType, label: m.audit_action_retention_policy_applied(), category: "system" },
+    { value: "audit_log_viewed" as ActionType, label: m.audit_action_audit_log_viewed(), category: "system" },
+    { value: "audit_log_exported" as ActionType, label: m.audit_action_audit_log_exported(), category: "system" },
   ]);
 
   // Create store for Select component
