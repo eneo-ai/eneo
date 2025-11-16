@@ -81,14 +81,18 @@ async def list_audit_logs(
     List audit logs for the authenticated user's tenant.
 
     Access Control:
-    - Regular users: See only their own actions
-    - Admins: See all actions in their tenant
-    - Compliance officers: See all actions in their tenant
+    - Admins only: View all actions in their tenant
 
     Requires: Authentication (JWT token or API key)
+    Requires: Admin permissions
     """
+    from intric.roles.permissions import Permission, validate_permission
+
     current_user = container.user()
     session = container.session()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
 
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
@@ -193,10 +197,16 @@ async def get_user_logs(
     Returns audit logs involving the user in any capacity.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
     Security: Only returns logs for the authenticated user's tenant
     """
+    from intric.roles.permissions import Permission, validate_permission
+
     current_user = container.user()
     session = container.session()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
 
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
@@ -287,10 +297,16 @@ async def export_audit_logs(
     Use user_id for GDPR Article 15 data subject access requests.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
     Security: Only exports logs for the authenticated user's tenant
     """
+    from intric.roles.permissions import Permission, validate_permission
+
     current_user = container.user()
     session = container.session()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
 
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
@@ -415,14 +431,19 @@ async def get_retention_policy(
     """
     Get the current retention policy for your tenant.
 
-    Returns both audit log and conversation retention policies.
+    Returns audit log retention policy configuration.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
     """
     from intric.audit.application.retention_service import RetentionService
+    from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = container.session()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
 
     retention_service = RetentionService(session)
     policy = await retention_service.get_policy(current_user.tenant_id)
@@ -437,37 +458,77 @@ async def update_retention_policy(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
-    Update the retention policy for your tenant.
+    Update the audit log retention policy for your tenant.
 
-    Configure both audit log and conversation retention policies.
+    Configure audit log retention for compliance and security tracking.
 
     Audit Log Retention:
     - Minimum: 1 day (Recommended: 90+ days for compliance)
     - Maximum: 2555 days (~7 years, Swedish statute of limitations)
     - Default: 365 days (Swedish Arkivlagen)
 
-    Conversation Retention:
-    - Optional: Enable tenant-wide fallback policy
-    - Hierarchy: Assistant/App → Space → Tenant → Keep forever
-    - When enabled, requires retention_days (1-2555)
+    Note: Conversation retention is configured at the Assistant, App, or Space level.
+    Tenant-level conversation retention has been removed to prevent accidental data loss.
 
-    The system automatically runs a daily job to delete data older than
+    The system automatically runs a daily job to delete audit logs older than
     the retention period.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
     Requires: Admin permissions
     """
+    from intric.audit.application.audit_service import AuditService
     from intric.audit.application.retention_service import RetentionService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = container.session()
 
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
+
     retention_service = RetentionService(session)
+
+    # Get old policy for change tracking
+    old_policy = await retention_service.get_policy(current_user.tenant_id)
+
+    # Update policy
     policy = await retention_service.update_policy(
         tenant_id=current_user.tenant_id,
         retention_days=request.retention_days,
-        conversation_retention_enabled=request.conversation_retention_enabled,
-        conversation_retention_days=request.conversation_retention_days,
+        # Conversation retention removed from API - only settable at Assistant/App/Space level
+    )
+
+    # Audit logging for retention policy change
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=current_user.tenant_id,
+        description=f"Updated audit log retention policy from {old_policy.retention_days} to {policy.retention_days} days",
+        metadata={
+            "actor": {
+                "id": str(current_user.id),
+                "name": current_user.username,
+                "email": current_user.email,
+            },
+            "target": {
+                "tenant_id": str(current_user.tenant_id),
+                "policy_type": "audit_log_retention",
+            },
+            "changes": {
+                "retention_days": {
+                    "old": old_policy.retention_days,
+                    "new": policy.retention_days,
+                }
+            },
+        },
     )
 
     # Map to response model (convert from RetentionPolicyModel to RetentionPolicyResponse)
