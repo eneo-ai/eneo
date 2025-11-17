@@ -192,6 +192,97 @@ class CallbackRequest(BaseModel):
     }
 
 
+class FederationStatusResponse(BaseModel):
+    """Federation configuration status for login page."""
+
+    has_single_tenant_federation: bool
+    has_multi_tenant_federation: bool
+    tenant_count: int
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "has_single_tenant_federation": True,
+                "has_multi_tenant_federation": False,
+                "tenant_count": 1,
+            }
+        }
+    }
+
+
+@router.get(
+    "/federation-status",
+    response_model=FederationStatusResponse,
+    summary="Check federation configuration status",
+    description=(
+        "Returns federation availability status for the system. "
+        "Used by login page to determine which authentication method to show. "
+        "No authentication required (public endpoint)."
+    ),
+)
+async def get_federation_status(
+    container: Container = Depends(get_container()),
+) -> FederationStatusResponse:
+    """
+    Determine federation configuration status.
+
+    This endpoint helps the login page decide which authentication UI to show:
+    - Single-tenant API federation: Exactly 1 active tenant with API-configured federation
+    - Multi-tenant federation: Federation per tenant is enabled
+    - No API federation: Fall back to env-based OIDC or username/password
+
+    Returns:
+        FederationStatusResponse with:
+        - has_single_tenant_federation: True if exactly 1 active tenant with API federation config
+        - has_multi_tenant_federation: True if federation_per_tenant_enabled
+        - tenant_count: Number of active tenants
+    """
+    settings = get_settings()
+    tenant_repo = container.tenant_repo()
+
+    # Get all active tenants
+    tenants = await tenant_repo.get_all_active()
+    tenant_count = len(tenants)
+
+    # Multi-tenant mode: federation per tenant is enabled
+    if settings.federation_per_tenant_enabled:
+        return FederationStatusResponse(
+            has_single_tenant_federation=False,
+            has_multi_tenant_federation=True,
+            tenant_count=tenant_count,
+        )
+
+    # Single-tenant federation detection:
+    # - Exactly 1 active tenant
+    # - Has API-configured federation (non-empty federation_config JSONB)
+    # - Federation config has required fields
+    has_single_federation = False
+    if tenant_count == 1:
+        tenant = tenants[0]
+        # Check if tenant has API-configured federation (non-empty federation_config JSONB)
+        # Note: We check the JSONB field directly to avoid fallback to env vars
+        # (env-based OIDC is handled separately by singleTenantOidcConfigured flag in frontend)
+        if tenant.federation_config and len(tenant.federation_config) > 0:
+            # Verify it has the required fields (avoid empty dicts)
+            required_fields = {"client_id", "discovery_endpoint"}
+            if required_fields.issubset(tenant.federation_config.keys()):
+                has_single_federation = True
+                logger.info(
+                    "Single-tenant API federation detected",
+                    extra={
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": tenant.name,
+                        "provider": tenant.federation_config.get("provider", "unknown"),
+                    },
+                )
+
+    return FederationStatusResponse(
+        has_single_tenant_federation=has_single_federation,
+        has_multi_tenant_federation=False,
+        tenant_count=tenant_count,
+    )
+
+
 @router.get(
     "/tenants",
     response_model=TenantListResponse,
