@@ -4,8 +4,10 @@ from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
 from intric.admin.quota_service import QuotaService
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.audit.application.audit_config_service import AuditConfigService
 from intric.audit.application.audit_service import AuditService
 from intric.audit.application.retention_service import RetentionService
+from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
@@ -531,6 +533,14 @@ class Container(containers.DeclarativeContainer):
         AuditLogRepositoryImpl,
         session=session,
     )
+    audit_config_repo = providers.Factory(
+        AuditConfigRepositoryImpl,
+        session=session,
+    )
+    audit_config_service = providers.Factory(
+        AuditConfigService,
+        repository=audit_config_repo,
+    )
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
@@ -641,6 +651,7 @@ class Container(containers.DeclarativeContainer):
     audit_service = providers.Factory(
         AuditService,
         repository=audit_log_repo,
+        audit_config_service=audit_config_service,
     )
     retention_service = providers.Factory(
         RetentionService,

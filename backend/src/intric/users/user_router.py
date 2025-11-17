@@ -551,9 +551,7 @@ async def generate_api_key(
     api_key = await service.generate_api_key(current_user.id)
 
     # Audit logging for API key generation
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -609,9 +607,7 @@ async def invite_user(
     new_user = await user_service.invite_user(user_invite)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     # Build comprehensive metadata for user creation
     target_metadata = {
@@ -756,9 +752,7 @@ async def update_user(
         target_metadata["quota_limit"] = updated_user.quota_limit
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -800,9 +794,7 @@ async def delete_user(
     await user_service.delete_user(user_id=id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     # Build comprehensive target metadata for deleted user
     target_metadata = {

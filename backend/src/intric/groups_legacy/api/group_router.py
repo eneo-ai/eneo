@@ -100,9 +100,7 @@ async def update_group(
     collection_updated = await service.update_collection(collection_id=id, name=group.name)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -153,9 +151,7 @@ async def delete_group_by_id(
     await service.delete_group(group_id=id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -229,9 +225,7 @@ async def add_info_blobs(
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -304,9 +298,7 @@ async def upload_file(
     )
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,

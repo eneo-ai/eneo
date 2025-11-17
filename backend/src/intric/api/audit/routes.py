@@ -23,7 +23,13 @@ from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 import sqlalchemy as sa
 
+# Import config routes
+from intric.api.audit.config_routes import router as config_router
+
 router = APIRouter(prefix="/audit", tags=["audit"])
+
+# Include config routes
+router.include_router(config_router)
 
 
 async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
@@ -94,8 +100,7 @@ async def list_audit_logs(
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
 
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     # Get the logs first to know how many records were actually returned
     logs, total_count = await audit_service.get_logs(
@@ -208,8 +213,7 @@ async def get_user_logs(
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
 
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     # Get the logs first to know actual results
     logs, total_count = await audit_service.get_user_logs(
@@ -308,8 +312,7 @@ async def export_audit_logs(
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
 
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     # Normalize format
     export_format = format.lower().strip()

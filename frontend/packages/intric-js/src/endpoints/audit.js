@@ -85,6 +85,36 @@ export function initAudit(client) {
         }
       });
       return res;
+    },
+
+    /**
+     * Get audit category configuration for the current tenant. Requires admin privileges.
+     * Returns all 7 audit categories with their enabled status, descriptions, action counts, and example actions.
+     * @returns {Promise<{categories: Array<{category: string, enabled: boolean, description: string, action_count: number, example_actions: string[]}>}>}
+     * @throws {IntricError}
+     * */
+    getConfig: async () => {
+      const res = await client.fetch("/api/v1/audit/config", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update audit category configuration for the current tenant. Requires admin privileges.
+     * Changes take effect immediately for new audit events. Historical logs are unaffected.
+     * @param {{updates: Array<{category: string, enabled: boolean}>}} config - Category updates
+     * @returns {Promise<{categories: Array<{category: string, enabled: boolean, description: string, action_count: number, example_actions: string[]}>}>}
+     * @throws {IntricError}
+     * */
+    updateConfig: async (config) => {
+      const res = await client.fetch("/api/v1/audit/config", {
+        method: "patch",
+        requestBody: {
+          "application/json": config
+        }
+      });
+      return res;
     }
   };
 }
