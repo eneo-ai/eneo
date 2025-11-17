@@ -106,9 +106,7 @@ async def register_new_user(
     created_user, access_token, api_key = await user_service.register(new_user)
 
     # Audit logging (system action since no authenticated user for sysadmin)
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=created_user.tenant_id,
@@ -175,9 +173,7 @@ async def delete_user(
     success = await user_service.delete_user(user_id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=user_to_delete.tenant_id,
@@ -230,9 +226,7 @@ async def update_user(
         changes["username"] = {"old": old_user.username, "new": user_update.username}
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=updated_user.tenant_id,
@@ -308,9 +302,7 @@ async def create_tenant(tenant: TenantBase, container: Container = Depends(get_c
     created_tenant = await tenant_service.create_tenant(tenant)
 
     # Audit logging (sysadmin - system actor)
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=created_tenant.id,
@@ -368,9 +360,7 @@ async def update_tenant(
         changes["state"] = {"old": old_tenant.state, "new": tenant.state}
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=updated_tenant.id,
@@ -414,9 +404,7 @@ async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_conta
     deleted_tenant = await tenant_service.delete_tenant(id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=deleted_tenant.id,
@@ -593,9 +581,7 @@ async def enable_completion_model(
     model = await completion_model_repo.get_model(completion_model_id, tenant_id=id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=id,
@@ -649,9 +635,7 @@ async def enable_embedding_model(
     model = await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=id,

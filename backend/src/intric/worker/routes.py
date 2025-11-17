@@ -139,8 +139,7 @@ async def purge_old_audit_logs(container: Container):
         total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
 
         # Audit logging for retention policy application (one log per tenant)
-        audit_repo = AuditLogRepositoryImpl(session)
-        audit_service = AuditService(audit_repo)
+        audit_service = container.audit_service()
 
         for tenant_id_str, stats in purge_stats.items():
             from uuid import UUID

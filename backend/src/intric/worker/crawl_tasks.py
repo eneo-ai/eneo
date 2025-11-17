@@ -1108,8 +1108,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             from intric.audit.domain.entity_types import EntityType
             from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-            audit_repo = AuditLogRepositoryImpl(session)
-            audit_service = AuditService(audit_repo)
+            audit_service = container.audit_service()
 
             # Determine actor (crawl is typically triggered by a user or system)
             # Use website owner or system actor

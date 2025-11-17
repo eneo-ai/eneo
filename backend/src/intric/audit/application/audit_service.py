@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+from intric.audit.application.audit_config_service import AuditConfigService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.audit_log import AuditLog
+from intric.audit.domain.category_mappings import get_category_for_action
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
@@ -34,8 +36,13 @@ def _sanitize_csv_cell(value: str) -> str:
 class AuditService:
     """Service for audit logging operations."""
 
-    def __init__(self, repository: AuditLogRepository):
+    def __init__(
+        self,
+        repository: AuditLogRepository,
+        audit_config_service: Optional[AuditConfigService] = None,
+    ):
         self.repository = repository
+        self.audit_config_service = audit_config_service
 
     async def log(
         self,
@@ -72,11 +79,21 @@ class AuditService:
             error_message: Error details if outcome is failure
 
         Returns:
-            Created audit log
+            Created audit log (or None if category is disabled)
 
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
+        # Check if category is enabled (uses Redis cache for <1ms overhead)
+        if self.audit_config_service:
+            category = get_category_for_action(action.value)
+            enabled = await self.audit_config_service.is_category_enabled(
+                tenant_id, category
+            )
+            if not enabled:
+                # Category disabled - skip logging
+                return None
+
         audit_log = AuditLog(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -386,13 +403,16 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
-    ) -> UUID:
+    ) -> Optional[UUID]:
         """
         Asynchronously create an audit log entry via ARQ worker.
 
         This method enqueues the audit log to Redis for async processing,
         returning immediately (<10ms latency). The ARQ worker will persist
         the log to PostgreSQL in the background.
+
+        NOTE: If audit category configuration is enabled and the category
+        for this action is disabled, returns None and skips logging.
 
         Args:
             tenant_id: Tenant ID
@@ -410,11 +430,21 @@ class AuditService:
             error_message: Error details if outcome is failure
 
         Returns:
-            Job ID for tracking the async operation
+            Job ID for tracking the async operation, or None if category disabled
 
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
+        # Check if category is enabled (uses Redis cache for <1ms overhead)
+        if self.audit_config_service:
+            category = get_category_for_action(action.value)
+            enabled = await self.audit_config_service.is_category_enabled(
+                tenant_id, category
+            )
+            if not enabled:
+                # Category disabled - skip logging
+                return None
+
         # Validate
         if outcome == Outcome.FAILURE and not error_message:
             raise ValueError("error_message required when outcome is failure")

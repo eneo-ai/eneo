@@ -1488,6 +1488,18 @@ export interface paths {
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
   };
+  "/api/v1/audit/audit/config": {
+    /**
+     * Get audit category configuration
+     * @description Retrieve all audit category configurations for the current tenant.
+     */
+    get: operations["get_audit_config_api_v1_audit_audit_config_get"];
+    /**
+     * Update audit category configuration
+     * @description Update one or more audit category configurations for the current tenant.
+     */
+    patch: operations["update_audit_config_api_v1_audit_audit_config_patch"];
+  };
   "/api/v1/audit/logs": {
     /**
      * List Audit Logs
@@ -2926,6 +2938,68 @@ export interface components {
       max_in_question: number;
     };
     /**
+     * AuditConfigResponse
+     * @description Response model for GET /api/v1/audit/config.
+     * Contains all 7 categories with metadata.
+     * @example {
+     *   "categories": [
+     *     {
+     *       "action_count": 13,
+     *       "category": "admin_actions",
+     *       "description": "User management, role changes, API keys, tenant settings",
+     *       "enabled": true,
+     *       "example_actions": [
+     *         "USER_CREATED",
+     *         "ROLE_DELETED",
+     *         "API_KEY_GENERATED"
+     *       ]
+     *     },
+     *     {
+     *       "action_count": 28,
+     *       "category": "user_actions",
+     *       "description": "Assistant, space, app operations, templates, model configs",
+     *       "enabled": true,
+     *       "example_actions": [
+     *         "ASSISTANT_CREATED",
+     *         "SPACE_DELETED",
+     *         "APP_EXECUTED"
+     *       ]
+     *     }
+     *   ]
+     * }
+     */
+    AuditConfigResponse: {
+      /**
+       * Categories
+       * @description List of all audit categories with configuration and metadata
+       */
+      categories: components["schemas"]["CategoryConfig"][];
+    };
+    /**
+     * AuditConfigUpdateRequest
+     * @description Request model for PATCH /api/v1/audit/config.
+     * Allows bulk updates of multiple categories.
+     * @example {
+     *   "updates": [
+     *     {
+     *       "category": "admin_actions",
+     *       "enabled": false
+     *     },
+     *     {
+     *       "category": "file_operations",
+     *       "enabled": false
+     *     }
+     *   ]
+     * }
+     */
+    AuditConfigUpdateRequest: {
+      /**
+       * Updates
+       * @description List of category configuration updates
+       */
+      updates: components["schemas"]["CategoryUpdate"][];
+    };
+    /**
      * AuditLogListResponse
      * @description Schema for audit log list response.
      */
@@ -3092,6 +3166,68 @@ export interface components {
       state: string;
       /** Code Verifier */
       code_verifier?: string | null;
+    };
+    /**
+     * CategoryConfig
+     * @description Enriched category configuration with metadata for API responses.
+     * @example {
+     *   "action_count": 13,
+     *   "category": "admin_actions",
+     *   "description": "User management, role changes, API keys, tenant settings",
+     *   "enabled": true,
+     *   "example_actions": [
+     *     "USER_CREATED",
+     *     "ROLE_DELETED",
+     *     "API_KEY_GENERATED"
+     *   ]
+     * }
+     */
+    CategoryConfig: {
+      /**
+       * Category
+       * @description Category name (e.g., 'admin_actions')
+       */
+      category: string;
+      /**
+       * Enabled
+       * @description Whether category is currently enabled
+       */
+      enabled: boolean;
+      /**
+       * Description
+       * @description Human-readable description of category
+       */
+      description: string;
+      /**
+       * Action Count
+       * @description Number of action types in this category
+       */
+      action_count: number;
+      /**
+       * Example Actions
+       * @description Sample action types (max 3) for UI display
+       */
+      example_actions: string[];
+    };
+    /**
+     * CategoryUpdate
+     * @description Represents a category configuration change request.
+     * @example {
+     *   "category": "admin_actions",
+     *   "enabled": false
+     * }
+     */
+    CategoryUpdate: {
+      /**
+       * Category
+       * @description Category name to update
+       */
+      category: string;
+      /**
+       * Enabled
+       * @description New enabled state
+       */
+      enabled: boolean;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -15948,6 +16084,45 @@ export interface operations {
       403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get audit category configuration
+   * @description Retrieve all audit category configurations for the current tenant.
+   */
+  get_audit_config_api_v1_audit_audit_config_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update audit category configuration
+   * @description Update one or more audit category configurations for the current tenant.
+   */
+  update_audit_config_api_v1_audit_audit_config_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AuditConfigUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditConfigResponse"];
         };
       };
       /** @description Validation Error */
