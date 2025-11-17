@@ -122,47 +122,29 @@
     };
   }
 
-  function listAllProviders(models: CompletionModel[]): string[] {
-    const providersSet = new Set<string>();
+  function listOrgs(models: CompletionModel[]): string[] {
+    const uniqueOrgs = new Set<string>();
     for (const model of models) {
-      if (model.org) providersSet.add(model.org);
+      if (model.org) uniqueOrgs.add(model.org);
     }
-    return Array.from(providersSet);
+    return Array.from(uniqueOrgs);
   }
 
   /**
-   * Get the credential provider ID for a given org/provider.
-   * Replicates backend logic from LiteLLMProviderRegistry.detect_provider_from_model_name()
-   * and AIModel.get_credential_provider_name()
+   * Get the credential provider ID for a given org.
+   * Uses the credential_provider field from the backend (authoritative source).
    */
   function getProviderIdForOrg(org: string): string | undefined {
-    // Find any model with this org
     const model = completionModels.find((m) => m.org === org);
-    if (!model) return undefined;
-
-    // If litellm_model_name is set and has "/" prefix, extract provider from it
-    // Examples: "azure/gpt-4" → "azure", "gdm/gemma3-27b-it" → "gdm"
-    if (model.litellm_model_name && model.litellm_model_name.includes("/")) {
-      const provider = model.litellm_model_name.split("/")[0];
-      return provider.toLowerCase();
-    }
-
-    // Fall back to family field
-    // Special case: claude family uses anthropic credentials
-    if (model.family === "claude") return "anthropic";
-
-    // Otherwise family maps directly to credential provider
-    return model.family;
+    return model?.credential_provider;
   }
 
   function getCredentialForProvider(provider: string) {
     if (!credentials) return undefined;
 
-    // Get the actual credential provider ID from the model family
     const providerId = getProviderIdForOrg(provider);
     if (!providerId) return undefined;
 
-    // Match credentials using the provider ID
     const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
     if (!cred) return undefined;
     return {
@@ -171,18 +153,22 @@
     };
   }
 
-  $: allProviders = listAllProviders(completionModels);
+  $: uniqueOrgs = listOrgs(completionModels);
   $: table.update(completionModels);
 </script>
 
 <div>
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
-    {#each allProviders as provider (provider)}
+    {#each uniqueOrgs as provider (provider)}
       {@const providerId = getProviderIdForOrg(provider)}
       <Table.Group filterFn={createOrgFilter(provider)} title={provider}>
         <svelte:fragment slot="title-suffix">
           {#if browser && tenantCredentialsEnabled && providerId}
-            <ProviderCredentialIcon provider={providerId} credential={getCredentialForProvider(provider)} />
+            <ProviderCredentialIcon
+              provider={providerId}
+              displayName={provider}
+              credential={getCredentialForProvider(provider)}
+            />
           {/if}
         </svelte:fragment>
       </Table.Group>

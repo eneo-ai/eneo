@@ -6,6 +6,7 @@
 	import { m } from "$lib/paraglide/messages";
 
 	export let provider: string;
+	export let displayName: string | undefined = undefined;
 	export let existingCredential:
 		| {
 				masked_key: string;
@@ -84,10 +85,6 @@
 
 		try {
 			const response = await intric.credentials.set(provider.toLowerCase(), formData);
-			alert(m.credentials_configured_successfully({
-				provider: displayProviderName,
-				masked_key: response.masked_key
-			}));
 			openController.set(false);
 			// Reload the page data to reflect new credentials
 			await invalidate("admin:models:load");
@@ -98,14 +95,16 @@
 			if (error.status === 422 && error.response?.detail?.errors) {
 				const validationErrors = error.response.detail.errors;
 				if (Array.isArray(validationErrors)) {
-					alert(`${m.validation_error()}: ${validationErrors.join(", ")}`);
-				} else {
-					alert(m.validation_error());
+					// Set field-level errors
+					validationErrors.forEach((errorMsg: string) => {
+						// Try to extract field name from error message
+						// Format: "Field 'field_name' is required for provider 'provider'"
+						const fieldMatch = errorMsg.match(/Field '(\w+)'/);
+						if (fieldMatch) {
+							errors[fieldMatch[1]] = errorMsg;
+						}
+					});
 				}
-			} else {
-				alert(m.failed_to_configure_credentials({
-					error: error.message || "An unexpected error occurred"
-				}));
 			}
 		} finally {
 			isSubmitting = false;
@@ -113,7 +112,7 @@
 	}
 
 	// Format provider name for display
-	const displayProviderName = provider.charAt(0).toUpperCase() + provider.slice(1);
+	const displayProviderName = displayName || provider.charAt(0).toUpperCase() + provider.slice(1);
 </script>
 
 <Dialog.Root {openController}>

@@ -6,6 +6,7 @@
 	import { m } from "$lib/paraglide/messages";
 
 	export let provider: string; // Credential provider ID (e.g., "azure", "openai", "anthropic")
+	export let displayName: string | undefined = undefined; // Display name (e.g., "GDM", "Microsoft")
 	export let credential:
 		| {
 				masked_key: string;
@@ -41,4 +42,4 @@
 	</Tooltip>
 </div>
 
-<ProviderCredentialDialog {provider} existingCredential={credential} {openController} />
+<ProviderCredentialDialog {provider} {displayName} existingCredential={credential} {openController} />
