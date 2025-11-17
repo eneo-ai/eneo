@@ -122,7 +122,7 @@ function isConfigured(value: unknown): boolean {
   return value.trim().length > 0;
 }
 
-export function getFeatureFlags() {
+export async function getFeatureFlags() {
   // UI Features (enabled by default)
   const showWebSearch = getFlagFromEnv("SHOW_WEB_SEARCH", false);
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
@@ -134,18 +134,48 @@ export function getFeatureFlags() {
   const useNewAuth = zitadelConfigured && !forceLegacyAuth;
   const tenantFederationEnabled = getFlagFromEnv("FEDERATION_PER_TENANT_ENABLED", false);
 
-  // Single-tenant OIDC: OIDC configured but federation per tenant is disabled
+  // Single-tenant OIDC via environment variables (EXISTING - no change)
   const singleTenantOidcConfigured =
     !tenantFederationEnabled &&
     isConfigured(env.OIDC_DISCOVERY_ENDPOINT) &&
     isConfigured(env.OIDC_CLIENT_ID) &&
     isConfigured(env.OIDC_CLIENT_SECRET);
 
+  // NEW: Single-tenant federation via API config
+  // When federation per tenant is enabled, always defer to backend to determine
+  // if there's a single tenant with API-configured federation
+  let singleTenantApiFederationConfigured = false;
+  if (tenantFederationEnabled) {
+    try {
+      const backendUrl = env.INTRIC_BACKEND_URL || "http://localhost:8123";
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+      const response = await fetch(`${backendUrl}/api/v1/auth/federation-status`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        singleTenantApiFederationConfigured = data.has_single_tenant_federation;
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn("[FeatureFlags] Federation status check timed out after 3s");
+      } else {
+        console.error("[FeatureFlags] Failed to check federation status:", error);
+      }
+      // Fail gracefully - fall back to username/password
+    }
+  }
+
   return Object.freeze({
     newAuth: useNewAuth,
     showWebSearch,
     showHelpCenter,
     tenantFederationEnabled,
-    singleTenantOidcConfigured
+    singleTenantOidcConfigured,
+    singleTenantApiFederationConfigured
   });
 }

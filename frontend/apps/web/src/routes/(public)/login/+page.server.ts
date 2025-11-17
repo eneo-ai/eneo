@@ -69,7 +69,11 @@ export const load = async (event) => {
   }
 
   // Generate single-tenant OIDC link if configured
-  if (event.locals.featureFlags.singleTenantOidcConfigured) {
+  // Support both env-based AND API-based federation
+  if (
+    event.locals.featureFlags.singleTenantOidcConfigured ||
+    event.locals.featureFlags.singleTenantApiFederationConfigured
+  ) {
     singleTenantOidcLink = await getSingleTenantOidcLink(env.INTRIC_BACKEND_URL);
   }
 

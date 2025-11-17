@@ -21,6 +21,11 @@ const authHandle: Handle = async ({ event, resolve }) => {
     clearFrontendCookies(event);
   }
 
+  // Load feature flags and environment BEFORE authentication check
+  // This ensures login page has access to federation configuration flags
+  event.locals.featureFlags = await getFeatureFlags();
+  event.locals.environment = getEnvironmentConfig();
+
   const tokens = authenticateUser(event);
   const isLoggedIn = tokens.id_token != undefined;
 
@@ -43,8 +48,6 @@ const authHandle: Handle = async ({ event, resolve }) => {
 
   event.locals.id_token = tokens.id_token ?? null;
   event.locals.access_token = tokens.access_token ?? null;
-  event.locals.featureFlags = getFeatureFlags();
-  event.locals.environment = getEnvironmentConfig();
 
   return resolve(event);
 };
