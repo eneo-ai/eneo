@@ -771,137 +771,140 @@
     {/if}
 
     <!-- Filters Section -->
-    <div class="mb-6 space-y-4 rounded-lg border border-default bg-subtle p-6">
-      <div class="flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-default">{m.audit_filters()}</h3>
-        {#if activeFilterCount > 0}
+    <div class="mb-6 rounded-lg border border-default bg-subtle p-6">
+      <div class="space-y-4">
+        <!-- Header Row -->
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-default">{m.audit_filters()}</h3>
+          {#if activeFilterCount > 0}
+            <button
+              onclick={clearFilters}
+              class="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+            >
+              <IconXMark class="h-3.5 w-3.5" />
+              {m.audit_clear_filter({ count: activeFilterCount })}
+            </button>
+          {/if}
+        </div>
+
+        <!-- Quick Filters Row -->
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
           <button
-            onclick={clearFilters}
-            class="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+            onclick={() => setDatePreset(7)}
+            class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
           >
-            <IconXMark class="h-4 w-4" />
-            {m.audit_clear_filter({ count: activeFilterCount })}
+            <Clock class="h-3.5 w-3.5" />
+            {m.audit_last_7_days()}
           </button>
-        {/if}
-      </div>
+          <button
+            onclick={() => setDatePreset(30)}
+            class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+          >
+            <Clock class="h-3.5 w-3.5" />
+            {m.audit_last_30_days()}
+          </button>
+          <button
+            onclick={() => setDatePreset(90)}
+            class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+          >
+            <Clock class="h-3.5 w-3.5" />
+            {m.audit_last_90_days()}
+          </button>
+        </div>
 
-      <!-- Date Presets -->
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
-        <button
-          onclick={() => setDatePreset(7)}
-          class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
-        >
-          <Clock class="h-3.5 w-3.5" />
-          {m.audit_last_7_days()}
-        </button>
-        <button
-          onclick={() => setDatePreset(30)}
-          class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
-        >
-          <Clock class="h-3.5 w-3.5" />
-          {m.audit_last_30_days()}
-        </button>
-        <button
-          onclick={() => setDatePreset(90)}
-          class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
-        >
-          <Clock class="h-3.5 w-3.5" />
-          {m.audit_last_90_days()}
-        </button>
-      </div>
+        <!-- Filter Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Date Range Filter -->
+          <div>
+            <label class="block text-xs font-medium text-default mb-1.5">{m.audit_date_range()}</label>
+            <div class="h-10">
+              <Input.DateRange bind:value={dateRange} class="w-full h-full" />
+            </div>
+          </div>
 
-      <!-- Filter Grid -->
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <!-- Date Range Filter -->
-        <div class="flex flex-col">
-          <span class="mb-2 block text-xs font-medium text-default">{m.audit_date_range()}</span>
-          <div class="h-10">
-            <Input.DateRange bind:value={dateRange} class="w-full h-full" />
+          <!-- Action Type Filter -->
+          <div>
+            <label class="block text-xs font-medium text-default mb-1.5">{m.audit_action_type()}</label>
+            <Select.Root customStore={actionStore}>
+              <Select.Trigger class="w-full h-10 text-sm" placeholder="Select action type" />
+              <Select.Options>
+                {#each actionOptions as option}
+                  <Select.Item value={option.value} label={option.label} />
+                {/each}
+              </Select.Options>
+            </Select.Root>
+          </div>
+
+          <!-- User Filter -->
+          <div>
+            <label class="block text-xs font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
+            <div class="relative h-10">
+              <Input.Text
+                bind:value={userSearchQuery}
+                oninput={(e) => searchUsers(e.currentTarget.value)}
+                onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
+                placeholder={m.audit_user_filter_placeholder()}
+                class="w-full h-10"
+              />
+              {#if selectedUser}
+                <button
+                  onclick={clearUserFilter}
+                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                  aria-label="Clear user filter"
+                >
+                  <IconXMark class="h-4 w-4 text-muted" />
+                </button>
+              {/if}
+              {#if isSearchingUsers}
+                <div class="absolute right-2 top-1/2 -translate-y-1/2">
+                  <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                </div>
+              {/if}
+
+              <!-- Dropdown Results -->
+              {#if showUserDropdown && userSearchResults.length > 0}
+                <div
+                  class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
+                  transition:fade={{ duration: 150 }}
+                >
+                  {#each userSearchResults as user}
+                    <button
+                      onclick={() => selectUser(user)}
+                      class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
+                    >
+                      <div class="flex flex-col gap-0.5">
+                        <span class="text-sm font-medium text-default">{user.email}</span>
+                        {#if user.name}
+                          <span class="text-xs text-muted">{user.name}</span>
+                        {/if}
+                      </div>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
 
-        <!-- Action Type Filter -->
-        <div class="flex flex-col">
-          <span class="mb-2 block text-xs font-medium text-default">{m.audit_action_type()}</span>
-          <Select.Root customStore={actionStore}>
-            <Select.Trigger class="w-full h-10" placeholder="Select action type" />
-            <Select.Options>
-              {#each actionOptions as option}
-                <Select.Item value={option.value} label={option.label} />
-              {/each}
-            </Select.Options>
-          </Select.Root>
-        </div>
-
-        <!-- User Filter -->
-        <div class="flex flex-col">
-          <span class="mb-2 block text-xs font-medium text-default">{m.audit_user_filter()}</span>
-          <div class="relative h-10">
-            <Input.Text
-              bind:value={userSearchQuery}
-              oninput={(e) => searchUsers(e.currentTarget.value)}
-              onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
-              placeholder={m.audit_user_filter_placeholder()}
-              class="w-full h-full"
-            />
-            {#if selectedUser}
+        <!-- Selected User Chip -->
+        {#if selectedUser}
+          <div class="flex items-center gap-2">
+            <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
+              <span class="text-blue-900 dark:text-blue-300">
+                {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
+              </span>
               <button
                 onclick={clearUserFilter}
-                class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
                 aria-label="Clear user filter"
               >
-                <IconXMark class="h-4 w-4 text-muted" />
+                <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
               </button>
-            {/if}
-            {#if isSearchingUsers}
-              <div class="absolute right-2 top-1/2 -translate-y-1/2">
-                <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-              </div>
-            {/if}
-
-            <!-- Dropdown Results -->
-            {#if showUserDropdown && userSearchResults.length > 0}
-              <div
-                class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
-                transition:fade={{ duration: 150 }}
-              >
-                {#each userSearchResults as user}
-                  <button
-                    onclick={() => selectUser(user)}
-                    class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
-                  >
-                    <div class="flex flex-col gap-0.5">
-                      <span class="text-sm font-medium text-default">{user.email}</span>
-                      {#if user.name}
-                        <span class="text-xs text-muted">{user.name}</span>
-                      {/if}
-                    </div>
-                  </button>
-                {/each}
-              </div>
-            {/if}
+            </div>
           </div>
-        </div>
+        {/if}
       </div>
-
-      <!-- Selected User Chip -->
-      {#if selectedUser}
-        <div class="flex items-center gap-2 mt-2">
-          <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
-            <span class="text-blue-900 dark:text-blue-300">
-              {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
-            </span>
-            <button
-              onclick={clearUserFilter}
-              class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
-              aria-label="Clear user filter"
-            >
-              <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
-            </button>
-          </div>
-        </div>
-      {/if}
     </div>
 
     <!-- Results Summary and Top Pagination -->
