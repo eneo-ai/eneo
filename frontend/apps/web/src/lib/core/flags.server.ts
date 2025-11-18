@@ -132,50 +132,43 @@ export async function getFeatureFlags() {
     isConfigured(env.ZITADEL_INSTANCE_URL) && isConfigured(env.ZITADEL_PROJECT_CLIENT_ID);
   const forceLegacyAuth = getFlagFromEnv("FORCE_LEGACY_AUTH", false);
   const useNewAuth = zitadelConfigured && !forceLegacyAuth;
-  const tenantFederationEnabled = getFlagFromEnv("FEDERATION_PER_TENANT_ENABLED", false);
 
-  // Single-tenant OIDC via environment variables (EXISTING - no change)
-  const singleTenantOidcConfigured =
-    !tenantFederationEnabled &&
-    isConfigured(env.OIDC_DISCOVERY_ENDPOINT) &&
-    isConfigured(env.OIDC_CLIENT_ID) &&
-    isConfigured(env.OIDC_CLIENT_SECRET);
+  // Federation status - always check backend to determine what's available
+  // Backend handles all the logic about federation_per_tenant_enabled, DB config, env vars, etc.
+  let federationStatus = {
+    has_single_tenant_federation: false,
+    has_multi_tenant_federation: false,
+    has_global_oidc_config: false,
+    tenant_count: 0
+  };
 
-  // NEW: Single-tenant federation via API config
-  // When federation per tenant is enabled, always defer to backend to determine
-  // if there's a single tenant with API-configured federation
-  let singleTenantApiFederationConfigured = false;
-  if (tenantFederationEnabled) {
-    try {
-      const backendUrl = env.INTRIC_BACKEND_URL || "http://localhost:8123";
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+  try {
+    const backendUrl = env.INTRIC_BACKEND_URL || "http://localhost:8123";
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 
-      const response = await fetch(`${backendUrl}/api/v1/auth/federation-status`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+    const response = await fetch(`${backendUrl}/api/v1/auth/federation-status`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const data = await response.json();
-        singleTenantApiFederationConfigured = data.has_single_tenant_federation;
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.warn("[FeatureFlags] Federation status check timed out after 3s");
-      } else {
-        console.error("[FeatureFlags] Failed to check federation status:", error);
-      }
-      // Fail gracefully - fall back to username/password
+    if (response.ok) {
+      federationStatus = await response.json();
+      console.log("[FeatureFlags] Federation status:", federationStatus);
     }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn("[FeatureFlags] Federation status check timed out after 3s");
+    } else {
+      console.error("[FeatureFlags] Failed to check federation status:", error);
+    }
+    // Fail gracefully - fall back to username/password
   }
 
   return Object.freeze({
     newAuth: useNewAuth,
     showWebSearch,
     showHelpCenter,
-    tenantFederationEnabled,
-    singleTenantOidcConfigured,
-    singleTenantApiFederationConfigured
+    federationStatus
   });
 }
