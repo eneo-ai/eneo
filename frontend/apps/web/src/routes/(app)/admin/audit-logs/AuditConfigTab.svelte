@@ -338,14 +338,14 @@
                       {/if}
                       <code class="inline-block text-xs text-muted/80 font-mono bg-subtle px-2 py-1 rounded border border-default">{action.action}</code>
                     </div>
-                    <div
-                      class="flex-shrink-0 pt-0.5 cursor-pointer"
-                      onclick={() => toggleAction(action.action, action.category)}
-                      role="button"
-                      tabindex="0"
-                    >
+                    <div class="flex-shrink-0 pt-0.5">
                       <Input.Checkbox
-                        value={action.enabled}
+                        checked={action.enabled}
+                        onCheckedChange={(next) => {
+                          if (next !== action.enabled) {
+                            toggleAction(action.action, action.category);
+                          }
+                        }}
                       />
                     </div>
                   </div>

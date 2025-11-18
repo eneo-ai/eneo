@@ -7,7 +7,7 @@ export function initAudit(client) {
   return {
     /**
      * List audit logs with optional filtering and pagination.
-     * @param {{actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string, page?: number, page_size?: number}} [options]
+     * @param {{actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string, page?: number, page_size?: number, justification_category?: string, justification_description?: string}} [options]
      * @returns {Promise<import('../types/schema').components["schemas"]["AuditLogListResponse"]>}
      * @throws {IntricError}
      * */

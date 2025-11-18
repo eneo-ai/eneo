@@ -237,16 +237,12 @@ class AuditConfigService:
                 category_enabled = config[1]  # enabled boolean
                 action_overrides = config[2] if len(config) > 2 else {}  # action_overrides JSONB
 
-                # If category is disabled, action is disabled
-                if not category_enabled:
-                    enabled = False
-                # If category is enabled, check action override
-                elif action in action_overrides:
-                    # Action has explicit override
+                if action in action_overrides:
+                    # Action has explicit override - takes precedence over category state
                     enabled = action_overrides[action]
                 else:
-                    # No override, use category setting
-                    enabled = True
+                    # No override, use category enabled state
+                    enabled = category_enabled
 
             # Cache result
             try:
@@ -300,15 +296,12 @@ class AuditConfigService:
             else:
                 category_enabled, action_overrides = config_dict[category]
 
-                if not category_enabled:
-                    # Category disabled → action disabled
-                    enabled = False
-                elif action_value in action_overrides:
-                    # Action has explicit override
+                if action_value in action_overrides:
+                    # Action has explicit override - takes precedence over category state
                     enabled = action_overrides[action_value]
                 else:
-                    # No override, use category setting (default True)
-                    enabled = True
+                    # No override, use category enabled state
+                    enabled = category_enabled
 
             # Get Swedish metadata
             metadata = get_action_metadata(action_value)
@@ -359,18 +352,20 @@ class AuditConfigService:
             config = await self.repository.find_by_tenant_and_category(tenant_id, category)
 
             if config is None:
-                # If no category config exists, create it first
-                await self.repository.update(tenant_id, category, True)
+                # If no category config exists, create it with default enabled=True
+                category_enabled = True
                 current_overrides = {}
             else:
+                # Preserve existing category enabled state
+                category_enabled = config[1]
                 current_overrides = config[2] if len(config) > 2 else {}
 
             # Merge new overrides with existing ones
             updated_overrides = {**current_overrides, **action_overrides}
 
-            # Update in database with new overrides
+            # Update in database with new overrides, preserving category state
             await self.repository.update(
-                tenant_id, category, True, updated_overrides
+                tenant_id, category, category_enabled, updated_overrides
             )
 
             # Invalidate all action caches for this category

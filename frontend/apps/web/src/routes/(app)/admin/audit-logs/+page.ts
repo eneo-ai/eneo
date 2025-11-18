@@ -10,7 +10,11 @@ export const load = async (event) => {
     const action = event.url.searchParams.get("action") || undefined;
     const actor_id = event.url.searchParams.get("actor_id") || undefined;
 
-    // Fetch audit logs with filters
+    // Read justification parameters (required for compliance tracking)
+    const justification_category = event.url.searchParams.get("justification_category") || undefined;
+    const justification_description = event.url.searchParams.get("justification_description") || undefined;
+
+    // Fetch audit logs with filters and justification
     const response = await intric.audit.list({
       page,
       page_size,
@@ -18,6 +22,8 @@ export const load = async (event) => {
       to_date,
       action: action !== "all" ? action : undefined,
       actor_id,
+      justification_category,
+      justification_description,
     });
 
     return {

@@ -81,6 +81,8 @@ async def list_audit_logs(
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(100, ge=1, le=1000, description="Page size"),
+    justification_category: Optional[str] = Query(None, description="Access justification category"),
+    justification_description: Optional[str] = Query(None, description="Access justification description"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
@@ -151,6 +153,14 @@ async def list_audit_logs(
         metadata["date_range_viewed"] = {
             "oldest": oldest_log_date.isoformat(),
             "newest": newest_log_date.isoformat()
+        }
+
+    # Add access justification if provided
+    if justification_category and justification_description:
+        metadata["access_justification"] = {
+            "category": justification_category,
+            "description": justification_description,
+            "timestamp": datetime.utcnow().isoformat()
         }
 
     # Build concise, human-readable description
