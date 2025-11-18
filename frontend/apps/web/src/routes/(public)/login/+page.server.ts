@@ -68,12 +68,14 @@ export const load = async (event) => {
     mobilityguardLink = await getMobilityguardLink(event);
   }
 
-  // Generate single-tenant OIDC link if configured
-  // Support both env-based AND API-based federation
-  if (
-    event.locals.featureFlags.singleTenantOidcConfigured ||
-    event.locals.featureFlags.singleTenantApiFederationConfigured
-  ) {
+  // Generate single-tenant OIDC link if federation is available
+  // Check if either single-tenant federation (DB) or global OIDC (env) is configured
+  const { federationStatus } = event.locals.featureFlags;
+  const hasSingleTenantOidc =
+    federationStatus.has_single_tenant_federation ||
+    federationStatus.has_global_oidc_config;
+
+  if (hasSingleTenantOidc) {
     singleTenantOidcLink = await getSingleTenantOidcLink(env.INTRIC_BACKEND_URL);
   }
 

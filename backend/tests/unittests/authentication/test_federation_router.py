@@ -195,7 +195,7 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
-    dummy_settings = DummySettings()
+    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     redis_client = FakeRedis()
@@ -303,7 +303,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_email", ["@example.com", "user@@example.com"])
 async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email):
-    dummy_settings = DummySettings()
+    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     redis_client = FakeRedis()
