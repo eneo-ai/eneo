@@ -311,7 +311,7 @@
               </div>
             </div>
             {#if category.description}
-              <p class="text-xs text-muted mt-3 ml-9 leading-relaxed">{category.description}</p>
+              <p class="text-sm text-muted mt-3 ml-9 leading-relaxed">{category.description}</p>
             {/if}
           </div>
 
@@ -319,7 +319,7 @@
           {#if isExpanded && actions.length > 0}
             <div class="divide-y divide-default bg-primary">
               {#each actions as action (action.action)}
-                <div class="px-6 py-4 hover:bg-hover/30 transition-colors">
+                <div class="px-6 py-5 hover:bg-hover/30 transition-colors">
                   <div class="flex items-start justify-between gap-6">
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2.5 mb-1.5 flex-wrap">
@@ -336,7 +336,7 @@
                       {#if action.description_sv}
                         <p class="text-sm text-muted leading-relaxed mb-2">{action.description_sv}</p>
                       {/if}
-                      <code class="inline-block text-xs text-muted/80 font-mono bg-subtle px-2 py-1 rounded border border-default">{action.action}</code>
+                      <code class="inline-block text-xs font-mono bg-accent-default/5 text-accent-default/90 dark:bg-accent-default/10 dark:text-accent-default px-2.5 py-1 rounded-md border border-accent-default/20">{action.action}</code>
                     </div>
                     <div class="flex-shrink-0 pt-0.5">
                       <Input.Checkbox
