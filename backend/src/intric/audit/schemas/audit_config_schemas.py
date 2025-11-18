@@ -98,3 +98,97 @@ class AuditConfigUpdateRequest(BaseModel):
                 ]
             }
         }
+
+
+class ActionConfig(BaseModel):
+    """
+    Configuration for a single action type with metadata for UI display.
+    """
+    action: str = Field(..., description="Action type value (e.g., 'user_created')")
+    enabled: bool = Field(..., description="Whether this action is currently enabled")
+    category: str = Field(..., description="Category this action belongs to")
+    name_sv: str = Field(..., description="Swedish display name")
+    description_sv: str = Field(..., description="Swedish description")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "action": "user_created",
+                "enabled": True,
+                "category": "admin_actions",
+                "name_sv": "Användare skapad",
+                "description_sv": "Loggar när en ny användare skapas"
+            }
+        }
+
+
+class ActionConfigResponse(BaseModel):
+    """
+    Response model for GET /api/v1/audit/config/actions.
+    Contains all 65 actions with their configuration and metadata.
+    """
+    actions: list[ActionConfig] = Field(
+        ...,
+        description="List of all actions with configuration and Swedish metadata"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "actions": [
+                    {
+                        "action": "user_created",
+                        "enabled": True,
+                        "category": "admin_actions",
+                        "name_sv": "Användare skapad",
+                        "description_sv": "Loggar när en ny användare skapas"
+                    },
+                    {
+                        "action": "user_deleted",
+                        "enabled": False,
+                        "category": "admin_actions",
+                        "name_sv": "Användare raderad",
+                        "description_sv": "Loggar när en användare tas bort"
+                    }
+                ]
+            }
+        }
+
+
+class ActionUpdate(BaseModel):
+    """
+    Represents an action-level configuration change request.
+    """
+    action: str = Field(..., description="Action name to update")
+    enabled: bool = Field(..., description="New enabled state")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "action": "user_created",
+                "enabled": False
+            }
+        }
+
+
+class ActionConfigUpdateRequest(BaseModel):
+    """
+    Request model for PATCH /api/v1/audit/config/actions.
+    Allows bulk updates of multiple action overrides.
+    """
+    updates: list[ActionUpdate] = Field(
+        ...,
+        description="List of action configuration updates",
+        min_length=1,
+        max_length=65
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "updates": [
+                    {"action": "user_created", "enabled": False},
+                    {"action": "user_deleted", "enabled": False}
+                ]
+            }
+        }

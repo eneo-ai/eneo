@@ -5,6 +5,8 @@ import logging
 from fastapi import APIRouter, Depends
 
 from intric.audit.schemas.audit_config_schemas import (
+    ActionConfigResponse,
+    ActionConfigUpdateRequest,
     AuditConfigResponse,
     AuditConfigUpdateRequest,
 )
@@ -113,6 +115,102 @@ async def update_audit_config(
             metadata={
                 "setting": "audit_category_config",
                 "changes": changes
+            },
+        )
+
+    return updated_config
+
+
+# ============================================================================
+# ACTION-LEVEL CONFIGURATION ENDPOINTS
+# ============================================================================
+
+
+@router.get(
+    "/actions",
+    response_model=ActionConfigResponse,
+    summary="Get per-action audit configuration",
+    description="Retrieve all 65 actions with their enabled status for the modal UI.",
+)
+async def get_action_config(
+    container: Container = Depends(get_container(with_user=True)),
+) -> ActionConfigResponse:
+    """
+    Get all actions with their enabled status (considering category + overrides).
+
+    Returns all 65 actions grouped by category with Swedish metadata.
+    Used for populating the audit configuration modal UI.
+
+    Requires admin permission.
+    """
+    user = container.user()
+
+    # Validate admin permissions
+    validate_permission(user, Permission.ADMIN)
+
+    audit_config_service = container.audit_config_service()
+
+    logger.info(
+        f"User {user.id} fetching action config for tenant {user.tenant_id}"
+    )
+
+    return await audit_config_service.get_action_config(user.tenant_id)
+
+
+@router.patch(
+    "/actions",
+    response_model=ActionConfigResponse,
+    summary="Update per-action audit configuration",
+    description="Update one or more action-level audit configurations.",
+)
+async def update_action_config(
+    request: ActionConfigUpdateRequest,
+    container: Container = Depends(get_container(with_user=True)),
+) -> ActionConfigResponse:
+    """
+    Update action overrides for a tenant.
+
+    Accepts bulk updates for one or more actions. Changes are stored in
+    the action_overrides JSONB column of the category config.
+
+    Requires admin permission.
+    """
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+
+    user = container.user()
+
+    # Validate admin permissions
+    validate_permission(user, Permission.ADMIN)
+
+    audit_config_service = container.audit_config_service()
+    audit_service = container.audit_service()
+
+    logger.info(
+        f"User {user.id} updating {len(request.updates)} action configs "
+        f"for tenant {user.tenant_id}"
+    )
+
+    # Update configuration
+    updated_config = await audit_config_service.update_action_config(
+        user.tenant_id, request.updates
+    )
+
+    # Create audit log for configuration change
+    if request.updates:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=user.tenant_id,
+            description=f"Updated {len(request.updates)} audit action configurations",
+            metadata={
+                "setting": "audit_action_config",
+                "updates": [
+                    {"action": u.action, "enabled": u.enabled}
+                    for u in request.updates
+                ]
             },
         )
 

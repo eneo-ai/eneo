@@ -115,6 +115,36 @@ export function initAudit(client) {
         }
       });
       return res;
+    },
+
+    /**
+     * Get per-action audit configuration for all 65 actions. Requires admin privileges.
+     * Returns actions grouped by category with Swedish metadata.
+     * @returns {Promise<{actions: Array<{action: string, enabled: boolean, category: string, name_sv: string, description_sv: string}>}>}
+     * @throws {IntricError}
+     * */
+    getActionConfig: async () => {
+      const res = await client.fetch("/api/v1/audit/config/actions", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update action-level audit configuration. Requires admin privileges.
+     * Changes are stored in the action_overrides JSONB column.
+     * @param {{updates: Array<{action: string, enabled: boolean}>}} config - Action updates
+     * @returns {Promise<{actions: Array<{action: string, enabled: boolean, category: string, name_sv: string, description_sv: string}>}>}
+     * @throws {IntricError}
+     * */
+    updateActionConfig: async (config) => {
+      const res = await client.fetch("/api/v1/audit/config/actions", {
+        method: "patch",
+        requestBody: {
+          "application/json": config
+        }
+      });
+      return res;
     }
   };
 }

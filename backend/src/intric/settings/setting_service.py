@@ -36,6 +36,12 @@ class SettingService:
             tenant_id=self.user.tenant_id
         )
 
+        # Populate audit_logging_enabled from feature flag
+        audit_logging_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="audit_logging_enabled",
+            tenant_id=self.user.tenant_id
+        )
+
         # Get tenant_credentials_enabled from global config
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
@@ -45,12 +51,14 @@ class SettingService:
             return SettingsPublic(
                 chatbot_widget={},
                 using_templates=using_templates,
+                audit_logging_enabled=audit_logging_enabled,
                 tenant_credentials_enabled=tenant_credentials_enabled
             )
 
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget or {},
             using_templates=using_templates,
+            audit_logging_enabled=audit_logging_enabled,
             tenant_credentials_enabled=tenant_credentials_enabled
         )
 
@@ -114,5 +122,57 @@ class SettingService:
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=enabled,  # Use the value we just set, not a re-query
+            tenant_credentials_enabled=tenant_credentials_enabled
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_audit_logging_setting(self, enabled: bool) -> SettingsPublic:
+        """Toggle the audit_logging_enabled feature flag for tenant.
+
+        **Admin Only:** Only users with admin permissions can toggle this setting.
+        Enables/disables all audit logging for the tenant globally.
+        """
+        logger.info(
+            f"Admin user {self.user.username} toggling audit logging to {enabled} for tenant {self.user.tenant_id}"
+        )
+
+        # Get the feature flag
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+            name="audit_logging_enabled"
+        )
+
+        if not feature_flag:
+            raise ValueError("audit_logging_enabled feature flag not found")
+
+        # Enable or disable for tenant
+        if enabled:
+            await self.feature_flag_service.enable_tenant(
+                feature_id=feature_flag.feature_id,
+                tenant_id=self.user.tenant_id
+            )
+        else:
+            await self.feature_flag_service.disable_tenant(
+                feature_id=feature_flag.feature_id,
+                tenant_id=self.user.tenant_id
+            )
+
+        # Return updated settings with the known state (avoid read-after-write race)
+        settings = await self.repo.get(self.user.id)
+
+        logger.info(
+            f"Audit logging successfully toggled to {enabled} for tenant {self.user.tenant_id}"
+        )
+
+        # Get tenant_credentials_enabled from global config
+        app_settings = get_app_settings()
+        tenant_credentials_enabled = app_settings.tenant_credentials_enabled
+
+        return SettingsPublic(
+            chatbot_widget=settings.chatbot_widget if settings else {},
+            using_templates=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="using_templates",
+                tenant_id=self.user.tenant_id
+            ),
+            audit_logging_enabled=enabled,  # Use the value we just set, not a re-query
             tenant_credentials_enabled=tenant_credentials_enabled
         )

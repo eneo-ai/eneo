@@ -223,6 +223,38 @@ export interface paths {
      */
     patch: operations["update_template_setting_api_v1_settings_templates_patch"];
   };
+  "/api/v1/settings/audit-logging": {
+    /**
+     * Toggle global audit logging
+     * @description Enable or disable global audit logging for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `audit_logging_enabled` feature flag for your tenant
+     * - When disabled: No audit logs are created for any action (global kill switch)
+     * - When enabled: Audit logging resumes with category and action-level filtering
+     * - This is independent from category/action configuration
+     * - Change takes effect immediately for all workers
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "enabled": false
+     * }
+     * ```
+     *
+     * **Example Response:**
+     * ```json
+     * {
+     *   "chatbot_widget": {},
+     *   "audit_logging_enabled": false,
+     *   "using_templates": true
+     * }
+     * ```
+     */
+    patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
@@ -1488,17 +1520,29 @@ export interface paths {
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
   };
-  "/api/v1/audit/audit/config": {
+  "/api/v1/audit/config": {
     /**
      * Get audit category configuration
      * @description Retrieve all audit category configurations for the current tenant.
      */
-    get: operations["get_audit_config_api_v1_audit_audit_config_get"];
+    get: operations["get_audit_config_api_v1_audit_config_get"];
     /**
      * Update audit category configuration
      * @description Update one or more audit category configurations for the current tenant.
      */
-    patch: operations["update_audit_config_api_v1_audit_audit_config_patch"];
+    patch: operations["update_audit_config_api_v1_audit_config_patch"];
+  };
+  "/api/v1/audit/config/actions": {
+    /**
+     * Get per-action audit configuration
+     * @description Retrieve all 65 actions with their enabled status for the modal UI.
+     */
+    get: operations["get_action_config_api_v1_audit_config_actions_get"];
+    /**
+     * Update per-action audit configuration
+     * @description Update one or more action-level audit configurations.
+     */
+    patch: operations["update_action_config_api_v1_audit_config_actions_patch"];
   };
   "/api/v1/audit/logs": {
     /**
@@ -1966,6 +2010,98 @@ export interface components {
       token_type: string;
     };
     /**
+     * ActionConfig
+     * @description Configuration for a single action type with metadata for UI display.
+     * @example {
+     *   "action": "user_created",
+     *   "category": "admin_actions",
+     *   "description_sv": "Loggar när en ny användare skapas",
+     *   "enabled": true,
+     *   "name_sv": "Användare skapad"
+     * }
+     */
+    ActionConfig: {
+      /**
+       * Action
+       * @description Action type value (e.g., 'user_created')
+       */
+      action: string;
+      /**
+       * Enabled
+       * @description Whether this action is currently enabled
+       */
+      enabled: boolean;
+      /**
+       * Category
+       * @description Category this action belongs to
+       */
+      category: string;
+      /**
+       * Name Sv
+       * @description Swedish display name
+       */
+      name_sv: string;
+      /**
+       * Description Sv
+       * @description Swedish description
+       */
+      description_sv: string;
+    };
+    /**
+     * ActionConfigResponse
+     * @description Response model for GET /api/v1/audit/config/actions.
+     * Contains all 65 actions with their configuration and metadata.
+     * @example {
+     *   "actions": [
+     *     {
+     *       "action": "user_created",
+     *       "category": "admin_actions",
+     *       "description_sv": "Loggar när en ny användare skapas",
+     *       "enabled": true,
+     *       "name_sv": "Användare skapad"
+     *     },
+     *     {
+     *       "action": "user_deleted",
+     *       "category": "admin_actions",
+     *       "description_sv": "Loggar när en användare tas bort",
+     *       "enabled": false,
+     *       "name_sv": "Användare raderad"
+     *     }
+     *   ]
+     * }
+     */
+    ActionConfigResponse: {
+      /**
+       * Actions
+       * @description List of all actions with configuration and Swedish metadata
+       */
+      actions: components["schemas"]["ActionConfig"][];
+    };
+    /**
+     * ActionConfigUpdateRequest
+     * @description Request model for PATCH /api/v1/audit/config/actions.
+     * Allows bulk updates of multiple action overrides.
+     * @example {
+     *   "updates": [
+     *     {
+     *       "action": "user_created",
+     *       "enabled": false
+     *     },
+     *     {
+     *       "action": "user_deleted",
+     *       "enabled": false
+     *     }
+     *   ]
+     * }
+     */
+    ActionConfigUpdateRequest: {
+      /**
+       * Updates
+       * @description List of action configuration updates
+       */
+      updates: components["schemas"]["ActionUpdate"][];
+    };
+    /**
      * ActionType
      * @description Standardized vocabulary of auditable actions
      * @enum {string}
@@ -2036,6 +2172,26 @@ export interface components {
       | "system_maintenance"
       | "audit_log_viewed"
       | "audit_log_exported";
+    /**
+     * ActionUpdate
+     * @description Represents an action-level configuration change request.
+     * @example {
+     *   "action": "user_created",
+     *   "enabled": false
+     * }
+     */
+    ActionUpdate: {
+      /**
+       * Action
+       * @description Action name to update
+       */
+      action: string;
+      /**
+       * Enabled
+       * @description New enabled state
+       */
+      enabled: boolean;
+    };
     /**
      * ActorType
      * @description Categorize who performed the action
@@ -6757,6 +6913,11 @@ export interface components {
        * @default false
        */
       tenant_credentials_enabled?: boolean;
+      /**
+       * Audit Logging Enabled
+       * @default true
+       */
+      audit_logging_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -9862,6 +10023,56 @@ export interface operations {
    * ```
    */
   update_template_setting_api_v1_settings_templates_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle global audit logging
+   * @description Enable or disable global audit logging for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `audit_logging_enabled` feature flag for your tenant
+   * - When disabled: No audit logs are created for any action (global kill switch)
+   * - When enabled: Audit logging resumes with category and action-level filtering
+   * - This is independent from category/action configuration
+   * - Change takes effect immediately for all workers
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": false
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "audit_logging_enabled": false,
+   *   "using_templates": true
+   * }
+   * ```
+   */
+  update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TemplateSettingUpdate"];
@@ -16098,7 +16309,7 @@ export interface operations {
    * Get audit category configuration
    * @description Retrieve all audit category configurations for the current tenant.
    */
-  get_audit_config_api_v1_audit_audit_config_get: {
+  get_audit_config_api_v1_audit_config_get: {
     responses: {
       /** @description Successful Response */
       200: {
@@ -16112,7 +16323,7 @@ export interface operations {
    * Update audit category configuration
    * @description Update one or more audit category configurations for the current tenant.
    */
-  update_audit_config_api_v1_audit_audit_config_patch: {
+  update_audit_config_api_v1_audit_config_patch: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["AuditConfigUpdateRequest"];
@@ -16123,6 +16334,45 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get per-action audit configuration
+   * @description Retrieve all 65 actions with their enabled status for the modal UI.
+   */
+  get_action_config_api_v1_audit_config_actions_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update per-action audit configuration
+   * @description Update one or more action-level audit configurations.
+   */
+  update_action_config_api_v1_audit_config_actions_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActionConfigUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ActionConfigResponse"];
         };
       };
       /** @description Validation Error */

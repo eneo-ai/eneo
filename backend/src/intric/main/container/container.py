@@ -648,10 +648,16 @@ class Container(containers.DeclarativeContainer):
         repo=security_classification_repo,
         tenant_repo=tenant_repo,
     )
+    # Feature flag service for audit logging and other toggles
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
     audit_service = providers.Factory(
         AuditService,
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
+        feature_flag_service=feature_flag_service,
     )
     retention_service = providers.Factory(
         RetentionService,
@@ -718,10 +724,6 @@ class Container(containers.DeclarativeContainer):
         PredefinedRolesService, repo=predefined_roles_repo
     )
     role_service = providers.Factory(RolesService, user=user, repo=role_repo)
-    feature_flag_service = providers.Factory(
-        FeatureFlagService,
-        feature_flag_repo=feature_flag_repo,
-    )
     settings_service = providers.Factory(
         SettingService,
         user=user,
