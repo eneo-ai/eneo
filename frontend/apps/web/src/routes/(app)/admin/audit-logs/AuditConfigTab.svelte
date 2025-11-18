@@ -13,10 +13,23 @@
   let expandedCategories = $state(new Set());
   let searchQuery = $state("");
   let isLoading = $state(true);
+  let showLoading = $state(false); // Only show loading spinner after 200ms delay
   let isSaving = $state(false);
   let hasChanges = $state(false);
   let originalCategoryConfig = [];
   let originalActionConfig = [];
+
+  // Show loading indicator only after 200ms delay (prevents flash for fast loads)
+  $effect(() => {
+    if (isLoading) {
+      const timeoutId = setTimeout(() => {
+        showLoading = true;
+      }, 200);
+      return () => clearTimeout(timeoutId);
+    } else {
+      showLoading = false;
+    }
+  });
 
   // Filtered actions based on search
   let filteredActionsByCategory = $derived.by(() => {
@@ -237,14 +250,14 @@
   });
 </script>
 
-{#if isLoading}
+{#if isLoading && showLoading}
   <div class="flex items-center justify-center py-20">
     <div class="flex flex-col items-center gap-4">
       <div class="h-10 w-10 animate-spin rounded-full border-4 border-accent-default border-t-transparent"></div>
       <p class="text-sm font-medium text-muted">Laddar konfiguration...</p>
     </div>
   </div>
-{:else}
+{:else if !isLoading}
   <!-- Header Section with improved styling -->
   <div class="mb-6 rounded-xl border border-default bg-subtle p-6 shadow-sm">
     <div class="mb-5">

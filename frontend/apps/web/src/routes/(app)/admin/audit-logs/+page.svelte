@@ -31,8 +31,8 @@
 
   const intric = getIntric();
 
-  // Access justification state
-  let accessJustification = $state<{ category: string; description: string; timestamp: string } | null>(null);
+  // Access justification state (initialized from server data to prevent flash)
+  let accessJustification = $state<{ category: string; description: string; timestamp: string } | null>(data.justification);
   let hasProvidedJustification = $derived(accessJustification !== null);
 
   // Tab state
@@ -48,18 +48,9 @@
     }
   });
 
-  // Restore justification state from URL parameters
+  // Sync justification state when data changes (e.g., navigation)
   $effect(() => {
-    const justificationCategory = $page.url.searchParams.get('justification_category');
-    const justificationDescription = $page.url.searchParams.get('justification_description');
-
-    if (justificationCategory && justificationDescription) {
-      accessJustification = {
-        category: justificationCategory,
-        description: justificationDescription,
-        timestamp: new Date().toISOString()
-      };
-    }
+    accessJustification = data.justification;
   });
 
   // Update URL when tab changes

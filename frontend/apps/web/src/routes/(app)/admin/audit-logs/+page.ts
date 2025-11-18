@@ -14,6 +14,26 @@ export const load = async (event) => {
     const justification_category = event.url.searchParams.get("justification_category") || undefined;
     const justification_description = event.url.searchParams.get("justification_description") || undefined;
 
+    // Create justification object if both params present (for state initialization)
+    const justification = (justification_category && justification_description) ? {
+      category: justification_category,
+      description: justification_description,
+      timestamp: new Date().toISOString()
+    } : null;
+
+    // Don't fetch logs without justification (prevents creating audit log entries without access reason)
+    if (!justification) {
+      return {
+        logs: [],
+        total_count: 0,
+        page: 1,
+        page_size: 100,
+        total_pages: 0,
+        justification: null,
+        error: null,
+      };
+    }
+
     // Fetch audit logs with filters and justification
     const response = await intric.audit.list({
       page,
@@ -32,6 +52,7 @@ export const load = async (event) => {
       page: response.page || 1,
       page_size: response.page_size || 100,
       total_pages: response.total_pages || 0,
+      justification,
       error: null,
     };
   } catch (error) {
@@ -42,6 +63,7 @@ export const load = async (event) => {
       page: 1,
       page_size: 100,
       total_pages: 0,
+      justification: null,
       error: "Failed to load audit logs. Please try again.",
     };
   }
