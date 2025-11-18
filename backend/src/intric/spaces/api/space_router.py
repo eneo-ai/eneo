@@ -335,6 +335,14 @@ async def create_space_assistant(
         name=assistant_in.name, space_id=id, template_data=assistant_in.from_template
     )
 
+    # Get space for context
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        space = None
+
     # Audit logging
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
@@ -357,6 +365,7 @@ async def create_space_assistant(
                 "id": str(assistant.id),
                 "name": assistant.name,
                 "space_id": str(id),
+                "space_name": space.name if space else None,
             },
         },
     )
@@ -390,6 +399,14 @@ async def create_group_chat(
     # Create group chat
     group_chat = await service.create_group_chat(space_id=id, name=group_chat_in.name)
 
+    # Get space for context
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        space = None
+
     # Audit logging
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
@@ -412,6 +429,7 @@ async def create_group_chat(
                 "group_chat_id": str(group_chat.id),
                 "group_chat_name": group_chat.name,
                 "space_id": str(id),
+                "space_name": space.name if space else None,
             },
         },
     )
@@ -630,6 +648,14 @@ async def create_space_websites(
         http_auth_password=website.http_auth_password,
     )
 
+    # Get space for context
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        space = None
+
     # Audit logging
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
@@ -653,6 +679,7 @@ async def create_space_websites(
                 "url": created_website.url,
                 "name": created_website.name,
                 "space_id": str(id),
+                "space_name": space.name if space else None,
             },
         },
     )
@@ -685,6 +712,14 @@ async def create_space_integration_knowledge(
         key=data.key,
     )
 
+    # Get space for context
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        space = None
+
     # Audit logging
     from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
@@ -713,6 +748,7 @@ async def create_space_integration_knowledge(
                 "knowledge_name": knowledge.name,
                 "integration_type": knowledge.integration_type,
                 "space_id": str(id),
+                "space_name": space.name if space else None,
                 "url": knowledge.url,
             },
         },
@@ -798,6 +834,21 @@ async def add_space_member(
         id, member_id=add_space_member_req.id, role=add_space_member_req.role
     )
 
+    # Get space for context
+    space = None
+    try:
+        space = await service.get_space(id)
+    except Exception:
+        space = None
+
+    # Get member info for context
+    member_user = None
+    try:
+        user_service = container.user_service()
+        member_user = await user_service.get_user(add_space_member_req.id)
+    except Exception:
+        member_user = None
+
     # Audit logging
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
@@ -818,7 +869,10 @@ async def add_space_member(
             },
             "target": {
                 "space_id": str(id),
+                "space_name": space.name if space else None,
                 "member_id": str(add_space_member_req.id),
+                "member_name": member_user.username if member_user else None,
+                "member_email": member_user.email if member_user else None,
                 "role": add_space_member_req.role,
             },
         },

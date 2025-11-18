@@ -68,6 +68,15 @@ async def create_assistant(
         name=assistant.name, space_id=assistant.space_id
     )
 
+    # Get space for context
+    space = None
+    if created_assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(created_assistant.space_id)
+        except Exception:
+            space = None
+
     # Audit logging
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
@@ -90,6 +99,7 @@ async def create_assistant(
                 "id": str(created_assistant.id),
                 "name": created_assistant.name,
                 "space_id": str(created_assistant.space_id) if created_assistant.space_id else None,
+                "space_name": space.name if space else None,
                 "type": created_assistant.type.value if created_assistant.type else "standard",
             },
             "configuration": {
@@ -806,7 +816,21 @@ async def transfer_assistant_to_space(
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-    # Transfer assistant (do this FIRST to avoid DI issues)
+    # Get assistant info BEFORE transfer to capture source space
+    user = container.user()
+    assistant_service = container.assistant_service()
+    assistant_before, _ = await assistant_service.get_assistant(id)
+
+    # Get source space info
+    source_space = None
+    if assistant_before.space_id:
+        try:
+            space_service = container.space_service()
+            source_space = await space_service.get_space(assistant_before.space_id)
+        except Exception:
+            source_space = None
+
+    # Transfer assistant
     service = container.resource_mover_service()
     await service.move_assistant_to_space(
         assistant_id=id,
@@ -814,10 +838,13 @@ async def transfer_assistant_to_space(
         move_resources=transfer_req.move_resources,
     )
 
-    # Get user and assistant info AFTER transfer for audit logging
-    user = container.user()
-    assistant_service = container.assistant_service()
-    assistant, _ = await assistant_service.get_assistant(id)
+    # Get target space info
+    target_space = None
+    try:
+        space_service = container.space_service()
+        target_space = await space_service.get_space(transfer_req.target_space_id)
+    except Exception:
+        target_space = None
 
     # Audit logging
     session = container.session()
@@ -839,8 +866,11 @@ async def transfer_assistant_to_space(
             },
             "target": {
                 "assistant_id": str(id),
-                "assistant_name": assistant.name,
+                "assistant_name": assistant_before.name,
+                "source_space_id": str(assistant_before.space_id) if assistant_before.space_id else None,
+                "source_space_name": source_space.name if source_space else None,
                 "target_space_id": str(transfer_req.target_space_id),
+                "target_space_name": target_space.name if target_space else None,
                 "move_resources": transfer_req.move_resources,
             },
         },

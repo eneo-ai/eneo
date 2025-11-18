@@ -352,6 +352,18 @@ async def run_app(
     file_ids = [file.id for file in run_app_req.files]
     app_run = await service.queue_app_run(id, file_ids=file_ids, text=run_app_req.text)
 
+    # Get app for context
+    app = None
+    space = None
+    try:
+        app_service = container.app_service()
+        app = await app_service.get_app(id)
+        if app.space_id:
+            space_service = container.space_service()
+            space = await space_service.get_space(app.space_id)
+    except Exception:
+        pass
+
     # Audit logging
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
@@ -372,6 +384,9 @@ async def run_app(
             },
             "target": {
                 "app_id": str(id),
+                "app_name": app.name if app else None,
+                "space_id": str(app.space_id) if app and app.space_id else None,
+                "space_name": space.name if space else None,
                 "run_id": str(app_run.id),
                 "file_count": len(file_ids),
             },
