@@ -118,7 +118,7 @@
     <div class="rounded-xl border border-default bg-subtle p-8 shadow-sm">
       <!-- Header -->
       <div class="flex items-start gap-4 mb-6">
-        <div class="rounded-lg bg-accent-default/10 p-2.5">
+        <div class="rounded-lg bg-accent-default/15 p-2.5">
           <Shield class="h-6 w-6 text-accent-default" />
         </div>
         <div class="flex-1">
