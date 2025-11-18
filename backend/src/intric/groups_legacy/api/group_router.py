@@ -99,6 +99,15 @@ async def update_group(
     # Update collection
     collection_updated = await service.update_collection(collection_id=id, name=group.name)
 
+    # Get space for context
+    space = None
+    if collection_updated.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(collection_updated.space_id)
+        except Exception:
+            space = None
+
     # Audit logging
     audit_service = container.audit_service()
 
@@ -119,6 +128,7 @@ async def update_group(
                 "collection_id": str(collection_updated.id),
                 "collection_name": collection_updated.name,
                 "space_id": str(collection_updated.space_id),
+                "space_name": space.name if space else None,
             },
             "changes": {
                 "name": group.name,
@@ -146,6 +156,15 @@ async def delete_group_by_id(
     current_user = container.user()
     collection = await collection_service.get_collection(id)
 
+    # Get space for context
+    space = None
+    if collection.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(collection.space_id)
+        except Exception:
+            space = None
+
     # Delete collection
     service = container.group_service()
     await service.delete_group(group_id=id)
@@ -170,6 +189,7 @@ async def delete_group_by_id(
                 "collection_id": str(id),
                 "collection_name": collection.name,
                 "space_id": str(collection.space_id),
+                "space_name": space.name if space else None,
             },
         },
     )
@@ -225,6 +245,15 @@ async def add_info_blobs(
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    # Get space for context
+    space = None
+    if group.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(group.space_id)
+        except Exception:
+            space = None
+
     audit_service = container.audit_service()
 
     await audit_service.log_async(
@@ -242,6 +271,9 @@ async def add_info_blobs(
             },
             "target": {
                 "group_id": str(id),
+                "group_name": group.name,
+                "space_id": str(group.space_id) if group.space_id else None,
+                "space_name": space.name if space else None,
                 "blobs_count": len(info_blobs_updated),
             },
         },
@@ -292,10 +324,22 @@ async def upload_file(
     group_service = container.group_service()
     current_user = container.user()
 
+    # Get group info for context
+    group = await group_service.get_group(id)
+
     # Upload file to group
     result = await group_service.add_file_to_group(
         group_id=id, file=file.file, mimetype=file.content_type, filename=file.filename
     )
+
+    # Get space for context
+    space = None
+    if group.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(group.space_id)
+        except Exception:
+            space = None
 
     # Audit logging
     audit_service = container.audit_service()
@@ -315,6 +359,9 @@ async def upload_file(
             },
             "target": {
                 "group_id": str(id),
+                "group_name": group.name,
+                "space_id": str(group.space_id) if group.space_id else None,
+                "space_name": space.name if space else None,
                 "filename": file.filename,
                 "content_type": file.content_type,
             },
