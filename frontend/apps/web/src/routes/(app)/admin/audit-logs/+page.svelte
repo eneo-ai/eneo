@@ -22,6 +22,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { onMount } from "svelte";
   import AuditConfigTab from "./AuditConfigTab.svelte";
+  import AccessJustificationForm from "./AccessJustificationForm.svelte";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
@@ -29,6 +30,10 @@
   let { data } = $props();
 
   const intric = getIntric();
+
+  // Access justification state
+  let accessJustification = $state<{ category: string; description: string; timestamp: string } | null>(null);
+  let hasProvidedJustification = $derived(accessJustification !== null);
 
   // Tab state
   let activeTab = $state<'logs' | 'config'>('logs');
@@ -43,6 +48,20 @@
     }
   });
 
+  // Restore justification state from URL parameters
+  $effect(() => {
+    const justificationCategory = $page.url.searchParams.get('justification_category');
+    const justificationDescription = $page.url.searchParams.get('justification_description');
+
+    if (justificationCategory && justificationDescription) {
+      accessJustification = {
+        category: justificationCategory,
+        description: justificationDescription,
+        timestamp: new Date().toISOString()
+      };
+    }
+  });
+
   // Update URL when tab changes
   function switchTab(tab: 'logs' | 'config') {
     activeTab = tab;
@@ -54,6 +73,22 @@
     }
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : '/admin/audit-logs';
     goto(url, { noScroll: true, keepFocus: true });
+  }
+
+  // Handle access justification submission
+  async function handleJustificationSubmit(justification: { category: string; description: string }) {
+    // Store justification with timestamp
+    accessJustification = {
+      ...justification,
+      timestamp: new Date().toISOString()
+    };
+
+    // Reload the page data with justification params
+    const params = new URLSearchParams($page.url.search);
+    params.set('justification_category', justification.category);
+    params.set('justification_description', justification.description);
+
+    await goto(`/admin/audit-logs?${params.toString()}`, { invalidateAll: true });
   }
 
   // Expandable row state
@@ -380,6 +415,12 @@
       params.set("actor_id", selectedUser.id);
     }
 
+    // Preserve justification params (required for compliance tracking)
+    if (accessJustification) {
+      params.set("justification_category", accessJustification.category);
+      params.set("justification_description", accessJustification.description);
+    }
+
     if (activeTab === 'config') {
       params.set("tab", "config");
     }
@@ -592,7 +633,7 @@
     <div class="flex items-center gap-4">
       <Page.Title title={m.audit_logs()}></Page.Title>
     </div>
-    {#if activeTab === 'logs'}
+    {#if activeTab === 'logs' && hasProvidedJustification}
       <div class="flex gap-[1px]">
         <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
           {#if isExporting}
@@ -625,6 +666,7 @@
   </Page.Header>
 
   <Page.Main>
+    {#if !(activeTab === 'logs' && !hasProvidedJustification)}
     <!-- Description with better spacing and visual treatment -->
     <div class="mb-6 px-4 sm:px-6 lg:px-8">
       <p class="text-sm text-muted leading-relaxed">
@@ -659,9 +701,14 @@
         </button>
       </div>
     </div>
+    {/if}
 
       {#if activeTab === 'logs'}
         <!-- Logs Tab Content -->
+        {#if !hasProvidedJustification}
+          <!-- Access Justification Form -->
+          <AccessJustificationForm onSubmit={handleJustificationSubmit} />
+        {:else}
         <div class="px-4 sm:px-6 lg:px-8">
         <!-- Retention Policy Section -->
         <div class="mb-8 rounded-xl border border-default bg-subtle p-5">
@@ -1176,6 +1223,7 @@
           </div>
         {/if}
         </div> <!-- End of logs tab container -->
+        {/if} <!-- End of justification check -->
       {:else if activeTab === 'config'}
         <!-- Configuration Tab Content -->
         <div class="px-4 sm:px-6 lg:px-8">

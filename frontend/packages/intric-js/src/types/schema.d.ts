@@ -16249,6 +16249,10 @@ export interface operations {
         page?: number;
         /** @description Page size */
         page_size?: number;
+        /** @description Access justification category */
+        justification_category?: string | null;
+        /** @description Access justification description */
+        justification_description?: string | null;
       };
     };
     responses: {
