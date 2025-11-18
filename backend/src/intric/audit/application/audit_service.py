@@ -1,7 +1,8 @@
 """Audit logging service."""
 
+import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
 from intric.audit.application.audit_config_service import AuditConfigService
@@ -13,6 +14,11 @@ from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from intric.jobs.job_manager import job_manager
+
+if TYPE_CHECKING:
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_csv_cell(value: str) -> str:
@@ -40,9 +46,51 @@ class AuditService:
         self,
         repository: AuditLogRepository,
         audit_config_service: Optional[AuditConfigService] = None,
+        feature_flag_service: Optional["FeatureFlagService"] = None,
     ):
         self.repository = repository
         self.audit_config_service = audit_config_service
+        self.feature_flag_service = feature_flag_service
+
+    async def _should_log_action(self, tenant_id: UUID, action: ActionType) -> bool:
+        """
+        Check if an action should be logged based on audit configuration.
+
+        Implements 2-stage filtering:
+        1. Global audit_logging_enabled feature flag (kill switch)
+        2. Action-level configuration (3-level: global → category → action override)
+
+        Args:
+            tenant_id: Tenant ID
+            action: Action type to check
+
+        Returns:
+            True if action should be logged, False otherwise
+        """
+        # Stage 1: Check global feature flag
+        if self.feature_flag_service:
+            try:
+                audit_logging_enabled = await self.feature_flag_service.check_is_feature_enabled(
+                    feature_name="audit_logging_enabled",
+                    tenant_id=tenant_id
+                )
+                if not audit_logging_enabled:
+                    # Global audit logging disabled - skip logging entirely
+                    return False
+            except Exception as e:
+                # Graceful degradation: if flag service unavailable, continue logging
+                logger.warning(f"Failed to check audit_logging_enabled flag: {e}")
+
+        # Stage 2: Check action-level configuration
+        if self.audit_config_service:
+            enabled = await self.audit_config_service.is_action_enabled(
+                tenant_id, action.value
+            )
+            if not enabled:
+                # Action disabled (by category or by action override) - skip logging
+                return False
+
+        return True
 
     async def log(
         self,
@@ -79,20 +127,15 @@ class AuditService:
             error_message: Error details if outcome is failure
 
         Returns:
-            Created audit log (or None if category is disabled)
+            Created audit log (or None if action is disabled)
 
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
-        # Check if category is enabled (uses Redis cache for <1ms overhead)
-        if self.audit_config_service:
-            category = get_category_for_action(action.value)
-            enabled = await self.audit_config_service.is_category_enabled(
-                tenant_id, category
-            )
-            if not enabled:
-                # Category disabled - skip logging
-                return None
+        # Check if action should be logged based on configuration
+        should_log = await self._should_log_action(tenant_id, action)
+        if not should_log:
+            return None
 
         audit_log = AuditLog(
             id=uuid4(),
@@ -411,8 +454,8 @@ class AuditService:
         returning immediately (<10ms latency). The ARQ worker will persist
         the log to PostgreSQL in the background.
 
-        NOTE: If audit category configuration is enabled and the category
-        for this action is disabled, returns None and skips logging.
+        NOTE: If audit logging is globally disabled or the action is disabled
+        (by category or action override), returns None and skips logging.
 
         Args:
             tenant_id: Tenant ID
@@ -430,20 +473,15 @@ class AuditService:
             error_message: Error details if outcome is failure
 
         Returns:
-            Job ID for tracking the async operation, or None if category disabled
+            Job ID for tracking the async operation, or None if action disabled
 
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
-        # Check if category is enabled (uses Redis cache for <1ms overhead)
-        if self.audit_config_service:
-            category = get_category_for_action(action.value)
-            enabled = await self.audit_config_service.is_category_enabled(
-                tenant_id, category
-            )
-            if not enabled:
-                # Category disabled - skip logging
-                return None
+        # Check if action should be logged based on configuration
+        should_log = await self._should_log_action(tenant_id, action)
+        if not should_log:
+            return None
 
         # Validate
         if outcome == Outcome.FAILURE and not error_message:

@@ -1,7 +1,7 @@
 """Database table for audit category configuration."""
 
 from sqlalchemy import Boolean, Column, String, TIMESTAMP, CheckConstraint, Index, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from intric.database.tables.base_class import BasePublic
 
@@ -34,6 +34,15 @@ class AuditCategoryConfig(BasePublic):
         nullable=False,
         default=True,
         server_default="TRUE",
+    )
+
+    # Action-level overrides (JSONB dict of action_name -> bool)
+    action_overrides = Column(
+        JSONB,
+        nullable=False,
+        default={},
+        server_default="'{}'::jsonb",
+        comment="Per-action overrides: {action_name: true/false}",
     )
 
     # Timestamps

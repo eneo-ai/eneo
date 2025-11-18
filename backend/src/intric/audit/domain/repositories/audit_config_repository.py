@@ -23,7 +23,7 @@ class AuditConfigRepository(ABC):
     @abstractmethod
     async def find_by_tenant_and_category(
         self, tenant_id: UUID, category: str
-    ) -> tuple[str, bool] | None:
+    ) -> tuple[str, bool, dict] | None:
         """
         Get configuration for a specific category.
 
@@ -32,12 +32,33 @@ class AuditConfigRepository(ABC):
             category: Category name
 
         Returns:
-            Tuple of (category, enabled) or None if not found
+            Tuple of (category, enabled, action_overrides) or None if not found
         """
         pass
 
     @abstractmethod
-    async def update(self, tenant_id: UUID, category: str, enabled: bool) -> None:
+    async def find_all_by_tenant(
+        self, tenant_id: UUID
+    ) -> list[tuple[str, bool, dict]]:
+        """
+        Get all category configurations for a tenant in a single batch query.
+
+        Args:
+            tenant_id: Tenant identifier
+
+        Returns:
+            List of tuples (category, enabled, action_overrides) for all existing configs
+        """
+        pass
+
+    @abstractmethod
+    async def update(
+        self,
+        tenant_id: UUID,
+        category: str,
+        enabled: bool,
+        action_overrides: dict | None = None,
+    ) -> None:
         """
         Update or insert category configuration (upsert).
 
@@ -45,5 +66,6 @@ class AuditConfigRepository(ABC):
             tenant_id: Tenant identifier
             category: Category name
             enabled: New enabled state
+            action_overrides: Optional dict of action overrides (JSONB)
         """
         pass

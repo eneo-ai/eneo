@@ -16,11 +16,12 @@
   import { IconInfo } from "@intric/icons/info";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
-  import { Clock, CircleCheck, CircleX, Calendar, Shield } from "lucide-svelte";
+  import { Clock, CircleCheck, CircleX, Calendar, Shield, FileText, Settings } from "lucide-svelte";
   import { slide, fade } from "svelte/transition";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
   import { onMount } from "svelte";
+  import AuditConfigTab from "./AuditConfigTab.svelte";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
@@ -28,6 +29,32 @@
   let { data } = $props();
 
   const intric = getIntric();
+
+  // Tab state
+  let activeTab = $state<'logs' | 'config'>('logs');
+
+  // Check URL for tab parameter
+  $effect(() => {
+    const tab = $page.url.searchParams.get('tab');
+    if (tab === 'config') {
+      activeTab = 'config';
+    } else {
+      activeTab = 'logs';
+    }
+  });
+
+  // Update URL when tab changes
+  function switchTab(tab: 'logs' | 'config') {
+    activeTab = tab;
+    const params = new URLSearchParams($page.url.search);
+    if (tab === 'config') {
+      params.set('tab', 'config');
+    } else {
+      params.delete('tab');
+    }
+    const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : '/admin/audit-logs';
+    goto(url, { noScroll: true, keepFocus: true });
+  }
 
   // Expandable row state
   let expandedRows = $state<Set<string>>(new Set());
@@ -353,6 +380,10 @@
       params.set("actor_id", selectedUser.id);
     }
 
+    if (activeTab === 'config') {
+      params.set("tab", "config");
+    }
+
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
     goto(url, { noScroll: true, keepFocus: true });
   }
@@ -364,7 +395,14 @@
     selectedUser = null;
     userSearchQuery = "";
     userSearchResults = [];
-    goto("/admin/audit-logs", { noScroll: true });
+
+    const params = new URLSearchParams();
+    if (activeTab === 'config') {
+      params.set("tab", "config");
+    }
+
+    const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
+    goto(url, { noScroll: true });
   }
 
   // User search with debounce
@@ -554,558 +592,595 @@
     <div class="flex items-center gap-4">
       <Page.Title title={m.audit_logs()}></Page.Title>
     </div>
-    <div class="flex gap-[1px]">
-      <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
-        {#if isExporting}
-          <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-          {m.audit_exporting()}
-        {:else}
-          <IconDownload class="h-4 w-4" />
-          Export ({data.total_count})
-        {/if}
-      </Button>
-      <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-        <Dropdown.Trigger asFragment let:trigger>
-          <Button padding="icon" variant="primary" is={trigger} disabled={isExporting} class="!rounded-l-none">
-            <IconChevronDown></IconChevronDown>
-          </Button>
-        </Dropdown.Trigger>
-        <Dropdown.Menu let:item>
-          <Button is={item} onclick={() => exportLogs("csv")}>
-            <IconDownload size="sm"></IconDownload>
-            Download as CSV
-          </Button>
-          <Button is={item} onclick={() => exportLogs("json")}>
-            <IconDownload size="sm"></IconDownload>
-            Download as JSON
-          </Button>
-        </Dropdown.Menu>
-      </Dropdown.Root>
-    </div>
+    {#if activeTab === 'logs'}
+      <div class="flex gap-[1px]">
+        <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
+          {#if isExporting}
+            <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+            {m.audit_exporting()}
+          {:else}
+            <IconDownload class="h-4 w-4" />
+            Export ({data.total_count})
+          {/if}
+        </Button>
+        <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
+          <Dropdown.Trigger asFragment let:trigger>
+            <Button padding="icon" variant="primary" is={trigger} disabled={isExporting} class="!rounded-l-none">
+              <IconChevronDown></IconChevronDown>
+            </Button>
+          </Dropdown.Trigger>
+          <Dropdown.Menu let:item>
+            <Button is={item} onclick={() => exportLogs("csv")}>
+              <IconDownload size="sm"></IconDownload>
+              Download as CSV
+            </Button>
+            <Button is={item} onclick={() => exportLogs("json")}>
+              <IconDownload size="sm"></IconDownload>
+              Download as JSON
+            </Button>
+          </Dropdown.Menu>
+        </Dropdown.Root>
+      </div>
+    {/if}
   </Page.Header>
 
   <Page.Main>
-    <!-- Container for proper centering and padding -->
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-      <!-- Description with better spacing and visual treatment -->
-      <div class="mb-8 pb-6 border-b border-default">
-        <p class="text-sm text-muted leading-relaxed max-w-3xl">
-          {m.audit_logs_description()}
-        </p>
-      </div>
-
-    <!-- Retention Policy Section -->
-    <div class="mb-12 rounded-xl border border-default bg-subtle p-5">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2.5">
-          <div class="rounded-lg bg-accent/10 p-1.5">
-            <Shield class="h-5 w-5 text-accent" />
-          </div>
-          <div>
-            <h3 class="text-sm font-semibold text-default">{m.audit_retention_policy()}</h3>
-            <p class="text-xs text-muted mt-0.5">Automatisk borttagning av gamla granskningsloggar</p>
-          </div>
-        </div>
-        {#if !isEditingRetention}
-          <Button onclick={() => (isEditingRetention = true)} variant="ghost" size="sm" class="min-w-[80px]">
-            {m.audit_retention_edit()}
-          </Button>
-        {/if}
-      </div>
-
-      {#if !isEditingRetention}
-        <!-- Display Mode -->
-        <div class="rounded-lg bg-primary p-4 space-y-2">
-          <div class="flex items-start gap-3">
-            <div class="rounded-md bg-accent/10 p-1.5">
-              <Calendar class="h-4 w-4 text-accent" />
-            </div>
-            <div class="flex-1">
-              <div class="flex items-baseline gap-2 mb-1">
-                <span class="text-lg font-semibold text-default">{retentionDays}</span>
-                <span class="text-xs text-muted">
-                  {retentionDays === 1 ? 'dag' : 'dagar'}
-                  {retentionDays === 365 ? ` (1 ${m.audit_retention_year()})` : retentionDays === 730 ? ` (2 ${m.audit_retention_years()})` : retentionDays === 90 ? ` (3 ${m.audit_retention_months()})` : retentionDays === 2555 ? ` (7 ${m.audit_retention_years()})` : ''}
-                </span>
-              </div>
-              <p class="text-xs text-muted leading-relaxed">
-                {m.audit_retention_cutoff({ date: getRetentionCutoffDate(retentionDays) })}
-              </p>
-            </div>
-          </div>
-        </div>
-      {:else}
-        <!-- Edit Mode -->
-        <div class="space-y-3">
-          <div class="rounded-lg bg-primary p-4 space-y-3">
-            <div class="max-w-xl">
-              <label class="text-xs font-semibold text-default block mb-2">{m.audit_retention_period_label()}</label>
-              <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
-                <div class="flex items-center gap-2">
-                  <Input.Text
-                    bind:value={retentionInputValue}
-                    type="number"
-                    min="1"
-                    max="2555"
-                    class="w-20"
-                    inputClass="text-center text-sm font-medium"
-                  />
-                  <span class="text-xs text-muted">
-                    {m.audit_retention_days_unit()}
-                  </span>
-                </div>
-                <div class="text-xs text-muted">
-                  {retentionInputValue === 365 ? `(1 ${m.audit_retention_year()})` : retentionInputValue === 730 ? `(2 ${m.audit_retention_years()})` : retentionInputValue === 90 ? `(3 ${m.audit_retention_months()})` : retentionInputValue === 2555 ? `(7 ${m.audit_retention_years()})` : ''}
-                </div>
-              </div>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-                <Button
-                  onclick={() => (retentionInputValue = 90)}
-                  variant={retentionInputValue === 90 ? "primary" : "ghost"}
-                  size="sm"
-                  class="w-full text-sm font-medium"
-                >
-                  3 mån
-                </Button>
-                <Button
-                  onclick={() => (retentionInputValue = 365)}
-                  variant={retentionInputValue === 365 ? "primary" : "ghost"}
-                  size="sm"
-                  class="w-full text-sm font-medium"
-                >
-                  1 år
-                </Button>
-                <Button
-                  onclick={() => (retentionInputValue = 730)}
-                  variant={retentionInputValue === 730 ? "primary" : "ghost"}
-                  size="sm"
-                  class="w-full text-sm font-medium"
-                >
-                  2 år
-                </Button>
-                <Button
-                  onclick={() => (retentionInputValue = 2555)}
-                  variant={retentionInputValue === 2555 ? "primary" : "ghost"}
-                  size="sm"
-                  class="w-full text-sm font-medium"
-                >
-                  7 år
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {#if retentionInputValue !== retentionDays}
-            <div class={`rounded-lg p-2.5 text-xs transition-all border-l-4 ${
-              retentionInputValue < retentionDays
-                ? 'border-l-red-500 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50'
-                : 'border-l-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50'
-            }`}>
-              {#if retentionInputValue < retentionDays}
-                <div class="flex items-start gap-2.5">
-                  <div class="rounded-full bg-red-100 dark:bg-red-900 p-1.5">
-                    <IconInfo class="h-4 w-4 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div class="flex-1 space-y-1">
-                    <p class="font-semibold text-red-900 dark:text-red-200 text-xs">{m.audit_retention_warning_title()}</p>
-                    <p class="text-red-800 dark:text-red-300 text-xs leading-[1.4]">
-                      {m.audit_retention_warning_desc({ date: getRetentionCutoffDate(retentionInputValue) })}
-                    </p>
-                  </div>
-                </div>
-              {:else}
-                <div class="flex items-start gap-2.5">
-                  <div class="rounded-full bg-blue-100 dark:bg-blue-900 p-1.5">
-                    <IconInfo class="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div class="flex-1 space-y-1">
-                    <p class="font-semibold text-blue-900 dark:text-blue-200 text-xs">{m.audit_retention_info_title()}</p>
-                    <p class="text-blue-800 dark:text-blue-300 text-xs leading-[1.4]">
-                      {m.audit_retention_info_desc()}
-                    </p>
-                  </div>
-                </div>
-              {/if}
-            </div>
-          {/if}
-
-          {#if retentionError}
-            <div class="text-xs text-red-600 dark:text-red-400">
-              {retentionError}
-            </div>
-          {/if}
-
-          <div class="border-t border-default pt-3 mt-3">
-            <p class="text-xs text-muted mb-2">
-              {m.audit_retention_range()}
-            </p>
-            <div class="flex items-center justify-end gap-2">
-              <Button onclick={cancelRetentionEdit} variant="ghost" disabled={isSavingRetention} class="min-w-[80px] text-sm font-medium">
-                {m.audit_retention_cancel()}
-              </Button>
-              <Button onclick={saveRetentionPolicy} variant="primary" disabled={isSavingRetention || retentionInputValue === retentionDays} class="min-w-[120px] text-sm font-medium">
-                {#if isSavingRetention}
-                  <div class="flex items-center gap-2">
-                    <div class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                    {m.audit_retention_saving()}
-                  </div>
-                {:else}
-                  {m.audit_retention_save()}
-                {/if}
-              </Button>
-            </div>
-          </div>
-        </div>
-      {/if}
+    <!-- Description with better spacing and visual treatment -->
+    <div class="mb-6 px-4 sm:px-6 lg:px-8">
+      <p class="text-sm text-muted leading-relaxed">
+        {m.audit_logs_description()}
+      </p>
     </div>
 
-    <!-- Error State -->
-    {#if data.error}
-      <div class="mb-6 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
-        <IconInfo class="h-5 w-5 text-red-600 dark:text-red-400" />
-        <p class="text-sm text-red-800 dark:text-red-200">{m.audit_error_loading()}</p>
-        <Button onclick={() => window.location.reload()} variant="outlined" size="sm" class="ml-auto">
-          {m.audit_retry()}
-        </Button>
+    <!-- Tabs with improved styling -->
+    <div class="mb-6 px-4 sm:px-6 lg:px-8">
+      <div class="inline-flex gap-1 p-1.5 bg-subtle rounded-lg border border-default shadow-sm">
+        <button
+          onclick={() => switchTab('logs')}
+          class={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md text-sm font-semibold transition-all ${
+            activeTab === 'logs'
+              ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20'
+              : 'text-muted hover:text-default hover:bg-hover'
+          }`}
+        >
+          <FileText class="h-4 w-4" />
+          {m.audit_tab_logs()}
+        </button>
+        <button
+          onclick={() => switchTab('config')}
+          class={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md text-sm font-semibold transition-all ${
+            activeTab === 'config'
+              ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20'
+              : 'text-muted hover:text-default hover:bg-hover'
+          }`}
+        >
+          <Settings class="h-4 w-4" />
+          {m.audit_tab_config()}
+        </button>
       </div>
-    {/if}
+    </div>
 
-    <!-- Filters Section -->
-    <div class="mb-6 rounded-lg border border-default bg-subtle p-6">
-      <div class="space-y-4">
-        <!-- Header Row -->
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-default">{m.audit_filters()}</h3>
-          {#if activeFilterCount > 0}
-            <button
-              onclick={clearFilters}
-              class="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
-            >
-              <IconXMark class="h-3.5 w-3.5" />
-              {m.audit_clear_filter({ count: activeFilterCount })}
-            </button>
+      {#if activeTab === 'logs'}
+        <!-- Logs Tab Content -->
+        <div class="px-4 sm:px-6 lg:px-8">
+        <!-- Retention Policy Section -->
+        <div class="mb-8 rounded-xl border border-default bg-subtle p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div class="rounded-lg bg-accent/10 p-1.5">
+                <Shield class="h-5 w-5 text-accent" />
+              </div>
+              <div>
+                <h3 class="text-sm font-semibold text-default">{m.audit_retention_policy()}</h3>
+                <p class="text-xs text-muted mt-0.5">Automatisk borttagning av gamla granskningsloggar</p>
+              </div>
+            </div>
+            {#if !isEditingRetention}
+              <Button onclick={() => (isEditingRetention = true)} variant="ghost" size="sm" class="min-w-[80px]">
+                {m.audit_retention_edit()}
+              </Button>
+            {/if}
+          </div>
+
+          {#if !isEditingRetention}
+            <!-- Display Mode -->
+            <div class="rounded-lg bg-primary p-4 space-y-2">
+              <div class="flex items-start gap-3">
+                <div class="rounded-md bg-accent/10 p-1.5">
+                  <Calendar class="h-4 w-4 text-accent" />
+                </div>
+                <div class="flex-1">
+                  <div class="flex items-baseline gap-2 mb-1">
+                    <span class="text-lg font-semibold text-default">{retentionDays}</span>
+                    <span class="text-xs text-muted">
+                      {retentionDays === 1 ? 'dag' : 'dagar'}
+                      {retentionDays === 365 ? ` (1 ${m.audit_retention_year()})` : retentionDays === 730 ? ` (2 ${m.audit_retention_years()})` : retentionDays === 90 ? ` (3 ${m.audit_retention_months()})` : retentionDays === 2555 ? ` (7 ${m.audit_retention_years()})` : ''}
+                    </span>
+                  </div>
+                  <p class="text-xs text-muted leading-relaxed">
+                    {m.audit_retention_cutoff({ date: getRetentionCutoffDate(retentionDays) })}
+                  </p>
+                </div>
+              </div>
+            </div>
+          {:else}
+            <!-- Edit Mode -->
+            <div class="space-y-3">
+              <div class="rounded-lg bg-primary p-4 space-y-3">
+                <div class="max-w-xl">
+                  <label class="text-xs font-semibold text-default block mb-2">{m.audit_retention_period_label()}</label>
+                  <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
+                    <div class="flex items-center gap-2">
+                      <Input.Text
+                        bind:value={retentionInputValue}
+                        type="number"
+                        min="1"
+                        max="2555"
+                        class="w-20"
+                        inputClass="text-center text-sm font-medium"
+                      />
+                      <span class="text-xs text-muted">
+                        {m.audit_retention_days_unit()}
+                      </span>
+                    </div>
+                    <div class="text-xs text-muted">
+                      {retentionInputValue === 365 ? `(1 ${m.audit_retention_year()})` : retentionInputValue === 730 ? `(2 ${m.audit_retention_years()})` : retentionInputValue === 90 ? `(3 ${m.audit_retention_months()})` : retentionInputValue === 2555 ? `(7 ${m.audit_retention_years()})` : ''}
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                    <Button
+                      onclick={() => (retentionInputValue = 90)}
+                      variant={retentionInputValue === 90 ? "primary" : "ghost"}
+                      size="sm"
+                      class="w-full text-sm font-medium"
+                    >
+                      3 mån
+                    </Button>
+                    <Button
+                      onclick={() => (retentionInputValue = 365)}
+                      variant={retentionInputValue === 365 ? "primary" : "ghost"}
+                      size="sm"
+                      class="w-full text-sm font-medium"
+                    >
+                      1 år
+                    </Button>
+                    <Button
+                      onclick={() => (retentionInputValue = 730)}
+                      variant={retentionInputValue === 730 ? "primary" : "ghost"}
+                      size="sm"
+                      class="w-full text-sm font-medium"
+                    >
+                      2 år
+                    </Button>
+                    <Button
+                      onclick={() => (retentionInputValue = 2555)}
+                      variant={retentionInputValue === 2555 ? "primary" : "ghost"}
+                      size="sm"
+                      class="w-full text-sm font-medium"
+                    >
+                      7 år
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {#if retentionInputValue !== retentionDays}
+                <div class={`rounded-lg p-2.5 text-xs transition-all border-l-4 ${
+                  retentionInputValue < retentionDays
+                    ? 'border-l-red-500 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50'
+                    : 'border-l-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50'
+                }`}>
+                  {#if retentionInputValue < retentionDays}
+                    <div class="flex items-start gap-2.5">
+                      <div class="rounded-full bg-red-100 dark:bg-red-900 p-1.5">
+                        <IconInfo class="h-4 w-4 text-red-600 dark:text-red-400" />
+                      </div>
+                      <div class="flex-1 space-y-1">
+                        <p class="font-semibold text-red-900 dark:text-red-200 text-xs">{m.audit_retention_warning_title()}</p>
+                        <p class="text-red-800 dark:text-red-300 text-xs leading-[1.4]">
+                          {m.audit_retention_warning_desc({ date: getRetentionCutoffDate(retentionInputValue) })}
+                        </p>
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="flex items-start gap-2.5">
+                      <div class="rounded-full bg-blue-100 dark:bg-blue-900 p-1.5">
+                        <IconInfo class="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div class="flex-1 space-y-1">
+                        <p class="font-semibold text-blue-900 dark:text-blue-200 text-xs">{m.audit_retention_info_title()}</p>
+                        <p class="text-blue-800 dark:text-blue-300 text-xs leading-[1.4]">
+                          {m.audit_retention_info_desc()}
+                        </p>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if retentionError}
+                <div class="text-xs text-red-600 dark:text-red-400">
+                  {retentionError}
+                </div>
+              {/if}
+
+              <div class="border-t border-default pt-3 mt-3">
+                <p class="text-xs text-muted mb-2">
+                  {m.audit_retention_range()}
+                </p>
+                <div class="flex items-center justify-end gap-2">
+                  <Button onclick={cancelRetentionEdit} variant="ghost" disabled={isSavingRetention} class="min-w-[80px] text-sm font-medium">
+                    {m.audit_retention_cancel()}
+                  </Button>
+                  <Button onclick={saveRetentionPolicy} variant="primary" disabled={isSavingRetention || retentionInputValue === retentionDays} class="min-w-[120px] text-sm font-medium">
+                    {#if isSavingRetention}
+                      <div class="flex items-center gap-2">
+                        <div class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                        {m.audit_retention_saving()}
+                      </div>
+                    {:else}
+                      {m.audit_retention_save()}
+                    {/if}
+                  </Button>
+                </div>
+              </div>
+            </div>
           {/if}
         </div>
 
-        <!-- Quick Filters Row -->
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
-          <button
-            onclick={() => setDatePreset(7)}
-            class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
-          >
-            <Clock class="h-3.5 w-3.5" />
-            {m.audit_last_7_days()}
-          </button>
-          <button
-            onclick={() => setDatePreset(30)}
-            class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
-          >
-            <Clock class="h-3.5 w-3.5" />
-            {m.audit_last_30_days()}
-          </button>
-          <button
-            onclick={() => setDatePreset(90)}
-            class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
-          >
-            <Clock class="h-3.5 w-3.5" />
-            {m.audit_last_90_days()}
-          </button>
-        </div>
-
-        <!-- Filter Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <!-- Date Range Filter -->
-          <div>
-            <label class="block text-xs font-medium text-default mb-1.5">{m.audit_date_range()}</label>
-            <div class="h-10">
-              <Input.DateRange bind:value={dateRange} class="w-full h-full" />
-            </div>
+        <!-- Error State -->
+        {#if data.error}
+          <div class="mb-6 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
+            <IconInfo class="h-5 w-5 text-red-600 dark:text-red-400" />
+            <p class="text-sm text-red-800 dark:text-red-200">{m.audit_error_loading()}</p>
+            <Button onclick={() => window.location.reload()} variant="outlined" size="sm" class="ml-auto">
+              {m.audit_retry()}
+            </Button>
           </div>
+        {/if}
 
-          <!-- Action Type Filter -->
-          <div>
-            <label class="block text-xs font-medium text-default mb-1.5">{m.audit_action_type()}</label>
-            <Select.Root customStore={actionStore}>
-              <Select.Trigger class="w-full h-10 text-sm" placeholder="Select action type" />
-              <Select.Options>
-                {#each actionOptions as option}
-                  <Select.Item value={option.value} label={option.label} />
-                {/each}
-              </Select.Options>
-            </Select.Root>
-          </div>
-
-          <!-- User Filter -->
-          <div>
-            <label class="block text-xs font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
-            <div class="relative h-10">
-              <Input.Text
-                bind:value={userSearchQuery}
-                oninput={(e) => searchUsers(e.currentTarget.value)}
-                onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
-                placeholder={m.audit_user_filter_placeholder()}
-                class="w-full h-10"
-              />
-              {#if selectedUser}
+        <!-- Filters Section -->
+        <div class="mb-6 rounded-lg border border-default bg-subtle p-6">
+          <div class="space-y-4">
+            <!-- Header Row -->
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-default">{m.audit_filters()}</h3>
+              {#if activeFilterCount > 0}
                 <button
-                  onclick={clearUserFilter}
-                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
-                  aria-label="Clear user filter"
+                  onclick={clearFilters}
+                  class="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
                 >
-                  <IconXMark class="h-4 w-4 text-muted" />
+                  <IconXMark class="h-3.5 w-3.5" />
+                  {m.audit_clear_filter({ count: activeFilterCount })}
                 </button>
               {/if}
-              {#if isSearchingUsers}
-                <div class="absolute right-2 top-1/2 -translate-y-1/2">
-                  <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-                </div>
-              {/if}
-
-              <!-- Dropdown Results -->
-              {#if showUserDropdown && userSearchResults.length > 0}
-                <div
-                  class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
-                  transition:fade={{ duration: 150 }}
-                >
-                  {#each userSearchResults as user}
-                    <button
-                      onclick={() => selectUser(user)}
-                      class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
-                    >
-                      <div class="flex flex-col gap-0.5">
-                        <span class="text-sm font-medium text-default">{user.email}</span>
-                        {#if user.name}
-                          <span class="text-xs text-muted">{user.name}</span>
-                        {/if}
-                      </div>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
             </div>
-          </div>
-        </div>
 
-        <!-- Selected User Chip -->
-        {#if selectedUser}
-          <div class="flex items-center gap-2">
-            <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
-              <span class="text-blue-900 dark:text-blue-300">
-                {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
-              </span>
+            <!-- Quick Filters Row -->
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
               <button
-                onclick={clearUserFilter}
-                class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
-                aria-label="Clear user filter"
+                onclick={() => setDatePreset(7)}
+                class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
               >
-                <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+                <Clock class="h-3.5 w-3.5" />
+                {m.audit_last_7_days()}
+              </button>
+              <button
+                onclick={() => setDatePreset(30)}
+                class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+              >
+                <Clock class="h-3.5 w-3.5" />
+                {m.audit_last_30_days()}
+              </button>
+              <button
+                onclick={() => setDatePreset(90)}
+                class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+              >
+                <Clock class="h-3.5 w-3.5" />
+                {m.audit_last_90_days()}
               </button>
             </div>
-          </div>
-        {/if}
-      </div>
-    </div>
 
-    <!-- Results Summary and Top Pagination -->
-    <div class="mb-6 rounded-lg bg-subtle p-4">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <p class="text-sm font-medium text-default">
-            {m.audit_showing_results({ shown: data.logs.length, total: data.total_count })}
-          </p>
-          {#if data.total_pages > 1}
-            <span class="text-sm text-muted border-l border-default pl-3">
-              {m.audit_page_info({ current: data.page, total: data.total_pages })}
-            </span>
-          {/if}
+            <!-- Filter Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <!-- Date Range Filter -->
+              <div>
+                <label class="block text-xs font-medium text-default mb-1.5">{m.audit_date_range()}</label>
+                <div class="h-10">
+                  <Input.DateRange bind:value={dateRange} class="w-full h-full" />
+                </div>
+              </div>
+
+              <!-- Action Type Filter -->
+              <div>
+                <label class="block text-xs font-medium text-default mb-1.5">{m.audit_action_type()}</label>
+                <Select.Root customStore={actionStore}>
+                  <Select.Trigger class="w-full h-10 text-sm" placeholder="Select action type" />
+                  <Select.Options>
+                    {#each actionOptions as option}
+                      <Select.Item value={option.value} label={option.label} />
+                    {/each}
+                  </Select.Options>
+                </Select.Root>
+              </div>
+
+              <!-- User Filter -->
+              <div>
+                <label class="block text-xs font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
+                <div class="relative h-10">
+                  <Input.Text
+                    bind:value={userSearchQuery}
+                    oninput={(e) => searchUsers(e.currentTarget.value)}
+                    onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
+                    placeholder={m.audit_user_filter_placeholder()}
+                    class="w-full h-10"
+                  />
+                  {#if selectedUser}
+                    <button
+                      onclick={clearUserFilter}
+                      class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                      aria-label="Clear user filter"
+                    >
+                      <IconXMark class="h-4 w-4 text-muted" />
+                    </button>
+                  {/if}
+                  {#if isSearchingUsers}
+                    <div class="absolute right-2 top-1/2 -translate-y-1/2">
+                      <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                    </div>
+                  {/if}
+
+                  <!-- Dropdown Results -->
+                  {#if showUserDropdown && userSearchResults.length > 0}
+                    <div
+                      class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
+                      transition:fade={{ duration: 150 }}
+                    >
+                      {#each userSearchResults as user}
+                        <button
+                          onclick={() => selectUser(user)}
+                          class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
+                        >
+                          <div class="flex flex-col gap-0.5">
+                            <span class="text-sm font-medium text-default">{user.email}</span>
+                            {#if user.name}
+                              <span class="text-xs text-muted">{user.name}</span>
+                            {/if}
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </div>
+
+            <!-- Selected User Chip -->
+            {#if selectedUser}
+              <div class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
+                  <span class="text-blue-900 dark:text-blue-300">
+                    {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
+                  </span>
+                  <button
+                    onclick={clearUserFilter}
+                    class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
+                    aria-label="Clear user filter"
+                  >
+                    <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+                  </button>
+                </div>
+              </div>
+            {/if}
+          </div>
         </div>
 
-        {#if data.total_pages > 1}
-          <div class="flex items-center gap-3">
-            <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" size="sm" class="min-w-[100px]">
-              {m.audit_previous()}
-            </Button>
-            <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" size="sm" class="min-w-[100px]">
-              {m.audit_next()}
-            </Button>
+        <!-- Results Summary and Top Pagination -->
+        <div class="mb-6 rounded-lg bg-subtle p-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <p class="text-sm font-medium text-default">
+                {m.audit_showing_results({ shown: data.logs.length, total: data.total_count })}
+              </p>
+              {#if data.total_pages > 1}
+                <span class="text-sm text-muted border-l border-default pl-3">
+                  {m.audit_page_info({ current: data.page, total: data.total_pages })}
+                </span>
+              {/if}
+            </div>
+
+            {#if data.total_pages > 1}
+              <div class="flex items-center gap-3">
+                <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" size="sm" class="min-w-[100px]">
+                  {m.audit_previous()}
+                </Button>
+                <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" size="sm" class="min-w-[100px]">
+                  {m.audit_next()}
+                </Button>
+              </div>
+            {/if}
           </div>
-        {/if}
-      </div>
-    </div>
+        </div>
 
-    <!-- Audit Logs Table -->
-    <div class="rounded-lg border border-default shadow-sm bg-primary">
-      <div class="overflow-x-auto">
-        <table class="w-full">
-          <thead class="sticky top-0 border-b border-default bg-subtle">
-            <tr>
-              <th class="w-8 px-4 py-3"></th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
-                {m.audit_timestamp()}
-              </th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
-                {m.audit_action()}
-              </th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[45%]">
-                {m.audit_description()}
-              </th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[18%]">
-                {m.audit_actor()}
-              </th>
-              <th class="px-4 py-3 text-center text-xs font-semibold text-default uppercase tracking-wider w-[7%]">
-                {m.audit_status()}
-              </th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-default bg-primary">
-            {#if data.logs.length === 0}
-              <tr>
-                <td colspan="6" class="px-4 py-16 text-center">
-                  <div class="flex flex-col items-center gap-3">
-                    <IconCalendar class="h-12 w-12 text-muted opacity-50" />
-                    <div>
-                      <p class="text-sm font-medium text-default">{m.audit_no_logs_found()}</p>
-                      <p class="text-xs text-muted mt-1">
-                        {activeFilterCount > 0 ? m.audit_try_adjusting_filters() : m.audit_logs_will_appear()}
-                      </p>
-                    </div>
-                    {#if activeFilterCount > 0}
-                      <Button onclick={clearFilters} variant="outlined" size="sm">
-                        {m.audit_clear_filters()}
-                      </Button>
-                    {/if}
-                  </div>
-                </td>
-              </tr>
-            {:else}
-              {#each data.logs as log, index (log.id || index)}
-                {@const isExpanded = expandedRows.has(log.id || index.toString())}
-                <!-- Main Row -->
-                <tr
-                  class="cursor-pointer transition-colors hover:bg-hover"
-                  onclick={() => toggleRowExpansion(log.id || index.toString())}
-                >
-                  <td class="px-4 py-3">
-                    <div class="rounded-md hover:bg-hover p-1 transition-colors">
-                      {#if isExpanded}
-                        <IconChevronDown class="h-5 w-5 text-muted rotate-180 transition-transform" />
-                      {:else}
-                        <IconChevronDown class="h-5 w-5 text-muted transition-transform" />
-                      {/if}
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="flex flex-col">
-                      <span class="text-sm font-medium text-default" title={formatFullTimestamp(log.timestamp)}>
-                        {formatTimestamp(log.timestamp)}
-                      </span>
-                      <span class="text-xs text-muted">
-                        {new Date(log.timestamp).toLocaleTimeString(getLocale())}
-                      </span>
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <span class={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${getActionBadgeClass(log.action)}`}>
-                      {getActionLabel(log.action as ActionType)}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3">
-                    <p class="text-sm text-default line-clamp-2" title={log.description}>
-                      {log.description}
-                    </p>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="flex flex-col">
-                      <span class="text-sm text-default truncate">
-                        {log.metadata?.actor?.name || "System"}
-                      </span>
-                      {#if log.metadata?.actor?.email}
-                        <span class="text-xs text-muted truncate">
-                          {log.metadata.actor.email}
-                        </span>
-                      {/if}
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    {#if log.outcome === "success"}
-                      <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-900 dark:text-green-300 border border-green-200 dark:border-green-800">
-                        <CircleCheck class="h-3.5 w-3.5" />
-                        {m.audit_success()}
-                      </span>
-                    {:else}
-                      <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-900 dark:text-red-300 border border-red-200 dark:border-red-800">
-                        <CircleX class="h-3.5 w-3.5" />
-                        {m.audit_failure()}
-                      </span>
-                    {/if}
-                  </td>
+        <!-- Audit Logs Table -->
+        <div class="rounded-lg border border-default shadow-sm bg-primary">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="sticky top-0 border-b border-default bg-subtle">
+                <tr>
+                  <th class="w-8 px-4 py-3"></th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
+                    {m.audit_timestamp()}
+                  </th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
+                    {m.audit_action()}
+                  </th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[45%]">
+                    {m.audit_description()}
+                  </th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[18%]">
+                    {m.audit_actor()}
+                  </th>
+                  <th class="px-4 py-3 text-center text-xs font-semibold text-default uppercase tracking-wider w-[7%]">
+                    {m.audit_status()}
+                  </th>
                 </tr>
-
-                <!-- Expanded Metadata Row -->
-                {#if isExpanded}
-                  <tr transition:fade={{ duration: 150 }}>
-                    <td colspan="6" class="bg-subtle px-4 py-4">
-                      <div class="mx-auto max-w-5xl space-y-3">
-                        <h4 class="text-xs font-semibold text-default uppercase tracking-wider">{m.audit_full_details()}</h4>
-                        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                          <div class="rounded-lg border border-default bg-primary p-3">
-                            <p class="text-xs font-medium text-muted mb-1">{m.audit_full_timestamp()}</p>
-                            <p class="text-sm text-default">{formatFullTimestamp(log.timestamp)}</p>
-                          </div>
-                          <div class="rounded-lg border border-default bg-primary p-3">
-                            <p class="text-xs font-medium text-muted mb-1">{m.audit_outcome()}</p>
-                            <p class="text-sm text-default">{log.outcome === "success" ? m.audit_success() : m.audit_failure()}</p>
-                          </div>
+              </thead>
+              <tbody class="divide-y divide-default bg-primary">
+                {#if data.logs.length === 0}
+                  <tr>
+                    <td colspan="6" class="px-4 py-16 text-center">
+                      <div class="flex flex-col items-center gap-3">
+                        <IconCalendar class="h-12 w-12 text-muted opacity-50" />
+                        <div>
+                          <p class="text-sm font-medium text-default">{m.audit_no_logs_found()}</p>
+                          <p class="text-xs text-muted mt-1">
+                            {activeFilterCount > 0 ? m.audit_try_adjusting_filters() : m.audit_logs_will_appear()}
+                          </p>
                         </div>
-                        {#if log.metadata && Object.keys(log.metadata).length > 0}
-                          <div class="rounded-lg border border-default bg-primary p-3">
-                            <div class="flex items-center justify-between mb-2">
-                              <p class="text-xs font-medium text-muted">{m.audit_metadata_json()}</p>
-                              <button
-                                onclick={() => copyJsonToClipboard(log.metadata, log.id || index.toString())}
-                                class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-muted hover:bg-hover hover:text-default transition-colors"
-                                aria-label={m.audit_copy_json()}
-                              >
-                                {#if copiedRowId === (log.id || index.toString())}
-                                  <IconCheck class="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-                                  <span class="text-green-600 dark:text-green-400">{m.audit_json_copied()}</span>
-                                {:else}
-                                  <IconCopy class="h-3.5 w-3.5" />
-                                  {m.audit_copy_json()}
-                                {/if}
-                              </button>
-                            </div>
-                            <pre class="text-xs text-gray-800 dark:text-gray-200 rounded bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono">{@html formatJsonWithSyntaxHighlighting(log.metadata)}</pre>
-                          </div>
+                        {#if activeFilterCount > 0}
+                          <Button onclick={clearFilters} variant="outlined" size="sm">
+                            {m.audit_clear_filters()}
+                          </Button>
                         {/if}
                       </div>
                     </td>
                   </tr>
-                {/if}
-              {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
-    </div>
+                {:else}
+                  {#each data.logs as log, index (log.id || index)}
+                    {@const isExpanded = expandedRows.has(log.id || index.toString())}
+                    <!-- Main Row -->
+                    <tr
+                      class="cursor-pointer transition-colors hover:bg-hover"
+                      onclick={() => toggleRowExpansion(log.id || index.toString())}
+                    >
+                      <td class="px-4 py-3">
+                        <div class="rounded-md hover:bg-hover p-1 transition-colors">
+                          {#if isExpanded}
+                            <IconChevronDown class="h-5 w-5 text-muted rotate-180 transition-transform" />
+                          {:else}
+                            <IconChevronDown class="h-5 w-5 text-muted transition-transform" />
+                          {/if}
+                        </div>
+                      </td>
+                      <td class="px-4 py-3">
+                        <div class="flex flex-col">
+                          <span class="text-sm font-medium text-default" title={formatFullTimestamp(log.timestamp)}>
+                            {formatTimestamp(log.timestamp)}
+                          </span>
+                          <span class="text-xs text-muted">
+                            {new Date(log.timestamp).toLocaleTimeString(getLocale())}
+                          </span>
+                        </div>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span class={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${getActionBadgeClass(log.action)}`}>
+                          {getActionLabel(log.action as ActionType)}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <p class="text-sm text-default line-clamp-2" title={log.description}>
+                          {log.description}
+                        </p>
+                      </td>
+                      <td class="px-4 py-3">
+                        <div class="flex flex-col">
+                          <span class="text-sm text-default truncate">
+                            {log.metadata?.actor?.name || "System"}
+                          </span>
+                          {#if log.metadata?.actor?.email}
+                            <span class="text-xs text-muted truncate">
+                              {log.metadata.actor.email}
+                            </span>
+                          {/if}
+                        </div>
+                      </td>
+                      <td class="px-4 py-3">
+                        {#if log.outcome === "success"}
+                          <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-900 dark:text-green-300 border border-green-200 dark:border-green-800">
+                            <CircleCheck class="h-3.5 w-3.5" />
+                            {m.audit_success()}
+                          </span>
+                        {:else}
+                          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-900 dark:text-red-300 border border-red-200 dark:border-red-800">
+                            <CircleX class="h-3.5 w-3.5" />
+                            {m.audit_failure()}
+                          </span>
+                        {/if}
+                      </td>
+                    </tr>
 
-    <!-- Bottom Pagination -->
-    {#if data.total_pages > 1}
-      <div class="mt-8 rounded-lg bg-subtle p-4">
-        <div class="flex items-center justify-center gap-4">
-          <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" class="min-w-[120px]">
-            {m.audit_previous()}
-          </Button>
-          <span class="text-sm px-4 py-2 rounded-md bg-primary border border-default">
-            {m.audit_page()} <span class="font-semibold text-default">{data.page}</span> {m.audit_of()} <span class="font-semibold text-default">{data.total_pages}</span>
-          </span>
-          <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" class="min-w-[120px]">
-            {m.audit_next()}
-          </Button>
+                    <!-- Expanded Metadata Row -->
+                    {#if isExpanded}
+                      <tr transition:fade={{ duration: 150 }}>
+                        <td colspan="6" class="bg-subtle px-4 py-4">
+                          <div class="mx-auto max-w-5xl space-y-3">
+                            <h4 class="text-xs font-semibold text-default uppercase tracking-wider">{m.audit_full_details()}</h4>
+                            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                              <div class="rounded-lg border border-default bg-primary p-3">
+                                <p class="text-xs font-medium text-muted mb-1">{m.audit_full_timestamp()}</p>
+                                <p class="text-sm text-default">{formatFullTimestamp(log.timestamp)}</p>
+                              </div>
+                              <div class="rounded-lg border border-default bg-primary p-3">
+                                <p class="text-xs font-medium text-muted mb-1">{m.audit_outcome()}</p>
+                                <p class="text-sm text-default">{log.outcome === "success" ? m.audit_success() : m.audit_failure()}</p>
+                              </div>
+                            </div>
+                            {#if log.metadata && Object.keys(log.metadata).length > 0}
+                              <div class="rounded-lg border border-default bg-primary p-3">
+                                <div class="flex items-center justify-between mb-2">
+                                  <p class="text-xs font-medium text-muted">{m.audit_metadata_json()}</p>
+                                  <button
+                                    onclick={() => copyJsonToClipboard(log.metadata, log.id || index.toString())}
+                                    class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-muted hover:bg-hover hover:text-default transition-colors"
+                                    aria-label={m.audit_copy_json()}
+                                  >
+                                    {#if copiedRowId === (log.id || index.toString())}
+                                      <IconCheck class="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                                      <span class="text-green-600 dark:text-green-400">{m.audit_json_copied()}</span>
+                                    {:else}
+                                      <IconCopy class="h-3.5 w-3.5" />
+                                      {m.audit_copy_json()}
+                                    {/if}
+                                  </button>
+                                </div>
+                                <pre class="text-xs text-gray-800 dark:text-gray-200 rounded bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono">{@html formatJsonWithSyntaxHighlighting(log.metadata)}</pre>
+                              </div>
+                            {/if}
+                          </div>
+                        </td>
+                      </tr>
+                    {/if}
+                  {/each}
+                {/if}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    {/if}
-    </div> <!-- End of container div -->
+
+        <!-- Bottom Pagination -->
+        {#if data.total_pages > 1}
+          <div class="mt-8 rounded-lg bg-subtle p-4">
+            <div class="flex items-center justify-center gap-4">
+              <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" class="min-w-[120px]">
+                {m.audit_previous()}
+              </Button>
+              <span class="text-sm px-4 py-2 rounded-md bg-primary border border-default">
+                {m.audit_page()} <span class="font-semibold text-default">{data.page}</span> {m.audit_of()} <span class="font-semibold text-default">{data.total_pages}</span>
+              </span>
+              <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" class="min-w-[120px]">
+                {m.audit_next()}
+              </Button>
+            </div>
+          </div>
+        {/if}
+        </div> <!-- End of logs tab container -->
+      {:else if activeTab === 'config'}
+        <!-- Configuration Tab Content -->
+        <div class="px-4 sm:px-6 lg:px-8">
+          <AuditConfigTab />
+        </div>
+      {/if}
   </Page.Main>
 </Page.Root>
