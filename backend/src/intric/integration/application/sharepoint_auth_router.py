@@ -157,8 +157,6 @@ class SharePointAuthRouter:
             }
         )
 
-        # TODO: Add token expiration check and refresh logic if needed
-
         return SharePointToken(
             access_token=oauth_token.access_token,
             refresh_token=oauth_token.refresh_token,
