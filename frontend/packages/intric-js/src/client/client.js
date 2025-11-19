@@ -47,7 +47,8 @@ export function createClient(args) {
             ...auth,
             ...payload.header
           },
-          body: payload.body
+          body: payload.body,
+          credentials: "include" // Required for cookies (audit sessions, etc.)
         });
         /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */
         const parsed = await parseResponse(response);
@@ -74,7 +75,8 @@ export function createClient(args) {
           body,
           headers,
           method: "POST",
-          signal: controller.signal
+          signal: controller.signal,
+          credentials: "include" // Required for cookies
         });
 
         await readEvents(response, {
@@ -198,14 +200,14 @@ async function parseResponse(response) {
     throw new PartialError("RESPONSE", response.status, {
       message: `Could not parse server response (1).\n${text ? text : "No body received"}`,
       intric_error_code: 0
-    });
+    }, response.headers);
   }
 
   if (response.ok) {
     return parsed;
   }
 
-  throw new PartialError("RESPONSE", response.status, parsed);
+  throw new PartialError("RESPONSE", response.status, parsed, response.headers);
 }
 
 /** An intermediate error that is throw during running a request on the client. Needs to be finalised into an IntricError */
@@ -215,8 +217,9 @@ export class PartialError extends Error {
    * @param {"CONNECTION" | "SERVER" | "RESPONSE"} stage On what stage the error was thrown, during connection, on the server on while processing the response
    * @param {number} status
    * @param {{[x: string]: any } & {message?: string, intric_error_code: import("../types/resources").IntricErrorCode}} [parsedResponse] Parsed json response from server
+   * @param {Headers} [headers] Response headers
    */
-  constructor(stage, status, parsedResponse) {
+  constructor(stage, status, parsedResponse, headers) {
     const message =
       status === 500
         ? "Upstream server error"
@@ -226,7 +229,13 @@ export class PartialError extends Error {
     this.detail = parsedResponse;
     this.status = status;
     this.stage = stage;
-    this.code = parsedResponse?.intric_error_code ?? 0;
+
+    // Extract error code from X-Error-Code header (for audit sessions) or response body
+    const headerCode = headers?.get("x-error-code");
+    this.code = headerCode || parsedResponse?.intric_error_code || 0;
+
+    /** @type {Headers | undefined} */
+    this.headers = headers;
   }
 }
 
@@ -240,8 +249,9 @@ export class IntricError extends Error {
    * @param {import("../types/resources").IntricErrorCode | 0} code The backend will return an error code in most cases that can give additional info
    * @param {Object} [response] Parsed json response from server
    * @param {{endpoint: string; payload?: object;}} request
+   * @param {Headers} [headers] Response headers
    */
-  constructor(message, stage, status, code, response, request = { endpoint: "" }) {
+  constructor(message, stage, status, code, response, request = { endpoint: "" }, headers) {
     super(message);
     /** @type {"CONNECTION" | "SERVER" | "RESPONSE" | "UNKNOWN"} During what stage the error happened. */
     this.stage = stage;
@@ -253,6 +263,8 @@ export class IntricError extends Error {
     this.response = response;
     /** @type {{endpoint: string; payload?: object;}} Info about the request during which the error occured. */
     this.request = request;
+    /** @type {Headers | undefined} */
+    this.headers = headers;
   }
 
   /**
@@ -283,7 +295,8 @@ export class IntricError extends Error {
         error.status,
         error.code,
         error.detail,
-        requestInfo
+        requestInfo,
+        error.headers
       );
     }
     if (error instanceof Error) {

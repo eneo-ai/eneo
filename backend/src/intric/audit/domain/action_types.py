@@ -76,5 +76,6 @@ class ActionType(str, Enum):
     SYSTEM_MAINTENANCE = "system_maintenance"
 
     # Audit Access Actions
+    AUDIT_SESSION_CREATED = "audit_session_created"
     AUDIT_LOG_VIEWED = "audit_log_viewed"
     AUDIT_LOG_EXPORTED = "audit_log_exported"

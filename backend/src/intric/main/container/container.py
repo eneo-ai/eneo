@@ -9,6 +9,7 @@ from intric.audit.application.audit_service import AuditService
 from intric.audit.application.retention_service import RetentionService
 from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
@@ -540,6 +541,9 @@ class Container(containers.DeclarativeContainer):
     audit_config_service = providers.Factory(
         AuditConfigService,
         repository=audit_config_repo,
+    )
+    audit_session_service = providers.Factory(
+        AuditSessionService,
     )
 
     # Completion model adapters

@@ -30,9 +30,8 @@
 
   const intric = getIntric();
 
-  // Access justification state (initialized from server data to prevent flash)
-  let accessJustification = $state<{ category: string; description: string; timestamp: string } | null>(data.justification);
-  let hasProvidedJustification = $derived(accessJustification !== null);
+  // Session state (determined by successful data load)
+  let hasSession = $derived(data.hasSession);
 
   // Tab state
   let activeTab = $state<'logs' | 'config'>('logs');
@@ -45,11 +44,6 @@
     } else {
       activeTab = 'logs';
     }
-  });
-
-  // Sync justification state when data changes (e.g., navigation)
-  $effect(() => {
-    accessJustification = data.justification;
   });
 
   // Update URL when tab changes
@@ -67,18 +61,20 @@
 
   // Handle access justification submission
   async function handleJustificationSubmit(justification: { category: string; description: string }) {
-    // Store justification with timestamp
-    accessJustification = {
-      ...justification,
-      timestamp: new Date().toISOString()
-    };
+    try {
+      // Create audit access session (sets HTTP-only cookie with session ID)
+      await intric.audit.createAccessSession({
+        category: justification.category,
+        description: justification.description
+      });
 
-    // Reload the page data with justification params
-    const params = new URLSearchParams($page.url.search);
-    params.set('justification_category', justification.category);
-    params.set('justification_description', justification.description);
-
-    await goto(`/admin/audit-logs?${params.toString()}`, { invalidateAll: true });
+      // Reload page - session cookie is now set, grants access to audit logs
+      await goto('/admin/audit-logs', { invalidateAll: true });
+    } catch (error) {
+      console.error("Failed to create audit access session:", error);
+      // Error will be shown by the form component
+      throw error;
+    }
   }
 
   // Expandable row state
@@ -436,12 +432,6 @@
       params.set("actor_id", selectedUser.id);
     }
 
-    // Preserve justification params (required for compliance tracking)
-    if (accessJustification) {
-      params.set("justification_category", accessJustification.category);
-      params.set("justification_description", accessJustification.description);
-    }
-
     if (activeTab === 'config') {
       params.set("tab", "config");
     }
@@ -451,6 +441,11 @@
   }
 
   function clearFilters() {
+    // Stop any pending debounce timers to prevent race conditions
+    // This prevents reactive effects from triggering navigation while we manually navigate
+    clearTimeout(debounceTimer);
+    clearTimeout(userSearchTimer);
+
     dateRange = { start: undefined, end: undefined };
     selectedAction = "all";
     actionStore.set({ value: "all", label: m.audit_all_actions() });
@@ -461,18 +456,14 @@
 
     const params = new URLSearchParams();
 
-    // Preserve justification params (required for compliance tracking)
-    if (accessJustification) {
-      params.set("justification_category", accessJustification.category);
-      params.set("justification_description", accessJustification.description);
-    }
-
     if (activeTab === 'config') {
       params.set("tab", "config");
     }
 
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
-    goto(url, { noScroll: true });
+
+    // Use replaceState to avoid polluting history
+    goto(url, { noScroll: true, replaceState: true });
   }
 
   // User search with debounce
@@ -647,7 +638,7 @@
     <div class="flex items-center gap-4">
       <Page.Title title={m.audit_logs()}></Page.Title>
     </div>
-    {#if activeTab === 'logs' && hasProvidedJustification}
+    {#if activeTab === 'logs' && hasSession}
       <div class="flex gap-[1px]">
         <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
           {#if isExporting}
@@ -680,7 +671,7 @@
   </Page.Header>
 
   <Page.Main>
-    {#if !(activeTab === 'logs' && !hasProvidedJustification)}
+    {#if !(activeTab === 'logs' && !hasSession)}
     <!-- Description with better spacing and visual treatment -->
     <div class="mb-6 px-4 sm:px-6 lg:px-8">
       <p class="text-sm text-muted leading-relaxed">
@@ -719,7 +710,7 @@
 
       {#if activeTab === 'logs'}
         <!-- Logs Tab Content -->
-        {#if !hasProvidedJustification}
+        {#if !hasSession}
           <!-- Access Justification Form -->
           <AccessJustificationForm onSubmit={handleJustificationSubmit} />
         {:else}

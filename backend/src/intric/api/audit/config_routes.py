@@ -16,7 +16,8 @@ from intric.server.dependencies.container import get_container
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/config", tags=["audit-config"])
+# No tags here - inherits from parent router (/audit) to avoid duplicates in Swagger
+router = APIRouter(prefix="/config")
 
 
 @router.get(

@@ -98,9 +98,9 @@
     }
   }
 
-  // Handle cancel
+  // Handle cancel - go back to audit logs without filters
   function handleCancel() {
-    goto('/admin');
+    goto('/admin/audit-logs', { replaceState: true });
   }
 
   // Handle keyboard shortcuts

@@ -316,6 +316,10 @@ export interface paths {
     /** Transfer Assistant To Space */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
   };
+  "/api/v1/assistants/{id}/prompts/": {
+    /** Get Prompts */
+    get: operations["get_prompts_api_v1_assistants__id__prompts__get"];
+  };
   "/api/v1/assistants/{id}/publish/": {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
@@ -1544,16 +1548,67 @@ export interface paths {
      */
     patch: operations["update_action_config_api_v1_audit_config_actions_patch"];
   };
+  "/api/v1/audit/session-debug": {
+    /**
+     * Debug Session
+     * @description Debug endpoint to check if audit session cookie is being received.
+     */
+    get: operations["debug_session_api_v1_audit_session_debug_get"];
+  };
+  "/api/v1/audit/access-session/rate-limit": {
+    /**
+     * Reset Rate Limit
+     * @description Admin utility: Reset audit session rate limit for current user.
+     *
+     * This endpoint is only available in development/testing environments.
+     * Use when you get rate limited during testing.
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Development/testing environment
+     *
+     * Note: Permission check intentionally removed to allow clearing rate limit
+     * even when locked out. User is still authenticated via JWT.
+     */
+    delete: operations["reset_rate_limit_api_v1_audit_access_session_rate_limit_delete"];
+  };
+  "/api/v1/audit/access-session": {
+    /**
+     * Create Access Session
+     * @description Create an audit access session with justification.
+     *
+     * Stores the access justification securely in Redis (server-side) instead of
+     * exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+     *
+     * Security Features:
+     * - Justification never appears in URLs or browser history
+     * - Session ID stored in HTTP-only cookie (prevents XSS)
+     * - Automatic expiration after 1 hour
+     * - Tenant isolation validation
+     * - Instant revocation capability
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Admin permissions
+     *
+     * Returns: Session creation confirmation with HTTP-only cookie set
+     */
+    post: operations["create_access_session_api_v1_audit_access_session_post"];
+  };
   "/api/v1/audit/logs": {
     /**
      * List Audit Logs
      * @description List audit logs for the authenticated user's tenant.
+     *
+     * Security:
+     * - Requires active audit access session (via HTTP-only cookie)
+     * - Session must contain valid justification
+     * - Justification stored server-side (Redis) - never in URLs
      *
      * Access Control:
      * - Admins only: View all actions in their tenant
      *
      * Requires: Authentication (JWT token or API key)
      * Requires: Admin permissions
+     * Requires: Active audit access session with justification
      */
     get: operations["list_audit_logs_api_v1_audit_logs_get"];
   };
@@ -2002,6 +2057,39 @@ export interface components {
       /** Size Limit */
       size_limit: number;
     };
+    /**
+     * AccessJustificationRequest
+     * @description Schema for creating audit access session with justification.
+     */
+    AccessJustificationRequest: {
+      /**
+       * Category
+       * @description Justification category
+       */
+      category: string;
+      /**
+       * Description
+       * @description Detailed access reason
+       */
+      description: string;
+    };
+    /**
+     * AccessJustificationResponse
+     * @description Schema for access session creation response.
+     */
+    AccessJustificationResponse: {
+      /**
+       * Status
+       * @description Status of session creation
+       * @default session_created
+       */
+      status?: string;
+      /**
+       * Message
+       * @description Additional message if needed
+       */
+      message?: string | null;
+    };
     /** AccessToken */
     AccessToken: {
       /** Access Token */
@@ -2170,6 +2258,7 @@ export interface components {
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
+      | "audit_session_created"
       | "audit_log_viewed"
       | "audit_log_exported";
     /**
@@ -10999,6 +11088,28 @@ export interface operations {
       };
     };
   };
+  /** Get Prompts */
+  get_prompts_api_v1_assistants__id__prompts__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptSparse_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Publish Assistant */
   publish_assistant_api_v1_assistants__id__publish__post: {
     parameters: {
@@ -16384,14 +16495,95 @@ export interface operations {
     };
   };
   /**
+   * Debug Session
+   * @description Debug endpoint to check if audit session cookie is being received.
+   */
+  debug_session_api_v1_audit_session_debug_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Reset Rate Limit
+   * @description Admin utility: Reset audit session rate limit for current user.
+   *
+   * This endpoint is only available in development/testing environments.
+   * Use when you get rate limited during testing.
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Development/testing environment
+   *
+   * Note: Permission check intentionally removed to allow clearing rate limit
+   * even when locked out. User is still authenticated via JWT.
+   */
+  reset_rate_limit_api_v1_audit_access_session_rate_limit_delete: {
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Create Access Session
+   * @description Create an audit access session with justification.
+   *
+   * Stores the access justification securely in Redis (server-side) instead of
+   * exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+   *
+   * Security Features:
+   * - Justification never appears in URLs or browser history
+   * - Session ID stored in HTTP-only cookie (prevents XSS)
+   * - Automatic expiration after 1 hour
+   * - Tenant isolation validation
+   * - Instant revocation capability
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Admin permissions
+   *
+   * Returns: Session creation confirmation with HTTP-only cookie set
+   */
+  create_access_session_api_v1_audit_access_session_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccessJustificationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessJustificationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * List Audit Logs
    * @description List audit logs for the authenticated user's tenant.
+   *
+   * Security:
+   * - Requires active audit access session (via HTTP-only cookie)
+   * - Session must contain valid justification
+   * - Justification stored server-side (Redis) - never in URLs
    *
    * Access Control:
    * - Admins only: View all actions in their tenant
    *
    * Requires: Authentication (JWT token or API key)
    * Requires: Admin permissions
+   * Requires: Active audit access session with justification
    */
   list_audit_logs_api_v1_audit_logs_get: {
     parameters: {
@@ -16408,10 +16600,6 @@ export interface operations {
         page?: number;
         /** @description Page size */
         page_size?: number;
-        /** @description Access justification category */
-        justification_category?: string | null;
-        /** @description Access justification description */
-        justification_description?: string | null;
       };
     };
     responses: {

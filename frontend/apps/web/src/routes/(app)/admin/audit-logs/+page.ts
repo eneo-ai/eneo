@@ -1,3 +1,7 @@
+// Disable SSR to ensure authentication cookies work reliably during browser refreshes
+// This forces the load function to run in the browser where credentials: 'include' is effective
+export const ssr = false;
+
 export const load = async (event) => {
   const { intric } = await event.parent();
 
@@ -10,35 +14,8 @@ export const load = async (event) => {
     const action = event.url.searchParams.get("action") || undefined;
     const actor_id = event.url.searchParams.get("actor_id") || undefined;
 
-    // Read justification parameters (required for compliance tracking)
-    const justification_category = event.url.searchParams.get("justification_category") || undefined;
-    const justification_description = event.url.searchParams.get("justification_description") || undefined;
-
-    // Create justification object if both params present (for state initialization)
-    const justification = (justification_category && justification_description) ? {
-      category: justification_category,
-      description: justification_description,
-      timestamp: new Date().toISOString()
-    } : null;
-
-    // Don't fetch logs without justification (prevents creating audit log entries without access reason)
-    if (!justification) {
-      // Fetch retention policy even without justification (doesn't require audit)
-      const retentionPolicy = await intric.audit.getRetentionPolicy();
-
-      return {
-        logs: [],
-        total_count: 0,
-        page: 1,
-        page_size: 100,
-        total_pages: 0,
-        justification: null,
-        error: null,
-        retentionPolicy,
-      };
-    }
-
-    // Fetch audit logs with filters and justification, and retention policy in parallel
+    // Fetch audit logs and retention policy in parallel
+    // Session cookie (if present) is automatically sent with request
     const [response, retentionPolicy] = await Promise.all([
       intric.audit.list({
         page,
@@ -47,8 +24,6 @@ export const load = async (event) => {
         to_date,
         action: action !== "all" ? action : undefined,
         actor_id,
-        justification_category,
-        justification_description,
       }),
       intric.audit.getRetentionPolicy(),
     ]);
@@ -59,21 +34,37 @@ export const load = async (event) => {
       page: response.page || 1,
       page_size: response.page_size || 100,
       total_pages: response.total_pages || 0,
-      justification,
+      hasSession: true, // Successfully loaded logs = valid session
       error: null,
       retentionPolicy,
     };
-  } catch (error) {
-    console.error("Failed to load audit logs:", error);
+  } catch (error: any) {
+    // Check if error is 401 (no session/justification required)
+    // Updated from 403 to match backend error codes
+    const needsJustification = error?.status === 401;
+
+    // Only log actual errors, not expected auth challenges
+    if (!needsJustification) {
+      console.error("Failed to load audit logs:", error);
+    }
+
+    // Fetch retention policy separately (doesn't require session)
+    let retentionPolicy = null;
+    try {
+      retentionPolicy = await intric.audit.getRetentionPolicy();
+    } catch (err) {
+      console.error("Failed to fetch retention policy:", err);
+    }
+
     return {
       logs: [],
       total_count: 0,
       page: 1,
       page_size: 100,
       total_pages: 0,
-      justification: null,
-      error: "Failed to load audit logs. Please try again.",
-      retentionPolicy: null,
+      hasSession: false, // No valid session
+      error: needsJustification ? null : "Failed to load audit logs. Please try again.",
+      retentionPolicy,
     };
   }
 };
