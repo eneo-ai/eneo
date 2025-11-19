@@ -6,8 +6,30 @@
 export function initAudit(client) {
   return {
     /**
+     * Create audit access session with justification.
+     * Sets HTTP-only cookie with session ID. Session expires after 1 hour.
+     * Required before viewing audit logs.
+     * @param {{category: string, description: string}} justification - Access justification (description: 10-500 chars)
+     * @returns {Promise<{status: string, message?: string}>}
+     * @throws {IntricError}
+     * */
+    createAccessSession: async (justification) => {
+      const res = await client.fetch("/api/v1/audit/access-session", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            category: justification.category,
+            description: justification.description
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
      * List audit logs with optional filtering and pagination.
-     * @param {{actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string, page?: number, page_size?: number, justification_category?: string, justification_description?: string}} [options]
+     * Requires active audit access session (created via createAccessSession).
+     * @param {{actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string, page?: number, page_size?: number}} [options]
      * @returns {Promise<import('../types/schema').components["schemas"]["AuditLogListResponse"]>}
      * @throws {IntricError}
      * */

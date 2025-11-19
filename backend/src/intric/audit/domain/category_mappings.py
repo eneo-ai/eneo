@@ -92,7 +92,8 @@ CATEGORY_MAPPINGS = {
     ActionType.ENCRYPTION_KEY_ROTATED.value: 'system_actions',
     ActionType.SYSTEM_MAINTENANCE.value: 'system_actions',
 
-    # Audit Access (2 actions)
+    # Audit Access (3 actions)
+    ActionType.AUDIT_SESSION_CREATED.value: 'audit_access',
     ActionType.AUDIT_LOG_VIEWED.value: 'audit_access',
     ActionType.AUDIT_LOG_EXPORTED.value: 'audit_access',
 }

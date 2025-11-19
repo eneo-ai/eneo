@@ -85,3 +85,17 @@ class AuditLogExportRequest(BaseModel):
     action: Optional[ActionType] = None
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None
+
+
+class AccessJustificationRequest(BaseModel):
+    """Schema for creating audit access session with justification."""
+
+    category: str = Field(min_length=1, max_length=100, description="Justification category")
+    description: str = Field(min_length=10, max_length=500, description="Detailed access reason")
+
+
+class AccessJustificationResponse(BaseModel):
+    """Schema for access session creation response."""
+
+    status: str = Field(default="session_created", description="Status of session creation")
+    message: Optional[str] = Field(default=None, description="Additional message if needed")

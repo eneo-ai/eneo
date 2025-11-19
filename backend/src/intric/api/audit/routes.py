@@ -1,16 +1,21 @@
 """FastAPI routes for audit logging."""
 
+import logging
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Response
+import redis.exceptions
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from intric.api.audit.retention_schemas import (
     RetentionPolicyResponse,
     RetentionPolicyUpdateRequest,
 )
 from intric.api.audit.schemas import (
+    AccessJustificationRequest,
+    AccessJustificationResponse,
     AuditLogListResponse,
     AuditLogResponse,
 )
@@ -19,12 +24,15 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from intric.database.tables.users_table import Users
+from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 import sqlalchemy as sa
 
 # Import config routes
 from intric.api.audit.config_routes import router as config_router
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -73,34 +81,275 @@ async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
     return enriched_logs
 
 
+@router.delete("/access-session/rate-limit", status_code=204)
+async def reset_rate_limit(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Admin utility: Reset audit session rate limit for current user.
+
+    This endpoint is only available in development/testing environments.
+    Use when you get rate limited during testing.
+
+    Requires: Authentication (JWT token or API key)
+    Requires: Development/testing environment
+
+    Note: Permission check intentionally removed to allow clearing rate limit
+    even when locked out. User is still authenticated via JWT.
+    """
+    from intric.worker.redis import get_redis
+
+    current_user = container.user()
+
+    # Permission check removed - endpoint needs to work even if rate limited
+    # User is already authenticated via get_container(with_user=True)
+
+    # Safety: Only allow in development/testing environments
+    settings = get_settings()
+    if not settings.testing:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    redis_client = get_redis()
+    rate_limit_key = f"rate_limit:audit_session:{current_user.id}:{current_user.tenant_id}"
+
+    try:
+        deleted = await redis_client.delete(rate_limit_key)
+        if deleted:
+            logger.info(f"Rate limit reset for user {current_user.id}")
+        else:
+            logger.info(f"No rate limit found for user {current_user.id}")
+    except redis.exceptions.RedisError as e:
+        logger.error(f"Failed to reset rate limit: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Rate limiting service temporarily unavailable. Please try again."
+        )
+
+    return Response(status_code=204)
+
+
+@router.post("/access-session", response_model=AccessJustificationResponse)
+async def create_access_session(
+    request: AccessJustificationRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Create an audit access session with justification.
+
+    Stores the access justification securely in Redis (server-side) instead of
+    exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+
+    Security Features:
+    - Justification never appears in URLs or browser history
+    - Session ID stored in HTTP-only cookie (prevents XSS)
+    - Automatic expiration after 1 hour
+    - Tenant isolation validation
+    - Instant revocation capability
+
+    Requires: Authentication (JWT token or API key)
+    Requires: Admin permissions
+
+    Returns: Session creation confirmation with HTTP-only cookie set
+    """
+    from intric.roles.permissions import Permission, validate_permission
+    from intric.worker.redis import get_redis
+
+    current_user = container.user()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
+
+    # Input validation for security and resource protection
+    if len(request.category) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="Category too long (maximum 64 characters)"
+        )
+    if len(request.description) > 2048:
+        raise HTTPException(
+            status_code=400,
+            detail="Description too long (maximum 2048 characters)"
+        )
+    if len(request.description.strip()) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Description too short (minimum 10 characters)"
+        )
+
+    # Rate limiting: 5 sessions per hour per user (atomic operation to prevent race conditions)
+    redis_client = get_redis()  # Renamed to avoid shadowing redis module
+    rate_limit_key = f"rate_limit:audit_session:{current_user.id}:{current_user.tenant_id}"
+
+    try:
+        # Atomic increment - prevents TOCTOU race condition
+        count = await redis_client.incr(rate_limit_key)
+
+        # Set expiration on first increment
+        if count == 1:
+            await redis_client.expire(rate_limit_key, 3600)
+
+        # Check limit after increment
+        if count > 5:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed."
+            )
+    except redis.exceptions.RedisError as e:
+        logger.error(f"Rate limit Redis error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Rate limiting service temporarily unavailable. Please try again."
+        )
+
+    # Create session in Redis (using injected service)
+    session_service = container.audit_session_service()
+    session_id = await session_service.create_session(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        category=request.category,
+        description=request.description,
+    )
+
+    # Sanitize inputs for audit logging (prevent log injection)
+    safe_category = request.category.replace("\n", " ").replace("\r", " ")
+    safe_description = request.description.replace("\n", " ").replace("\r", " ")
+
+    # Audit log session creation for compliance (with error handling to prevent orphaned sessions)
+    audit_service = container.audit_service()
+    try:
+        await audit_service.log(
+            tenant_id=current_user.tenant_id,
+            actor_id=current_user.id,
+            action=ActionType.AUDIT_SESSION_CREATED,
+            entity_type=EntityType.AUDIT_LOG,
+            entity_id=current_user.tenant_id,
+            description=f"Created audit access session: {safe_category}",
+            metadata={
+                "session_id": session_id,
+                "justification": {
+                    "category": safe_category,
+                    "description": safe_description,
+                },
+                "rate_limit": {
+                    "count": count,
+                    "max": 5,
+                    "period_seconds": 3600,
+                }
+            }
+        )
+    except Exception as e:
+        # If audit logging fails, revoke the session to prevent orphaned sessions
+        logger.error(f"Audit logging failed, revoking session: {e}", exc_info=True)
+        await session_service.revoke_session(session_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Audit logging service temporarily unavailable. Please try again."
+        )
+
+    # Create response with session cookie
+    response = JSONResponse(
+        content={
+            "status": "session_created",
+            "message": "Access session created successfully",
+        }
+    )
+
+    # Environment-aware cookie configuration
+    settings = get_settings()
+    is_dev = settings.testing
+
+    # Set HTTP-only cookie with session ID
+    response.set_cookie(
+        key="audit_session_id",
+        value=session_id,
+        httponly=True,  # Always prevents JavaScript access (XSS protection)
+        secure=not is_dev,  # False for localhost HTTP, True for production HTTPS
+        samesite="lax" if is_dev else "none",  # Lax works for same-domain cross-port
+        max_age=3600,  # 1 hour (matches Redis TTL)
+        path="/api/v1",
+    )
+
+    return response
+
+
 @router.get("/logs", response_model=AuditLogListResponse)
 async def list_audit_logs(
+    request: Request,
     actor_id: Optional[UUID] = Query(None, description="Filter by actor"),
     action: Optional[ActionType] = Query(None, description="Filter by action type"),
     from_date: Optional[datetime] = Query(None, description="Filter from date"),
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(100, ge=1, le=1000, description="Page size"),
-    justification_category: Optional[str] = Query(None, description="Access justification category"),
-    justification_description: Optional[str] = Query(None, description="Access justification description"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
     List audit logs for the authenticated user's tenant.
+
+    Security:
+    - Requires active audit access session (via HTTP-only cookie)
+    - Session must contain valid justification
+    - Justification stored server-side (Redis) - never in URLs
 
     Access Control:
     - Admins only: View all actions in their tenant
 
     Requires: Authentication (JWT token or API key)
     Requires: Admin permissions
+    Requires: Active audit access session with justification
     """
     from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = container.session()
 
+    # DEBUG: Log user info before permission check
+    logger.info(
+        f"Audit access attempt - User: {current_user.id}, "
+        f"Email: {current_user.email}, Permissions: {list(current_user.permissions)}"
+    )
+
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
+    logger.info("✓ Permission check passed")
+
+    # Get and validate audit access session (using injected service)
+    session_id = request.cookies.get("audit_session_id")
+
+    # DEBUG: Log cookie status
+    logger.info(
+        f"Cookie check - session_id present: {session_id is not None}, "
+        f"all cookies: {list(request.cookies.keys())}"
+    )
+
+    if not session_id:
+        logger.warning("✗ 401 at line 323: No audit_session_id cookie in request")
+        raise HTTPException(
+            status_code=401,  # Changed from 403 for better frontend handling
+            detail="Audit access requires justification. Please provide an access reason.",
+            headers={"X-Error-Code": "AUDIT_SESSION_REQUIRED"}
+        )
+
+    # DEBUG: Log before session validation
+    logger.info(f"Validating session {session_id[:8]}... for user {current_user.id}")
+
+    session_service = container.audit_session_service()
+    audit_session = await session_service.validate_session(
+        session_id, current_user.id, current_user.tenant_id
+    )
+
+    if not audit_session:
+        logger.warning(f"✗ 401 at line 335: Session validation failed for {session_id[:8]}...")
+        raise HTTPException(
+            status_code=401,  # Changed from 403 for better frontend handling
+            detail="Invalid or expired session. Please re-authenticate with justification.",
+            headers={"X-Error-Code": "AUDIT_SESSION_EXPIRED"}
+        )
+
+    logger.info(f"✓ Session validation passed for {session_id[:8]}...")
+
+    # Extend session TTL to keep active users logged in
+    await session_service.extend_session(session_id)
 
     audit_service = container.audit_service()
 
@@ -155,13 +404,13 @@ async def list_audit_logs(
             "newest": newest_log_date.isoformat()
         }
 
-    # Add access justification if provided
-    if justification_category and justification_description:
-        metadata["access_justification"] = {
-            "category": justification_category,
-            "description": justification_description,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+    # Add access justification from session (always present due to validation above)
+    metadata["access_justification"] = {
+        "category": audit_session["category"],
+        "description": audit_session["description"],
+        "timestamp": audit_session["created_at"],
+        "session_id": session_id,  # For audit trail
+    }
 
     # Build concise, human-readable description
     description_parts = ["Viewed audit logs"]
@@ -188,13 +437,38 @@ async def list_audit_logs(
     # Enrich logs with actor information for UI display
     enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
-    return AuditLogListResponse(
+    # Create response object
+    response_data = AuditLogListResponse(
         logs=enriched_logs,
         total_count=total_count,
         page=page,
         page_size=page_size,
         total_pages=total_pages,
     )
+
+    # Convert to JSON response so we can set cookie
+    response = JSONResponse(
+        content=response_data.model_dump(mode='json'),
+        status_code=200
+    )
+
+    # Environment-aware cookie configuration
+    settings = get_settings()
+    is_dev = settings.testing
+
+    # Re-set cookie to extend browser expiry (matches server-side TTL extension)
+    # This prevents unexpected logout despite active use
+    response.set_cookie(
+        key="audit_session_id",
+        value=session_id,
+        httponly=True,  # Always prevents JavaScript access (XSS protection)
+        secure=not is_dev,  # False for localhost HTTP, True for production HTTPS
+        samesite="lax" if is_dev else "none",  # Lax works for same-domain cross-port
+        max_age=3600,  # Fresh 1 hour window
+        path="/api/v1",
+    )
+
+    return response
 
 
 @router.get("/logs/user/{user_id}", response_model=AuditLogListResponse)
