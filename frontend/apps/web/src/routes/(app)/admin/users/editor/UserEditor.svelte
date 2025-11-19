@@ -30,27 +30,40 @@
     };
   };
 
-  export let mode: "update" | "create" = "create";
-  export let hideTrigger: boolean = false;  // Hide built-in trigger when controlled externally
+  type Props = {
+    mode?: "update" | "create";
+    hideTrigger?: boolean;  // Hide built-in trigger when controlled externally
+    user?: {
+      id: string;
+      username?: string | null | undefined;
+      email: string;
+      predefined_roles: Role[];
+      roles: Role[];
+      user_groups: UserGroup[];
+    };
+    showDialog: Dialog.OpenState;  // For parent component control (used in UserActions dropdown)
+  };
 
-  export let user: {
-    id: string;
-    username?: string | null | undefined;
-    email: string;
-    predefined_roles: Role[];
-    roles: Role[];
-    user_groups: UserGroup[];
-  } = createEmptyUser();
+  let {
+    mode = "create",
+    hideTrigger = false,
+    user = $bindable(createEmptyUser()),
+    showDialog = $bindable()
+  }: Props = $props();
 
-  let userPassword = "";
-  let username = user.username ?? "";
-  let userRoles = user.predefined_roles.concat(user.roles);
-  let defaultRolesIds = defaultRoles.flatMap((role) => role.id);
+  let userPassword = $state("");
+  let username = $state(user.username ?? "");
+  let userRoles = $state(user.predefined_roles.concat(user.roles));
+  let defaultRolesIds = $derived(defaultRoles.flatMap((role) => role.id));
 
-  let editableUser = makeEditable(user);
+  let editableUser = $state(makeEditable(user));
 
-  // Export showDialog for parent component control (used in UserActions dropdown)
-  export let showDialog: Dialog.OpenState;
+  // Reinitialize state when user prop changes (e.g., when selecting different row in table)
+  $effect(() => {
+    username = user.username ?? "";
+    userRoles = user.predefined_roles.concat(user.roles);
+    editableUser = makeEditable(user);
+  });
 
   function getRolesUpdate() {
     const updatedRoles = userRoles.reduce(
@@ -90,7 +103,7 @@
       // Invalidate does not update the user and userPassword values in this component, so we need to update
       user = editableUser;
       userPassword = "";
-      $showDialog = false;
+      showDialog.set(false);
     } catch (e) {
       alert(e);
     }
@@ -111,7 +124,7 @@
       editableUser.updateWithValue(createEmptyUser());
       userPassword = "";
       invalidate("admin:users:load");
-      $showDialog = false;
+      showDialog.set(false);
     } catch (e) {
       alert(e);
     }
