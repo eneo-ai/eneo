@@ -107,6 +107,9 @@
   let isSavingRetention = $state(false);
   let retentionError = $state<string | null>(null);
 
+  // Track active quick filter preset (7, 30, 90 days, or null)
+  let activePreset = $state<7 | 30 | 90 | null>(null);
+
   // Get translated label for action type
   function getActionLabel(action: ActionType | "all"): string {
     const labels: Record<ActionType | "all", () => string> = {
@@ -275,11 +278,16 @@
           start: parseDate(fromDate),
           end: endDateFromUrl
         };
+
+        // Detect if the date range matches a preset
+        activePreset = detectPresetFromDateRange(parseDate(fromDate), endDateFromUrl);
       } catch (e) {
         dateRange = { start: undefined, end: undefined };
+        activePreset = null;
       }
     } else {
       dateRange = { start: undefined, end: undefined };
+      activePreset = null;
     }
 
     // Set action from URL
@@ -303,12 +311,35 @@
   });
 
   // Date preset functions
-  function setDatePreset(days: number) {
+  function setDatePreset(days: 7 | 30 | 90) {
     const tz = getLocalTimeZone();
     const endDate = today(tz); // Set to current day (applyFilters will add 1 day to make it inclusive)
     const startDate = today(tz).subtract({ days: days - 1 }); // Subtract days-1 to get actual range
     dateRange = { start: startDate, end: endDate };
+    activePreset = days; // Track which preset is active
     applyFilters();
+  }
+
+  // Helper function to detect which preset matches a date range
+  function detectPresetFromDateRange(start: CalendarDate | undefined, end: CalendarDate | undefined): 7 | 30 | 90 | null {
+    if (!start || !end) return null;
+
+    const tz = getLocalTimeZone();
+    const currentEnd = today(tz);
+
+    // Check if end date matches today
+    if (!end.compare(currentEnd)) {
+      // Calculate days difference
+      const daysDiff = currentEnd.toDate(tz).getTime() - start.toDate(tz).getTime();
+      const days = Math.round(daysDiff / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end
+
+      // Check if it matches one of our presets
+      if (days === 7) return 7;
+      if (days === 30) return 30;
+      if (days === 90) return 90;
+    }
+
+    return null;
   }
 
   function formatTimestamp(timestamp: string): string {
@@ -426,8 +457,16 @@
     selectedUser = null;
     userSearchQuery = "";
     userSearchResults = [];
+    activePreset = null; // Clear active preset
 
     const params = new URLSearchParams();
+
+    // Preserve justification params (required for compliance tracking)
+    if (accessJustification) {
+      params.set("justification_category", accessJustification.category);
+      params.set("justification_description", accessJustification.description);
+    }
+
     if (activeTab === 'config') {
       params.set("tab", "config");
     }
@@ -883,21 +922,33 @@
               <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
               <button
                 onclick={() => setDatePreset(7)}
-                class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+                class={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                  activePreset === 7
+                    ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 border border-accent-default'
+                    : 'border border-default text-default hover:bg-subtle'
+                }`}
               >
                 <Clock class="h-3.5 w-3.5" />
                 {m.audit_last_7_days()}
               </button>
               <button
                 onclick={() => setDatePreset(30)}
-                class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+                class={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                  activePreset === 30
+                    ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 border border-accent-default'
+                    : 'border border-default text-default hover:bg-subtle'
+                }`}
               >
                 <Clock class="h-3.5 w-3.5" />
                 {m.audit_last_30_days()}
               </button>
               <button
                 onclick={() => setDatePreset(90)}
-                class="inline-flex items-center gap-1.5 rounded-md border border-default px-3 py-1.5 text-xs font-medium text-default hover:bg-subtle transition-colors"
+                class={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                  activePreset === 90
+                    ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 border border-accent-default'
+                    : 'border border-default text-default hover:bg-subtle'
+                }`}
               >
                 <Clock class="h-3.5 w-3.5" />
                 {m.audit_last_90_days()}
