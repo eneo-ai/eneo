@@ -180,13 +180,23 @@ async def create_access_session(
     redis_client = get_redis()  # Renamed to avoid shadowing redis module
     rate_limit_key = f"rate_limit:audit_session:{current_user.id}:{current_user.tenant_id}"
 
-    try:
-        # Atomic increment - prevents TOCTOU race condition
-        count = await redis_client.incr(rate_limit_key)
+    # Lua script for atomic INCR + EXPIRE to prevent zombie keys
+    rate_limit_script = """
+    local count = redis.call('INCR', KEYS[1])
+    if count == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+    end
+    return count
+    """
 
-        # Set expiration on first increment
-        if count == 1:
-            await redis_client.expire(rate_limit_key, 3600)
+    try:
+        # Execute Lua script atomically - prevents zombie keys if EXPIRE fails
+        count = await redis_client.eval(
+            rate_limit_script,
+            1,  # number of keys
+            rate_limit_key,  # KEYS[1]
+            3600  # ARGV[1] - TTL in seconds
+        )
 
         # Check limit after increment
         if count > 5:

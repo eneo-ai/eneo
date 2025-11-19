@@ -216,13 +216,13 @@ async def test_tenant_isolation_in_sessions(client, auth_headers, test_user_2, t
     )
 
     # Should be rejected due to tenant mismatch
-    assert response.status_code == 403
+    assert response.status_code == 401
     assert "invalid or expired" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
-async def test_session_expiration_returns_403(client, auth_headers):
-    """Test that expired sessions return 403 error."""
+async def test_session_expiration_returns_401(client, auth_headers):
+    """Test that expired sessions return 401 error."""
     # Create session
     create_response = await client.post(
         "/api/v1/audit/access-session",
@@ -245,12 +245,12 @@ async def test_session_expiration_returns_403(client, auth_headers):
             cookies=create_response.cookies
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 401
         assert "invalid or expired" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
-async def test_missing_session_cookie_returns_403(client, auth_headers):
+async def test_missing_session_cookie_returns_401(client, auth_headers):
     """Test that requests without session cookie are rejected."""
     response = await client.get(
         "/api/v1/audit/logs",
@@ -258,7 +258,7 @@ async def test_missing_session_cookie_returns_403(client, auth_headers):
         # No cookies provided
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 401
     assert "requires justification" in response.json()["detail"].lower()
 
 
