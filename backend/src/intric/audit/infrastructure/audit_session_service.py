@@ -50,7 +50,9 @@ class AuditSessionService:
             HTTPException: 503 Service Unavailable if Redis is down
 
         Note:
-            Session data is encrypted in Redis and automatically expires after 1 hour.
+            Session data is stored in Redis with automatic 1-hour expiration.
+            Data is stored as plaintext JSON within the trusted Redis boundary,
+            consistent with other session/cache data in the system.
         """
         session_id = str(uuid4())
         session_data = {
