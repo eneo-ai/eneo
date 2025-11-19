@@ -18,7 +18,6 @@
 
   export let title: string | undefined | null = undefined;
   export let filterFn: (value: T) => boolean = () => true;
-  export let forceShow: boolean = false; // Show header even when no rows
 
   const open = writable(true);
   // Original is not exposed on the type but present on the store...
@@ -80,7 +79,7 @@
   );
 </script>
 
-{#if $filteredRows.length > 0 || forceShow}
+{#if $filteredRows.length > 0}
   {#if $displayType === "list"}
     <tbody {...$tableBodyAttrs}>
       {#if title}
