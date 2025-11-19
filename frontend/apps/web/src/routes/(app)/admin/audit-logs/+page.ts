@@ -23,6 +23,9 @@ export const load = async (event) => {
 
     // Don't fetch logs without justification (prevents creating audit log entries without access reason)
     if (!justification) {
+      // Fetch retention policy even without justification (doesn't require audit)
+      const retentionPolicy = await intric.audit.getRetentionPolicy();
+
       return {
         logs: [],
         total_count: 0,
@@ -31,20 +34,24 @@ export const load = async (event) => {
         total_pages: 0,
         justification: null,
         error: null,
+        retentionPolicy,
       };
     }
 
-    // Fetch audit logs with filters and justification
-    const response = await intric.audit.list({
-      page,
-      page_size,
-      from_date,
-      to_date,
-      action: action !== "all" ? action : undefined,
-      actor_id,
-      justification_category,
-      justification_description,
-    });
+    // Fetch audit logs with filters and justification, and retention policy in parallel
+    const [response, retentionPolicy] = await Promise.all([
+      intric.audit.list({
+        page,
+        page_size,
+        from_date,
+        to_date,
+        action: action !== "all" ? action : undefined,
+        actor_id,
+        justification_category,
+        justification_description,
+      }),
+      intric.audit.getRetentionPolicy(),
+    ]);
 
     return {
       logs: response.logs || [],
@@ -54,6 +61,7 @@ export const load = async (event) => {
       total_pages: response.total_pages || 0,
       justification,
       error: null,
+      retentionPolicy,
     };
   } catch (error) {
     console.error("Failed to load audit logs:", error);
@@ -65,6 +73,7 @@ export const load = async (event) => {
       total_pages: 0,
       justification: null,
       error: "Failed to load audit logs. Please try again.",
+      retentionPolicy: null,
     };
   }
 };

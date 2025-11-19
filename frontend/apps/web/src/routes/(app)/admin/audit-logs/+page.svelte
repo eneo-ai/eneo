@@ -20,7 +20,6 @@
   import { slide, fade } from "svelte/transition";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { onMount } from "svelte";
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
 
@@ -101,10 +100,10 @@
   let userSearchTimer: ReturnType<typeof setTimeout>;
   let isExporting = $state(false);
 
-  // Retention policy state
-  let retentionDays = $state<number>(365);
+  // Retention policy state - initialize from server data
+  let retentionDays = $state<number>(data.retentionPolicy?.retention_days ?? 365);
   let isEditingRetention = $state(false);
-  let retentionInputValue = $state<number>(365);
+  let retentionInputValue = $state<number>(data.retentionPolicy?.retention_days ?? 365);
   let isSavingRetention = $state(false);
   let retentionError = $state<string | null>(null);
 
@@ -562,16 +561,6 @@
   );
 
   // Retention policy functions
-  async function fetchRetentionPolicy() {
-    try {
-      const policy = await intric.audit.getRetentionPolicy();
-      retentionDays = policy.retention_days;
-      retentionInputValue = policy.retention_days;
-    } catch (err) {
-      console.error("Failed to fetch retention policy:", err);
-    }
-  }
-
   async function saveRetentionPolicy() {
     try {
       isSavingRetention = true;
@@ -608,11 +597,6 @@
     cutoff.setDate(cutoff.getDate() - days);
     return cutoff.toLocaleDateString("sv-SE");
   }
-
-  // Load retention policy on mount
-  onMount(() => {
-    fetchRetentionPolicy();
-  });
 </script>
 
 <svelte:head>
@@ -878,7 +862,7 @@
         {/if}
 
         <!-- Filters Section -->
-        <div class="mb-6 rounded-lg border border-default bg-subtle p-6">
+        <div class="mb-6 rounded-lg border border-default bg-subtle p-4 sm:p-6">
           <div class="space-y-4">
             <!-- Header Row -->
             <div class="flex items-center justify-between mb-3">
@@ -895,7 +879,7 @@
             </div>
 
             <!-- Quick Filters Row -->
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
               <button
                 onclick={() => setDatePreset(7)}
@@ -920,11 +904,11 @@
               </button>
             </div>
 
-            <!-- Filter Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Filter Grid - Stack vertically on small/medium screens to prevent overlap -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <!-- Date Range Filter -->
               <div>
-                <label class="block text-xs font-medium text-default mb-1.5">{m.audit_date_range()}</label>
+                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_date_range()}</label>
                 <div class="h-10">
                   <Input.DateRange bind:value={dateRange} class="w-full h-full" />
                 </div>
@@ -932,9 +916,9 @@
 
               <!-- Action Type Filter -->
               <div>
-                <label class="block text-xs font-medium text-default mb-1.5">{m.audit_action_type()}</label>
+                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_action_type()}</label>
                 <Select.Root customStore={actionStore}>
-                  <Select.Trigger class="w-full h-10 text-sm" placeholder="Select action type" />
+                  <Select.Trigger class="w-full h-10 text-sm truncate" placeholder="Select action type" />
                   <Select.Options>
                     {#each actionOptions as option}
                       <Select.Item value={option.value} label={option.label} />
@@ -944,8 +928,8 @@
               </div>
 
               <!-- User Filter -->
-              <div>
-                <label class="block text-xs font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
+              <div class="min-w-0">
+                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
                 <div class="relative h-10">
                   <Input.Text
                     bind:value={userSearchQuery}

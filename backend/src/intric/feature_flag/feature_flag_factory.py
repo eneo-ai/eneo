@@ -13,13 +13,20 @@ class FeatureFlagFactory:
         tenant_feature_flags: list[TenantFeatureFlag],
     ) -> FeatureFlag:
         tenant_ids = set()
+        disabled_tenant_ids = set()
+
         if tenant_feature_flags:
-            tenant_ids = {i.tenant_id for i in tenant_feature_flags}
+            for tf in tenant_feature_flags:
+                if tf.enabled:
+                    tenant_ids.add(tf.tenant_id)
+                else:
+                    disabled_tenant_ids.add(tf.tenant_id)
 
         return FeatureFlag(
             feature_id=global_feature_flag.id,
             name=global_feature_flag.name,
             tenant_ids=tenant_ids,
+            disabled_tenant_ids=disabled_tenant_ids,
             is_enabled_globally=global_feature_flag.enabled,
             description=global_feature_flag.description,
         )
