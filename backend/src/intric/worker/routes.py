@@ -120,12 +120,10 @@ async def purge_old_audit_logs(container: Container):
     Returns:
         Dictionary with purge statistics per tenant
     """
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.application.retention_service import RetentionService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
     from intric.main.logging import get_logger
 
     logger = get_logger(__name__)

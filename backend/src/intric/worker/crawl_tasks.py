@@ -1103,10 +1103,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     await session.execute(stmt)
 
             # Audit logging for website crawl
-            from intric.audit.application.audit_service import AuditService
             from intric.audit.domain.action_types import ActionType
             from intric.audit.domain.entity_types import EntityType
-            from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
             audit_service = container.audit_service()
 

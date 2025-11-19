@@ -94,11 +94,9 @@ class OIDCDebugToggleResponse(BaseModel):
 async def register_new_user(
     new_user: UserAddSuperAdmin, container: Container = Depends(get_container())
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     user_service = container.user_service()
 
@@ -158,11 +156,9 @@ async def delete_user(
     user_id: UUID,
     container: Container = Depends(get_container()),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     user_service = container.user_service()
 
@@ -204,11 +200,9 @@ async def update_user(
     container: Container = Depends(get_container()),
 ):
     """Omitted fields are not updated."""
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     user_service = container.user_service()
 
@@ -290,11 +284,9 @@ async def get_tenants(domain: str | None = None, container: Container = Depends(
     responses=responses.get_responses([400]),
 )
 async def create_tenant(tenant: TenantBase, container: Container = Depends(get_container())):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     tenant_service = container.tenant_service()
 
@@ -336,11 +328,9 @@ async def update_tenant(
     tenant: TenantUpdatePublic,
     container: Container = Depends(get_container()),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     tenant_service = container.tenant_service()
 
@@ -389,11 +379,9 @@ async def update_tenant(
     responses=responses.get_responses([404]),
 )
 async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_container())):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     tenant_service = container.tenant_service()
 
@@ -565,11 +553,9 @@ async def enable_completion_model(
     ),
     container: Container = Depends(get_container()),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     # Enable model
     await completion_model_repo.enable_completion_model(
@@ -619,11 +605,9 @@ async def enable_embedding_model(
     ),
     container: Container = Depends(get_container()),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     # Enable model
     await embedding_model_repo.enable_embedding_model(

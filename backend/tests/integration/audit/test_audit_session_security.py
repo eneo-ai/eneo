@@ -2,7 +2,6 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
 
 import redis.exceptions
 
@@ -130,7 +129,6 @@ async def test_session_creation_is_audit_logged(client, auth_headers, db_session
     )
 
     assert response.status_code == 200
-    session_id = response.cookies["audit_session_id"]
 
     # Query audit logs to verify the session creation was logged
     async with db_session() as session:

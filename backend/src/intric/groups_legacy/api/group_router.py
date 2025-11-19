@@ -88,10 +88,8 @@ async def update_group(
     group: CollectionUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     service = container.collection_crud_service()
     current_user = container.user()
@@ -146,10 +144,8 @@ async def update_group(
 async def delete_group_by_id(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     # Get collection info BEFORE deletion
     collection_service = container.collection_crud_service()
@@ -240,10 +236,8 @@ async def add_info_blobs(
         info_blobs_updated.append(info_blob_updated)
 
     # Audit logging for info blob additions
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     # Get space for context
     space = None
@@ -316,10 +310,8 @@ async def upload_file(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Starts a job, use the job operations to keep track of this job"""
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     group_service = container.group_service()
     current_user = container.user()

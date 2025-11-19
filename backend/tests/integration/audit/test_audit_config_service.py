@@ -1,10 +1,8 @@
 """Integration tests for audit category configuration service."""
 
 import pytest
-from uuid import uuid4
 
 from intric.audit.application.audit_config_service import AuditConfigService
-from intric.audit.domain.action_types import ActionType
 from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
 from intric.audit.schemas.audit_config_schemas import CategoryUpdate
 from intric.worker.redis import get_redis
