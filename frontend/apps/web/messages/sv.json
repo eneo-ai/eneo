@@ -1355,6 +1355,8 @@
   "wizard_config": "Guideconfig",
   "enable_templates": "Aktivera mallar",
   "enable_templates_description": "Tillåt användare att skapa assistenter och appar från förkonfigurerade mallar",
+  "enable_audit_logging": "Aktivera granskningsloggning",
+  "enable_audit_logging_description": "Spåra användaråtgärder och systemhändelser för efterlevnad och säkerhetsövervakning",
   "delete_template_confirmation": "Är du säker på att du vill ta bort denna mall?",
   "permanent_action": "Detta kan inte ångras",
   "template_in_use": "Mallen används för närvarande",

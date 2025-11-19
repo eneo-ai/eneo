@@ -27,15 +27,17 @@ export const load = async (event) => {
     endDate: today.add({ days: 1 }).toString()
   };
 
-  const [storageStats, tokenStats, auditConfig] = await Promise.all([
+  const [storageStats, tokenStats, auditConfig, settings] = await Promise.all([
     intric.usage.storage.getSummary(),
     intric.usage.tokens.getSummary(dateRange),
-    intric.audit.getConfig()
+    intric.audit.getConfig(),
+    intric.settings.get()
   ]);
 
   return {
     storageStats,
     tokenStats,
-    auditConfig
+    auditConfig,
+    settings
   };
 };
