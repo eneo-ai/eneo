@@ -9,7 +9,6 @@ This improves performance when checking specific action overrides.
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic

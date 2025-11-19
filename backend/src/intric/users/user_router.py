@@ -540,10 +540,8 @@ async def generate_api_key(
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
     after which only the truncated key will be shown."""
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     service = container.user_service()
 
@@ -595,13 +593,12 @@ async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     user_service = container.user_service()
     current_user = container.user()
+    session = container.session()
 
     # Create user
     new_user = await user_service.invite_user(user_invite)
@@ -673,10 +670,8 @@ async def update_user(
     user_update: PropUserUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     user_service = container.user_service()
     current_user = container.user()
@@ -779,10 +774,8 @@ async def update_user(
 async def delete_user(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     user_service = container.user_service()
     current_user = container.user()

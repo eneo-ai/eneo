@@ -1,6 +1,5 @@
 """Unit tests for audit category mappings."""
 
-import pytest
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (

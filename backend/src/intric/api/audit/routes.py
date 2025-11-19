@@ -591,7 +591,6 @@ async def export_audit_logs(
     from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-    session = container.session()
 
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
@@ -763,11 +762,9 @@ async def update_retention_policy(
     Requires: Authentication (JWT token or API key via X-API-Key header)
     Requires: Admin permissions
     """
-    from intric.audit.application.audit_service import AuditService
     from intric.audit.application.retention_service import RetentionService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
     from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()

@@ -9,7 +9,6 @@ from intric.audit.application.audit_config_service import AuditConfigService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.audit_log import AuditLog
-from intric.audit.domain.category_mappings import get_category_for_action
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
