@@ -71,6 +71,7 @@ function SpacesManager(data: SpacesManagerParams) {
 
   async function refreshCurrentSpace(type?: "applications" | "knowledge") {
     let $currentSpace = get(currentSpace);
+    console.log("SpacesManager: refreshCurrentSpace called with type:", type);
     try {
       if (type) {
         switch (type) {
@@ -80,7 +81,9 @@ function SpacesManager(data: SpacesManagerParams) {
             break;
           }
           case "knowledge": {
+            console.log("SpacesManager: Fetching knowledge for space", $currentSpace.id);
             const knowledge = await intric.spaces.listKnowledge($currentSpace);
+            console.log("SpacesManager: Fetched knowledge, integration_knowledge_list items:", knowledge.integration_knowledge_list?.items?.length);
             $currentSpace.knowledge = knowledge;
             break;
           }
@@ -88,7 +91,9 @@ function SpacesManager(data: SpacesManagerParams) {
       } else {
         $currentSpace = await intric.spaces.get($currentSpace);
       }
+      console.log("SpacesManager: Setting currentSpace store");
       currentSpace.set($currentSpace);
+      console.log("SpacesManager: currentSpace store updated");
     } catch (e) {
       console.error("Error updating current space", e);
     }

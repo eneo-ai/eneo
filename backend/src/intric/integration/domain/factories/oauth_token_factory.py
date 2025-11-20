@@ -23,6 +23,8 @@ class OauthTokenFactory:
                 user_integration=record.user_integration,
                 id=record.id,
                 resources=record.resources,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
             )
         elif IntegrationType(record.token_type).is_sharepoint:
             return SharePointToken(
@@ -32,6 +34,8 @@ class OauthTokenFactory:
                 user_integration=record.user_integration,
                 id=record.id,
                 resources=record.resources,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
             )
         else:
             raise ValueError("Unknown token type")

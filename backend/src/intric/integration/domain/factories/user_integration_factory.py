@@ -12,10 +12,14 @@ class UserIntegrationFactory:
     @staticmethod
     def create_entity(record: "UserIntegrationDBModel") -> UserIntegration:
         return UserIntegration(
+            tenant_integration=record.tenant_integration,
+            user_id=record.user_id,  # Can be None for tenant_app integrations
             id=record.id,
             authenticated=record.authenticated,
-            tenant_integration=record.tenant_integration,
-            user_id=record.user_id,
+            auth_type=record.auth_type,
+            tenant_app_id=record.tenant_app_id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
         )
 
     @staticmethod

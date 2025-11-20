@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
@@ -18,8 +19,10 @@ class OauthToken(Entity):
         user_integration: "UserIntegration",
         id: Optional[UUID] = None,
         resources: list = [],
+        created_at: Optional["datetime"] = None,
+        updated_at: Optional["datetime"] = None,
     ):
-        super().__init__(id=id)
+        super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.token_type = token_type
@@ -44,6 +47,8 @@ class ConfluenceToken(OauthToken):
         user_integration: "UserIntegration",
         id: Optional[UUID] = None,
         resources: list = [],
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
     ):
         super().__init__(
             id=id,
@@ -52,6 +57,8 @@ class ConfluenceToken(OauthToken):
             token_type=token_type,
             user_integration=user_integration,
             resources=resources,
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
     @property
@@ -89,6 +96,8 @@ class SharePointToken(OauthToken):
         user_integration: "UserIntegration",
         id: Optional[UUID] = None,
         resources: list = [],
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
     ):
         super().__init__(
             id=id,
@@ -97,6 +106,8 @@ class SharePointToken(OauthToken):
             token_type=token_type,
             user_integration=user_integration,
             resources=resources,
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
     @property
