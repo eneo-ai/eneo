@@ -554,7 +554,6 @@ class SpaceRepository:
                     update_interval=website.update_interval,
                     size=_set_size_subquery(website),
                     embedding_model_id=website.embedding_model.id,
-                    space_id=space_in_db.id,
                     **auth_fields,
                 )
                 .where(WebsitesTable.id == website.id)
