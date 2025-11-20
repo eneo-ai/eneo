@@ -701,6 +701,20 @@ export interface paths {
     /** Update Privacy Policy */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
   };
+  "/api/v1/admin/credentials/{provider}": {
+    /**
+     * Set API credential for current tenant
+     * @description Set or update API credentials for a specific LLM provider. Tenant admin only. Provider-specific fields are validated.
+     */
+    put: operations["set_credential_api_v1_admin_credentials__provider__put"];
+  };
+  "/api/v1/admin/credentials/": {
+    /**
+     * List API credentials for current tenant
+     * @description List all configured API credentials with masked keys and encryption status. Tenant admin only.
+     */
+    get: operations["list_credentials_api_v1_admin_credentials__get"];
+  };
   "/api/v1/admin/templates/assistants/": {
     /**
      * List tenant's assistant templates
@@ -3035,6 +3049,8 @@ export interface components {
       is_locked?: boolean;
       /** Lock Reason */
       lock_reason?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** CompletionModelPublicAppTemplate */
@@ -3116,6 +3132,8 @@ export interface components {
       is_locked?: boolean;
       /** Lock Reason */
       lock_reason?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -3318,52 +3336,6 @@ export interface components {
        */
       published?: boolean;
       user: components["schemas"]["UserSparse"];
-    };
-    /**
-     * CredentialInfo
-     * @description Information about a configured credential.
-     *
-     * Example:
-     *     {
-     *         "provider": "openai",
-     *         "masked_key": "...xyz9",
-     *         "configured_at": "2025-10-07T12:34:56.789Z",
-     *         "encryption_status": "encrypted",
-     *         "config": {
-     *             "endpoint": "https://my-resource.openai.azure.com",
-     *             "api_version": "2024-02-15-preview"
-     *         }
-     *     }
-     */
-    CredentialInfo: {
-      /**
-       * Provider
-       * @description LLM provider name
-       */
-      provider: string;
-      /**
-       * Masked Key
-       * @description Last 4 characters of API key for identification
-       */
-      masked_key: string;
-      /**
-       * Configured At
-       * @description Timestamp when credential was last updated
-       */
-      configured_at?: string | null;
-      /**
-       * Encryption Status
-       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
-       * @enum {string}
-       */
-      encryption_status: "encrypted" | "plaintext";
-      /**
-       * Config
-       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
-       */
-      config?: {
-        [key: string]: unknown;
-      };
     };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
@@ -3619,6 +3591,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Can Access
        * @default false
@@ -3636,6 +3610,8 @@ export interface components {
        * @default false
        */
       is_org_enabled?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** EmbeddingModelPublicLegacy */
@@ -3718,6 +3694,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Can Access
        * @default false
@@ -3735,6 +3713,8 @@ export interface components {
        * @default false
        */
       is_org_enabled?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -4447,38 +4427,6 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
-    };
-    /**
-     * ListCredentialsResponse
-     * @description Response model for listing tenant credentials.
-     *
-     * Example:
-     *     {
-     *         "credentials": [
-     *             {
-     *                 "provider": "openai",
-     *                 "masked_key": "...xyz9",
-     *                 "configured_at": "2025-10-07T12:34:56.789Z",
-     *                 "encryption_status": "encrypted",
-     *                 "config": {}
-     *             },
-     *             {
-     *                 "provider": "azure",
-     *                 "masked_key": "...abc3",
-     *                 "configured_at": "2025-10-07T12:45:00.123Z",
-     *                 "encryption_status": "plaintext",
-     *                 "config": {
-     *                     "endpoint": "https://my-resource.openai.azure.com",
-     *                     "api_version": "2024-02-15-preview",
-     *                     "deployment_name": "gpt-4"
-     *                 }
-     *             }
-     *         ]
-     *     }
-     */
-    ListCredentialsResponse: {
-      /** Credentials */
-      credentials: components["schemas"]["CredentialInfo"][];
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -6280,90 +6228,6 @@ export interface components {
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
     /**
-     * SetCredentialRequest
-     * @description Request model for setting tenant API credentials.
-     *
-     * Provider-specific field requirements:
-     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
-     * - vLLM: api_key + endpoint (required)
-     * - Azure: api_key + endpoint + api_version (required)
-     *
-     * Example for OpenAI:
-     *     {
-     *         "api_key": "sk-proj-abc123..."
-     *     }
-     *
-     * Example for Azure:
-     *     {
-     *         "api_key": "abc123...",
-     *         "endpoint": "https://my-resource.openai.azure.com",
-     *         "api_version": "2024-02-15-preview"
-     *     }
-     *
-     * Example for vLLM:
-     *     {
-     *         "api_key": "vllm-secret-key",
-     *         "endpoint": "http://tenant-vllm:8000"
-     *     }
-     */
-    SetCredentialRequest: {
-      /**
-       * Api Key
-       * @description API key for the provider
-       */
-      api_key: string;
-      /**
-       * Endpoint
-       * @description Azure OpenAI endpoint (required for Azure provider)
-       */
-      endpoint?: string | null;
-      /**
-       * Api Version
-       * @description Azure OpenAI API version (required for Azure provider)
-       */
-      api_version?: string | null;
-      /**
-       * Deployment Name
-       * @description Azure OpenAI deployment name (required for Azure provider)
-       */
-      deployment_name?: string | null;
-    };
-    /**
-     * SetCredentialResponse
-     * @description Response model for setting tenant API credentials.
-     *
-     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
-     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
-     * not returned for security.
-     *
-     * Example:
-     *     {
-     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
-     *         "provider": "openai",
-     *         "masked_key": "...xyz9",
-     *         "message": "API credential for openai set successfully",
-     *         "set_at": "2025-10-22T10:00:00+00:00"
-     *     }
-     */
-    SetCredentialResponse: {
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Provider */
-      provider: string;
-      /** Masked Key */
-      masked_key: string;
-      /** Message */
-      message: string;
-      /**
-       * Set At
-       * Format: date-time
-       */
-      set_at: string;
-    };
-    /**
      * SetFederationRequest
      * @description Request model for setting tenant federation config.
      */
@@ -7131,6 +6995,8 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** TranscriptionModelSecurityStatus */
@@ -7178,6 +7044,8 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -8119,6 +7987,241 @@ export interface components {
      * @enum {string}
      */
     WizardType: "attachments" | "groups";
+    /**
+     * CredentialInfo
+     * @description Information about a configured credential.
+     *
+     * Example:
+     *     {
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "configured_at": "2025-10-07T12:34:56.789Z",
+     *         "encryption_status": "encrypted",
+     *         "config": {
+     *             "endpoint": "https://my-resource.openai.azure.com",
+     *             "api_version": "2024-02-15-preview"
+     *         }
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * ListCredentialsResponse
+     * @description Response model for listing tenant credentials.
+     *
+     * Example:
+     *     {
+     *         "credentials": [
+     *             {
+     *                 "provider": "openai",
+     *                 "masked_key": "...xyz9",
+     *                 "configured_at": "2025-10-07T12:34:56.789Z",
+     *                 "encryption_status": "encrypted",
+     *                 "config": {}
+     *             },
+     *             {
+     *                 "provider": "azure",
+     *                 "masked_key": "...abc3",
+     *                 "configured_at": "2025-10-07T12:45:00.123Z",
+     *                 "encryption_status": "plaintext",
+     *                 "config": {
+     *                     "endpoint": "https://my-resource.openai.azure.com",
+     *                     "api_version": "2024-02-15-preview",
+     *                     "deployment_name": "gpt-4"
+     *                 }
+     *             }
+     *         ]
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["intric__tenants__presentation__tenant_credentials_router__CredentialInfo"][];
+    };
+    /**
+     * SetCredentialRequest
+     * @description Request model for setting tenant API credentials.
+     *
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
+     *
+     * Example for OpenAI:
+     *     {
+     *         "api_key": "sk-proj-abc123..."
+     *     }
+     *
+     * Example for Azure:
+     *     {
+     *         "api_key": "abc123...",
+     *         "endpoint": "https://my-resource.openai.azure.com",
+     *         "api_version": "2024-02-15-preview"
+     *     }
+     *
+     * Example for vLLM:
+     *     {
+     *         "api_key": "vllm-secret-key",
+     *         "endpoint": "http://tenant-vllm:8000"
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /**
+     * SetCredentialResponse
+     * @description Response model for setting tenant API credentials.
+     *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
+    /** CredentialInfo */
+    intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    /** ListCredentialsResponse */
+    intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo"][];
+    };
+    /** SetCredentialRequest */
+    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /** SetCredentialResponse */
+    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse: {
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
     /** CrawlRunPublic */
     intric__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
       /** Created At */
@@ -9631,6 +9734,8 @@ export interface operations {
                 is_locked?: boolean;
                 /** Lock Reason */
                 lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9934,6 +10039,8 @@ export interface operations {
                 is_locked?: boolean;
                 /** Lock Reason */
                 lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -11998,6 +12105,58 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set API credential for current tenant
+   * @description Set or update API credentials for a specific LLM provider. Tenant admin only. Provider-specific fields are validated.
+   */
+  set_credential_api_v1_admin_credentials__provider__put: {
+    parameters: {
+      path: {
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List API credentials for current tenant
+   * @description List all configured API credentials with masked keys and encryption status. Tenant admin only.
+   */
+  list_credentials_api_v1_admin_credentials__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
         };
       };
     };
@@ -16678,14 +16837,14 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SetCredentialRequest"];
+        "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["SetCredentialResponse"];
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
         };
       };
       /** @description Validation Error */
@@ -16744,7 +16903,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["ListCredentialsResponse"];
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
         };
       };
       /** @description Validation Error */

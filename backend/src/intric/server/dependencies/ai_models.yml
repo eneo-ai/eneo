@@ -423,7 +423,7 @@ embedding_models:
     hosting: 'swe'
     hf_link: 'https://huggingface.co/intfloat/multilingual-e5-large'
     description: Microsoft's E5 multilingual embedding model hosted by Berget.ai in Sweden for EU compliance.
-    org: Microsoft
+    org: Berget
     litellm_model_name: 'berget/intfloat/multilingual-e5-large'
 
   # GDM.se - Swedish AI provider

@@ -4,7 +4,7 @@
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
-  import { TriangleAlert, Lock } from "lucide-svelte";
+  import { Lock } from "lucide-svelte";
 
   /** Pass in a publishable resource. Its state should be maintained from the outside */
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -45,11 +45,7 @@
   {#if includeTrigger}
     <Dialog.Trigger let:trigger asFragment>
       <div class="flex items-center gap-2">
-        {#if model.lock_reason === "credentials"}
-          <Tooltip text={m.api_credentials_required_for_provider()}>
-            <TriangleAlert class="text-yellow-500" size={20} />
-          </Tooltip>
-        {:else if model.lock_reason === "module"}
+        {#if model.lock_reason === "module"}
           <Tooltip text={m.model_available_on_request()}>
             <Lock class="text-blue-500" size={20} />
           </Tooltip>
