@@ -400,20 +400,20 @@
                 <div class="pagination">
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === 1}
                     on:click={() => changePage(collection.id, currentPage - 1)}
                   >
-                    Previous
+                    {m.previous()}
                   </Button>
-                  <span class="text-muted text-sm">Page {currentPage} of {totalPages}</span>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === totalPages}
                     on:click={() => changePage(collection.id, currentPage + 1)}
                   >
-                    Next
+                    {m.next()}
                   </Button>
                 </div>
               {/if}
@@ -485,20 +485,20 @@
                 <div class="pagination">
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === 1}
                     on:click={() => changePage(website.id, currentPage - 1)}
                   >
-                    Previous
+                    {m.previous()}
                   </Button>
-                  <span class="text-muted text-sm">Page {currentPage} of {totalPages}</span>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === totalPages}
                     on:click={() => changePage(website.id, currentPage + 1)}
                   >
-                    Next
+                    {m.next()}
                   </Button>
                 </div>
               {/if}
@@ -597,20 +597,20 @@
                 <div class="pagination">
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === 1}
                     on:click={() => changePage(collection.id, currentPage - 1)}
                   >
-                    Previous
+                    {m.previous()}
                   </Button>
-                  <span class="text-muted text-sm">Page {currentPage} of {totalPages}</span>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === totalPages}
                     on:click={() => changePage(collection.id, currentPage + 1)}
                   >
-                    Next
+                    {m.next()}
                   </Button>
                 </div>
               {/if}
@@ -682,20 +682,20 @@
                 <div class="pagination">
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === 1}
                     on:click={() => changePage(website.id, currentPage - 1)}
                   >
-                    Previous
+                    {m.previous()}
                   </Button>
-                  <span class="text-muted text-sm">Page {currentPage} of {totalPages}</span>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
                   <Button
                     variant="simple"
-                    padding="compact"
+                    padding="text"
                     disabled={currentPage === totalPages}
                     on:click={() => changePage(website.id, currentPage + 1)}
                   >
-                    Next
+                    {m.next()}
                   </Button>
                 </div>
               {/if}

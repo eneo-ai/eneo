@@ -602,6 +602,7 @@
   "organization": "Organization",
   "owner": "Owner",
   "page": "Page",
+  "page_x_of_y": "Page {x} of {y}",
   "page_doesnt_exist": "The page you're looking for doesn't exist.",
   "page_not_found": "Page not found",
   "password": "Password",

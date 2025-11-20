@@ -601,6 +601,7 @@
   "organization": "Organisation",
   "owner": "Ägare",
   "page": "Sida",
+  "page_x_of_y": "Sida {x} av {y}",
   "page_doesnt_exist": "Sidan du letar efter finns inte.",
   "page_not_found": "Sidan hittades inte",
   "password": "Lösenord",
