@@ -5,14 +5,18 @@
   import { IconPlus } from "@intric/icons/plus";
   import { IconTrash } from "@intric/icons/trash";
   import { IconWeb } from "@intric/icons/web";
+  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { IconChevronRight } from "@intric/icons/chevron-right";
   import { Button } from "@intric/ui";
-  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse } from "@intric/intric-js";
+  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse, InfoBlob } from "@intric/intric-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAvailableKnowledge } from "../getAvailableKnowledge";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
+  import { getIntric } from "$lib/core/Intric";
+  import BlobPreview from "./BlobPreview.svelte";
 
   /** Bind this variable if you want to be able to select websites */
   export let selectedWebsites: WebsiteSparse[] | undefined = undefined;
@@ -98,6 +102,83 @@
   const {
     state: { currentSpace, nonOrgSpaces, organizationSpaceId }
   } = getSpacesManager();
+
+  const intric = getIntric();
+
+  let expandedItems = new Set<string>();
+  let blobCache = new Map<string, InfoBlob[]>();
+  let loadingBlobs = new Set<string>();
+  let currentPages = new Map<string, number>(); 
+  const ITEMS_PER_PAGE = 10;
+
+  async function toggleExpanded(id: string, type: "collection" | "website" | "integration", item: GroupSparse | WebsiteSparse | IntegrationKnowledge) {
+    if (expandedItems.has(id)) {
+      expandedItems.delete(id);
+      expandedItems = expandedItems;
+    } else {
+      expandedItems.add(id);
+      expandedItems = expandedItems;
+
+      // Initialize pagination for all types
+      if (!currentPages.has(id)) {
+        currentPages.set(id, 1);
+        currentPages = currentPages;
+      }
+
+      if (!blobCache.has(id)) {
+        loadingBlobs.add(id);
+        loadingBlobs = loadingBlobs;
+
+        try {
+          let blobs: InfoBlob[];
+          if (type === "collection") {
+            blobs = await intric.groups.listInfoBlobs(item as GroupSparse);
+          } else if (type === "website") {
+            blobs = await intric.websites.indexedBlobs.list(item as WebsiteSparse);
+          } else {
+            // Integration knowledge - not yet supported
+            blobs = [];
+          }
+          console.log(`Fetched ${blobs.length} blobs for ${type} ${id}`);
+          blobCache.set(id, blobs);
+          blobCache = blobCache;
+        } catch (error) {
+          console.error(`Failed to fetch blobs for ${type} ${id}:`, error);
+        } finally {
+          loadingBlobs.delete(id);
+          loadingBlobs = loadingBlobs;
+        }
+      }
+    }
+  }
+
+  function getPaginatedBlobs(id: string, blobs: InfoBlob[] | undefined) {
+    if (!blobs) return [];
+
+    // Always use pagination for all types
+    const page = currentPages.get(id) || 1;
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    const end = start + ITEMS_PER_PAGE;
+    return blobs.slice(start, end);
+  }
+
+  function getTotalPages(blobs: InfoBlob[] | undefined) {
+    if (!blobs) return 0;
+    return Math.ceil(blobs.length / ITEMS_PER_PAGE);
+  }
+
+  function changePage(id: string, newPage: number) {
+    currentPages.set(id, newPage);
+    currentPages = currentPages;
+  }
+
+  function formatBlobSize(bytes: number | undefined): string {
+    if (!bytes) return "";
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    return `${mb.toFixed(1)} MB`;
+  }
 
   function ownerSpaceId(item: any): string | undefined {
     return (
@@ -254,44 +335,178 @@
 
     {#each selectedCollectionsPersonal as collection (`group:${collection.id}`)}
       {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
-      <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
-        {#if isItemModelEnabled}
-          <IconCollections />
-        {:else}
-          <IconCancel />
+      {@const isExpanded = expandedItems.has(collection.id)}
+      {@const isLoading = loadingBlobs.has(collection.id)}
+      {@const allBlobs = blobCache.get(collection.id)}
+      {@const blobs = getPaginatedBlobs(collection.id, allBlobs)}
+      {@const totalPages = getTotalPages(allBlobs)}
+      {@const currentPage = currentPages.get(collection.id) || 1}
+      <div class="knowledge-item-container">
+        <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
+          {#if collection.metadata.num_info_blobs > 0}
+            <button
+              class="expand-button"
+              on:click={() => toggleExpanded(collection.id, "collection", collection)}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              {#if isExpanded}
+                <IconChevronDown />
+              {:else}
+                <IconChevronRight />
+              {/if}
+            </button>
+          {:else}
+            <div class="expand-button-placeholder"></div>
+          {/if}
+          {#if isItemModelEnabled}
+            <IconCollections />
+          {:else}
+            <IconCancel />
+          {/if}
+          <span class="truncate px-2">{collection.name}</span>
+          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <div class="flex-grow"></div>
+          {#if collection.metadata.num_info_blobs > 0}
+            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+              {collection.metadata.num_info_blobs} {m.resource_files()}
+            </span>
+          {:else}
+            <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+              {m.empty()}
+            </span>
+          {/if}
+          <Button variant="destructive" padding="icon" on:click={() => {
+            selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
+            if ($openPersonal) inputPersonalEl?.focus();
+            if ($openOrg)      inputOrgEl?.focus();
+          }}><IconTrash /></Button>
+        </div>
+        {#if isExpanded}
+          <div class="blob-list">
+            {#if isLoading}
+              <div class="blob-item text-muted">Loading...</div>
+            {:else if blobs && blobs.length > 0}
+              {#each blobs as blob (blob.id)}
+                <BlobPreview {blob} let:showBlob>
+                  <button class="blob-item blob-item-clickable" on:click={showBlob}>
+                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
+                    {#if blob.metadata?.size}
+                      <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
+                    {/if}
+                  </button>
+                </BlobPreview>
+              {/each}
+              {#if totalPages > 1}
+                <div class="pagination">
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === 1}
+                    on:click={() => changePage(collection.id, currentPage - 1)}
+                  >
+                    {m.previous()}
+                  </Button>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === totalPages}
+                    on:click={() => changePage(collection.id, currentPage + 1)}
+                  >
+                    {m.next()}
+                  </Button>
+                </div>
+              {/if}
+            {:else}
+              <div class="blob-item text-muted">No files found</div>
+            {/if}
+          </div>
         {/if}
-        <span class="truncate px-2">{collection.name}</span>
-        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
-        <div class="flex-grow"></div>
-        {#if collection.metadata.num_info_blobs > 0}
-          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            {collection.metadata.num_info_blobs} {m.resource_files()}
-          </span>
-        {:else}
-          <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            {m.empty()}
-          </span>
-        {/if}
-        <Button variant="destructive" padding="icon" on:click={() => {
-          selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
-          if ($openPersonal) inputPersonalEl?.focus();
-          if ($openOrg)      inputOrgEl?.focus();
-        }}><IconTrash /></Button>
       </div>
     {/each}
 
     {#each selectedWebsitesPersonal as website (`website:${website.id}`)}
       {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
-      <div class="knowledge-item">
-        {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-        <span class="truncate px-2">{formatWebsiteName(website)}</span>
-        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
-        <div class="flex-grow"></div>
-        <Button variant="destructive" padding="icon" on:click={() => {
-          selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
-          if ($openPersonal) inputPersonalEl?.focus();
-          if ($openOrg)      inputOrgEl?.focus();
-        }}><IconTrash /></Button>
+      {@const isExpanded = expandedItems.has(website.id)}
+      {@const isLoading = loadingBlobs.has(website.id)}
+      {@const allBlobs = blobCache.get(website.id)}
+      {@const blobs = getPaginatedBlobs(website.id, allBlobs)}
+      {@const totalPages = getTotalPages(allBlobs)}
+      {@const currentPage = currentPages.get(website.id) || 1}
+      {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+      <div class="knowledge-item-container">
+        <div class="knowledge-item">
+          {#if pagesCrawled && pagesCrawled > 0}
+            <button
+              class="expand-button"
+              on:click={() => toggleExpanded(website.id, "website", website)}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              {#if isExpanded}
+                <IconChevronDown />
+              {:else}
+                <IconChevronRight />
+              {/if}
+            </button>
+          {:else}
+            <div class="expand-button-placeholder"></div>
+          {/if}
+          {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
+          <span class="truncate px-2">{formatWebsiteName(website)}</span>
+          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <div class="flex-grow"></div>
+          {#if pagesCrawled && pagesCrawled > 0}
+            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+              {pagesCrawled} {pagesCrawled === 1 ? 'page' : 'pages'}
+            </span>
+          {/if}
+          <Button variant="destructive" padding="icon" on:click={() => {
+            selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
+            if ($openPersonal) inputPersonalEl?.focus();
+            if ($openOrg)      inputOrgEl?.focus();
+          }}><IconTrash /></Button>
+        </div>
+        {#if isExpanded}
+          <div class="blob-list">
+            {#if isLoading}
+              <div class="blob-item text-muted">Loading...</div>
+            {:else if blobs && blobs.length > 0}
+              {#each blobs as blob (blob.id)}
+                <BlobPreview {blob} let:showBlob>
+                  <button class="blob-item blob-item-clickable" on:click={showBlob}>
+                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
+                    {#if blob.metadata?.size}
+                      <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
+                    {/if}
+                  </button>
+                </BlobPreview>
+              {/each}
+              {#if totalPages > 1}
+                <div class="pagination">
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === 1}
+                    on:click={() => changePage(website.id, currentPage - 1)}
+                  >
+                    {m.previous()}
+                  </Button>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === totalPages}
+                    on:click={() => changePage(website.id, currentPage + 1)}
+                  >
+                    {m.next()}
+                  </Button>
+                </div>
+              {/if}
+            {:else}
+              <div class="blob-item text-muted">No pages found</div>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/each}
 
@@ -321,40 +536,174 @@
   <section class="knowledge-selected">
     {#each selectedCollectionsOrg as collection (`group:${collection.id}`)}
       {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
-      <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
-        {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
-        <span class="truncate px-2">{collection.name}</span>
-        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
-        <div class="flex-grow"></div>
-        {#if collection.metadata.num_info_blobs > 0}
-          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            {collection.metadata.num_info_blobs} {m.resource_files()}
-          </span>
-        {:else}
-          <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-            Empty
-          </span>
+      {@const isExpanded = expandedItems.has(collection.id)}
+      {@const isLoading = loadingBlobs.has(collection.id)}
+      {@const allBlobs = blobCache.get(collection.id)}
+      {@const blobs = getPaginatedBlobs(collection.id, allBlobs)}
+      {@const totalPages = getTotalPages(allBlobs)}
+      {@const currentPage = currentPages.get(collection.id) || 1}
+      <div class="knowledge-item-container">
+        <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
+          {#if collection.metadata.num_info_blobs > 0}
+            <button
+              class="expand-button"
+              on:click={() => toggleExpanded(collection.id, "collection", collection)}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              {#if isExpanded}
+                <IconChevronDown />
+              {:else}
+                <IconChevronRight />
+              {/if}
+            </button>
+          {:else}
+            <div class="expand-button-placeholder"></div>
+          {/if}
+          {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
+          <span class="truncate px-2">{collection.name}</span>
+          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <div class="flex-grow"></div>
+          {#if collection.metadata.num_info_blobs > 0}
+            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+              {collection.metadata.num_info_blobs} {m.resource_files()}
+            </span>
+          {:else}
+            <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+              Empty
+            </span>
+          {/if}
+          <Button variant="destructive" padding="icon" on:click={() => {
+            selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
+            if ($openPersonal) inputPersonalEl?.focus();
+            if ($openOrg)      inputOrgEl?.focus();
+          }}><IconTrash /></Button>
+        </div>
+        {#if isExpanded}
+          <div class="blob-list">
+            {#if isLoading}
+              <div class="blob-item text-muted">Loading...</div>
+            {:else if blobs && blobs.length > 0}
+              {#each blobs as blob (blob.id)}
+                <BlobPreview {blob} let:showBlob>
+                  <button class="blob-item blob-item-clickable" on:click={showBlob}>
+                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
+                    {#if blob.metadata?.size}
+                      <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
+                    {/if}
+                  </button>
+                </BlobPreview>
+              {/each}
+              {#if totalPages > 1}
+                <div class="pagination">
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === 1}
+                    on:click={() => changePage(collection.id, currentPage - 1)}
+                  >
+                    {m.previous()}
+                  </Button>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === totalPages}
+                    on:click={() => changePage(collection.id, currentPage + 1)}
+                  >
+                    {m.next()}
+                  </Button>
+                </div>
+              {/if}
+            {:else}
+              <div class="blob-item text-muted">No files found</div>
+            {/if}
+          </div>
         {/if}
-        <Button variant="destructive" padding="icon" on:click={() => {
-          selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
-          if ($openPersonal) inputPersonalEl?.focus();
-          if ($openOrg)      inputOrgEl?.focus();
-        }}><IconTrash /></Button>
       </div>
     {/each}
 
     {#each selectedWebsitesOrg as website (`website:${website.id}`)}
       {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
-      <div class="knowledge-item">
-        {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-        <span class="truncate px-2">{formatWebsiteName(website)}</span>
-        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
-        <div class="flex-grow"></div>
-        <Button variant="destructive" padding="icon" on:click={() => {
-          selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
-          if ($openPersonal) inputPersonalEl?.focus();
-          if ($openOrg)      inputOrgEl?.focus();
-        }}><IconTrash /></Button>
+      {@const isExpanded = expandedItems.has(website.id)}
+      {@const isLoading = loadingBlobs.has(website.id)}
+      {@const allBlobs = blobCache.get(website.id)}
+      {@const blobs = getPaginatedBlobs(website.id, allBlobs)}
+      {@const totalPages = getTotalPages(allBlobs)}
+      {@const currentPage = currentPages.get(website.id) || 1}
+      {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+      <div class="knowledge-item-container">
+        <div class="knowledge-item">
+          {#if pagesCrawled && pagesCrawled > 0}
+            <button
+              class="expand-button"
+              on:click={() => toggleExpanded(website.id, "website", website)}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              {#if isExpanded}
+                <IconChevronDown />
+              {:else}
+                <IconChevronRight />
+              {/if}
+            </button>
+          {:else}
+            <div class="expand-button-placeholder"></div>
+          {/if}
+          {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
+          <span class="truncate px-2">{formatWebsiteName(website)}</span>
+          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <div class="flex-grow"></div>
+          {#if pagesCrawled && pagesCrawled > 0}
+            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+              {pagesCrawled} {pagesCrawled === 1 ? 'page' : 'pages'}
+            </span>
+          {/if}
+          <Button variant="destructive" padding="icon" on:click={() => {
+            selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
+            if ($openPersonal) inputPersonalEl?.focus();
+            if ($openOrg)      inputOrgEl?.focus();
+          }}><IconTrash /></Button>
+        </div>
+        {#if isExpanded}
+          <div class="blob-list">
+            {#if isLoading}
+              <div class="blob-item text-muted">Loading...</div>
+            {:else if blobs && blobs.length > 0}
+              {#each blobs as blob (blob.id)}
+                <BlobPreview {blob} let:showBlob>
+                  <button class="blob-item blob-item-clickable" on:click={showBlob}>
+                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
+                    {#if blob.metadata?.size}
+                      <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
+                    {/if}
+                  </button>
+                </BlobPreview>
+              {/each}
+              {#if totalPages > 1}
+                <div class="pagination">
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === 1}
+                    on:click={() => changePage(website.id, currentPage - 1)}
+                  >
+                    {m.previous()}
+                  </Button>
+                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
+                  <Button
+                    variant="simple"
+                    padding="text"
+                    disabled={currentPage === totalPages}
+                    on:click={() => changePage(website.id, currentPage + 1)}
+                  >
+                    {m.next()}
+                  </Button>
+                </div>
+              {/if}
+            {:else}
+              <div class="blob-item text-muted">No pages found</div>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/each}
 
@@ -620,5 +969,44 @@
 
   div.inDialog {
     z-index: 5000;
+  }
+
+  .knowledge-item-container {
+    @apply w-full;
+  }
+
+  .expand-button {
+    @apply flex items-center justify-center p-0 bg-transparent border-none cursor-pointer hover:opacity-70 transition-opacity;
+    width: 24px;
+    height: 24px;
+  }
+
+  .expand-button-placeholder {
+    width: 24px;
+    height: 24px;
+  }
+
+  .blob-list {
+    @apply border-default bg-secondary flex flex-col border-t px-4 py-2;
+  }
+
+  .blob-item {
+    @apply flex items-center justify-between gap-2 py-2 text-sm;
+  }
+
+  .blob-item-clickable {
+    @apply w-full text-left cursor-pointer hover:bg-hover-dimmer transition-colors;
+  }
+
+  .blob-title {
+    @apply flex-grow truncate;
+  }
+
+  .blob-size {
+    @apply flex-shrink-0 text-xs;
+  }
+
+  .pagination {
+    @apply flex items-center justify-center gap-3 py-3 border-t border-default;
   }
 </style>
