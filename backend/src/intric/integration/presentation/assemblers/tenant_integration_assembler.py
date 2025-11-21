@@ -12,8 +12,11 @@ class TenantIntegrationAssembler:
     def from_domain_to_model(
         cls, item: "TenantIntegration"
     ) -> "TenantIntegrationModel":
+        # Only return the TenantIntegration id if it's actually linked to the tenant
+        # (i.e., has been enabled via POST /tenant/{integration_id}/)
+        # For available-but-not-enabled integrations, id will be None
         return TenantIntegrationModel(
-            id=item.id,
+            id=item.id,  # None for not-yet-enabled integrations
             name=item.integration.name,
             description=item.integration.description,
             integration_type=item.integration.integration_type,

@@ -102,6 +102,8 @@ class CompletionModel(CompletionModelBase, InDB):
 class CompletionModelPublic(CompletionModel):
     can_access: bool = False
     is_locked: bool = True
+    lock_reason: Optional[str] = None
+    credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
 
     @classmethod
@@ -131,6 +133,8 @@ class CompletionModelPublic(CompletionModel):
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
             is_locked=completion_model.is_locked,
+            lock_reason=completion_model.lock_reason,
+            credential_provider=completion_model.get_credential_provider_name(),
             security_classification=SecurityClassificationPublic.from_domain(
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,

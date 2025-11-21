@@ -17,7 +17,16 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const websites = derived(currentSpace, ($currentSpace) => $currentSpace.knowledge.websites);
+  const ownedWebsites = derived(currentSpace, ($currentSpace) =>
+    $currentSpace.knowledge.websites.filter(c => c.space_id === $currentSpace.id)
+  );
+
+  //Kan användas för att visa länkade knowledge(websites) men då måste det vara readOnly för att inte ändra org baserad knowledge.
+  const linkedCollections = derived(currentSpace, ($currentSpace) =>
+    $currentSpace.knowledge.groups.filter(c => c.space_id !== $currentSpace.id)
+  );
+
+  const websites = ownedWebsites;
 
   // Selection state for bulk operations
   export let selectedWebsiteIds = writable<Set<string>>(new Set());

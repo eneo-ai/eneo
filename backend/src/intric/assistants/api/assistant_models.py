@@ -93,7 +93,7 @@ class AssistantGuard(BaseModel):
 
 class AssistantBase(BaseModel):
     name: str
-    completion_model_kwargs: ModelKwargs = ModelKwargs()
+    completion_model_kwargs: ModelKwargs = Field(default_factory=ModelKwargs)
     logging_enabled: bool = False
 
     @field_validator("completion_model_kwargs", mode="before")

@@ -28,6 +28,12 @@ from intric.settings.encryption_service import EncryptionService
 from intric.users.user import UserInDB, UserState
 
 
+@pytest.fixture(autouse=True)
+def enable_tenant_credentials(test_settings, monkeypatch):
+    """Enable tenant credentials feature for all tests in this module."""
+    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+
+
 async def _put_tenant_credential(
     client: AsyncClient,
     super_api_key: str,

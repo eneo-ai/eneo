@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class AppTemplateFactory:
     @staticmethod
     def create_app_template(item: "AppTemplates") -> AppTemplate:
-        wizard = AppTemplateWizard(**item.wizard)
+        wizard = AppTemplateWizard.model_validate(item.wizard) if item.wizard else None
         return AppTemplate(
             id=item.id,
             name=item.name,
@@ -26,6 +26,14 @@ class AppTemplateFactory:
             input_description=item.input_description,
             input_type=item.input_type,
             organization=item.organization,
+            tenant_id=item.tenant_id,
+            deleted_at=item.deleted_at,
+            original_snapshot=item.original_snapshot,
+            deleted_by_user_id=item.deleted_by_user_id,
+            restored_by_user_id=item.restored_by_user_id,
+            restored_at=item.restored_at,
+            is_default=item.is_default,
+            icon_name=item.icon_name,
         )
 
     @staticmethod

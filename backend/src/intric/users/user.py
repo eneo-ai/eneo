@@ -1,6 +1,7 @@
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Generic, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import EmailStr, Field, computed_field, field_serializer, field_validator
@@ -21,6 +22,142 @@ class UserState(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     DELETED = "deleted"
+
+
+class SortField(str, Enum):
+    """Allowed fields for sorting user lists"""
+    EMAIL = "email"
+    USERNAME = "username"
+    CREATED_AT = "created_at"
+
+
+class SortOrder(str, Enum):
+    """Sort direction for user lists"""
+    ASC = "asc"
+    DESC = "desc"
+
+
+@dataclass(frozen=True)
+class PaginationParams:
+    """
+    Pagination parameters with validation.
+
+    Implements max depth limit to prevent deep pagination performance issues.
+    Max depth of 100 pages ensures bounded query time even with large user bases.
+
+    Examples:
+        >>> params = PaginationParams(page=1, page_size=50)
+        >>> params.offset  # 0
+        >>> params = PaginationParams(page=3, page_size=50)
+        >>> params.offset  # 100
+    """
+    page: int = 1
+    page_size: int = 100
+
+    # Constants for validation
+    MIN_PAGE: int = 1
+    MAX_PAGE: int = 100  # Max depth limit
+    MIN_PAGE_SIZE: int = 1
+    MAX_PAGE_SIZE: int = 100
+
+    def __post_init__(self):
+        """Validate pagination parameters on initialization"""
+        if self.page < self.MIN_PAGE:
+            raise ValueError(f"page must be >= {self.MIN_PAGE}, got {self.page}")
+        if self.page > self.MAX_PAGE:
+            raise ValueError(f"page must be <= {self.MAX_PAGE} (max depth limit), got {self.page}")
+        if self.page_size < self.MIN_PAGE_SIZE:
+            raise ValueError(f"page_size must be >= {self.MIN_PAGE_SIZE}, got {self.page_size}")
+        if self.page_size > self.MAX_PAGE_SIZE:
+            raise ValueError(f"page_size must be <= {self.MAX_PAGE_SIZE}, got {self.page_size}")
+
+    @property
+    def offset(self) -> int:
+        """Calculate SQL OFFSET from page number and page size"""
+        return (self.page - 1) * self.page_size
+
+
+@dataclass(frozen=True)
+class SearchFilters:
+    """
+    Search filters for user queries.
+
+    Supports fuzzy matching with case-insensitive ILIKE queries.
+    Uses pg_trgm GIN indexes for efficient substring search.
+
+    Examples:
+        >>> filters = SearchFilters(email="john")
+        >>> filters.has_filters()  # True
+        >>> filters = SearchFilters()
+        >>> filters.has_filters()  # False
+        >>> filters = SearchFilters(state_filter="active")
+        >>> filters.has_filters()  # True
+    """
+    email: str | None = None
+    name: str | None = None
+    state_filter: str | None = None  # "active" (includes invited) or "inactive"
+
+    def has_filters(self) -> bool:
+        """Check if any search filters are active"""
+        return self.email is not None or self.name is not None or self.state_filter is not None
+
+
+@dataclass(frozen=True)
+class SortOptions:
+    """
+    Sort options for user queries.
+
+    Defaults to most recently created users first (created_at DESC).
+    Uses composite B-tree indexes for efficient tenant-scoped sorting.
+
+    Examples:
+        >>> sort = SortOptions()  # Default: created_at DESC
+        >>> sort = SortOptions(field=SortField.EMAIL, order=SortOrder.ASC)
+    """
+    field: SortField = SortField.CREATED_AT
+    order: SortOrder = SortOrder.DESC
+
+
+T = TypeVar('T')
+
+
+@dataclass(frozen=True)
+class PaginatedResult(Generic[T]):
+    """
+    Generic paginated result container with metadata.
+
+    Provides pagination metadata for frontend navigation (total_pages, has_next, has_previous).
+    Optionally includes counts by state for tab navigation.
+
+    Examples:
+        >>> result = PaginatedResult(items=[user1, user2], total_count=50, page=1, page_size=25)
+        >>> result.total_pages  # 2
+        >>> result.has_next  # True
+        >>> result.has_previous  # False
+        >>> result.counts  # {'active': 2828, 'inactive': 3}
+    """
+    items: list[T]
+    total_count: int
+    page: int
+    page_size: int
+    counts: dict[str, int] | None = None  # Optional: counts by state for tab display
+
+    @property
+    def total_pages(self) -> int:
+        """Calculate total number of pages"""
+        if self.total_count == 0:
+            return 0
+        return (self.total_count + self.page_size - 1) // self.page_size
+
+    @property
+    def has_next(self) -> bool:
+        """Check if there is a next page"""
+        return self.page < self.total_pages
+
+    @property
+    def has_previous(self) -> bool:
+        """Check if there is a previous page"""
+        return self.page > 1
 
 
 class UserBase(BaseModel):

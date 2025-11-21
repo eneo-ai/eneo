@@ -109,17 +109,10 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             if not isinstance(cred, dict):
                 raise ValueError(f"Provider {provider} credentials must be a dict")
 
+            # Basic validation: all providers must have api_key
+            # (Provider-specific field validation happens in routers when setting credentials)
             if "api_key" not in cred:
                 raise ValueError(f"Provider {provider} missing required field: api_key")
-
-            # Azure-specific validation - requires additional configuration fields
-            if provider == "azure":
-                required = {"api_key", "endpoint", "api_version", "deployment_name"}
-                missing = required - set(cred.keys())
-                if missing:
-                    raise ValueError(
-                        f"Azure provider missing required fields: {missing}"
-                    )
 
         return v
 

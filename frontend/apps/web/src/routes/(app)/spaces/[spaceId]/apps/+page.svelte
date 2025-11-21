@@ -36,11 +36,11 @@
   <Page.Header>
     <Page.Title title={m.apps()}></Page.Title>
     {#if $currentSpace.hasPermission("create", "app")}
-      <TemplateCreateApp></TemplateCreateApp>
+      <TemplateCreateApp settings={data.settings}></TemplateCreateApp>
     {/if}
   </Page.Header>
   <Page.Main>
-    {#if $currentSpace.applications.apps.length < 1 && data.featureFlags.showTemplates && $currentSpace.hasPermission("create", "app")}
+    {#if $currentSpace.applications.apps.length < 1 && data.settings.using_templates && $currentSpace.hasPermission("create", "app")}
       <TemplateCreateAppHint></TemplateCreateAppHint>
     {:else}
       <AppsTable apps={$currentSpace.applications.apps}></AppsTable>

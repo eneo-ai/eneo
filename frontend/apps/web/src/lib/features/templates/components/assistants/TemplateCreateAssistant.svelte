@@ -7,6 +7,8 @@
   import CreateAssistantBackdrop from "./CreateAssistantBackdrop.svelte";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
+  import type { Settings } from "@intric/intric-js";
+  import type { Snippet } from "svelte";
 
   const {
     state: { currentSpace },
@@ -19,21 +21,25 @@
     state: { currentStep, createButtonLabel, creationMode, showCreateDialog }
   } = getTemplateController();
 
-  let openAssistantAfterCreation = true;
-  let userTouchedToggle = false;
+  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } = $props();
+
+  let openAssistantAfterCreation = $state(true);
+  let userTouchedToggle = $state(false);
 
   function disableEditorOnTemplate(creationMode: "blank" | "template") {
     if (userTouchedToggle) return;
     openAssistantAfterCreation = creationMode === "blank";
   }
 
-  $: disableEditorOnTemplate($creationMode);
+  $effect(() => {
+    disableEditorOnTemplate($creationMode);
+  });
 </script>
 
 <Dialog.Root openController={showCreateDialog} on:close={resetForm}>
   <Dialog.Trigger asFragment let:trigger>
-    {#if $$slots.default}
-      <slot {trigger}></slot>
+    {#if triggerSnippet}
+      {@render triggerSnippet(trigger)}
     {:else}
       <Button is={trigger} variant="primary">{m.create_assistant()}</Button>
     {/if}
@@ -54,7 +60,7 @@
       {#if $currentStep === "wizard"}
         <TemplateWizard></TemplateWizard>
       {:else}
-        <TemplateSelector></TemplateSelector>
+        <TemplateSelector {settings}></TemplateSelector>
         <div class="absolute top-0 right-0 h-52 w-72 overflow-hidden">
           <CreateAssistantBackdrop></CreateAssistantBackdrop>
         </div>

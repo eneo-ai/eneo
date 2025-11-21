@@ -27,9 +27,12 @@ class EmbeddingModelPublic(BaseResponse):
     hosting: ModelHostingLocation
     description: Optional[str] = None
     org: Optional[Orgs] = None
+    litellm_model_name: Optional[str] = None
     can_access: bool = False
     is_locked: bool = True
+    lock_reason: Optional[str] = None
     is_org_enabled: bool = False
+    credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
 
     @classmethod
@@ -55,10 +58,13 @@ class EmbeddingModelPublic(BaseResponse):
             hosting=model.hosting,
             description=model.description,
             org=model.org,
+            litellm_model_name=model.litellm_model_name,
             dimensions=model.dimensions,
             can_access=model.can_access,
             is_locked=model.is_locked,
+            lock_reason=model.lock_reason,
             is_org_enabled=model.is_org_enabled,
+            credential_provider=model.get_credential_provider_name(),
             security_classification=security_classification,
         )
 

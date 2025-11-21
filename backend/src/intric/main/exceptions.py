@@ -176,7 +176,7 @@ EXCEPTION_MAP = {
         "Something went wrong.",
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
-    NameCollisionException: (400, None, ErrorCodes.NAME_COLLISION),
+    NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),
     NoModelSelectedException: (400, None, ErrorCodes.NO_MODEL_SELECTED),

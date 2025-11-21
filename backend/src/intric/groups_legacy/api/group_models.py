@@ -69,6 +69,7 @@ class GroupPublicBase(InDB, GroupBase):
 
 class GroupPublic(GroupPublicBase, ResourcePermissionsMixin):
     embedding_model: EmbeddingModelPublic
+    space_id: UUID
 
 
 class GroupPublicWithMetadata(GroupPublic):

@@ -188,6 +188,7 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     encryption_service,
     test_settings,
     mock_transcription_models,
+    monkeypatch,
 ):
     """Verify GET /tenants/{id}/credentials is strictly tenant-scoped.
 
@@ -202,6 +203,8 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     - Credential enumeration attacks
     - Response filtering bugs
     """
+    # Enable tenant credentials for this test
+    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
     # Create two tenants with credentials
     tenant_a = await _create_tenant(client, super_admin_token, f"tenant-cred-a-{uuid4().hex[:6]}")
     tenant_b = await _create_tenant(client, super_admin_token, f"tenant-cred-b-{uuid4().hex[:6]}")

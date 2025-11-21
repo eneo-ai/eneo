@@ -78,6 +78,17 @@ class CompletionModel(AIModel):
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
 
+    def get_credential_provider_name(self) -> str:
+        """Get the credential provider name for this model."""
+        from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
+
+        # If litellm_model_name is set, use it for provider detection
+        if self.litellm_model_name:
+            return LiteLLMProviderRegistry.detect_provider_from_model_name(self.litellm_model_name)
+
+        # Fall back to base implementation (checks family)
+        return super().get_credential_provider_name()
+
     @classmethod
     def create_from_db(
         cls,

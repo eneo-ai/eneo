@@ -18,7 +18,26 @@
   const {
     state: { userInfo }
   } = getAppContext();
+
+  function ownerSpaceId(item: any): string | undefined {
+    return (
+      item?.space_id ??
+      item?.spaceId ??
+      item?.space?.id ??
+      item?.metadata?.space_id ??
+      item?.metadata?.spaceId
+    );
+  }
+
+  $: localCollections = ($currentSpace?.knowledge?.groups ?? []).filter(
+    (g: any) => ownerSpaceId(g) === $currentSpace?.id
+  );
+  $: localWebsites = ($currentSpace?.knowledge?.websites ?? []).filter(
+    (w: any) => ownerSpaceId(w) === $currentSpace?.id
+  );
+
 </script>
+
 
 <svelte:head>
   <title
@@ -91,14 +110,14 @@
         {#if $currentSpace.hasPermission("read", "collection")}
           {@render tile({
             title: m.collections(),
-            count: $currentSpace.knowledge.groups.length,
+            count: localCollections.length,
             link: "/knowledge?tab=collections"
           })}
         {/if}
         {#if $currentSpace.hasPermission("read", "website")}
           {@render tile({
             title: m.websites(),
-            count: $currentSpace.knowledge.websites.length,
+            count: localWebsites.length,
             link: "/knowledge?tab=websites"
           })}
         {/if}

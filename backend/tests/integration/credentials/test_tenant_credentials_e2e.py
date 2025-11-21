@@ -20,6 +20,12 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+@pytest.fixture(autouse=True)
+def enable_tenant_credentials(test_settings, monkeypatch):
+    """Enable tenant credentials feature for all tests in this module."""
+    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_municipality_admin_sets_api_key(

@@ -48,6 +48,7 @@ export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
+export type Settings = components["schemas"]["SettingsPublic"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];

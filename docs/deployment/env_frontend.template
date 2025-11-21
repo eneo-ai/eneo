@@ -79,7 +79,8 @@ FEDERATION_PER_TENANT_ENABLED=false
 # UI Feature Flags (OPTIONAL)
 # ----------------------------------------------------------------------------
 # Enable optional UI features
-SHOW_TEMPLATES=true
+# DEPRECATED: SHOW_TEMPLATES - Use admin settings panel to enable templates per-tenant
+# SHOW_TEMPLATES=true
 SHOW_WEB_SEARCH=true
 # SHOW_HELP_CENTER=false
 

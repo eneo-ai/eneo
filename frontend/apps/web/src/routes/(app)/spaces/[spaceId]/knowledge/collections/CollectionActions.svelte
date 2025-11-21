@@ -18,18 +18,18 @@
   const intric = getIntric();
 
   export let collection: GroupSparse;
+  $: isOrgSpace = $currentSpace.organization === true;
 
   async function deleteResource() {
     isProcessing = true;
     try {
-      await intric.groups.delete(collection);
+      await intric.groups.delete({ id: collection.id });
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
       alert(m.could_not_delete_collection());
       console.error(e);
     }
-    isProcessing = false;
   }
 
   async function moveCollection() {
@@ -83,15 +83,18 @@
       {m.edit()}</Button
     >
     {#if collection.permissions?.includes("delete")}
-      <Button
-        is={item}
-        on:click={() => {
-          $showMoveDialog = true;
-        }}
-        padding="icon-leading"
-      >
-        <IconMove size="sm" />{m.move()}</Button
-      >
+      {#if !isOrgSpace}
+        <Button
+          is={item}
+          on:click={() => {
+            $showMoveDialog = true;
+          }}
+          padding="icon-leading"
+        >
+          <IconMove size="sm" />Move</Button
+        >
+      {/if}
+      
       <Button
         is={item}
         variant="destructive"

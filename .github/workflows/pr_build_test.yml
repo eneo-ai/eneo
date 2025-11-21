@@ -56,12 +56,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./backend
-        run: uv sync
+        run: uv sync --all-groups
 
       - name: Run unit tests
         working-directory: ./backend
         run: |
-          uv run pytest -v -m "not integration" tests/
+          uv run pytest -v -n auto -m "not integration" tests/
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -81,12 +81,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./backend
-        run: uv sync
+        run: uv sync --all-groups
 
       - name: Run integration tests
         working-directory: ./backend
         run: |
-          uv run pytest -v -m integration tests/integration/
+          uv run pytest -v -n auto -m integration tests/integration/
         env:
           # Testcontainers configuration
           TESTCONTAINERS_RYUK_DISABLED: "true"

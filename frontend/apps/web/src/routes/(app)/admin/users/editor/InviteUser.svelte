@@ -12,19 +12,19 @@
   const { defaultRoles } = getAdminUserCtx();
   const { tenant } = getAppContext();
 
-  let userRole = defaultRoles[0];
+  let userRole = [defaultRoles[0]]; // Array to match SelectRole API
   let userEmail = "";
   let emailIsValid: boolean;
   let showDialog: Dialog.OpenState;
   let showInviteLink: Dialog.OpenState;
 
   async function inviteUser() {
-    if (!userRole || !emailIsValid) return;
+    if (!userRole[0] || !emailIsValid) return;
 
     try {
       await intric.users.invite({
         email: userEmail,
-        predefined_role: userRole
+        predefined_role: userRole[0]  // Get first role from array
       });
       invalidate("admin:users:load");
       $showDialog = false;
@@ -55,7 +55,7 @@
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
 
-      <SelectRole availableRoles={defaultRoles} bind:value={userRole}></SelectRole>
+      <SelectRole {defaultRoles} customRoles={[]} bind:value={userRole}></SelectRole>
     </Dialog.Section>
 
     <Dialog.Controls let:close>

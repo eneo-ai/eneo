@@ -73,6 +73,7 @@ class EmbeddingModelPublicBase(EmbeddingModelBase, InDB):
 class EmbeddingModelPublicLegacy(EmbeddingModelLegacy):
     can_access: bool = False
     is_locked: bool = True
+    lock_reason: Optional[str] = None
 
 
 class EmbeddingModelSparse(EmbeddingModelBase, InDB):

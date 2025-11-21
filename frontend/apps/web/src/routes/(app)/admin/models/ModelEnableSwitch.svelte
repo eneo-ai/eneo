@@ -14,6 +14,7 @@
 
   export let model: (CompletionModel | EmbeddingModel | TranscriptionModel) & {
     is_locked?: boolean | null | undefined;
+    lock_reason?: string | null | undefined;
   };
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
 
@@ -38,10 +39,14 @@
   }
 
   $: tooltip = model.is_locked
-    ? m.model_available_on_request()
-    : model.is_org_enabled
-      ? m.toggle_to_disable_model()
-      : m.toggle_to_enable_model();
+    ? (model.lock_reason === "credentials"
+        ? m.api_credentials_required_for_provider()
+        : m.model_available_on_request())
+    : model.lock_reason === "credentials"
+      ? m.api_credentials_required_for_provider()
+      : model.is_org_enabled
+        ? m.toggle_to_disable_model()
+        : m.toggle_to_enable_model();
 </script>
 
 <div class="-ml-3 flex items-center gap-4">

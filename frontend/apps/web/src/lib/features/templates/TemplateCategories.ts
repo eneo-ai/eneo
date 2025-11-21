@@ -1,7 +1,10 @@
-type AssistantTemplateCategory = "communication" | "q&a" | "misc" | "advice";
+// Predefined category types - kept for backward compatibility
+type PredefinedAssistantCategory = "communication" | "q&a" | "misc" | "advice";
+type PredefinedAppCategory = "transcription" | "misc";
 
+// Predefined categories with localized titles and descriptions
 export const assistantTemplateCategories: Record<
-  AssistantTemplateCategory,
+  PredefinedAssistantCategory,
   { title: string; description: string }
 > = {
   communication: {
@@ -12,7 +15,6 @@ export const assistantTemplateCategories: Record<
     title: "Frågor & Svar",
     description: "Assistenter som ger informativa och klara svar på vanliga frågor."
   },
-
   advice: {
     title: "Rådgivning",
     description: "Assistenter som vägleder genom beslutsfattande och kreativa processer."
@@ -21,12 +23,10 @@ export const assistantTemplateCategories: Record<
     title: "Övrigt",
     description: "Diverse assistenter för olika behov och uppgifter."
   }
-} as const;
-
-type AppTemplateCategory = "transcription" | "misc";
+};
 
 export const appTemplateCategories: Record<
-  AppTemplateCategory,
+  PredefinedAppCategory,
   { title: string; description: string }
 > = {
   transcription: {
@@ -37,4 +37,40 @@ export const appTemplateCategories: Record<
     title: "Övrigt",
     description: "Diverse appar för olika funktioner och behov."
   }
-} as const;
+};
+
+/**
+ * Converts a category name to a human-readable title.
+ * Examples:
+ * - "test" -> "Test"
+ * - "custom-category" -> "Custom Category"
+ * - "my_category" -> "My Category"
+ */
+export function formatCategoryTitle(category: string): string {
+  return category
+    .split(/[-_\s]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Gets category information for any category string.
+ * If the category is predefined, returns localized title/description.
+ * If the category is custom (tenant-created), generates title from category name.
+ */
+export function getCategoryInfo(
+  category: string,
+  predefinedCategories: Record<string, { title: string; description: string }>
+): { title: string; description: string } {
+  // Check if it's a predefined category
+  if (category in predefinedCategories) {
+    return predefinedCategories[category];
+  }
+
+  // Generate title and description for custom categories
+  const title = formatCategoryTitle(category);
+  return {
+    title,
+    description: `${title} templates`
+  };
+}
