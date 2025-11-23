@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from functools import wraps
 from typing import Callable
@@ -107,7 +108,50 @@ class Worker:
         await lifespan.startup()
         crochet.setup()
 
+        # Start crawl feeder as background task if enabled
+        # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
+        # Uses leader election to ensure only ONE feeder runs across all workers
+        settings = get_settings()
+        if settings.crawl_feeder_enabled:
+            from intric.worker.crawl_feeder import CrawlFeeder
+
+            try:
+                # Create container for feeder (reuses existing session manager)
+                async with sessionmanager.session() as session:
+                    container = await self._create_container(session)
+                    feeder = CrawlFeeder(container)
+
+                    # Start feeder as background task
+                    # Why: Runs concurrently with worker jobs in same event loop
+                    task = asyncio.create_task(feeder.run_forever())
+
+                    # Store reference for cleanup on shutdown
+                    # Why: Allows graceful cancellation and prevents GC
+                    ctx["feeder_task"] = task
+
+                    logger.info(
+                        "Started crawl feeder background task with leader election",
+                        extra={"feeder_enabled": True},
+                    )
+            except Exception as exc:
+                logger.error(
+                    f"Failed to start crawl feeder: {exc}. Continuing without feeder.",
+                    extra={"feeder_enabled": False},
+                )
+
     async def shutdown(self, ctx):
+        # Stop feeder gracefully if running
+        # Why: Prevents orphaned background tasks
+        if "feeder_task" in ctx:
+            task = ctx["feeder_task"]
+            if not task.done():
+                logger.info("Stopping crawl feeder background task")
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass  # Expected on cancellation
+
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True):
