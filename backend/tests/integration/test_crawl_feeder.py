@@ -169,8 +169,14 @@ class TestCrawlFeederCapacity:
     async def test_returns_full_capacity_when_no_active_jobs(
         self, redis_client: aioredis.Redis, test_settings
     ):
-        """Should return full capacity when no jobs are active."""
+        """Should return full capacity when no jobs are active.
+
+        Note: _get_available_capacity is a read-only hint for batch sizing.
+        Actual slot acquisition is done atomically by _try_acquire_slot().
+        Returning full capacity when no key exists is safe.
+        """
         tenant_id = uuid4()
+        max_concurrent = test_settings.tenant_worker_concurrency_limit
 
         # Ensure no active jobs key exists
         await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
@@ -182,9 +188,8 @@ class TestCrawlFeederCapacity:
         # Get capacity
         capacity = await feeder._get_available_capacity(tenant_id, redis_client)
 
-        # With no key, feeder is conservative and returns 0
-        # This prevents over-enqueue before limiter initializes
-        assert capacity == 0, "Should be conservative when no active_jobs key exists"
+        # With no key, return full capacity (safe because _try_acquire_slot does atomic check)
+        assert capacity == max_concurrent, "Should return full capacity when no active_jobs key"
 
     async def test_returns_remaining_capacity(
         self, redis_client: aioredis.Redis, test_settings
