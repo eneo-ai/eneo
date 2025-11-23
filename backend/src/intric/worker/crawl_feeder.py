@@ -21,6 +21,7 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 
+from intric.jobs.job_manager import job_manager
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
@@ -349,9 +350,6 @@ class CrawlFeeder:
 
             # Enqueue to ARQ with deterministic job_id
             # Why: If feeder crashes and retries, ARQ rejects duplicate IDs
-            # Use module-level singleton (same pattern as rest of codebase)
-            from intric.jobs.job_manager import job_manager
-
             await job_manager.enqueue(
                 task=Task.CRAWL,
                 job_id=job_id,  # Use pre-created ID for idempotency

@@ -9,7 +9,7 @@ These tests catch real production bugs, not just verify happy paths.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -44,9 +44,8 @@ class TestZombieLeaderScenario:
         await redis_client.delete("crawl_feeder:leader")
 
         # Create two feeder instances
-        mock_container = MagicMock()
-        feeder_a = CrawlFeeder(mock_container)
-        feeder_b = CrawlFeeder(mock_container)
+        feeder_a = CrawlFeeder()
+        feeder_b = CrawlFeeder()
 
         # Feeder A acquires lock
         acquired_a = await feeder_a._try_acquire_leader_lock(redis_client)
@@ -76,12 +75,12 @@ class TestZombieLeaderScenario:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
-        feeder_a = CrawlFeeder(mock_container)
-        feeder_b = CrawlFeeder(mock_container)
+        feeder_a = CrawlFeeder()
+        feeder_b = CrawlFeeder()
 
         # Feeder A acquires and refreshes
-        await feeder_a._try_acquire_leader_lock(redis_client)
+        acquired = await feeder_a._try_acquire_leader_lock(redis_client)
+        assert acquired is True, "Lock should be acquired before refresh"
         await feeder_a._refresh_leader_lock(redis_client)
 
         # Check TTL was refreshed to ~30s
@@ -124,8 +123,7 @@ class TestEnqueueStateLag:
         # Set active_jobs to 0 (full capacity available)
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "0")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # First capacity check - full capacity
@@ -155,8 +153,7 @@ class TestEnqueueStateLag:
         # Initial state: 0 active jobs
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "0")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # Check initial capacity
@@ -212,19 +209,16 @@ class TestCrashBeforeLremRecovery:
             "crawl_type": "crawl",
         }
 
-        # Mock container with job_manager that raises duplicate error
-        mock_job_manager = MagicMock()
-        mock_job_manager.enqueue = AsyncMock(
-            side_effect=Exception("job_id already exists in queue")
-        )
+        feeder = CrawlFeeder()
 
-        mock_container = MagicMock()
-        mock_container.job_manager = MagicMock(return_value=mock_job_manager)
+        # Mock module-level job_manager.enqueue to raise duplicate error
+        with patch("intric.worker.crawl_feeder.job_manager") as mock_job_manager:
+            mock_job_manager.enqueue = AsyncMock(
+                side_effect=Exception("job_id already exists in queue")
+            )
 
-        feeder = CrawlFeeder(mock_container)
-
-        # This should return True (success) despite the exception
-        success, returned_job_id = await feeder._enqueue_crawl_job(job_data, tenant_id)
+            # This should return True (success) despite the exception
+            success, returned_job_id = await feeder._enqueue_crawl_job(job_data, tenant_id)
 
         assert success is True, "Duplicate job_id error should be treated as success"
         assert returned_job_id == job_id, "Should return the job_id"
@@ -250,19 +244,16 @@ class TestCrashBeforeLremRecovery:
             "crawl_type": "crawl",
         }
 
-        # Mock container with job_manager that raises a REAL error
-        mock_job_manager = MagicMock()
-        mock_job_manager.enqueue = AsyncMock(
-            side_effect=Exception("Redis connection timeout")
-        )
+        feeder = CrawlFeeder()
 
-        mock_container = MagicMock()
-        mock_container.job_manager = MagicMock(return_value=mock_job_manager)
+        # Mock module-level job_manager.enqueue to raise a REAL error
+        with patch("intric.worker.crawl_feeder.job_manager") as mock_job_manager:
+            mock_job_manager.enqueue = AsyncMock(
+                side_effect=Exception("Redis connection timeout")
+            )
 
-        feeder = CrawlFeeder(mock_container)
-
-        # This should return False (failure) for real errors
-        success, returned_job_id = await feeder._enqueue_crawl_job(job_data, tenant_id)
+            # This should return False (failure) for real errors
+            success, returned_job_id = await feeder._enqueue_crawl_job(job_data, tenant_id)
 
         assert success is False, "Real errors should NOT be treated as success"
 
@@ -298,15 +289,13 @@ class TestCrashBeforeLremRecovery:
                 "crawl_type": "crawl",
             }
 
-            mock_job_manager = MagicMock()
-            mock_job_manager.enqueue = AsyncMock(side_effect=Exception(error_msg))
+            feeder = CrawlFeeder()
 
-            mock_container = MagicMock()
-            mock_container.job_manager = MagicMock(return_value=mock_job_manager)
+            # Mock module-level job_manager.enqueue
+            with patch("intric.worker.crawl_feeder.job_manager") as mock_job_manager:
+                mock_job_manager.enqueue = AsyncMock(side_effect=Exception(error_msg))
 
-            feeder = CrawlFeeder(mock_container)
-
-            success, _ = await feeder._enqueue_crawl_job(job_data, tenant_id)
+                success, _ = await feeder._enqueue_crawl_job(job_data, tenant_id)
 
             assert success is True, f"Error '{error_msg}' should be treated as duplicate"
 
@@ -329,21 +318,21 @@ class TestPendingQueueIdempotency:
 
         job_data = {"job_id": str(uuid4()), "url": "https://example.com/test"}
 
-        # Add job to pending queue
-        await redis_client.rpush(queue_key, json.dumps(job_data, default=str, sort_keys=True))
+        # Add job to pending queue and get the raw bytes we pushed
+        raw_bytes = json.dumps(job_data, default=str, sort_keys=True).encode()
+        await redis_client.rpush(queue_key, raw_bytes)
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # First removal - should work
-        await feeder._remove_from_pending(tenant_id, job_data, redis_client)
+        # First removal - should work (now takes raw_bytes instead of job_data)
+        await feeder._remove_from_pending(tenant_id, raw_bytes, redis_client)
 
         # Verify job is removed
         remaining = await redis_client.lrange(queue_key, 0, -1)
         assert len(remaining) == 0, "Job should be removed"
 
         # Second removal - should NOT crash (idempotent)
-        await feeder._remove_from_pending(tenant_id, job_data, redis_client)
+        await feeder._remove_from_pending(tenant_id, raw_bytes, redis_client)
 
         # Still empty, no crash
         remaining_after = await redis_client.lrange(queue_key, 0, -1)
@@ -368,15 +357,14 @@ class TestPendingQueueIdempotency:
         for job in jobs:
             await redis_client.rpush(queue_key, json.dumps(job))
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # Get pending jobs
+        # Get pending jobs - returns list of (raw_bytes, job_data) tuples
         pending = await feeder._get_pending_crawls(tenant_id, redis_client, limit=5)
 
-        # Verify FIFO order
-        for i, job in enumerate(pending):
-            assert job["url"] == f"https://example.com/{i}", f"Job {i} should be in FIFO order"
+        # Verify FIFO order - access tuple index 1 for job_data dict
+        for i, (raw_bytes, job_data) in enumerate(pending):
+            assert job_data["url"] == f"https://example.com/{i}", f"Job {i} should be in FIFO order"
 
         # Cleanup
         await redis_client.delete(queue_key)

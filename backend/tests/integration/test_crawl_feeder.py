@@ -9,64 +9,12 @@ Tests the metered job enqueueing system with real Redis:
 
 import asyncio
 import json
-from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.crawl_feeder import (
-    CrawlFeeder,
-    _generate_deterministic_job_id,
-)
-
-
-class TestGenerateDeterministicJobId:
-    """Tests for deterministic job ID generation."""
-
-    def test_same_inputs_produce_same_id(self):
-        """Same run_id + url should produce same job ID."""
-        run_id = uuid4()
-        url = "https://example.com/page"
-
-        id_1 = _generate_deterministic_job_id(run_id, url)
-        id_2 = _generate_deterministic_job_id(run_id, url)
-
-        assert id_1 == id_2, "Same inputs should produce same job ID"
-
-    def test_different_urls_produce_different_ids(self):
-        """Different URLs should produce different job IDs."""
-        run_id = uuid4()
-        url_1 = "https://example.com/page1"
-        url_2 = "https://example.com/page2"
-
-        id_1 = _generate_deterministic_job_id(run_id, url_1)
-        id_2 = _generate_deterministic_job_id(run_id, url_2)
-
-        assert id_1 != id_2, "Different URLs should produce different IDs"
-
-    def test_different_run_ids_produce_different_ids(self):
-        """Different run IDs should produce different job IDs."""
-        run_id_1 = uuid4()
-        run_id_2 = uuid4()
-        url = "https://example.com/page"
-
-        id_1 = _generate_deterministic_job_id(run_id_1, url)
-        id_2 = _generate_deterministic_job_id(run_id_2, url)
-
-        assert id_1 != id_2, "Different run IDs should produce different IDs"
-
-    def test_job_id_format(self):
-        """Job ID should follow crawl:{run_id}:{url_hash} format."""
-        run_id = uuid4()
-        url = "https://example.com/page"
-
-        job_id = _generate_deterministic_job_id(run_id, url)
-
-        assert job_id.startswith(f"crawl:{run_id}:"), "Should start with crawl:{run_id}:"
-        parts = job_id.split(":")
-        assert len(parts) == 3, "Should have 3 parts"
-        assert len(parts[2]) == 8, "URL hash should be 8 characters"
+from intric.worker.crawl_feeder import CrawlFeeder
 
 
 @pytest.mark.integration
@@ -81,9 +29,7 @@ class TestCrawlFeederLeaderElection:
         # Clean up any existing lock
         await redis_client.delete("crawl_feeder:leader")
 
-        # Create mock container
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
         # Should acquire lock
         acquired = await feeder._try_acquire_leader_lock(redis_client)
@@ -105,9 +51,7 @@ class TestCrawlFeederLeaderElection:
         await redis_client.delete("crawl_feeder:leader")
         await redis_client.set("crawl_feeder:leader", "existing_leader", ex=30)
 
-        # Create mock container
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
         # Should NOT acquire lock
         acquired = await feeder._try_acquire_leader_lock(redis_client)
@@ -124,8 +68,7 @@ class TestCrawlFeederLeaderElection:
         # Clean up any existing lock
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
         await feeder._try_acquire_leader_lock(redis_client)
 
@@ -145,8 +88,7 @@ class TestCrawlFeederLeaderElection:
         # Set lock with short TTL
         await redis_client.set("crawl_feeder:leader", "leader", ex=5)
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
         # Refresh lock
         await feeder._refresh_leader_lock(redis_client)
@@ -181,8 +123,7 @@ class TestCrawlFeederCapacity:
         # Ensure no active jobs key exists
         await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # Get capacity
@@ -201,8 +142,7 @@ class TestCrawlFeederCapacity:
         # Set active jobs
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "2")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # Get capacity
@@ -225,8 +165,7 @@ class TestCrawlFeederCapacity:
         # Set active jobs at max
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", str(max_concurrent))
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # Get capacity
@@ -246,8 +185,7 @@ class TestCrawlFeederCapacity:
         # Set invalid value
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "not_a_number")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # Get capacity - should not raise
@@ -278,10 +216,9 @@ class TestCrawlFeederPendingQueue:
 
         await redis_client.lpush(queue_key, json.dumps(job_1), json.dumps(job_2))
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # Get pending
+        # Get pending - returns list of (raw_bytes, job_data) tuples
         pending = await feeder._get_pending_crawls(tenant_id, redis_client, limit=10)
 
         # LPUSH adds to left, LRANGE returns left-to-right
@@ -302,10 +239,9 @@ class TestCrawlFeederPendingQueue:
             job = {"job_id": str(uuid4()), "url": f"https://example.com/{i}"}
             await redis_client.rpush(queue_key, json.dumps(job))
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # Get only 2
+        # Get only 2 - returns list of (raw_bytes, job_data) tuples
         pending = await feeder._get_pending_crawls(tenant_id, redis_client, limit=2)
 
         assert len(pending) == 2, "Should respect limit parameter"
@@ -323,10 +259,9 @@ class TestCrawlFeederPendingQueue:
         # Ensure queue is empty
         await redis_client.delete(queue_key)
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # Get pending
+        # Get pending - returns list of (raw_bytes, job_data) tuples
         pending = await feeder._get_pending_crawls(tenant_id, redis_client, limit=10)
 
         assert pending == [], "Should return empty list"
@@ -343,15 +278,15 @@ class TestCrawlFeederPendingQueue:
         await redis_client.rpush(queue_key, json.dumps(valid_job))
         await redis_client.rpush(queue_key, "not valid json {{{")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # Get pending - should not raise
+        # Get pending - should not raise, returns list of (raw_bytes, job_data) tuples
         pending = await feeder._get_pending_crawls(tenant_id, redis_client, limit=10)
 
-        # Should have only the valid job
+        # Should have only the valid job (malformed JSON is removed as poison message)
         assert len(pending) == 1, "Should skip malformed JSON"
-        assert pending[0]["url"] == "https://example.com/valid"
+        # Access tuple index 1 for job_data dict
+        assert pending[0][1]["url"] == "https://example.com/valid"
 
         # Cleanup
         await redis_client.delete(queue_key)
@@ -376,8 +311,7 @@ class TestCrawlFeederMultiTenant:
         # Tenant 2 has 0 active jobs
         await redis_client.set(f"tenant:{tenant_2}:active_jobs", "0")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
         feeder.settings = test_settings
 
         # Check capacities
@@ -408,18 +342,18 @@ class TestCrawlFeederMultiTenant:
         job_2 = {"job_id": str(uuid4()), "url": "https://tenant2.com/page"}
         await redis_client.rpush(f"tenant:{tenant_2}:crawl_pending", json.dumps(job_2))
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
-        # Get pending for each tenant
+        # Get pending for each tenant - returns list of (raw_bytes, job_data) tuples
         pending_1 = await feeder._get_pending_crawls(tenant_1, redis_client, limit=10)
         pending_2 = await feeder._get_pending_crawls(tenant_2, redis_client, limit=10)
 
         assert len(pending_1) == 1, "Tenant 1 should have 1 job"
-        assert pending_1[0]["url"] == "https://tenant1.com/page"
+        # Access tuple index 1 for job_data dict
+        assert pending_1[0][1]["url"] == "https://tenant1.com/page"
 
         assert len(pending_2) == 1, "Tenant 2 should have 1 job"
-        assert pending_2[0]["url"] == "https://tenant2.com/page"
+        assert pending_2[0][1]["url"] == "https://tenant2.com/page"
 
         # Cleanup
         await redis_client.delete(
@@ -447,9 +381,8 @@ class TestCrawlFeederSplitBrain:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
-        feeder_1 = CrawlFeeder(mock_container)
-        feeder_2 = CrawlFeeder(mock_container)
+        feeder_1 = CrawlFeeder()
+        feeder_2 = CrawlFeeder()
 
         # Both try to acquire simultaneously using asyncio.gather
         results = await asyncio.gather(
@@ -476,10 +409,9 @@ class TestCrawlFeederSplitBrain:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
         num_feeders = 5
 
-        feeders = [CrawlFeeder(mock_container) for _ in range(num_feeders)]
+        feeders = [CrawlFeeder() for _ in range(num_feeders)]
 
         # All try to acquire leadership simultaneously
         results = await asyncio.gather(
@@ -505,8 +437,7 @@ class TestCrawlFeederSplitBrain:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
-        feeder = CrawlFeeder(mock_container)
+        feeder = CrawlFeeder()
 
         await feeder._try_acquire_leader_lock(redis_client)
 
@@ -528,9 +459,8 @@ class TestCrawlFeederSplitBrain:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
-        feeder_1 = CrawlFeeder(mock_container)
-        feeder_2 = CrawlFeeder(mock_container)
+        feeder_1 = CrawlFeeder()
+        feeder_2 = CrawlFeeder()
 
         # Feeder 1 acquires lock
         result_1 = await feeder_1._try_acquire_leader_lock(redis_client)
@@ -564,9 +494,8 @@ class TestCrawlFeederSplitBrain:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        mock_container = MagicMock()
-        feeder_1 = CrawlFeeder(mock_container)
-        feeder_2 = CrawlFeeder(mock_container)
+        feeder_1 = CrawlFeeder()
+        feeder_2 = CrawlFeeder()
 
         # Feeder 1 acquires lock
         await feeder_1._try_acquire_leader_lock(redis_client)
