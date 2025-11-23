@@ -454,7 +454,7 @@ class CrawlFeeder:
 
         session = None  # Initialize to prevent UnboundLocalError in except block
         try:
-            async with sessionmanager.session() as session:
+            async with sessionmanager.session() as session, session.begin():
                 # Time-based cleanup: Mark stuck crawl jobs as FAILED
                 # Only affects CRAWL task jobs (not file uploads, transcriptions, etc.)
                 # Compare-and-set WHERE clause prevents race conditions
@@ -472,9 +472,7 @@ class CrawlFeeder:
                 )
                 result = await session.execute(cleanup_stmt)
                 cleaned_count = result.rowcount
-
-                # Commit changes atomically
-                await session.commit()
+                # Transaction auto-commits on exit of session.begin() context
 
                 # Log only if we cleaned something (avoid log spam)
                 if cleaned_count > 0:
