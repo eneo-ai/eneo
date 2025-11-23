@@ -297,17 +297,20 @@ class CrawlService:
                     await self._release_slot(website.tenant_id)
 
                     # Fail the job to prevent orphaned DB records
+                    # This prevents "Crawl already in progress" blocking future crawls
+                    # Note: CrawlRun.status derives from Job.status (no status column on CrawlRuns)
                     try:
                         await self.task_service.job_service.fail_job(
                             crawl_job.id, error_message=f"Enqueue failed: {exc}"
                         )
                     except Exception:
-                        pass  # Best effort - job remains QUEUED but won't be processed
+                        pass  # Best effort - will be cleaned up by orphan cleanup
 
                     logger.error(
                         "Failed to enqueue crawl, rolled back slot and failed job",
                         extra={
                             "job_id": str(crawl_job.id),
+                            "crawl_run_id": str(crawl_run.id),
                             "error": str(exc),
                         },
                     )

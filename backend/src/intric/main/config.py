@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
 
+    # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
+    orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
+
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
 

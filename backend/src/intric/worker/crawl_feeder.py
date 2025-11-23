@@ -16,6 +16,7 @@ Reuses existing concurrency infrastructure, no parallel permit system needed.
 import asyncio
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from typing import TYPE_CHECKING
 
@@ -444,6 +445,71 @@ class CrawlFeeder:
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
 
+    async def _cleanup_orphaned_crawl_jobs(self) -> None:
+        """Clean up orphaned crawl Jobs to prevent "Crawl already in progress" blocking.
+
+        Why: CrawlRun.status comes from Job.status (via relationship). If a crawl Job gets
+        stuck in QUEUED/IN_PROGRESS, the CrawlRun appears as "in progress" and blocks new crawls.
+
+        Strategy: Time-based cleanup - mark crawl Jobs stuck in QUEUED/IN_PROGRESS for
+        > timeout_hours as FAILED. Uses compare-and-set bulk UPDATE for race safety.
+
+        Note: CrawlRuns table does NOT have a status column. Status is derived from Job.status.
+        """
+        from sqlalchemy import update, and_
+
+        from intric.database.tables.job_table import Jobs
+        from intric.main.models import Status
+
+        timeout_hours = self.settings.orphan_crawl_run_timeout_hours
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
+
+        session = None
+        try:
+            async with self.container.session_factory() as session:
+                # Time-based cleanup: Mark stuck crawl jobs as FAILED
+                # Only affects CRAWL task jobs (not file uploads, transcriptions, etc.)
+                # Compare-and-set WHERE clause prevents race conditions
+                cleanup_stmt = (
+                    update(Jobs)
+                    .where(
+                        and_(
+                            Jobs.task == "CRAWL",  # Only crawl jobs
+                            Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
+                            Jobs.created_at < cutoff_time,
+                        )
+                    )
+                    .values(status=Status.FAILED)
+                    .execution_options(synchronize_session=False)
+                )
+                result = await session.execute(cleanup_stmt)
+                cleaned_count = result.rowcount
+
+                # Commit changes atomically
+                await session.commit()
+
+                # Log only if we cleaned something (avoid log spam)
+                if cleaned_count > 0:
+                    logger.info(
+                        f"Orphan cleanup complete: {cleaned_count} stuck crawl jobs marked as FAILED",
+                        extra={
+                            "cleaned_count": cleaned_count,
+                            "timeout_hours": timeout_hours,
+                        },
+                    )
+
+        except Exception as exc:
+            # Rollback on failure to prevent partial state
+            if session is not None:
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass  # Best effort rollback
+            logger.warning(
+                "Failed to cleanup orphaned crawl jobs",
+                extra={"error": str(exc)},
+            )
+
     async def _process_tenant_queue(
         self, tenant_id: UUID, redis_client: aioredis.Redis
     ) -> None:
@@ -586,6 +652,10 @@ class CrawlFeeder:
 
                 # We are the leader, run one feeder cycle
                 logger.debug("Feeder leader lock acquired, processing queues")
+
+                # Run orphan cleanup every cycle (lightweight - only updates stuck jobs)
+                # Why: Prevents "Crawl already in progress" blocking from stale records
+                await self._cleanup_orphaned_crawl_jobs()
 
                 # Find all tenants with pending crawls
                 # Why: Use SCAN instead of KEYS for production safety

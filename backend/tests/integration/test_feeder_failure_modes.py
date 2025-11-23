@@ -8,9 +8,8 @@ Tests critical failure scenarios identified by GPT-5 and Gemini-3-pro-preview:
 These tests catch real production bugs, not just verify happy paths.
 """
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
