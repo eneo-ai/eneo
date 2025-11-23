@@ -14,43 +14,17 @@ Reuses existing concurrency infrastructure, no parallel permit system needed.
 """
 
 import asyncio
-import hashlib
 import json
+import socket
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
-from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
 
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
-if TYPE_CHECKING:
-    from intric.main.container.container import Container
-
 logger = get_logger(__name__)
-
-
-def _generate_deterministic_job_id(run_id: UUID, url: str) -> str:
-    """Generate deterministic job ID for idempotent enqueueing.
-
-    Why: Prevents duplicate jobs if feeder crashes and restarts.
-    ARQ will reject duplicate job_ids, making enqueue idempotent.
-
-    Args:
-        run_id: Crawl run UUID (unique per crawl)
-        url: Website URL (for additional uniqueness)
-
-    Returns:
-        Deterministic job ID string
-
-    Example:
-        run_id="a1b2c3..." url="https://example.com"
-        -> "crawl:a1b2c3...:5d41402a"
-    """
-    # Use MD5 hash of URL for compact, deterministic identifier
-    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-    return f"crawl:{run_id}:{url_hash}"
 
 
 class CrawlFeeder:
@@ -58,12 +32,18 @@ class CrawlFeeder:
 
     Why: Prevents burst overload by only enqueueing when capacity exists.
     Observes the existing TenantConcurrencyLimiter state (active_jobs counter).
+
+    Note: This service is long-running and manages its own DB sessions and Redis client.
+    It does NOT depend on a request-scoped Container to avoid session lifecycle issues.
     """
 
-    def __init__(self, container: "Container"):
-        self.container = container
+    def __init__(self):
         self.settings = get_settings()
         self._running = False
+        self._redis_client: aioredis.Redis | None = None
+        # Cache worker_id at init to avoid blocking I/O in async loop
+        # Why: socket.gethostname() is sync and may trigger DNS lookup
+        self._worker_id = socket.gethostname()
 
     async def _try_acquire_leader_lock(
         self, redis_client: aioredis.Redis
@@ -76,16 +56,13 @@ class CrawlFeeder:
         Returns:
             True if lock acquired (this instance is leader), False otherwise
         """
-        import socket
-
         key = "crawl_feeder:leader"
         ttl = 30  # Lock expires after 30 seconds for automatic failover
-        worker_id = socket.gethostname()
 
         try:
             # Atomic SET with NX (only if not exists) and EX (expiry)
             # Why: If another feeder holds the lock, this returns False
-            acquired = await redis_client.set(key, worker_id, nx=True, ex=ttl)
+            acquired = await redis_client.set(key, self._worker_id, nx=True, ex=ttl)
             return bool(acquired)
         except Exception as exc:
             logger.warning(
@@ -126,6 +103,23 @@ class CrawlFeeder:
         "  end\n"
         "  return 0\n"
         "end\n"
+        "return current\n"
+    )
+
+    # Lua script for safe slot release (same logic as TenantConcurrencyLimiter)
+    _release_slot_lua: str = (
+        "local key = KEYS[1]\n"
+        "local ttl = tonumber(ARGV[1])\n"
+        "local current = redis.call('GET', key)\n"
+        "if not current then\n"
+        "  return 0\n"
+        "end\n"
+        "current = redis.call('DECR', key)\n"
+        "if not current or current <= 0 then\n"
+        "  redis.call('DEL', key)\n"
+        "  return 0\n"
+        "end\n"
+        "redis.call('EXPIRE', key, ttl)\n"
         "return current\n"
     )
 
@@ -187,16 +181,14 @@ class CrawlFeeder:
 
         Why: Worker checks this flag to skip limiter.acquire() (slot already held).
         TTL ensures cleanup if job is never picked up.
+
+        Raises:
+            Exception: If Redis operation fails - caller MUST handle and release slot.
         """
         key = f"job:{job_id}:slot_preacquired"
-        try:
-            # TTL matches semaphore TTL - if job isn't picked up by then, slot will expire anyway
-            await redis_client.set(key, "1", ex=self.settings.tenant_worker_semaphore_ttl_seconds)
-        except Exception as exc:
-            logger.warning(
-                "Failed to mark slot as preacquired",
-                extra={"job_id": str(job_id), "error": str(exc)},
-            )
+        # Use 1 hour TTL to survive queue backlogs (worker deletes on pickup)
+        # Why: Semaphore TTL may be shorter than worst-case queue wait time
+        await redis_client.set(key, "1", ex=3600)
 
     async def _release_slot(
         self, tenant_id: UUID, redis_client: aioredis.Redis
@@ -209,23 +201,8 @@ class CrawlFeeder:
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
 
         try:
-            # Lua script for safe decrement (same as TenantConcurrencyLimiter release)
-            release_lua = (
-                "local key = KEYS[1]\n"
-                "local ttl = tonumber(ARGV[1])\n"
-                "local current = redis.call('GET', key)\n"
-                "if not current then\n"
-                "  return 0\n"
-                "end\n"
-                "current = redis.call('DECR', key)\n"
-                "if not current or current <= 0 then\n"
-                "  redis.call('DEL', key)\n"
-                "  return 0\n"
-                "end\n"
-                "redis.call('EXPIRE', key, ttl)\n"
-                "return current\n"
-            )
-            await redis_client.eval(release_lua, 1, key, str(ttl))
+            # Use class constant for consistency and maintainability
+            await redis_client.eval(self._release_slot_lua, 1, key, str(ttl))
         except Exception as exc:
             logger.warning(
                 "Failed to release slot in feeder",
@@ -279,7 +256,7 @@ class CrawlFeeder:
 
     async def _get_pending_crawls(
         self, tenant_id: UUID, redis_client: aioredis.Redis, limit: int
-    ) -> list[dict]:
+    ) -> list[tuple[bytes, dict]]:
         """Get pending crawl jobs from the queue.
 
         Args:
@@ -288,7 +265,8 @@ class CrawlFeeder:
             limit: Maximum number of jobs to retrieve
 
         Returns:
-            List of job data dictionaries
+            List of tuples: (raw_bytes, parsed_job_data)
+            Raw bytes are preserved for exact LREM matching to avoid serialization mismatch.
         """
         key = f"tenant:{tenant_id}:crawl_pending"
 
@@ -299,17 +277,24 @@ class CrawlFeeder:
             if not pending_bytes:
                 return []
 
-            # Parse JSON job data
+            # Parse JSON job data, keeping raw bytes for LREM
+            # Why: Re-serializing with sort_keys=True may not match original, causing LREM to fail
             pending_jobs = []
-            for job_bytes in pending_bytes:
+            for raw_bytes in pending_bytes:
                 try:
-                    job_data = json.loads(job_bytes.decode())
-                    pending_jobs.append(job_data)
+                    job_data = json.loads(raw_bytes.decode())
+                    pending_jobs.append((raw_bytes, job_data))
                 except json.JSONDecodeError as parse_exc:
+                    # Remove poison message to prevent infinite retry loop
+                    # Why: Invalid JSON will never parse successfully
                     logger.warning(
-                        "Failed to parse pending job",
+                        "Removing invalid JSON from pending queue (poison message)",
                         extra={"tenant_id": str(tenant_id), "error": str(parse_exc)},
                     )
+                    try:
+                        await redis_client.lrem(key, 1, raw_bytes)
+                    except Exception:
+                        pass  # Best effort removal
                     continue
 
             return pending_jobs
@@ -364,7 +349,9 @@ class CrawlFeeder:
 
             # Enqueue to ARQ with deterministic job_id
             # Why: If feeder crashes and retries, ARQ rejects duplicate IDs
-            job_manager = self.container.job_manager()
+            # Use module-level singleton (same pattern as rest of codebase)
+            from intric.jobs.job_manager import job_manager
+
             await job_manager.enqueue(
                 task=Task.CRAWL,
                 job_id=job_id,  # Use pre-created ID for idempotency
@@ -423,22 +410,24 @@ class CrawlFeeder:
             return False, job_id
 
     async def _remove_from_pending(
-        self, tenant_id: UUID, job_data: dict, redis_client: aioredis.Redis
+        self, tenant_id: UUID, raw_bytes: bytes, redis_client: aioredis.Redis
     ) -> None:
         """Remove job from pending queue after successful enqueue.
 
         Args:
             tenant_id: Tenant identifier
-            job_data: Job data to remove
+            raw_bytes: Original raw bytes from lrange (NOT re-serialized)
             redis_client: Redis connection
+
+        Note: Using exact raw bytes from lrange ensures LREM matches.
+        Re-serializing with sort_keys=True could produce different string than original push.
         """
         key = f"tenant:{tenant_id}:crawl_pending"
 
         try:
-            # Remove first occurrence (LREM count=1)
-            # Why: Preserves FIFO order for remaining jobs
-            job_json = json.dumps(job_data, default=str, sort_keys=True)
-            await redis_client.lrem(key, 1, job_json)
+            # Remove first occurrence (LREM count=1) using exact original bytes
+            # Why: Avoids serialization mismatch that could cause LREM to fail
+            await redis_client.lrem(key, 1, raw_bytes)
         except Exception as exc:
             logger.warning(
                 "Failed to remove from pending queue",
@@ -458,15 +447,16 @@ class CrawlFeeder:
         """
         from sqlalchemy import update, and_
 
+        from intric.database.database import sessionmanager
         from intric.database.tables.job_table import Jobs
         from intric.main.models import Status
 
         timeout_hours = self.settings.orphan_crawl_run_timeout_hours
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
 
-        session = None
+        session = None  # Initialize to prevent UnboundLocalError in except block
         try:
-            async with self.container.session_factory() as session:
+            async with sessionmanager.session() as session:
                 # Time-based cleanup: Mark stuck crawl jobs as FAILED
                 # Only affects CRAWL task jobs (not file uploads, transcriptions, etc.)
                 # Compare-and-set WHERE clause prevents race conditions
@@ -550,7 +540,9 @@ class CrawlFeeder:
         failed_count = 0
         skipped_capacity = 0
 
-        for job_data in pending_jobs:
+        # pending_jobs is list of (raw_bytes, job_data) tuples
+        # raw_bytes preserved for exact LREM matching
+        for raw_bytes, job_data in pending_jobs:
             # Extract job_id early for flag operations
             # Why: Need job_id before enqueue to mark flag first
             try:
@@ -584,14 +576,24 @@ class CrawlFeeder:
             # FIX: Mark flag BEFORE enqueueing (safe hand-off)
             # Why: If enqueue succeeds but mark fails, worker would double-acquire
             # By marking first, we ensure flag exists before job enters ARQ queue
-            await self._mark_slot_preacquired(job_id, redis_client)
+            try:
+                await self._mark_slot_preacquired(job_id, redis_client)
+            except Exception as mark_exc:
+                # Mark failed - MUST release slot and skip enqueue to prevent double-acquire
+                logger.error(
+                    "Failed to mark slot pre-acquired, rolling back slot",
+                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id), "error": str(mark_exc)},
+                )
+                await self._release_slot(tenant_id, redis_client)
+                failed_count += 1
+                continue
 
             # Now enqueue to ARQ
             success, returned_job_id = await self._enqueue_crawl_job(job_data, tenant_id)
 
             if success:
-                # Remove from pending queue
-                await self._remove_from_pending(tenant_id, job_data, redis_client)
+                # Remove from pending queue using exact raw bytes (avoids serialization mismatch)
+                await self._remove_from_pending(tenant_id, raw_bytes, redis_client)
                 enqueued_count += 1
             else:
                 # Enqueue failed - rollback: delete flag and release slot
@@ -620,6 +622,9 @@ class CrawlFeeder:
         - Only one succeeds (becomes leader)
         - Others sleep and retry (become leader if current leader crashes)
         - Lock TTL=30s for automatic failover
+
+        Note: This service manages its own Redis client lifecycle.
+        It does NOT depend on a Container to avoid session scope issues.
         """
         if not self.settings.crawl_feeder_enabled:
             logger.info("Crawl feeder disabled, not starting")
@@ -634,79 +639,108 @@ class CrawlFeeder:
         )
         self._running = True
 
+        # Create own Redis client (not from container which may have stale session)
+        # Why: Long-running service must manage its own client lifecycle
         try:
-            redis_client = self.container.redis_client()
+            # Build Redis URL with optional DB selection (same as Container)
+            # Why: Ensures feeder sees same keys as producers/consumers
+            redis_url = f"redis://{self.settings.redis_host}:{self.settings.redis_port}"
+            redis_kwargs = {"decode_responses": False}  # Keep raw bytes for LREM matching
+
+            # Respect redis_db setting if present (multi-db deployments)
+            redis_db = getattr(self.settings, "redis_db", None)
+            if redis_db is not None:
+                redis_kwargs["db"] = redis_db
+
+            self._redis_client = aioredis.Redis.from_url(redis_url, **redis_kwargs)
+            redis_client = self._redis_client
         except Exception as exc:
-            logger.error(f"Failed to get Redis client: {exc}")
+            logger.error(f"Failed to create Redis client: {exc}")
             return
 
-        while self._running:
-            try:
-                # CRITICAL: Try to become leader
-                # Why: Prevents multiple feeders from running simultaneously
-                if not await self._try_acquire_leader_lock(redis_client):
-                    # Not leader, sleep and retry
-                    # Why: Another worker is already running the feeder
-                    await asyncio.sleep(5)
-                    continue
+        try:
+            while self._running:
+                try:
+                    # CRITICAL: Try to become leader
+                    # Why: Prevents multiple feeders from running simultaneously
+                    if not await self._try_acquire_leader_lock(redis_client):
+                        # Not leader, sleep and retry
+                        # Why: Another worker is already running the feeder
+                        await asyncio.sleep(5)
+                        continue
 
-                # We are the leader, run one feeder cycle
-                logger.debug("Feeder leader lock acquired, processing queues")
+                    # We are the leader, run one feeder cycle
+                    logger.debug("Feeder leader lock acquired, processing queues")
 
-                # Run orphan cleanup every cycle (lightweight - only updates stuck jobs)
-                # Why: Prevents "Crawl already in progress" blocking from stale records
-                await self._cleanup_orphaned_crawl_jobs()
+                    # Run orphan cleanup every cycle (lightweight - only updates stuck jobs)
+                    # Why: Prevents "Crawl already in progress" blocking from stale records
+                    await self._cleanup_orphaned_crawl_jobs()
 
-                # Find all tenants with pending crawls
-                # Why: Use SCAN instead of KEYS for production safety
-                pattern = "tenant:*:crawl_pending"
-                tenant_ids = set()
+                    # Find all tenants with pending crawls
+                    # Why: Use SCAN instead of KEYS for production safety
+                    pattern = "tenant:*:crawl_pending"
+                    tenant_ids = set()
 
-                cursor = 0
-                while True:
-                    cursor, keys = await redis_client.scan(
-                        cursor=cursor, match=pattern, count=100
-                    )
-
-                    for key_bytes in keys:
-                        key = key_bytes.decode()
-                        # Extract tenant_id from key: tenant:{uuid}:crawl_pending
-                        parts = key.split(":")
-                        if len(parts) >= 2:
-                            try:
-                                tenant_ids.add(UUID(parts[1]))
-                            except ValueError:
-                                continue
-
-                    if cursor == 0:
-                        break
-
-                # Process each tenant's pending queue
-                # Why: Single feeder processes ALL tenants efficiently
-                for tenant_id in tenant_ids:
-                    try:
-                        await self._process_tenant_queue(tenant_id, redis_client)
-                    except Exception as exc:
-                        logger.error(
-                            f"Error processing tenant queue: {exc}",
-                            extra={"tenant_id": str(tenant_id)},
+                    cursor = 0
+                    while True:
+                        cursor, keys = await redis_client.scan(
+                            cursor=cursor, match=pattern, count=100
                         )
-                        continue  # Don't let one tenant's error stop others
 
-                # Refresh leader lock before sleeping
-                # Why: Keeps us as leader for next cycle
-                await self._refresh_leader_lock(redis_client)
+                        for key_bytes in keys:
+                            key = key_bytes.decode()
+                            # Extract tenant_id from key: tenant:{uuid}:crawl_pending
+                            parts = key.split(":")
+                            if len(parts) >= 2:
+                                try:
+                                    tenant_ids.add(UUID(parts[1]))
+                                except ValueError:
+                                    continue
 
-                # Sleep until next cycle
-                await asyncio.sleep(self.settings.crawl_feeder_interval_seconds)
+                        if cursor == 0:
+                            break
 
+                    # Process each tenant's pending queue
+                    # Why: Single feeder processes ALL tenants efficiently
+                    for tenant_id in tenant_ids:
+                        try:
+                            await self._process_tenant_queue(tenant_id, redis_client)
+                        except Exception as exc:
+                            logger.error(
+                                f"Error processing tenant queue: {exc}",
+                                extra={"tenant_id": str(tenant_id)},
+                            )
+                            continue  # Don't let one tenant's error stop others
+
+                    # Refresh leader lock before sleeping
+                    # Why: Keeps us as leader for next cycle
+                    await self._refresh_leader_lock(redis_client)
+
+                    # Sleep until next cycle
+                    await asyncio.sleep(self.settings.crawl_feeder_interval_seconds)
+
+                except Exception as exc:
+                    logger.error(f"Error in feeder loop: {exc}")
+                    # Continue running even on errors
+                    # Why: Feeder should be resilient, not crash the worker
+                    await asyncio.sleep(self.settings.crawl_feeder_interval_seconds)
+        finally:
+            # Always close Redis client on exit
+            # Why: Prevents connection leaks on worker shutdown/reload
+            await self._close_redis()
+
+    async def _close_redis(self) -> None:
+        """Close Redis client if it exists."""
+        if self._redis_client:
+            try:
+                await self._redis_client.aclose()
+                self._redis_client = None
+                logger.debug("Feeder Redis client closed")
             except Exception as exc:
-                logger.error(f"Error in feeder loop: {exc}")
-                # Continue running even on errors
-                # Why: Feeder should be resilient, not crash the worker
-                await asyncio.sleep(self.settings.crawl_feeder_interval_seconds)
+                logger.warning(f"Error closing Redis client: {exc}")
 
     async def stop(self) -> None:
         """Stop the feeder loop gracefully."""
         logger.info("Stopping crawl feeder service")
         self._running = False
+        await self._close_redis()

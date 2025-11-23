@@ -116,23 +116,24 @@ class Worker:
             from intric.worker.crawl_feeder import CrawlFeeder
 
             try:
-                # Create container for feeder (reuses existing session manager)
-                async with sessionmanager.session() as session:
-                    container = await self._create_container(session)
-                    feeder = CrawlFeeder(container)
+                # CrawlFeeder is now container-independent
+                # Why: It manages its own DB sessions and Redis client to avoid
+                # session lifecycle issues (session closing while feeder runs)
+                feeder = CrawlFeeder()
 
-                    # Start feeder as background task
-                    # Why: Runs concurrently with worker jobs in same event loop
-                    task = asyncio.create_task(feeder.run_forever())
+                # Start feeder as background task
+                # Why: Runs concurrently with worker jobs in same event loop
+                task = asyncio.create_task(feeder.run_forever())
 
-                    # Store reference for cleanup on shutdown
-                    # Why: Allows graceful cancellation and prevents GC
-                    ctx["feeder_task"] = task
+                # Store references for cleanup on shutdown
+                # Why: Allows graceful cancellation and prevents GC
+                ctx["feeder_task"] = task
+                ctx["feeder"] = feeder  # Store feeder for proper stop() call
 
-                    logger.info(
-                        "Started crawl feeder background task with leader election",
-                        extra={"feeder_enabled": True},
-                    )
+                logger.info(
+                    "Started crawl feeder background task with leader election",
+                    extra={"feeder_enabled": True},
+                )
             except Exception as exc:
                 logger.error(
                     f"Failed to start crawl feeder: {exc}. Continuing without feeder.",
@@ -141,11 +142,15 @@ class Worker:
 
     async def shutdown(self, ctx):
         # Stop feeder gracefully if running
-        # Why: Prevents orphaned background tasks
+        # Why: Prevents orphaned background tasks and closes Redis connection
+        if "feeder" in ctx:
+            feeder = ctx["feeder"]
+            logger.info("Stopping crawl feeder background task")
+            await feeder.stop()  # Gracefully stop and close Redis
+
         if "feeder_task" in ctx:
             task = ctx["feeder_task"]
             if not task.done():
-                logger.info("Stopping crawl feeder background task")
                 task.cancel()
                 try:
                     await task
