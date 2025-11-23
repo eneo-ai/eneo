@@ -106,13 +106,138 @@ class CrawlFeeder:
         except Exception:
             pass  # Silent failure, next acquire attempt will handle it
 
+    # Lua script for atomic slot acquisition (same logic as TenantConcurrencyLimiter)
+    _acquire_slot_lua: str = (
+        "local key = KEYS[1]\n"
+        "local limit = tonumber(ARGV[1])\n"
+        "local ttl = tonumber(ARGV[2])\n"
+        "if limit <= 0 then\n"
+        "  return 1\n"
+        "end\n"
+        "local current = redis.call('INCR', key)\n"
+        "redis.call('EXPIRE', key, ttl)\n"
+        "if current > limit then\n"
+        "  local after_decr = redis.call('DECR', key)\n"
+        "  if after_decr <= 0 then\n"
+        "    redis.call('DEL', key)\n"
+        "  else\n"
+        "    redis.call('EXPIRE', key, ttl)\n"
+        "  end\n"
+        "  return 0\n"
+        "end\n"
+        "return current\n"
+    )
+
+    async def _try_acquire_slot(
+        self, tenant_id: UUID, redis_client: aioredis.Redis
+    ) -> bool:
+        """Atomically try to acquire a concurrency slot for this tenant.
+
+        Why: Eliminates race condition between feeder capacity check and worker acquire.
+        Uses same Lua script as TenantConcurrencyLimiter for atomic INCR-then-check.
+
+        Args:
+            tenant_id: Tenant identifier
+            redis_client: Redis connection
+
+        Returns:
+            True if slot acquired, False if at capacity
+        """
+        key = f"tenant:{tenant_id}:active_jobs"
+        max_concurrent = self.settings.tenant_worker_concurrency_limit
+        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
+
+        try:
+            result = await redis_client.eval(
+                self._acquire_slot_lua,
+                1,
+                key,
+                str(max_concurrent),
+                str(ttl),
+            )
+
+            if isinstance(result, bytes):
+                result = int(result)
+
+            acquired = bool(result and int(result) > 0)
+
+            if not acquired:
+                logger.debug(
+                    "Feeder slot acquisition failed (at capacity)",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "max_concurrent": max_concurrent,
+                    },
+                )
+
+            return acquired
+
+        except Exception as exc:
+            logger.warning(
+                "Failed to acquire slot in feeder",
+                extra={"tenant_id": str(tenant_id), "error": str(exc)},
+            )
+            return False
+
+    async def _mark_slot_preacquired(
+        self, job_id: UUID, redis_client: aioredis.Redis
+    ) -> None:
+        """Mark that the feeder pre-acquired a slot for this job.
+
+        Why: Worker checks this flag to skip limiter.acquire() (slot already held).
+        TTL ensures cleanup if job is never picked up.
+        """
+        key = f"job:{job_id}:slot_preacquired"
+        try:
+            # TTL matches semaphore TTL - if job isn't picked up by then, slot will expire anyway
+            await redis_client.set(key, "1", ex=self.settings.tenant_worker_semaphore_ttl_seconds)
+        except Exception as exc:
+            logger.warning(
+                "Failed to mark slot as preacquired",
+                extra={"job_id": str(job_id), "error": str(exc)},
+            )
+
+    async def _release_slot(
+        self, tenant_id: UUID, redis_client: aioredis.Redis
+    ) -> None:
+        """Release a previously acquired slot (used when ARQ enqueue fails).
+
+        Why: If feeder acquires slot but fails to enqueue, must release to prevent leak.
+        """
+        key = f"tenant:{tenant_id}:active_jobs"
+        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
+
+        try:
+            # Lua script for safe decrement (same as TenantConcurrencyLimiter release)
+            release_lua = (
+                "local key = KEYS[1]\n"
+                "local ttl = tonumber(ARGV[1])\n"
+                "local current = redis.call('GET', key)\n"
+                "if not current then\n"
+                "  return 0\n"
+                "end\n"
+                "current = redis.call('DECR', key)\n"
+                "if not current or current <= 0 then\n"
+                "  redis.call('DEL', key)\n"
+                "  return 0\n"
+                "end\n"
+                "redis.call('EXPIRE', key, ttl)\n"
+                "return current\n"
+            )
+            await redis_client.eval(release_lua, 1, key, str(ttl))
+        except Exception as exc:
+            logger.warning(
+                "Failed to release slot in feeder",
+                extra={"tenant_id": str(tenant_id), "error": str(exc)},
+            )
+
     async def _get_available_capacity(
         self, tenant_id: UUID, redis_client: aioredis.Redis
     ) -> int:
-        """Check available crawl capacity for this tenant.
+        """Check available crawl capacity for this tenant (read-only).
 
-        Why: Reads the existing TenantConcurrencyLimiter's active_jobs counter.
-        Feeder observes this state to decide if it's safe to enqueue more jobs.
+        Why: Used to decide how many pending jobs to consider.
+        Actual slot acquisition is done atomically per-job via _try_acquire_slot().
 
         Args:
             tenant_id: Tenant identifier
@@ -129,12 +254,10 @@ class CrawlFeeder:
             active_jobs_bytes = await redis_client.get(key)
             max_concurrent = self.settings.tenant_worker_concurrency_limit
 
-            # P1 FIX: Conservative defaulting when key doesn't exist
-            # Why: Prevents over-enqueue if limiter key is transiently missing
+            # Allow capacity check even if key doesn't exist (will be 0 active)
+            # Why: _try_acquire_slot() handles actual atomic acquisition
             if not active_jobs_bytes:
-                # Conservative: Assume no capacity until limiter initializes
-                # Key will exist once first job starts via limiter.acquire()
-                return 0
+                return max_concurrent  # No active jobs, full capacity available
 
             # Decode bytes to int, with safety clamping
             # Why: Prevents crashes and ensures value is within valid range
@@ -326,13 +449,14 @@ class CrawlFeeder:
     ) -> None:
         """Process pending crawls for one tenant.
 
-        Why: Checks capacity and enqueues jobs when slots are available.
+        Why: Atomically acquires slots and enqueues jobs when capacity exists.
+        FIX: Eliminates race condition by acquiring slot BEFORE enqueueing.
 
         Args:
             tenant_id: Tenant identifier
             redis_client: Redis connection
         """
-        # Check available capacity
+        # Check available capacity (read-only hint for batch sizing)
         available = await self._get_available_capacity(tenant_id, redis_client)
 
         if available <= 0:
@@ -355,25 +479,67 @@ class CrawlFeeder:
             },
         )
 
-        # Enqueue each pending job
+        # Enqueue each pending job with atomic slot acquisition
         enqueued_count = 0
         failed_count = 0
+        skipped_capacity = 0
 
         for job_data in pending_jobs:
-            # Enqueue to ARQ
-            success, job_id = await self._enqueue_crawl_job(job_data, tenant_id)
+            # Extract job_id early for flag operations
+            # Why: Need job_id before enqueue to mark flag first
+            try:
+                job_id = UUID(job_data["job_id"])
+            except (KeyError, ValueError, TypeError):
+                logger.warning(
+                    "Invalid job_id in pending job, skipping",
+                    extra={"tenant_id": str(tenant_id), "job_data": job_data},
+                )
+                failed_count += 1
+                continue
+
+            # FIX: Atomically acquire slot BEFORE enqueueing
+            # Why: Eliminates race condition between feeder GET and worker INCR
+            slot_acquired = await self._try_acquire_slot(tenant_id, redis_client)
+
+            if not slot_acquired:
+                # At capacity - stop processing this tenant
+                # Remaining jobs stay in pending queue for next cycle
+                skipped_capacity = len(pending_jobs) - enqueued_count - failed_count
+                logger.debug(
+                    "Stopping tenant processing: at capacity",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "enqueued": enqueued_count,
+                        "skipped": skipped_capacity,
+                    },
+                )
+                break
+
+            # FIX: Mark flag BEFORE enqueueing (safe hand-off)
+            # Why: If enqueue succeeds but mark fails, worker would double-acquire
+            # By marking first, we ensure flag exists before job enters ARQ queue
+            await self._mark_slot_preacquired(job_id, redis_client)
+
+            # Now enqueue to ARQ
+            success, returned_job_id = await self._enqueue_crawl_job(job_data, tenant_id)
 
             if success:
                 # Remove from pending queue
                 await self._remove_from_pending(tenant_id, job_data, redis_client)
                 enqueued_count += 1
             else:
-                # Enqueue failed, leave in pending queue to retry next cycle
+                # Enqueue failed - rollback: delete flag and release slot
+                # Why: Prevents slot leak and stale flag when ARQ enqueue fails
+                try:
+                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
+                except Exception:
+                    pass  # Best effort cleanup
+                await self._release_slot(tenant_id, redis_client)
                 failed_count += 1
 
-        if enqueued_count > 0 or failed_count > 0:
+        if enqueued_count > 0 or failed_count > 0 or skipped_capacity > 0:
             logger.info(
-                f"Feeder cycle complete: {enqueued_count} enqueued, {failed_count} failed",
+                f"Feeder cycle complete: {enqueued_count} enqueued, {failed_count} failed, {skipped_capacity} skipped (capacity)",
                 extra={"tenant_id": str(tenant_id)},
             )
 

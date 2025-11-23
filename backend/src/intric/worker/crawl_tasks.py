@@ -494,7 +494,44 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         except Exception:  # pragma: no cover - container guard
             redis_client = None
 
-        acquired = await limiter.acquire(tenant.id)
+        # FIX: Check if feeder pre-acquired the slot (eliminates race condition)
+        # Why: Feeder atomically acquires slot before enqueueing to ARQ
+        # Worker checks this flag to skip redundant acquire attempt
+        slot_preacquired = False
+        if redis_client:
+            try:
+                preacquired_key = f"job:{job_id}:slot_preacquired"
+                preacquired = await redis_client.get(preacquired_key)
+                if preacquired:
+                    slot_preacquired = True
+                    # Clean up the flag - slot is now "owned" by this worker
+                    await redis_client.delete(preacquired_key)
+                    logger.debug(
+                        "Slot pre-acquired by feeder, skipping limiter.acquire()",
+                        extra={"job_id": str(job_id), "tenant_id": str(tenant.id)},
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to check slot_preacquired flag",
+                    extra={"job_id": str(job_id), "error": str(exc)},
+                )
+
+        if slot_preacquired:
+            acquired = True  # Slot was pre-acquired by feeder
+            # FIX: Refresh semaphore TTL - we now own this slot
+            # Why: Normal acquire() refreshes TTL via Lua script. When we skip acquire,
+            # we must manually refresh to prevent semaphore expiry during long queue times.
+            try:
+                concurrency_key = f"tenant:{tenant.id}:active_jobs"
+                await redis_client.expire(
+                    concurrency_key,
+                    settings.tenant_worker_semaphore_ttl_seconds
+                )
+            except Exception:
+                pass  # Best effort - slot is still valid
+        else:
+            acquired = await limiter.acquire(tenant.id)
+
         if not acquired:
             # ✅ CRITICAL FIX: Enforce max age limit with exponential backoff
             # to prevent infinite retry loops during burst crawl periods
