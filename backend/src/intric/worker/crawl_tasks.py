@@ -418,7 +418,7 @@ async def queue_website_crawls(container: Container):
                         # Redis push failed, rollback by marking DB records as FAILED
                         # Why: Prevents silent data loss and orphaned records
                         try:
-                            from intric.jobs.task_models import Status
+                            from intric.main.models import Status
 
                             job_in_db.status = Status.FAILED
                             await job_repo.update_job(job_in_db)
@@ -555,7 +555,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 try:
                     crawl_run_repo = container.crawl_run_repo()
                     crawl_run = await crawl_run_repo.one(params.run_id)
-                    from intric.jobs.task_models import Status
+                    from intric.main.models import Status
 
                     crawl_run.status = Status.FAILED
                     await crawl_run_repo.update(crawl_run)
@@ -752,7 +752,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 last_heartbeat_time = time.time()
 
                 # Import for suicide check
-                from intric.jobs.task_models import Status as JobStatus
+                from intric.main.models import Status as JobStatus
 
                 # Process pages with retry logic
                 for page in crawl.pages:
@@ -960,7 +960,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # SUICIDE CHECK: Verify job wasn't preempted while we were crawling
             # If another user triggered a recrawl and safe preemption marked this job FAILED,
             # we should NOT write results (a new crawl is already running)
-            from intric.jobs.task_models import Status as JobStatus
+            from intric.main.models import Status as JobStatus
             current_job = await job_repo.get_job(job_id)
             if current_job and current_job.status == JobStatus.FAILED:
                 logger.warning(

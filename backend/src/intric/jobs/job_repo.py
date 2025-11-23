@@ -68,7 +68,7 @@ class JobRepository:
             Number of rows affected (1 if successful, 0 if job was already
             completed/failed or doesn't exist)
         """
-        from intric.jobs.task_models import Status
+        from intric.main.models import Status
 
         stmt = (
             sa.update(Jobs)
