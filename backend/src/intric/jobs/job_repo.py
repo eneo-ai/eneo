@@ -36,6 +36,53 @@ class JobRepository:
     async def get_job(self, id: UUID):
         return await self.delegate.get_by(conditions={Jobs.id: id})
 
+    async def touch_job(self, id: UUID) -> None:
+        """Update job's updated_at timestamp to signal 'still alive'.
+
+        Used as a heartbeat during long-running tasks like crawls to prevent
+        safe preemption from marking the job as stale.
+
+        Args:
+            id: Job UUID to touch
+        """
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .values(updated_at=sa.func.now())
+        )
+        await self.delegate._session.execute(stmt)
+
+    async def mark_job_failed_if_running(
+        self, id: UUID, error_message: str
+    ) -> int:
+        """Atomically mark a job as FAILED only if it's currently IN_PROGRESS or QUEUED.
+
+        Uses Compare-and-Swap pattern to prevent race conditions when multiple
+        users try to preempt the same job simultaneously.
+
+        Args:
+            id: Job UUID to fail
+            error_message: Error message to store
+
+        Returns:
+            Number of rows affected (1 if successful, 0 if job was already
+            completed/failed or doesn't exist)
+        """
+        from intric.jobs.task_models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
+            .values(
+                status=Status.FAILED,
+                result={"error": error_message},
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate._session.execute(stmt)
+        return result.rowcount
+
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
 

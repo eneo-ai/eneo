@@ -1,13 +1,18 @@
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
+from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
     CrawlAlreadyRunningException,
     UnauthorizedException,
 )
-from intric.main.models import NOT_PROVIDED, NotProvided, Status
+from intric.main.logging import get_logger
+from intric.main.models import NOT_PROVIDED, NotProvided, Status  # Status used for job status check
 from intric.websites.domain.website import UpdateInterval, Website
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from intric.actors.actor_manager import ActorManager
@@ -145,9 +150,95 @@ class WebsiteCRUDService:
         website = space.get_website(website_id=id)
 
         if website.latest_crawl.status in [Status.QUEUED, Status.IN_PROGRESS]:
-            raise CrawlAlreadyRunningException()
+            # Safe preemption: Check if job is stale (no activity for threshold period)
+            preempted = await self._try_preempt_stale_job(website)
+            if not preempted:
+                # Job is actively running, don't preempt
+                raise CrawlAlreadyRunningException()
+            # Job was stale and preempted, proceed with new crawl
 
         return await self.crawl_service.crawl(website=website)
+
+    async def _try_preempt_stale_job(self, website: Website) -> bool:
+        """Check if existing crawl job is stale and preempt it if so.
+
+        Safe preemption: If a job hasn't had activity (updated_at) for longer than
+        the configured threshold, it's considered stale (crashed worker). We mark it
+        as FAILED so the user can immediately start a new crawl.
+
+        Uses atomic Compare-and-Swap to prevent race conditions when multiple
+        users click "recrawl" simultaneously on the same stale job.
+
+        Returns:
+            True if job was stale and preempted (or already finished), False if actively running.
+        """
+        latest_crawl = website.latest_crawl
+        if not latest_crawl or not latest_crawl.job_id:
+            return True  # No job to preempt, allow new crawl
+
+        try:
+            # Get the job to check its updated_at
+            job_repo = self.crawl_service.task_service.job_service.job_repo
+            job = await job_repo.get_job(latest_crawl.job_id)
+
+            if not job:
+                return True  # Job not found, allow new crawl
+
+            # Check if job is stale
+            settings = get_settings()
+            threshold_minutes = settings.crawl_stale_threshold_minutes
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+
+            # Use updated_at if available, otherwise created_at
+            job_activity_time = job.updated_at or job.created_at
+            if job_activity_time and job_activity_time.tzinfo is None:
+                job_activity_time = job_activity_time.replace(tzinfo=timezone.utc)
+
+            if job_activity_time and job_activity_time < cutoff_time:
+                # Job is stale - attempt ATOMIC preemption (Compare-and-Swap)
+                # Only succeeds if job is still IN_PROGRESS or QUEUED
+                error_message = (
+                    f"Preempted: Job was stale (no activity for {threshold_minutes} minutes)"
+                )
+                rows_affected = await job_repo.mark_job_failed_if_running(
+                    latest_crawl.job_id, error_message
+                )
+
+                if rows_affected > 0:
+                    # We successfully preempted the job
+                    logger.info(
+                        "Preempted stale crawl job",
+                        extra={
+                            "job_id": str(latest_crawl.job_id),
+                            "website_id": str(website.id),
+                            "last_activity": str(job_activity_time),
+                            "threshold_minutes": threshold_minutes,
+                        },
+                    )
+                    return True
+                else:
+                    # rows_affected == 0: Someone else preempted it, or job already finished
+                    # Check current status to decide if we can proceed
+                    refreshed_job = await job_repo.get_job(latest_crawl.job_id)
+                    if refreshed_job and refreshed_job.status in [
+                        Status.QUEUED,
+                        Status.IN_PROGRESS,
+                    ]:
+                        # Job is still running (another user refreshed it?) - don't allow
+                        return False
+                    # Job completed or was preempted by someone else - allow new crawl
+                    return True
+
+            # Job has recent activity, don't preempt
+            return False
+
+        except Exception as exc:
+            # If we can't check staleness, be conservative and don't preempt
+            logger.warning(
+                "Failed to check job staleness, not preempting",
+                extra={"job_id": str(latest_crawl.job_id), "error": str(exc)},
+            )
+            return False
 
     async def get_crawl_run(self, id: UUID) -> "CrawlRun":
         crawl_run = await self.crawl_run_repo.one(id)

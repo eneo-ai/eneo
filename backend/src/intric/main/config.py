@@ -143,6 +143,8 @@ class Settings(BaseSettings):
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
     orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
+    crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
+    crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
 
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False

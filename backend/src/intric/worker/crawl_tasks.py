@@ -746,9 +746,51 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 # Measure page processing time
                 process_start = time.time()
+                # Get job repo for heartbeat updates
+                job_repo = container.job_repo()
+                heartbeat_interval_seconds = settings.crawl_heartbeat_interval_seconds
+                last_heartbeat_time = time.time()
+
+                # Import for suicide check
+                from intric.jobs.task_models import Status as JobStatus
+
                 # Process pages with retry logic
                 for page in crawl.pages:
                     num_pages += 1
+
+                    # TIME-BASED HEARTBEAT: Update every N seconds (not every N pages)
+                    # This handles slow-loading pages correctly - a 3min/page site won't be preempted
+                    current_time = time.time()
+                    if current_time - last_heartbeat_time >= heartbeat_interval_seconds:
+                        try:
+                            await job_repo.touch_job(job_id)
+                            last_heartbeat_time = current_time
+                            logger.debug(
+                                f"Heartbeat: crawl job still alive after {num_pages} pages",
+                                extra={"job_id": str(job_id), "pages_processed": num_pages},
+                            )
+
+                            # IN-LOOP SUICIDE CHECK: Detect preemption immediately
+                            # If user triggered recrawl and this job was marked FAILED,
+                            # stop NOW to avoid zombie writer corrupting new crawl's data
+                            current_job = await job_repo.get_job(job_id)
+                            if current_job and current_job.status == JobStatus.FAILED:
+                                logger.warning(
+                                    "Worker detected preemption during heartbeat - stopping immediately",
+                                    extra={
+                                        "job_id": str(job_id),
+                                        "website_id": str(params.website_id),
+                                        "pages_processed": num_pages,
+                                    },
+                                )
+                                return {"status": "preempted_during_crawl", "pages_crawled": num_pages}
+
+                        except Exception as heartbeat_exc:
+                            # Non-fatal: Log warning but continue crawling
+                            logger.warning(
+                                f"Failed to update heartbeat: {heartbeat_exc}",
+                                extra={"job_id": str(job_id)},
+                            )
 
                     # Process page with retry logic
                     success, error_message = await process_page_with_retry(
@@ -914,6 +956,26 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "blobs_deleted": num_deleted_blobs,
                 },
             )
+
+            # SUICIDE CHECK: Verify job wasn't preempted while we were crawling
+            # If another user triggered a recrawl and safe preemption marked this job FAILED,
+            # we should NOT write results (a new crawl is already running)
+            from intric.jobs.task_models import Status as JobStatus
+            current_job = await job_repo.get_job(job_id)
+            if current_job and current_job.status == JobStatus.FAILED:
+                logger.warning(
+                    "Crawl job was preempted during execution - aborting without writing results",
+                    extra={
+                        "job_id": str(job_id),
+                        "website_id": str(params.website_id),
+                        "pages_crawled": num_pages,
+                        "files_crawled": num_files,
+                    },
+                )
+                # Don't write results - exit gracefully
+                # Note: Downloaded pages/files were already processed, but we won't update
+                # the crawl_run or website stats since a new crawl should handle that
+                return {"status": "preempted", "pages_crawled": num_pages}
 
             crawl_run = await crawl_run_repo.one(params.run_id)
             crawl_run.update(
