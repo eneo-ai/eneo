@@ -702,7 +702,10 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
     )
     crawl_service = providers.Factory(
-        CrawlService, repo=crawl_run_repo, task_service=task_service
+        CrawlService,
+        repo=crawl_run_repo,
+        task_service=task_service,
+        redis_client=redis_client,
     )
     crawl_scheduler_service = providers.Factory(
         CrawlSchedulerService, website_sparse_repo=website_sparse_repo
