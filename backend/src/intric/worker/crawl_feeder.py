@@ -45,6 +45,9 @@ class CrawlFeeder:
         # Cache worker_id at init to avoid blocking I/O in async loop
         # Why: socket.gethostname() is sync and may trigger DNS lookup
         self._worker_id = socket.gethostname()
+        # Heartbeat tracking - log idle status every 5 minutes instead of every cycle
+        self._last_heartbeat: datetime | None = None
+        self._heartbeat_interval = 300  # 5 minutes
 
     async def _try_acquire_leader_lock(
         self, redis_client: aioredis.Redis
@@ -666,8 +669,6 @@ class CrawlFeeder:
                         continue
 
                     # We are the leader, run one feeder cycle
-                    logger.debug("Feeder leader lock acquired, processing queues")
-
                     # Run orphan cleanup every cycle (lightweight - only updates stuck jobs)
                     # Why: Prevents "Crawl already in progress" blocking from stale records
                     await self._cleanup_orphaned_crawl_jobs()
@@ -698,15 +699,31 @@ class CrawlFeeder:
 
                     # Process each tenant's pending queue
                     # Why: Single feeder processes ALL tenants efficiently
+                    processed_any = False
                     for tenant_id in tenant_ids:
                         try:
                             await self._process_tenant_queue(tenant_id, redis_client)
+                            processed_any = True
                         except Exception as exc:
                             logger.error(
                                 f"Error processing tenant queue: {exc}",
                                 extra={"tenant_id": str(tenant_id)},
                             )
                             continue  # Don't let one tenant's error stop others
+
+                    # Heartbeat pattern: Only log when idle every 5 minutes
+                    # Why: Reduces log spam while confirming feeder is alive
+                    now = datetime.now(timezone.utc)
+                    if not processed_any:
+                        if (
+                            self._last_heartbeat is None
+                            or (now - self._last_heartbeat).total_seconds() >= self._heartbeat_interval
+                        ):
+                            logger.info("Feeder heartbeat: idle, no pending crawls")
+                            self._last_heartbeat = now
+                    else:
+                        # Reset heartbeat timer after actual work
+                        self._last_heartbeat = now
 
                     # Refresh leader lock before sleeping
                     # Why: Keeps us as leader for next cycle

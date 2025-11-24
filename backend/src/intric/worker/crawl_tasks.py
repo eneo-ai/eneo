@@ -927,12 +927,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Calculate file skip rate for performance analysis
             file_skip_rate = (num_skipped_files / num_files * 100) if num_files > 0 else 0
 
-            logger.info(
-                f"Crawler finished. {num_pages} pages, {num_failed_pages} failed. "
-                f"{num_files} files, {num_failed_files} failed, "
-                f"{num_skipped_files} skipped (unchanged) [{file_skip_rate:.1f}%]. "
-                f"{num_deleted_blobs} blobs deleted."
-            )
+            # Structured crawl summary for easy log scanning
+            summary = [
+                "=" * 60,
+                f"CRAWL FINISHED: {params.url}",
+                "-" * 60,
+                f"Pages:   {num_pages} crawled, {num_failed_pages} failed",
+                f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
+                f"Cleanup: {num_deleted_blobs} stale entries removed",
+                "=" * 60,
+            ]
+            logger.info("\n".join(summary))
 
             # Performance breakdown log for analysis
             total_time = sum(timings.values())
