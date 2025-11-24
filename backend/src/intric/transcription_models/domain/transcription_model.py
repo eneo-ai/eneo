@@ -45,6 +45,8 @@ class TranscriptionModel(AIModel):
         is_org_enabled: bool,
         is_org_default: bool,
         security_classification: Optional["SecurityClassification"] = None,
+        tenant_id: Optional["UUID"] = None,
+        provider_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -67,6 +69,8 @@ class TranscriptionModel(AIModel):
         self.base_url = base_url
         self.is_org_default = is_org_default
         self.security_classification = security_classification
+        self.tenant_id = tenant_id
+        self.provider_id = provider_id
 
     @classmethod
     def create_from_db(
@@ -110,4 +114,6 @@ class TranscriptionModel(AIModel):
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),
+            tenant_id=transcription_model_db.tenant_id,
+            provider_id=transcription_model_db.provider_id,
         )

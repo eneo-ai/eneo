@@ -35,6 +35,9 @@ class TranscriptionModelPublic(BaseModel):
     is_org_default: bool = False
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
+    # Tenant model fields
+    tenant_id: Optional[UUID] = None
+    provider_id: Optional[UUID] = None
 
     @classmethod
     def from_domain(cls, model: TranscriptionModel):
@@ -60,6 +63,8 @@ class TranscriptionModelPublic(BaseModel):
                 model.security_classification,
                 return_none_if_not_enabled=False,
             ),
+            tenant_id=model.tenant_id,
+            provider_id=model.provider_id,
         )
 
 
