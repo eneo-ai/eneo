@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from intric.ai_models.ai_model import AIModel
 from intric.ai_models.model_enums import (
@@ -33,10 +33,10 @@ class TranscriptionModel(AIModel):
         updated_at: "datetime",
         nickname: str,
         name: str,
-        family: ModelFamily,
-        hosting: ModelHostingLocation,
-        org: Optional[ModelOrg],
-        stability: ModelStability,
+        family: Union[ModelFamily, str],
+        hosting: Union[ModelHostingLocation, str],
+        org: Optional[Union[ModelOrg, str]],
+        stability: Union[ModelStability, str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],
@@ -88,12 +88,7 @@ class TranscriptionModel(AIModel):
                 transcription_model_settings.security_classification
             )
 
-        org = (
-            None
-            if transcription_model_db.org is None
-            else ModelOrg(transcription_model_db.org)
-        )
-
+        # Pass raw string values - parent class will convert to enum if valid
         return cls(
             user=user,
             id=transcription_model_db.id,
@@ -101,10 +96,10 @@ class TranscriptionModel(AIModel):
             updated_at=updated_at,
             nickname=transcription_model_db.name,
             name=transcription_model_db.model_name,
-            family=ModelFamily(transcription_model_db.family),
-            hosting=ModelHostingLocation(transcription_model_db.hosting),
-            org=org,
-            stability=ModelStability(transcription_model_db.stability),
+            family=transcription_model_db.family,
+            hosting=transcription_model_db.hosting,
+            org=transcription_model_db.org,
+            stability=transcription_model_db.stability,
             open_source=transcription_model_db.open_source,
             description=transcription_model_db.description,
             hf_link=transcription_model_db.hf_link,

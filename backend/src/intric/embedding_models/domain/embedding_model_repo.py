@@ -24,6 +24,10 @@ class EmbeddingModelRepository:
         self.user = user
 
     async def all(self, with_deprecated: bool = False):
+        from intric.main.config import get_settings
+        app_settings = get_settings()
+        tenant_models_enabled = app_settings.tenant_models_enabled
+
         stmt = (
             sa.select(EmbeddingModels, EmbeddingModelSettings)
             .outerjoin(
@@ -38,6 +42,16 @@ class EmbeddingModelRepository:
                 selectinload(EmbeddingModelSettings.security_classification).options(
                     selectinload(SecurityClassification.tenant)
                 ),
+            )
+            .where(
+                # When tenant_models_enabled, return both global and tenant models
+                # This allows existing collections with global models to continue working
+                # UI filtering happens at the presentation layer
+                sa.or_(
+                    EmbeddingModels.tenant_id.is_(None),
+                    EmbeddingModels.tenant_id == self.user.tenant_id
+                ) if tenant_models_enabled
+                else EmbeddingModels.tenant_id.is_(None)
             )
             .order_by(
                 EmbeddingModels.org,
@@ -62,6 +76,7 @@ class EmbeddingModelRepository:
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["EmbeddingModel"]:
+        # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
             sa.select(EmbeddingModels, EmbeddingModelSettings)
             .outerjoin(
@@ -77,7 +92,14 @@ class EmbeddingModelRepository:
                     selectinload(SecurityClassification.tenant)
                 ),
             )
-            .where(EmbeddingModels.id == model_id)
+            .where(
+                EmbeddingModels.id == model_id,
+                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
+                sa.or_(
+                    EmbeddingModels.tenant_id.is_(None),
+                    EmbeddingModels.tenant_id == self.user.tenant_id
+                )
+            )
         )
 
         result = await self.session.execute(stmt)

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         CompletionModelAdapter,
     )
     from intric.completion_models.infrastructure.web_search import WebSearchResult
+    from intric.database.database import AsyncSession
     from intric.main.container.container import Container
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
@@ -55,6 +56,7 @@ class CompletionService:
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
+        session: Optional["AsyncSession"] = None,
     ):
         self._adapters = {
             ModelFamily.OPEN_AI: OpenAIModelAdapter,
@@ -68,9 +70,80 @@ class CompletionService:
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
+        self.session = session
 
-    def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
-        # Create credential resolver with tenant context if tenant is available
+    async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+        # PRIORITY 1: Check for tenant model (has provider_id) - only if feature flag enabled
+        # Tenant models use TenantModelAdapter with auto-generated LiteLLM names
+        if (hasattr(model, 'provider_id') and
+            model.provider_id and
+            self.config.tenant_models_enabled):
+
+            # Check if session is available
+            if not self.session:
+                logger.error(
+                    "Tenant model requires database session but none available",
+                    extra={
+                        "model_id": str(model.id) if hasattr(model, 'id') else None,
+                        "model_name": model.name,
+                        "provider_id": str(model.provider_id),
+                        "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    }
+                )
+                raise ValueError(
+                    f"Tenant model '{model.name}' requires database session to load provider credentials. "
+                    "Please ensure the CompletionService is initialized with a database session."
+                )
+
+            # Load provider data from database
+            import sqlalchemy as sa
+            from intric.database.tables.model_providers_table import ModelProviders
+            from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
+                TenantModelCredentialResolver,
+            )
+            from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+                TenantModelAdapter,
+            )
+
+            stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
+            result = await self.session.execute(stmt)
+            provider_db = result.scalar_one_or_none()
+
+            if provider_db is None:
+                raise ValueError(f"Model provider {model.provider_id} not found")
+
+            if not provider_db.is_active:
+                raise ValueError(f"Model provider {model.provider_id} is not active")
+
+            # Create tenant model credential resolver
+            credential_resolver = TenantModelCredentialResolver(
+                provider_id=provider_db.id,
+                provider_type=provider_db.provider_type,
+                credentials=provider_db.credentials,
+                config=provider_db.config,
+                encryption_service=self.encryption_service,
+            )
+
+            logger.info(
+                f"Using TenantModelAdapter for tenant model '{model.name}'",
+                extra={
+                    "model_id": str(model.id) if hasattr(model, 'id') else None,
+                    "model_name": model.name,
+                    "provider_id": str(model.provider_id),
+                    "provider_type": provider_db.provider_type,
+                    "tenant_id": str(self.tenant.id) if self.tenant else None,
+                }
+            )
+
+            # Use TenantModelAdapter for all tenant models
+            return TenantModelAdapter(
+                model=model,
+                credential_resolver=credential_resolver,
+                provider_type=provider_db.provider_type,
+            )
+
+        # PRIORITY 2: Global models
+        # Create credential resolver for tenant's global credentials
         credential_resolver = None
         if self.tenant:
             credential_resolver = CredentialResolver(
@@ -198,7 +271,7 @@ class CompletionService:
         version: int = 1,
         use_image_generation: bool = False,
     ):
-        model_adapter = self._get_adapter(model)
+        model_adapter = await self._get_adapter(model)
 
         # Make sure everything fits in the context of the model
         max_tokens = model_adapter.get_token_limit_of_model()

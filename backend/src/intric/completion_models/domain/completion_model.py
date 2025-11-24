@@ -49,6 +49,8 @@ class CompletionModel(AIModel):
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         security_classification: Optional[SecurityClassification] = None,
+        tenant_id: Optional["UUID"] = None,
+        provider_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -77,6 +79,8 @@ class CompletionModel(AIModel):
         self.token_limit = token_limit
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
+        self.tenant_id = tenant_id
+        self.provider_id = provider_id
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
@@ -107,12 +111,7 @@ class CompletionModel(AIModel):
             updated_at = completion_model_settings.updated_at
             security_classification = completion_model_settings.security_classification
 
-        org = (
-            None
-            if completion_model_db.org is None
-            else ModelOrg(completion_model_db.org)
-        )
-
+        # Pass raw string values - parent class will convert to enum if valid
         return cls(
             user=user,
             id=completion_model_db.id,
@@ -122,10 +121,10 @@ class CompletionModel(AIModel):
             name=completion_model_db.name,
             token_limit=completion_model_db.token_limit,
             vision=completion_model_db.vision,
-            family=ModelFamily(completion_model_db.family),
-            hosting=ModelHostingLocation(completion_model_db.hosting),
-            org=org,
-            stability=ModelStability(completion_model_db.stability),
+            family=completion_model_db.family,
+            hosting=completion_model_db.hosting,
+            org=completion_model_db.org,
+            stability=completion_model_db.stability,
             open_source=completion_model_db.open_source,
             description=completion_model_db.description,
             nr_billion_parameters=completion_model_db.nr_billion_parameters,
@@ -140,4 +139,6 @@ class CompletionModel(AIModel):
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),
+            tenant_id=completion_model_db.tenant_id,
+            provider_id=completion_model_db.provider_id,
         )

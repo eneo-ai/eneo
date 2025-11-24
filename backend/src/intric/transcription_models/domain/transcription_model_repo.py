@@ -28,6 +28,10 @@ class TranscriptionModelRepository:
         self.user = user
 
     async def all(self, with_deprecated: bool = False):
+        from intric.main.config import get_settings
+        app_settings = get_settings()
+        tenant_models_enabled = app_settings.tenant_models_enabled
+
         stmt = (
             sa.select(TranscriptionModels, TranscriptionModelSettings)
             .outerjoin(
@@ -43,6 +47,16 @@ class TranscriptionModelRepository:
                 selectinload(
                     TranscriptionModelSettings.security_classification
                 ).options(selectinload(SecurityClassificationDBModel.tenant)),
+            )
+            .where(
+                # When tenant_models_enabled, return both global and tenant models
+                # This allows existing apps with global models to continue working
+                # UI filtering happens at the presentation layer
+                sa.or_(
+                    TranscriptionModels.tenant_id.is_(None),
+                    TranscriptionModels.tenant_id == self.user.tenant_id
+                ) if tenant_models_enabled
+                else TranscriptionModels.tenant_id.is_(None)
             )
             .order_by(
                 TranscriptionModels.org,
@@ -67,6 +81,7 @@ class TranscriptionModelRepository:
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["TranscriptionModel"]:
+        # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
             sa.select(TranscriptionModels, TranscriptionModelSettings)
             .outerjoin(
@@ -83,7 +98,14 @@ class TranscriptionModelRepository:
                     TranscriptionModelSettings.security_classification
                 ).options(selectinload(SecurityClassificationDBModel.tenant)),
             )
-            .where(TranscriptionModels.id == model_id)
+            .where(
+                TranscriptionModels.id == model_id,
+                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
+                sa.or_(
+                    TranscriptionModels.tenant_id.is_(None),
+                    TranscriptionModels.tenant_id == self.user.tenant_id
+                )
+            )
         )
 
         result = await self.session.execute(stmt)
