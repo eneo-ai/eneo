@@ -359,8 +359,8 @@ async def queue_website_crawls(container: Container):
                 # Deterministic job_id based on run_id prevents duplicate enqueues
                 if settings.crawl_feeder_enabled and redis_client:
                     from intric.websites.domain.crawl_run import CrawlRun
-                    from intric.jobs.models import Job
-                    from intric.jobs.task_models import Task, Status
+                    from intric.jobs.job_models import Job, Task
+                    from intric.main.models import Status
 
                     # Step 1: Create crawl run record
                     crawl_run_repo = container.crawl_run_repo()
