@@ -18,6 +18,8 @@
   let providerType = "openai";
   let apiKey = "";
   let endpoint = "";
+  let apiVersion = "";
+  let deploymentName = "";
   let isSubmitting = false;
   let error: string | null = null;
 
@@ -29,6 +31,18 @@
     { value: "gemini", label: "Google Gemini" },
     { value: "cohere", label: "Cohere" },
   ];
+
+  const providerTypeStore = writable(providerTypes[0]);
+
+  // Sync the store with providerType variable
+  $: {
+    if ($providerTypeStore && $providerTypeStore.value) {
+      const value = typeof $providerTypeStore.value === 'object'
+        ? $providerTypeStore.value.value
+        : $providerTypeStore.value;
+      providerType = value;
+    }
+  }
 
   async function handleSubmit() {
     error = null;
@@ -52,6 +66,17 @@
       return;
     }
 
+    if (providerType === "azure") {
+      if (!apiVersion.trim()) {
+        error = "API Version is required for Azure OpenAI";
+        return;
+      }
+      if (!deploymentName.trim()) {
+        error = "Deployment Name is required for Azure OpenAI";
+        return;
+      }
+    }
+
     try {
       isSubmitting = true;
 
@@ -69,6 +94,16 @@
       // Add endpoint to config if provided
       if (endpoint.trim()) {
         providerData.config.endpoint = endpoint;
+      }
+
+      // Add Azure-specific fields to config
+      if (providerType === "azure") {
+        if (apiVersion.trim()) {
+          providerData.config.api_version = apiVersion;
+        }
+        if (deploymentName.trim()) {
+          providerData.config.deployment_name = deploymentName;
+        }
       }
 
       await intric.modelProviders.create(providerData);
@@ -90,9 +125,11 @@
 
   function resetForm() {
     providerName = "";
-    providerType = "openai";
+    providerTypeStore.set(providerTypes[0]);
     apiKey = "";
     endpoint = "";
+    apiVersion = "";
+    deploymentName = "";
   }
 
   function handleCancel() {
@@ -118,6 +155,18 @@
         {/if}
 
         <div class="flex flex-col gap-2">
+          <Select.Root customStore={providerTypeStore} class="border-b border-dimmer">
+            <Select.Label>Provider Type</Select.Label>
+            <Select.Trigger placeholder="Select provider type"></Select.Trigger>
+            <Select.Options>
+              {#each providerTypes as type}
+                <Select.Item value={type} label={type.label}>{type.label}</Select.Item>
+              {/each}
+            </Select.Options>
+          </Select.Root>
+        </div>
+
+        <div class="flex flex-col gap-2">
           <label for="provider-name" class="text-sm font-medium">Provider Name</label>
           <Input.Text
             id="provider-name"
@@ -128,19 +177,6 @@
           <p class="text-muted-foreground text-xs">
             A unique name to identify this provider instance
           </p>
-        </div>
-
-        <div class="flex flex-col gap-2">
-          <label for="provider-type" class="text-sm font-medium">Provider Type</label>
-          <select
-            id="provider-type"
-            bind:value={providerType}
-            class="rounded border border-dimmer bg-surface px-3 py-2 text-sm"
-          >
-            {#each providerTypes as type}
-              <option value={type.value}>{type.label}</option>
-            {/each}
-          </select>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -187,6 +223,34 @@
             </p>
           {/if}
         </div>
+
+        {#if providerType === "azure"}
+          <div class="flex flex-col gap-2">
+            <label for="api-version" class="text-sm font-medium">API Version</label>
+            <Input.Text
+              id="api-version"
+              bind:value={apiVersion}
+              placeholder="e.g., 2024-02-15-preview"
+              required
+            />
+            <p class="text-muted-foreground text-xs">
+              <strong>Required</strong>. The Azure OpenAI API version to use
+            </p>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <label for="deployment-name" class="text-sm font-medium">Deployment Name</label>
+            <Input.Text
+              id="deployment-name"
+              bind:value={deploymentName}
+              placeholder="e.g., gpt-4-deployment"
+              required
+            />
+            <p class="text-muted-foreground text-xs">
+              <strong>Required</strong>. Your Azure OpenAI deployment name
+            </p>
+          </div>
+        {/if}
       </form>
     </Dialog.Section>
 
