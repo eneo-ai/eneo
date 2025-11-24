@@ -11,11 +11,10 @@
   import EmbeddingModelsTable from "./EmbeddingModelsTable.svelte";
   import TranscriptionModelsTable from "./TranscriptionModelsTable.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
-  import { Plus } from "lucide-svelte";
   import { writable } from "svelte/store";
   import AddCompletionModelDialog from "./AddCompletionModelDialog.svelte";
-  import AddProviderDialog from "./AddProviderDialog.svelte";
+  import AddEmbeddingModelDialog from "./AddEmbeddingModelDialog.svelte";
+  import AddTranscriptionModelDialog from "./AddTranscriptionModelDialog.svelte";
 
   export let data;
 
@@ -26,8 +25,9 @@
   console.log('data.tenantModelsEnabled:', data.tenantModelsEnabled);
   console.log('Type of tenantModelsEnabled:', typeof data.tenantModelsEnabled);
 
-  let addModelDialogOpen = writable(false);
-  let addProviderDialogOpen = writable(false);
+  let addCompletionModelDialogOpen = writable(false);
+  let addEmbeddingModelDialogOpen = writable(false);
+  let addTranscriptionModelDialogOpen = writable(false);
 </script>
 
 <svelte:head>
@@ -37,18 +37,6 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.models()} />
-    {#if data.tenantModelsEnabled}
-      <div class="flex gap-2 ml-auto">
-        <Button variant="outlined" on:click={() => addProviderDialogOpen.set(true)}>
-          <Plus class="w-4 h-4 mr-2" />
-          Add Provider
-        </Button>
-        <Button variant="primary" on:click={() => addModelDialogOpen.set(true)}>
-          <Plus class="w-4 h-4 mr-2" />
-          Add Model
-        </Button>
-      </div>
-    {/if}
     <Page.Tabbar>
       <Page.TabTrigger tab="completion_models">{m.completion_models()}</Page.TabTrigger>
       <Page.TabTrigger tab="embedding_models">{m.embedding_models()}</Page.TabTrigger>
@@ -63,6 +51,7 @@
         credentials={data.credentials}
         tenantCredentialsEnabled={data.tenantCredentialsEnabled}
         tenantModelsEnabled={data.tenantModelsEnabled}
+        addModelDialogOpen={addCompletionModelDialogOpen}
       />
     </Page.Tab>
     <Page.Tab id="embedding_models">
@@ -71,6 +60,8 @@
         providers={data.providers}
         credentials={data.credentials}
         tenantCredentialsEnabled={data.tenantCredentialsEnabled}
+        tenantModelsEnabled={data.tenantModelsEnabled}
+        addModelDialogOpen={addEmbeddingModelDialogOpen}
       />
     </Page.Tab>
     <Page.Tab id="transcription_models">
@@ -79,12 +70,15 @@
         providers={data.providers}
         credentials={data.credentials}
         tenantCredentialsEnabled={data.tenantCredentialsEnabled}
+        tenantModelsEnabled={data.tenantModelsEnabled}
+        addModelDialogOpen={addTranscriptionModelDialogOpen}
       />
     </Page.Tab>
   </Page.Main>
 </Page.Root>
 
 {#if data.tenantModelsEnabled}
-  <AddCompletionModelDialog openController={addModelDialogOpen} providers={data.providers} />
-  <AddProviderDialog openController={addProviderDialogOpen} />
+  <AddCompletionModelDialog openController={addCompletionModelDialogOpen} providers={data.providers} />
+  <AddEmbeddingModelDialog openController={addEmbeddingModelDialogOpen} providers={data.providers} />
+  <AddTranscriptionModelDialog openController={addTranscriptionModelDialogOpen} providers={data.providers} />
 {/if}

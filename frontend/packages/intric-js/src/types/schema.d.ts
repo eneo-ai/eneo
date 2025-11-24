@@ -1107,6 +1107,34 @@ export interface paths {
      */
     delete: operations["delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete"];
   };
+  "/api/v1/admin/tenant-models/embedding/": {
+    /**
+     * Create Tenant Embedding Model
+     * @description Create a new tenant-specific embedding model.
+     */
+    post: operations["create_tenant_embedding_model_api_v1_admin_tenant_models_embedding__post"];
+  };
+  "/api/v1/admin/tenant-models/embedding/{model_id}/": {
+    /**
+     * Delete Tenant Embedding Model
+     * @description Delete a tenant-specific embedding model.
+     */
+    delete: operations["delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/transcription/": {
+    /**
+     * Create Tenant Transcription Model
+     * @description Create a new tenant-specific transcription model.
+     */
+    post: operations["create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post"];
+  };
+  "/api/v1/admin/tenant-models/transcription/{model_id}/": {
+    /**
+     * Delete Tenant Transcription Model
+     * @description Delete a tenant-specific transcription model.
+     */
+    delete: operations["delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete"];
+  };
   "/api/v1/files/": {
     /** Get Files */
     get: operations["get_files_api_v1_files__get"];
@@ -2961,7 +2989,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -2970,15 +2999,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3004,7 +3036,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3013,15 +3046,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3046,7 +3082,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3055,15 +3092,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3097,6 +3137,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -3129,7 +3173,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3138,15 +3183,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3180,6 +3228,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -3198,7 +3250,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3207,15 +3260,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3658,6 +3714,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -3761,6 +3821,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -5707,7 +5771,8 @@ export interface components {
       name?: string | null;
       /** Nickname */
       nickname?: string | null;
-      family?: components["schemas"]["ModelFamily"] | null;
+      /** Family */
+      family?: components["schemas"]["ModelFamily"] | string | null;
       /** Token Limit */
       token_limit?: number | null;
       /** Is Deprecated */
@@ -5716,15 +5781,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability?: components["schemas"]["ModelStability"] | null;
-      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Stability */
+      stability?: components["schemas"]["ModelStability"] | string | null;
+      /** Hosting */
+      hosting?: components["schemas"]["ModelHostingLocation"] | string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision?: boolean | null;
       /** Reasoning */
@@ -6776,7 +6844,7 @@ export interface components {
       provider_id: string;
       /**
        * Name
-       * @description LiteLLM model identifier (e.g., 'gpt-4o', 'claude-3-5-sonnet-20241022')
+       * @description Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')
        */
       name: string;
       /**
@@ -6785,35 +6853,73 @@ export interface components {
        */
       display_name: string;
       /**
-       * Capabilities
-       * @description Model capabilities
+       * Token Limit
+       * @description Maximum context tokens
+       * @default 128000
        */
-      capabilities?: {
-        [key: string]: unknown;
-      };
+      token_limit?: number;
       /**
-       * Default Params
-       * @description Default parameters for this model
+       * Vision
+       * @description Supports vision/image inputs
+       * @default false
        */
-      default_params?: {
-        [key: string]: unknown;
-      };
+      vision?: boolean;
       /**
-       * Param Constraints
-       * @description Parameter constraints
+       * Reasoning
+       * @description Supports extended reasoning
+       * @default false
        */
-      param_constraints?: {
-        [key: string]: unknown;
-      };
+      reasoning?: boolean;
       /**
        * Is Active
-       * @description Whether the model is active
+       * @description Enable in organization
        * @default true
        */
       is_active?: boolean;
       /**
        * Is Default
-       * @description Whether this is the default model for the tenant
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantEmbeddingModelCreate */
+    TenantEmbeddingModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'text-embedding-3-large', 'intfloat/multilingual-e5-large')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Dimensions
+       * @description Embedding dimensions
+       */
+      dimensions?: number | null;
+      /**
+       * Max Input
+       * @description Maximum input tokens
+       */
+      max_input?: number | null;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
        * @default false
        */
       is_default?: boolean;
@@ -6973,6 +7079,37 @@ export interface components {
      * @enum {string}
      */
     TenantState: "active" | "suspended";
+    /** TenantTranscriptionModelCreate */
+    TenantTranscriptionModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'whisper-1', 'distil-whisper-large-v3-en')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
       /** Display Name */
@@ -7207,6 +7344,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -7256,6 +7397,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -9895,7 +10040,8 @@ export interface operations {
                 name: string;
                 /** Nickname */
                 nickname: string;
-                family: components["schemas"]["ModelFamily"];
+                /** Family */
+                family: components["schemas"]["ModelFamily"] | string;
                 /** Token Limit */
                 token_limit: number;
                 /** Is Deprecated */
@@ -9904,15 +10050,18 @@ export interface operations {
                 nr_billion_parameters?: number | null;
                 /** Hf Link */
                 hf_link?: string | null;
-                stability: components["schemas"]["ModelStability"];
-                hosting: components["schemas"]["ModelHostingLocation"];
+                /** Stability */
+                stability: components["schemas"]["ModelStability"] | string;
+                /** Hosting */
+                hosting: components["schemas"]["ModelHostingLocation"] | string;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
                 description?: string | null;
                 /** Deployment Name */
                 deployment_name?: string | null;
-                org?: components["schemas"]["ModelOrg"] | null;
+                /** Org */
+                org?: components["schemas"]["ModelOrg"] | string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -9948,6 +10097,10 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -10200,7 +10353,8 @@ export interface operations {
                 name: string;
                 /** Nickname */
                 nickname: string;
-                family: components["schemas"]["ModelFamily"];
+                /** Family */
+                family: components["schemas"]["ModelFamily"] | string;
                 /** Token Limit */
                 token_limit: number;
                 /** Is Deprecated */
@@ -10209,15 +10363,18 @@ export interface operations {
                 nr_billion_parameters?: number | null;
                 /** Hf Link */
                 hf_link?: string | null;
-                stability: components["schemas"]["ModelStability"];
-                hosting: components["schemas"]["ModelHostingLocation"];
+                /** Stability */
+                stability: components["schemas"]["ModelStability"] | string;
+                /** Hosting */
+                hosting: components["schemas"]["ModelHostingLocation"] | string;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
                 description?: string | null;
                 /** Deployment Name */
                 deployment_name?: string | null;
-                org?: components["schemas"]["ModelOrg"] | null;
+                /** Org */
+                org?: components["schemas"]["ModelOrg"] | string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -10253,6 +10410,10 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -14123,6 +14284,154 @@ export interface operations {
    * @description Delete a tenant-specific completion model.
    */
   delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Embedding Model
+   * @description Create a new tenant-specific embedding model.
+   */
+  create_tenant_embedding_model_api_v1_admin_tenant_models_embedding__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantEmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Embedding Model
+   * @description Delete a tenant-specific embedding model.
+   */
+  delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Transcription Model
+   * @description Create a new tenant-specific transcription model.
+   */
+  create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantTranscriptionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Transcription Model
+   * @description Delete a tenant-specific transcription model.
+   */
+  delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete: {
     parameters: {
       path: {
         model_id: string;

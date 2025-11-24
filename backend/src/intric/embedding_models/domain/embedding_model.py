@@ -47,6 +47,8 @@ class EmbeddingModel(AIModel):
         security_classification: Optional[SecurityClassification],
         max_batch_size: Optional[int] = None,
         litellm_model_name: Optional[str] = None,
+        tenant_id: Optional["UUID"] = None,
+        provider_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -71,6 +73,8 @@ class EmbeddingModel(AIModel):
         self.dimensions = dimensions
         self.max_batch_size = max_batch_size
         self.litellm_model_name = litellm_model_name
+        self.tenant_id = tenant_id
+        self.provider_id = provider_id
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
@@ -123,6 +127,8 @@ class EmbeddingModel(AIModel):
                 db_security_classification=security_classification
             ),
             litellm_model_name=db_model.litellm_model_name,
+            tenant_id=db_model.tenant_id,
+            provider_id=db_model.provider_id,
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):

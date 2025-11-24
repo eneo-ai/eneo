@@ -20,6 +20,10 @@
   import { m } from "$lib/paraglide/messages";
   import { browser } from "$app/environment";
 
+  import type { Writable } from "svelte/store";
+  import { Button } from "@intric/ui";
+  import { Plus } from "lucide-svelte";
+
   export let completionModels: CompletionModel[];
   export let providers: any[] = [];
   export let credentials:
@@ -31,6 +35,7 @@
     | undefined = undefined;
   export let tenantCredentialsEnabled: boolean = false;
   export let tenantModelsEnabled: boolean = false;
+  export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
 
   // When tenant_models_enabled, backend returns both global and tenant models
   // Filter to show only tenant models in UI
@@ -240,19 +245,30 @@
   $: groups = listGroups(filteredModels);
   $: table.update(filteredModels);</script>
 
-<Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
-  {#each groups as group (group.key)}
-    {@const providerId = getProviderIdForGroup(group.key)}
-    <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
-      <svelte:fragment slot="title-suffix">
-        {#if browser && tenantCredentialsEnabled && providerId}
-          <ProviderCredentialIcon
-            provider={providerId}
-            displayName={group.name}
-            credential={getCredentialForGroup(group.key, group.name)}
-          />
-        {/if}
-      </svelte:fragment>
-    </Table.Group>
-  {/each}
-</Table.Root>
+<div class="flex flex-col gap-4">
+  <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
+    {#each groups as group (group.key)}
+      {@const providerId = getProviderIdForGroup(group.key)}
+      <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
+        <svelte:fragment slot="title-suffix">
+          {#if browser && tenantCredentialsEnabled && providerId}
+            <ProviderCredentialIcon
+              provider={providerId}
+              displayName={group.name}
+              credential={getCredentialForGroup(group.key, group.name)}
+            />
+          {/if}
+        </svelte:fragment>
+      </Table.Group>
+    {/each}
+  </Table.Root>
+
+  {#if tenantModelsEnabled && addModelDialogOpen}
+    <div class="flex justify-center pb-4">
+      <Button variant="outlined" on:click={() => addModelDialogOpen?.set(true)}>
+        <Plus class="w-4 h-4 mr-2" />
+        Add Completion Model
+      </Button>
+    </div>
+  {/if}
+</div>

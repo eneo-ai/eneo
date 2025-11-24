@@ -19,8 +19,12 @@
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import { m } from "$lib/paraglide/messages";
   import { browser } from "$app/environment";
+  import type { Writable } from "svelte/store";
+  import { Button } from "@intric/ui";
+  import { Plus } from "lucide-svelte";
 
   export let transcriptionModels: TranscriptionModel[];
+  export let providers: any[] = [];
   export let credentials:
     | {
         provider: string;
@@ -29,7 +33,16 @@
       }[]
     | undefined = undefined;
   export let tenantCredentialsEnabled: boolean = false;
-  const table = Table.createWithResource(transcriptionModels);
+  export let tenantModelsEnabled: boolean = false;
+  export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
+
+  // When tenant_models_enabled, backend returns both global and tenant models
+  // Filter to show only tenant models in UI
+  $: filteredModels = tenantModelsEnabled
+    ? transcriptionModels.filter(m => m.provider_id != null)
+    : transcriptionModels;
+
+  const table = Table.createWithResource(filteredModels);
 
   const viewModel = table.createViewModel([
     table.column({
@@ -113,33 +126,60 @@
     })
   ]);
 
-  function createOrgFilter(org: string | undefined | null) {
+  function createGroupFilter(groupKey: string) {
     return function (model: TranscriptionModel) {
-      return model.org === org;
+      if (tenantModelsEnabled) {
+        return model.provider_id === groupKey;
+      } else {
+        return model.org === groupKey;
+      }
     };
   }
 
-  function listOrgs(models: TranscriptionModel[]): string[] {
-    const uniqueOrgs = new Set<string>();
-    for (const model of models) {
-      if (model.org) uniqueOrgs.add(model.org);
+  function listGroups(models: TranscriptionModel[]): Array<{ key: string; name: string }> {
+    if (tenantModelsEnabled) {
+      const uniqueProviders = new Set<string>();
+      for (const model of models) {
+        if (model.provider_id) uniqueProviders.add(model.provider_id);
+      }
+      return Array.from(uniqueProviders).map(providerId => {
+        const provider = providers.find(p => p.id === providerId);
+        return {
+          key: providerId,
+          name: provider?.name || "Unknown Provider"
+        };
+      });
+    } else {
+      const uniqueOrgs = new Set<string>();
+      for (const model of models) {
+        if (model.org) uniqueOrgs.add(model.org);
+      }
+      return Array.from(uniqueOrgs).map(org => ({
+        key: org,
+        name: org
+      }));
     }
-    return Array.from(uniqueOrgs);
   }
 
   /**
-   * Get the credential provider ID for a given org.
-   * Uses the credential_provider field from the backend (authoritative source).
+   * Get the credential provider ID for a given group.
+   * For tenant models, returns the provider's credential type.
+   * For global models, returns the model's credential_provider field.
    */
-  function getProviderIdForOrg(org: string): string | undefined {
-    const model = transcriptionModels.find((m) => m.org === org);
-    return model?.credential_provider;
+  function getProviderIdForGroup(groupKey: string): string | undefined {
+    if (tenantModelsEnabled) {
+      const provider = providers.find(p => p.id === groupKey);
+      return provider?.type;
+    } else {
+      const model = transcriptionModels.find((m) => m.org === groupKey);
+      return model?.credential_provider;
+    }
   }
 
-  function getCredentialForProvider(provider: string) {
+  function getCredentialForGroup(groupKey: string, groupName: string) {
     if (!credentials) return undefined;
 
-    const providerId = getProviderIdForOrg(provider);
+    const providerId = getProviderIdForGroup(groupKey);
     if (!providerId) return undefined;
 
     const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
@@ -150,23 +190,34 @@
     };
   }
 
-  $: uniqueOrgs = listOrgs(transcriptionModels);
-  $: table.update(transcriptionModels);
+  $: groups = listGroups(filteredModels);
+  $: table.update(filteredModels);
 </script>
 
-<Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
-  {#each uniqueOrgs as provider (provider)}
-    {@const providerId = getProviderIdForOrg(provider)}
-    <Table.Group filterFn={createOrgFilter(provider)} title={provider}>
-      <svelte:fragment slot="title-suffix">
-        {#if browser && tenantCredentialsEnabled && providerId}
-          <ProviderCredentialIcon
-            provider={providerId}
-            displayName={provider}
-            credential={getCredentialForProvider(provider)}
-          />
-        {/if}
-      </svelte:fragment>
-    </Table.Group>
-  {/each}
-</Table.Root>
+<div class="flex flex-col gap-4">
+  <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
+    {#each groups as group (group.key)}
+      {@const providerId = getProviderIdForGroup(group.key)}
+      <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
+        <svelte:fragment slot="title-suffix">
+          {#if browser && tenantCredentialsEnabled && providerId}
+            <ProviderCredentialIcon
+              provider={providerId}
+              displayName={group.name}
+              credential={getCredentialForGroup(group.key, group.name)}
+            />
+          {/if}
+        </svelte:fragment>
+      </Table.Group>
+    {/each}
+  </Table.Root>
+
+  {#if tenantModelsEnabled && addModelDialogOpen}
+    <div class="flex justify-center pb-4">
+      <Button variant="outlined" on:click={() => addModelDialogOpen?.set(true)}>
+        <Plus class="w-4 h-4 mr-2" />
+        Add Transcription Model
+      </Button>
+    </div>
+  {/if}
+</div>

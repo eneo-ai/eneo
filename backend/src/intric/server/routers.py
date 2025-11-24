@@ -21,6 +21,9 @@ from intric.dashboard.api.dashboard_router import router as dashboard_router
 from intric.embedding_models.presentation.embedding_model_router import (
     router as embedding_models_router,
 )
+from intric.embedding_models.presentation.tenant_embedding_models_router import (
+    router as tenant_embedding_models_router,
+)
 from intric.files.file_router import router as files_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
@@ -63,6 +66,9 @@ from intric.token_usage.presentation.token_usage_router import (
 )
 from intric.transcription_models.presentation.transcription_models_router import (
     router as transcription_models_router,
+)
+from intric.transcription_models.presentation.tenant_transcription_models_router import (
+    router as tenant_transcription_models_router,
 )
 from intric.user_groups.user_groups_router import router as user_groups_router
 from intric.users.user_router import router as users_router
@@ -128,6 +134,16 @@ router.include_router(
 router.include_router(
     tenant_completion_models_router,
     prefix="/admin/tenant-models/completion",
+    tags=["admin", "tenant-models"],
+)
+router.include_router(
+    tenant_embedding_models_router,
+    prefix="/admin/tenant-models/embedding",
+    tags=["admin", "tenant-models"],
+)
+router.include_router(
+    tenant_transcription_models_router,
+    prefix="/admin/tenant-models/transcription",
     tags=["admin", "tenant-models"],
 )
 router.include_router(files_router, prefix="/files", tags=["files"])

@@ -542,6 +542,7 @@ class Container(containers.DeclarativeContainer):
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,
+        session=session,
     )
     datastore = providers.Factory(
         Datastore,
