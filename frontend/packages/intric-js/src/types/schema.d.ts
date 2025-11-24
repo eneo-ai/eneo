@@ -1062,6 +1062,51 @@ export interface paths {
     /** Update Transcription Model */
     post: operations["update_transcription_model_api_v1_transcription_models__id___post"];
   };
+  "/api/v1/admin/model-providers/": {
+    /**
+     * List Providers
+     * @description List all model providers for the tenant.
+     */
+    get: operations["list_providers_api_v1_admin_model_providers__get"];
+    /**
+     * Create Provider
+     * @description Create a new model provider.
+     */
+    post: operations["create_provider_api_v1_admin_model_providers__post"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/": {
+    /**
+     * Get Provider
+     * @description Get a specific model provider.
+     */
+    get: operations["get_provider_api_v1_admin_model_providers__provider_id___get"];
+    /**
+     * Update Provider
+     * @description Update an existing model provider.
+     */
+    put: operations["update_provider_api_v1_admin_model_providers__provider_id___put"];
+    /**
+     * Delete Provider
+     * @description Delete a model provider.
+     *
+     * Will fail if the provider has models attached to it.
+     */
+    delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/completion/": {
+    /**
+     * Create Tenant Completion Model
+     * @description Create a new tenant-specific completion model.
+     */
+    post: operations["create_tenant_completion_model_api_v1_admin_tenant_models_completion__post"];
+  };
+  "/api/v1/admin/tenant-models/completion/{model_id}/": {
+    /**
+     * Delete Tenant Completion Model
+     * @description Delete a tenant-specific completion model.
+     */
+    delete: operations["delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete"];
+  };
   "/api/v1/files/": {
     /** Get Files */
     get: operations["get_files_api_v1_files__get"];
@@ -4661,6 +4706,113 @@ export interface components {
       | "Berget"
       | "GDM";
     /**
+     * ModelProviderCreate
+     * @description Request model for creating a model provider.
+     */
+    ModelProviderCreate: {
+      /**
+       * Name
+       * @description User-defined name for this provider instance
+       */
+      name: string;
+      /**
+       * Provider Type
+       * @description Provider type: openai, azure, or anthropic
+       */
+      provider_type: string;
+      /**
+       * Credentials
+       * @description Provider credentials (will be encrypted)
+       */
+      credentials: {
+        [key: string]: unknown;
+      };
+      /**
+       * Config
+       * @description Additional configuration
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Is Active
+       * @description Whether the provider is active
+       * @default true
+       */
+      is_active?: boolean;
+    };
+    /**
+     * ModelProviderPublic
+     * @description Public response model for a model provider (without credentials).
+     */
+    ModelProviderPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Name */
+      name: string;
+      /** Provider Type */
+      provider_type: string;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ModelProviderUpdate
+     * @description Request model for updating a model provider.
+     */
+    ModelProviderUpdate: {
+      /**
+       * Name
+       * @description User-defined name for this provider instance
+       */
+      name?: string | null;
+      /**
+       * Provider Type
+       * @description Provider type: openai, azure, or anthropic
+       */
+      provider_type?: string | null;
+      /**
+       * Credentials
+       * @description Provider credentials (will be encrypted)
+       */
+      credentials?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Config
+       * @description Additional configuration
+       */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Active
+       * @description Whether the provider is active
+       */
+      is_active?: boolean | null;
+    };
+    /**
      * ModelStability
      * @enum {string}
      */
@@ -6304,6 +6456,11 @@ export interface components {
        * @default false
        */
       tenant_credentials_enabled?: boolean;
+      /**
+       * Tenant Models Enabled
+       * @default false
+       */
+      tenant_models_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -6608,6 +6765,58 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+    };
+    /** TenantCompletionModelCreate */
+    TenantCompletionModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description LiteLLM model identifier (e.g., 'gpt-4o', 'claude-3-5-sonnet-20241022')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Capabilities
+       * @description Model capabilities
+       */
+      capabilities?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Default Params
+       * @description Default parameters for this model
+       */
+      default_params?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Param Constraints
+       * @description Parameter constraints
+       */
+      param_constraints?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Is Active
+       * @description Whether the model is active
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Whether this is the default model for the tenant
+       * @default false
+       */
+      is_default?: boolean;
     };
     /** TenantInDB */
     TenantInDB: {
@@ -13705,6 +13914,231 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Providers
+   * @description List all model providers for the tenant.
+   */
+  list_providers_api_v1_admin_model_providers__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"][];
+        };
+      };
+    };
+  };
+  /**
+   * Create Provider
+   * @description Create a new model provider.
+   */
+  create_provider_api_v1_admin_model_providers__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelProviderCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Provider
+   * @description Get a specific model provider.
+   */
+  get_provider_api_v1_admin_model_providers__provider_id___get: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Provider
+   * @description Update an existing model provider.
+   */
+  update_provider_api_v1_admin_model_providers__provider_id___put: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelProviderUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Provider
+   * @description Delete a model provider.
+   *
+   * Will fail if the provider has models attached to it.
+   */
+  delete_provider_api_v1_admin_model_providers__provider_id___delete: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Completion Model
+   * @description Create a new tenant-specific completion model.
+   */
+  create_tenant_completion_model_api_v1_admin_tenant_models_completion__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantCompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Completion Model
+   * @description Delete a tenant-specific completion model.
+   */
+  delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */

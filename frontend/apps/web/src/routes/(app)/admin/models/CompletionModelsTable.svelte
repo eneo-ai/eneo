@@ -21,6 +21,7 @@
   import { browser } from "$app/environment";
 
   export let completionModels: CompletionModel[];
+  export let providers: any[] = [];
   export let credentials:
     | {
         provider: string;
@@ -29,10 +30,18 @@
       }[]
     | undefined = undefined;
   export let tenantCredentialsEnabled: boolean = false;
+  export let tenantModelsEnabled: boolean = false;
 
-  const table = Table.createWithResource(completionModels);
+  // When tenant_models_enabled, backend returns both global and tenant models
+  // Filter to show only tenant models in UI
+  $: filteredModels = tenantModelsEnabled
+    ? completionModels.filter(m => m.provider_id != null)
+    : completionModels;
 
-  const viewModel = table.createViewModel([
+  const table = Table.createWithResource(filteredModels);
+
+  // Build columns dynamically based on feature flags
+  $: columns = [
     table.column({
       accessor: (model) => model,
       header: m.name(),
@@ -52,6 +61,44 @@
         }
       }
     }),
+
+    // Only show provider column if tenant models are enabled
+    ...(tenantModelsEnabled ? [
+      table.column({
+        accessor: (model) => model,
+        header: "Provider",
+        cell: (item) => {
+          const model = item.value;
+          // Tenant models have provider_id
+          if (model.provider_id) {
+            const provider = providers.find((p) => p.id === model.provider_id);
+            return provider?.name || "Unknown";
+          }
+          // Global models show org
+          return model.org || "-";
+        },
+        plugins: {
+          sort: {
+            getSortValue(value) {
+              if (value.provider_id) {
+                const provider = providers.find((p) => p.id === value.provider_id);
+                return provider?.name || "";
+              }
+              return value.org || "";
+            }
+          },
+          tableFilter: {
+            getFilterValue(value) {
+              if (value.provider_id) {
+                const provider = providers.find((p) => p.id === value.provider_id);
+                return provider?.name || "";
+              }
+              return value.org || "";
+            }
+          }
+        }
+      })
+    ] : []),
 
     table.column({
       accessor: (model) => model,
@@ -114,35 +161,72 @@
         return createRender(ModelActions, { model: item.value, type: "completionModel" });
       }
     })
-  ]);
+  ];
 
-  function createOrgFilter(org: string | null | undefined) {
+  $: viewModel = table.createViewModel(columns);
+
+  // For tenant models: group by provider_id
+  // For global models: group by org
+  function createGroupFilter(groupKey: string) {
     return function (model: CompletionModel) {
-      return model.org === org;
+      if (tenantModelsEnabled) {
+        // Tenant models: filter by provider_id
+        return model.provider_id === groupKey;
+      } else {
+        // Global models: filter by org
+        return model.org === groupKey;
+      }
     };
   }
 
-  function listOrgs(models: CompletionModel[]): string[] {
-    const uniqueOrgs = new Set<string>();
-    for (const model of models) {
-      if (model.org) uniqueOrgs.add(model.org);
+  function listGroups(models: CompletionModel[]): Array<{ key: string; name: string }> {
+    if (tenantModelsEnabled) {
+      // Group by provider_id for tenant models
+      const uniqueProviders = new Set<string>();
+      for (const model of models) {
+        if (model.provider_id) uniqueProviders.add(model.provider_id);
+      }
+      return Array.from(uniqueProviders).map(providerId => {
+        const provider = providers.find(p => p.id === providerId);
+        return {
+          key: providerId,
+          name: provider?.name || "Unknown Provider"
+        };
+      });
+    } else {
+      // Group by org for global models
+      const uniqueOrgs = new Set<string>();
+      for (const model of models) {
+        if (model.org) uniqueOrgs.add(model.org);
+      }
+      return Array.from(uniqueOrgs).map(org => ({
+        key: org,
+        name: org
+      }));
     }
-    return Array.from(uniqueOrgs);
   }
 
   /**
-   * Get the credential provider ID for a given org.
-   * Uses the credential_provider field from the backend (authoritative source).
+   * Get the credential provider ID for a given group.
+   * For tenant models, returns the provider's credential type.
+   * For global models, returns the model's credential_provider field.
    */
-  function getProviderIdForOrg(org: string): string | undefined {
-    const model = completionModels.find((m) => m.org === org);
-    return model?.credential_provider;
+  function getProviderIdForGroup(groupKey: string): string | undefined {
+    if (tenantModelsEnabled) {
+      // For tenant models, get provider's type
+      const provider = providers.find(p => p.id === groupKey);
+      return provider?.type;
+    } else {
+      // For global models, use credential_provider from model
+      const model = completionModels.find((m) => m.org === groupKey);
+      return model?.credential_provider;
+    }
   }
 
-  function getCredentialForProvider(provider: string) {
+  function getCredentialForGroup(groupKey: string, groupName: string) {
     if (!credentials) return undefined;
 
-    const providerId = getProviderIdForOrg(provider);
+    const providerId = getProviderIdForGroup(groupKey);
     if (!providerId) return undefined;
 
     const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
@@ -153,25 +237,22 @@
     };
   }
 
-  $: uniqueOrgs = listOrgs(completionModels);
-  $: table.update(completionModels);
-</script>
+  $: groups = listGroups(filteredModels);
+  $: table.update(filteredModels);</script>
 
-<div>
-  <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
-    {#each uniqueOrgs as provider (provider)}
-      {@const providerId = getProviderIdForOrg(provider)}
-      <Table.Group filterFn={createOrgFilter(provider)} title={provider}>
-        <svelte:fragment slot="title-suffix">
-          {#if browser && tenantCredentialsEnabled && providerId}
-            <ProviderCredentialIcon
-              provider={providerId}
-              displayName={provider}
-              credential={getCredentialForProvider(provider)}
-            />
-          {/if}
-        </svelte:fragment>
-      </Table.Group>
-    {/each}
-  </Table.Root>
-</div>
+<Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
+  {#each groups as group (group.key)}
+    {@const providerId = getProviderIdForGroup(group.key)}
+    <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
+      <svelte:fragment slot="title-suffix">
+        {#if browser && tenantCredentialsEnabled && providerId}
+          <ProviderCredentialIcon
+            provider={providerId}
+            displayName={group.name}
+            credential={getCredentialForGroup(group.key, group.name)}
+          />
+        {/if}
+      </svelte:fragment>
+    </Table.Group>
+  {/each}
+</Table.Root>

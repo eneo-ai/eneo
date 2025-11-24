@@ -12,6 +12,9 @@ from intric.assistants.api.assistant_router import router as assistants_router
 from intric.completion_models.presentation.completion_models_router import (
     router as completion_models_router,
 )
+from intric.completion_models.presentation.tenant_completion_models_router import (
+    router as tenant_completion_models_router,
+)
 from intric.conversations.conversations_router import router as conversations_router
 from intric.crawler.crawl_run_router import router as crawl_run_router
 from intric.dashboard.api.dashboard_router import router as dashboard_router
@@ -80,6 +83,9 @@ from intric.tenants.presentation.tenant_federation_router import (
 )
 from intric.authentication.federation_router import router as federation_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
+from intric.model_providers.presentation.model_provider_router import (
+    router as model_providers_router,
+)
 
 router = APIRouter()
 
@@ -113,6 +119,16 @@ router.include_router(
     transcription_models_router,
     prefix="/transcription-models",
     tags=["transcription-models"],
+)
+router.include_router(
+    model_providers_router,
+    prefix="/admin/model-providers",
+    tags=["admin", "model-providers"],
+)
+router.include_router(
+    tenant_completion_models_router,
+    prefix="/admin/tenant-models/completion",
+    tags=["admin", "tenant-models"],
 )
 router.include_router(files_router, prefix="/files", tags=["files"])
 router.include_router(icons_router, prefix="/icons", tags=["icons"])

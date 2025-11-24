@@ -36,22 +36,25 @@ class SettingService:
             tenant_id=self.user.tenant_id
         )
 
-        # Get tenant_credentials_enabled from global config
+        # Get global config flags
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
+        tenant_models_enabled = app_settings.tenant_models_enabled
 
         # Handle case when user has no settings record yet
         if settings is None:
             return SettingsPublic(
                 chatbot_widget={},
                 using_templates=using_templates,
-                tenant_credentials_enabled=tenant_credentials_enabled
+                tenant_credentials_enabled=tenant_credentials_enabled,
+                tenant_models_enabled=tenant_models_enabled
             )
 
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget or {},
             using_templates=using_templates,
-            tenant_credentials_enabled=tenant_credentials_enabled
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            tenant_models_enabled=tenant_models_enabled
         )
 
     async def update_settings(self, settings: SettingsPublic):
@@ -107,12 +110,14 @@ class SettingService:
             f"Templates successfully toggled to {enabled} for tenant {self.user.tenant_id}"
         )
 
-        # Get tenant_credentials_enabled from global config
+        # Get global config flags
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
+        tenant_models_enabled = app_settings.tenant_models_enabled
 
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=enabled,  # Use the value we just set, not a re-query
-            tenant_credentials_enabled=tenant_credentials_enabled
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            tenant_models_enabled=tenant_models_enabled
         )

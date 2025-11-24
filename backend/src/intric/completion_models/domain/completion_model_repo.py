@@ -26,6 +26,10 @@ class CompletionModelRepository:
         self.user = user
 
     async def all(self, with_deprecated: bool = False):
+        from intric.main.config import get_settings
+        app_settings = get_settings()
+        tenant_models_enabled = app_settings.tenant_models_enabled
+
         stmt = (
             sa.select(CompletionModels, CompletionModelSettings)
             .outerjoin(
@@ -40,6 +44,16 @@ class CompletionModelRepository:
                 selectinload(CompletionModelSettings.security_classification).options(
                     selectinload(SecurityClassificationDBModel.tenant)
                 ),
+            )
+            .where(
+                # When tenant_models_enabled, return both global and tenant models
+                # This allows existing assistants with global models to continue working
+                # UI filtering happens at the presentation layer
+                sa.or_(
+                    CompletionModels.tenant_id.is_(None),
+                    CompletionModels.tenant_id == self.user.tenant_id
+                ) if tenant_models_enabled
+                else CompletionModels.tenant_id.is_(None)
             )
             .order_by(
                 CompletionModels.org,
@@ -64,6 +78,8 @@ class CompletionModelRepository:
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["CompletionModel"]:
+        # When fetching by ID, return ANY model (global or tenant) that the user can access
+        # This ensures existing assistants continue working when tenant_models_enabled is toggled
         stmt = (
             sa.select(CompletionModels, CompletionModelSettings)
             .outerjoin(
@@ -79,7 +95,14 @@ class CompletionModelRepository:
                     selectinload(SecurityClassificationDBModel.tenant)
                 ),
             )
-            .where(CompletionModels.id == model_id)
+            .where(
+                CompletionModels.id == model_id,
+                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
+                sa.or_(
+                    CompletionModels.tenant_id.is_(None),
+                    CompletionModels.tenant_id == self.user.tenant_id
+                )
+            )
         )
 
         result = await self.session.execute(stmt)

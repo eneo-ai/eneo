@@ -265,26 +265,31 @@ class Settings(BaseSettings):
     # Tenant credential management
     tenant_credentials_enabled: bool = False
 
+    # Tenant model management (requires encryption_key when enabled)
+    tenant_models_enabled: bool = False
+
     @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
-        
+
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
+        - TENANT_MODELS_ENABLED=true (tenant-specific model provider credentials)
         - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
         - Worker/crawler HTTP authentication
         """
         encryption_required = (
-            self.tenant_credentials_enabled or 
+            self.tenant_credentials_enabled or
+            self.tenant_models_enabled or
             self.federation_per_tenant_enabled
         )
-        
+
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
                 logging.error(
-                    "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true "
-                    "or FEDERATION_PER_TENANT_ENABLED=true.\n"
+                    "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true, "
+                    "TENANT_MODELS_ENABLED=true, or FEDERATION_PER_TENANT_ENABLED=true.\n"
                     "Generate key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)

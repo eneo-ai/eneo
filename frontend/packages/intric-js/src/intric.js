@@ -28,6 +28,8 @@ import { initSecurityClassifications } from "./endpoints/security-classification
 import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
 import { initIcons } from "./endpoints/icons";
+import { initModelProviders } from "./endpoints/model-providers";
+import { initTenantModels } from "./endpoints/tenant-models";
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -70,6 +72,8 @@ export function createIntric(args) {
     settings: initSettings(client),
     credentials: initCredentials(client),
     icons: initIcons(client),
+    modelProviders: initModelProviders(client),
+    tenantModels: initTenantModels(client),
     client
   };
 }

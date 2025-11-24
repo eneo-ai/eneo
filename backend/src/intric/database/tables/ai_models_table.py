@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
@@ -31,6 +31,21 @@ class CompletionModels(BasePublic):
     reasoning: Mapped[bool] = mapped_column(server_default="False")
     base_url: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
+
+    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            name="ck_completion_models_tenant_provider",
+        ),
+    )
 
 
 class CompletionModelSettings(BaseCrossReference):
@@ -64,6 +79,21 @@ class TranscriptionModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     base_url: Mapped[str] = mapped_column()
+
+    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            name="ck_transcription_models_tenant_provider",
+        ),
+    )
 
 
 class TranscriptionModelSettings(BaseCrossReference):
@@ -100,6 +130,21 @@ class EmbeddingModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
+
+    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            name="ck_embedding_models_tenant_provider",
+        ),
+    )
 
 
 class EmbeddingModelSettings(BaseCrossReference):
