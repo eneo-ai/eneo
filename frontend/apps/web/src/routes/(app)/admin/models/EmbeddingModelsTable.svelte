@@ -13,13 +13,22 @@
     default as ModelLabels,
     getLabels
   } from "$lib/features/ai-models/components/ModelLabels.svelte";
-  import { modelOrgs } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
   import ModelActions from "./ModelActions.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
+  import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { browser } from "$app/environment";
 
   export let embeddingModels: EmbeddingModel[];
+  export let credentials:
+    | {
+        provider: string;
+        masked_key: string;
+        config: Record<string, any>;
+      }[]
+    | undefined = undefined;
+  export let tenantCredentialsEnabled: boolean = false;
   const table = Table.createWithResource(embeddingModels);
 
   const viewModel = table.createViewModel([
@@ -110,11 +119,54 @@
     };
   }
 
+  function listOrgs(models: EmbeddingModel[]): string[] {
+    const uniqueOrgs = new Set<string>();
+    for (const model of models) {
+      if (model.org) uniqueOrgs.add(model.org);
+    }
+    return Array.from(uniqueOrgs);
+  }
+
+  /**
+   * Get the credential provider ID for a given org.
+   * Uses the credential_provider field from the backend (authoritative source).
+   */
+  function getProviderIdForOrg(org: string): string | undefined {
+    const model = embeddingModels.find((m) => m.org === org);
+    return model?.credential_provider;
+  }
+
+  function getCredentialForProvider(provider: string) {
+    if (!credentials) return undefined;
+
+    const providerId = getProviderIdForOrg(provider);
+    if (!providerId) return undefined;
+
+    const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
+    if (!cred) return undefined;
+    return {
+      masked_key: cred.masked_key,
+      config: cred.config
+    };
+  }
+
+  $: uniqueOrgs = listOrgs(embeddingModels);
   $: table.update(embeddingModels);
 </script>
 
 <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
-  {#each Object.entries(modelOrgs) as [org] (org)}
-    <Table.Group filterFn={createOrgFilter(org)} title={org} />
+  {#each uniqueOrgs as provider (provider)}
+    {@const providerId = getProviderIdForOrg(provider)}
+    <Table.Group filterFn={createOrgFilter(provider)} title={provider}>
+      <svelte:fragment slot="title-suffix">
+        {#if browser && tenantCredentialsEnabled && providerId}
+          <ProviderCredentialIcon
+            provider={providerId}
+            displayName={provider}
+            credential={getCredentialForProvider(provider)}
+          />
+        {/if}
+      </svelte:fragment>
+    </Table.Group>
   {/each}
 </Table.Root>

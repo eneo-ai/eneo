@@ -1,8 +1,11 @@
-from typing import TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.main.exceptions import NotFoundException
 from intric.main.models import ModelId
+from intric.tenants.masking import mask_api_key
+from intric.tenants.provider_field_config import validate_provider_credentials
 from intric.tenants.tenant import (
     TenantBase,
     TenantInDB,
@@ -73,3 +76,215 @@ class TenantService:
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         return await self.repo.add_modules(list_of_module_ids, tenant_id)
+
+    async def set_credential(
+        self,
+        tenant_id: UUID,
+        provider: str,
+        api_key: str,
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        deployment_name: str | None = None,
+        strict_mode: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Set or update tenant API credentials for a specific provider.
+
+        Args:
+            tenant_id: UUID of the tenant
+            provider: LLM provider name
+            api_key: API key for the provider
+            endpoint: Optional endpoint (required for some providers)
+            api_version: Optional API version (required for some providers)
+            deployment_name: Optional deployment name (required for some providers)
+            strict_mode: Whether tenant_credentials_enabled (strict mode)
+
+        Returns:
+            Dict containing:
+                - tenant_id: UUID
+                - provider: str
+                - masked_key: str
+                - set_at: datetime
+
+        Raises:
+            NotFoundException: If tenant not found
+            ValueError: If validation fails
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        # Create a simple validation object
+        class CredentialData:
+            def __init__(self, api_key, endpoint, api_version, deployment_name):
+                self.api_key = api_key
+                self.endpoint = endpoint
+                self.api_version = api_version
+                self.deployment_name = deployment_name
+
+        credential_data = CredentialData(api_key, endpoint, api_version, deployment_name)
+
+        # Validate provider-specific fields
+        validation_errors = validate_provider_credentials(
+            provider, credential_data, strict_mode
+        )
+
+        if validation_errors:
+            raise ValueError(
+                f"Credential validation failed for provider '{provider}': "
+                + "; ".join(validation_errors)
+            )
+
+        # Build credential dict
+        credential: dict[str, Any] = {"api_key": api_key}
+
+        if endpoint:
+            credential["endpoint"] = endpoint
+        if api_version:
+            credential["api_version"] = api_version
+        if deployment_name:
+            credential["deployment_name"] = deployment_name
+
+        # Update credential and retrieve latest tenant snapshot
+        updated_tenant = await self.repo.update_api_credential(
+            tenant_id=tenant_id,
+            provider=provider,
+            credential=credential,
+        )
+
+        # Extract timestamp from stored credential
+        provider_key = provider.lower()
+        stored_credential = (
+            updated_tenant.api_credentials.get(provider_key, {})
+            if updated_tenant and updated_tenant.api_credentials
+            else {}
+        )
+
+        timestamp_raw = (
+            stored_credential.get("set_at")
+            if isinstance(stored_credential, dict)
+            else None
+        )
+
+        try:
+            set_at = (
+                datetime.fromisoformat(timestamp_raw)
+                if timestamp_raw
+                else datetime.now(timezone.utc)
+            )
+            if set_at.tzinfo is None:
+                set_at = set_at.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            set_at = datetime.now(timezone.utc)
+
+        masked_key = mask_api_key(api_key)
+
+        return {
+            "tenant_id": tenant_id,
+            "provider": provider,
+            "masked_key": masked_key,
+            "set_at": set_at,
+        }
+
+    async def delete_credential(
+        self,
+        tenant_id: UUID,
+        provider: str,
+    ) -> dict[str, Any]:
+        """
+        Delete tenant API credentials for a specific provider.
+
+        Args:
+            tenant_id: UUID of the tenant
+            provider: LLM provider name
+
+        Returns:
+            Dict containing:
+                - tenant_id: UUID
+                - provider: str
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        # Delete credential
+        await self.repo.delete_api_credential(tenant_id=tenant_id, provider=provider)
+
+        return {
+            "tenant_id": tenant_id,
+            "provider": provider,
+        }
+
+    async def list_credentials(
+        self,
+        tenant_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """
+        List all configured API credentials for a tenant.
+
+        Returns masked keys, encryption status, and provider-specific configuration
+        (without sensitive data).
+
+        Args:
+            tenant_id: UUID of the tenant
+
+        Returns:
+            List of credential info dicts containing:
+                - provider: str
+                - masked_key: str
+                - configured_at: datetime
+                - encryption_status: str ("encrypted" or "plaintext")
+                - config: dict (provider-specific fields excluding sensitive data)
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        # Get credentials with metadata (masked keys + encryption status)
+        credentials_metadata = await self.repo.get_api_credentials_with_metadata(
+            tenant_id
+        )
+
+        # Build credential info list
+        credentials: list[dict[str, Any]] = []
+        tenant_credentials = tenant.api_credentials or {}
+
+        for provider, metadata in credentials_metadata.items():
+            credential_data = tenant_credentials.get(provider, {})
+            config: dict[str, Any] = {}
+            configured_at: datetime = tenant.updated_at
+
+            if isinstance(credential_data, dict):
+                # Extract config (all fields except sensitive ones)
+                config = {
+                    k: v
+                    for k, v in credential_data.items()
+                    if k not in {"api_key", "encrypted_at", "set_at"}
+                }
+
+                # Extract timestamp
+                timestamp_candidate = metadata.get("set_at") or credential_data.get("set_at")
+                if not timestamp_candidate:
+                    timestamp_candidate = credential_data.get("encrypted_at")
+
+                if isinstance(timestamp_candidate, str):
+                    try:
+                        configured_at = datetime.fromisoformat(timestamp_candidate)
+                    except ValueError:
+                        configured_at = tenant.updated_at
+
+            credentials.append({
+                "provider": provider,
+                "masked_key": metadata["masked_key"],
+                "configured_at": configured_at,
+                "encryption_status": metadata["encryption_status"],
+                "config": config,
+            })
+
+        return credentials

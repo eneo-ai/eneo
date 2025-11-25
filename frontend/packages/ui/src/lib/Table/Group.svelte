@@ -85,20 +85,23 @@
       {#if title}
         <tr>
           <td colspan="99" class={tableCell({ groupHeader: true })}>
-            <Button
-              on:click={() => ($open = !$open)}
-              padding="icon-leading"
-              class="font-mono font-medium"
-            >
-              <div class="flex w-full gap-2">
-                <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
-                <span>{title}</span>
-              </div>
-            </Button>
+            <div class="flex w-full items-center justify-between">
+              <Button
+                on:click={() => ($open = !$open)}
+                padding="icon-leading"
+                class="font-mono font-medium"
+              >
+                <div class="flex items-center gap-2">
+                  <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+                  <span>{title}</span>
+                </div>
+              </Button>
+              <slot name="title-suffix" />
+            </div>
           </td>
         </tr>
       {/if}
-      {#if $open}
+      {#if $open && $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
             <tr {...rowAttrs} class="hover:bg-hover-dimmer relative h-16">
@@ -130,20 +133,21 @@
     </tbody>
   {:else}
     {#if title}
-      <div class="!border-b-default flex border-b pt-4 pb-2 !pl-2.5">
+      <div class="!border-b-default flex w-full items-center justify-between border-b pt-4 pb-2 !pl-2.5 pr-4">
         <Button
           on:click={() => ($open = !$open)}
           padding="icon-leading"
           class="font-mono font-medium"
         >
-          <div class="flex w-full gap-2">
+          <div class="flex items-center gap-2">
             <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
             <span>{title}</span>
           </div>
         </Button>
+        <slot name="title-suffix" />
       </div>
     {/if}
-    {#if $open}
+    {#if $open && $filteredRows.length > 0}
       <div style="column-gap: {gapX}rem; row-gap: {gapY}rem;" class={cardLayout({ layout })}>
         {#each $filteredRows as row (row.id)}
           {@const cell = getCardCell(row)}

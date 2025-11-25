@@ -27,6 +27,7 @@ import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
 import { initSettings } from "./endpoints/settings";
 import { initAudit } from "./endpoints/audit";
+import { initCredentials } from "./endpoints/credentials";
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -68,6 +69,7 @@ export function createIntric(args) {
     securityClassifications: initSecurityClassifications(client),
     settings: initSettings(client),
     audit: initAudit(client),
+    credentials: initCredentials(client),
     client
   };
 }

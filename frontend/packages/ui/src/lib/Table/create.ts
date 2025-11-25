@@ -191,7 +191,9 @@ export function createWithStore<Resource extends Record<string, unknown>>(
     },
     createViewModel(columns: Column<Resource, Plugins<Resource>>[]) {
       const dataCols = table.createColumns(columns);
-      return table.createViewModel(dataCols);
+      return table.createViewModel(dataCols, {
+        rowDataId: (item) => String((item as any).id)
+      });
     }
   };
 }

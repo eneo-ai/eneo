@@ -1,8 +1,10 @@
 """
-Tests for AIModel credential-based locking when TENANT_CREDENTIALS_ENABLED=true.
+Tests for AIModel credential status tracking when TENANT_CREDENTIALS_ENABLED=true.
 
-This test suite validates that models are properly locked in the UI when tenant
-credentials are missing in multi-tenant mode.
+This test suite validates that the lock_reason property correctly reports missing
+credentials for UI display purposes. Note that missing credentials no longer block
+model access (is_locked=False), but the UI can show warnings based on lock_reason.
+Runtime credential validation still occurs when models are actually used.
 """
 
 from datetime import datetime
@@ -45,11 +47,12 @@ class MockUser:
 
 
 class TestModelCredentialLocking:
-    """Test suite for model credential-based locking."""
+    """Test suite for model credential status tracking via lock_reason."""
 
-    def test_openai_model_locked_when_no_credentials_in_strict_mode(self, monkeypatch):
+    def test_openai_model_shows_credential_warning_when_no_credentials(self, monkeypatch):
         """
-        OpenAI model should be locked when tenant has no credentials in strict mode.
+        OpenAI model should report missing credentials via lock_reason for UI display,
+        but should not be locked (is_locked=False) to allow space initialization.
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
@@ -83,15 +86,15 @@ class TestModelCredentialLocking:
         )
 
         # Assert
-        assert model.is_locked is True
-        assert model.lock_reason == "credentials"
-        assert model.can_access is False
+        assert model.is_locked is False  # Not locked - allows space initialization
+        assert model.lock_reason == "credentials"  # UI can show warning
+        assert model.can_access is False  # Can't access because not org_enabled
 
-    def test_openai_model_unlocked_when_credentials_exist_in_strict_mode(
+    def test_openai_model_no_warning_when_credentials_exist(
         self, monkeypatch
     ):
         """
-        OpenAI model should be unlocked when tenant has OpenAI credentials.
+        OpenAI model should have no lock_reason when tenant has OpenAI credentials.
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
@@ -132,7 +135,8 @@ class TestModelCredentialLocking:
 
     def test_claude_model_uses_anthropic_provider_name(self, monkeypatch):
         """
-        Claude models (ModelFamily.CLAUDE) should check for 'anthropic' credentials.
+        Claude models (ModelFamily.CLAUDE) should check for 'anthropic' credentials
+        when reporting lock_reason for UI display.
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
@@ -165,14 +169,14 @@ class TestModelCredentialLocking:
             reasoning=False,
         )
 
-        # Assert - should be locked because no 'anthropic' credentials
-        assert model.is_locked is True
+        # Assert - not locked, but shows credential warning for UI
+        assert model.is_locked is False
         assert model.lock_reason == "credentials"
 
         # Now add anthropic credentials
         tenant.api_credentials["anthropic"] = {"api_key": "sk-ant-test"}
 
-        # Should now be unlocked
+        # Should have no warning
         assert model.is_locked is False
         assert model.lock_reason is None
 
@@ -254,9 +258,9 @@ class TestModelCredentialLocking:
         assert model.is_locked is True
         assert model.lock_reason == "module"  # Not "credentials"
 
-    def test_azure_model_locked_without_azure_credentials(self, monkeypatch):
+    def test_azure_model_shows_warning_without_azure_credentials(self, monkeypatch):
         """
-        Azure models should check for 'azure' credentials.
+        Azure models should check for 'azure' credentials and report via lock_reason.
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
@@ -291,8 +295,8 @@ class TestModelCredentialLocking:
             reasoning=False,
         )
 
-        # Assert - locked because no 'azure' credentials
-        assert model.is_locked is True
+        # Assert - not locked, but shows credential warning for UI
+        assert model.is_locked is False
         assert model.lock_reason == "credentials"
 
         # Add azure credentials
@@ -303,13 +307,13 @@ class TestModelCredentialLocking:
             "deployment_name": "gpt-4",
         }
 
-        # Should now be unlocked
+        # Should have no warning
         assert model.is_locked is False
         assert model.lock_reason is None
 
     def test_all_provider_families_credential_mapping(self, monkeypatch):
         """
-        Test that all provider families map to correct credential keys.
+        Test that all provider families map to correct credential keys for lock_reason.
         """
         settings = MockSettings(tenant_credentials_enabled=True)
 
@@ -326,11 +330,11 @@ class TestModelCredentialLocking:
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
 
         for family, expected_provider in test_cases:
-            # Model without credentials - should be locked
+            # Model without credentials - should show credential warning
             tenant_no_creds = MockTenant(api_credentials={})
             user_no_creds = MockUser(tenant=tenant_no_creds)
 
-            model_locked = CompletionModel(
+            model_no_creds = CompletionModel(
                 user=user_no_creds,
                 id=uuid4(),
                 created_at=datetime.now(),
@@ -354,16 +358,16 @@ class TestModelCredentialLocking:
                 reasoning=False,
             )
 
-            assert model_locked.is_locked is True, f"{family.value} should be locked without credentials"
-            assert model_locked.lock_reason == "credentials", f"{family.value} lock reason should be credentials"
+            assert model_no_creds.is_locked is False, f"{family.value} should not be locked (missing credentials only)"
+            assert model_no_creds.lock_reason == "credentials", f"{family.value} lock_reason should be credentials"
 
-            # Model with credentials - should be unlocked
+            # Model with credentials - should have no warning
             tenant_with_creds = MockTenant(
                 api_credentials={expected_provider: {"api_key": "test-key"}}
             )
             user_with_creds = MockUser(tenant=tenant_with_creds)
 
-            model_unlocked = CompletionModel(
+            model_with_creds = CompletionModel(
                 user=user_with_creds,
                 id=uuid4(),
                 created_at=datetime.now(),
@@ -387,5 +391,5 @@ class TestModelCredentialLocking:
                 reasoning=False,
             )
 
-            assert model_unlocked.is_locked is False, f"{family.value} should be unlocked with credentials"
-            assert model_unlocked.lock_reason is None, f"{family.value} should have no lock reason"
+            assert model_with_creds.is_locked is False, f"{family.value} should not be locked with credentials"
+            assert model_with_creds.lock_reason is None, f"{family.value} should have no lock_reason"
