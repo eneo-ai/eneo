@@ -40,6 +40,7 @@ class InfoBlobs(BasePublic):
     integration_knowledge_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE")
     )
+    sharepoint_item_id: Mapped[Optional[str]] = mapped_column()
 
     # relationships
     group: Mapped[CollectionsTable] = relationship()

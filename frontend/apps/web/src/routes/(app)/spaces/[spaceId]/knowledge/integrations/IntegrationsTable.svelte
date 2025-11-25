@@ -3,11 +3,18 @@
   import { createRender } from "svelte-headless-table";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
-  import type { GroupSparse } from "@intric/intric-js";
+  import type { GroupSparse, IntegrationKnowledge } from "@intric/intric-js";
   import IntegrationNameCell from "./IntegrationNameCell.svelte";
+  import IntegrationSyncStatusCell from "./IntegrationSyncStatusCell.svelte";
   import IntegrationActions from "./IntegrationActions.svelte";
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
+
+  interface Props {
+    onSelectIntegrationForSyncHistory?: (integration: IntegrationKnowledge) => void;
+  }
+
+  let { onSelectIntegrationForSyncHistory }: Props = $props();
 
   const {
     state: { currentSpace }
@@ -15,12 +22,13 @@
 
   const knowledge = derived(
     currentSpace,
-    ($currentSpace) => $currentSpace.knowledge.integrationKnowledge
+    ($currentSpace) => $currentSpace.knowledge.integrationKnowledge.filter(k => k.space_id === $currentSpace.id)
   );
 
   const embeddingModels = derived(currentSpace, ($currentSpace) => {
     const modelsInSpace = $currentSpace.embedding_models.map((model) => model.id);
-    const modelsInIntegrationKnowledge = $currentSpace.knowledge.integrationKnowledge.map(
+    const ownedKnowledge = $currentSpace.knowledge.integrationKnowledge.filter(k => k.space_id === $currentSpace.id);
+    const modelsInIntegrationKnowledge = ownedKnowledge.map(
       (collection) => {
         return {
           ...collection.embedding_model,
@@ -53,12 +61,30 @@
     }),
 
     table.column({
+      header: m.status(),
+      accessor: (item) => item,
+      cell: (item) => {
+        return createRender(IntegrationSyncStatusCell, {
+          knowledge: item.value,
+          onShowSyncHistory: () => {
+            if (onSelectIntegrationForSyncHistory) {
+              onSelectIntegrationForSyncHistory(item.value);
+            }
+          }
+        });
+      }
+    }),
+
+    table.column({
       accessor: (item) => item,
       header: m.link(),
       cell: (item) => {
+        const labelKey = integrationData[item.value.integration_type].previewLinkLabel;
+        // Get the translated label from the message system
+        const translatedLabel = m[labelKey as keyof typeof m]?.() ?? labelKey;
         return createRender(Table.ButtonCell, {
           link: item.value.url ?? "",
-          label: integrationData[item.value.integration_type].previewLinkLabel,
+          label: translatedLabel,
           linkIsExternal: true
         });
       }

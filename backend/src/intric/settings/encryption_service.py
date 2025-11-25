@@ -150,3 +150,22 @@ class EncryptionService:
     def is_encrypted(self, value: str) -> bool:
         """Check if value is encrypted with versioned format."""
         return value.startswith(self.VERSION_PREFIX) if value else False
+
+    @staticmethod
+    def mask_secret(secret: str, visible_chars: int = 4) -> str:
+        """Mask a secret for display purposes.
+
+        Args:
+            secret: The secret to mask
+            visible_chars: Number of characters to show at the end
+
+        Returns:
+            Masked secret (e.g., "********1234")
+        """
+        if not secret:
+            return ""
+
+        if len(secret) <= visible_chars:
+            return "*" * len(secret)
+
+        return "*" * (len(secret) - visible_chars) + secret[-visible_chars:]

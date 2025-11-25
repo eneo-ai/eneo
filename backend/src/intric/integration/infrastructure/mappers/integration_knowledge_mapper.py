@@ -25,6 +25,14 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
             "user_integration_id": entity.user_integration.id,
             "embedding_model_id": entity.embedding_model.id,
             "size": entity.size,
+            "last_synced_at": entity.last_synced_at,
+            "last_sync_summary": entity.last_sync_summary,
+            "site_id": entity.site_id,
+            "sharepoint_subscription_id": entity.sharepoint_subscription_id,
+            "delta_token": entity.delta_token,
+            "folder_id": entity.folder_id,
+            "folder_path": entity.folder_path,
+            "selected_item_type": entity.selected_item_type,
         }
 
     def to_entity(
