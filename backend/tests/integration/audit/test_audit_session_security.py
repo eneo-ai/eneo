@@ -12,26 +12,43 @@ from intric.audit.infrastructure.audit_session_service import AuditSessionServic
 @pytest.mark.asyncio
 async def test_environment_aware_cookies_in_development(client, auth_headers, monkeypatch):
     """Test that cookies use relaxed settings in development/testing mode."""
-    # Create audit access session
-    response = await client.post(
-        "/api/v1/audit/access-session",
-        json={
-            "category": "security_incident",
-            "description": "Testing cookie settings in dev environment"
-        },
-        headers=auth_headers
-    )
+    from intric.main.config import get_settings
 
-    assert response.status_code == 200
-    assert "audit_session_id" in response.cookies
+    # Enable testing mode for this test to verify dev-mode cookie settings
+    settings = get_settings()
+    original_testing = settings.testing
+    monkeypatch.setattr(settings, "testing", True)
 
-    # Verify cookie settings for dev/test environment
-    cookie = response.cookies["audit_session_id"]
-    # In test mode, secure should be False and samesite should be "lax"
-    assert cookie.get("secure") is None or cookie.get("secure") == False
-    assert cookie.get("samesite") == "lax" or cookie.get("samesite") is None
-    assert cookie.get("httponly") is True
-    assert cookie.get("path") == "/api/v1"
+    try:
+        # Create audit access session
+        response = await client.post(
+            "/api/v1/audit/access-session",
+            json={
+                "category": "security_incident",
+                "description": "Testing cookie settings in dev environment"
+            },
+            headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        assert "audit_session_id" in response.cookies
+
+        # Verify cookie settings from Set-Cookie header
+        # httpx cookies object doesn't expose attributes, so inspect the raw header
+        set_cookie_header = response.headers.get("set-cookie", "").lower()
+
+        # In test mode:
+        # - httponly should always be present
+        # - path should be /api/v1
+        assert "httponly" in set_cookie_header, "Cookie should be httponly"
+        assert "path=/api/v1" in set_cookie_header, "Cookie path should be /api/v1"
+        # In dev mode, samesite should be lax
+        assert "samesite=lax" in set_cookie_header, "Cookie should use samesite=lax in dev mode"
+        # In dev mode, secure should not be set (allows HTTP)
+        assert "; secure" not in set_cookie_header, "Cookie should not be secure in dev mode"
+    finally:
+        # Restore original setting
+        monkeypatch.setattr(settings, "testing", original_testing)
 
 
 @pytest.mark.asyncio
@@ -69,6 +86,8 @@ async def test_redis_error_handling_on_session_validation(client, auth_headers):
         headers=auth_headers
     )
     assert create_response.status_code == 200
+    # Extract cookie as dict to avoid domain/path matching issues
+    cookies = {"audit_session_id": create_response.cookies.get("audit_session_id")}
 
     # Now simulate Redis failure on validation
     with patch("intric.audit.infrastructure.audit_session_service.get_redis") as mock_redis:
@@ -79,7 +98,7 @@ async def test_redis_error_handling_on_session_validation(client, auth_headers):
         response = await client.get(
             "/api/v1/audit/logs",
             headers=auth_headers,
-            cookies=create_response.cookies
+            cookies=cookies
         )
 
         assert response.status_code == 503
@@ -116,7 +135,7 @@ async def test_rate_limiting_enforces_5_sessions_per_hour(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_session_creation_is_audit_logged(client, auth_headers, db_session, test_tenant):
+async def test_session_creation_is_audit_logged(client, auth_headers):
     """Test that session creation events are logged to audit logs."""
     # Create audit access session
     response = await client.post(
@@ -129,30 +148,28 @@ async def test_session_creation_is_audit_logged(client, auth_headers, db_session
     )
 
     assert response.status_code == 200
+    # Extract cookie as dict to avoid domain/path matching issues
+    cookies = {"audit_session_id": response.cookies.get("audit_session_id")}
 
-    # Query audit logs to verify the session creation was logged
-    async with db_session() as session:
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-        from intric.audit.application.audit_service import AuditService
+    # Query audit logs via API to verify the session creation was logged
+    # (Using API ensures we see committed data within the same request context)
+    logs_response = await client.get(
+        "/api/v1/audit/logs?action=audit_session_created",
+        headers=auth_headers,
+        cookies=cookies
+    )
 
-        repo = AuditLogRepositoryImpl(session)
-        service = AuditService(repo)
+    assert logs_response.status_code == 200
+    data = logs_response.json()
 
-        logs, count = await service.get_logs(
-            tenant_id=test_tenant.id,
-            action=ActionType.AUDIT_SESSION_CREATED,
-            page=1,
-            page_size=10
-        )
+    assert data["total_count"] > 0, "Session creation should be audit logged"
+    assert any(log["action"] == "audit_session_created" for log in data["logs"])
 
-        assert count > 0, "Session creation should be audit logged"
-        assert any(log.action == ActionType.AUDIT_SESSION_CREATED for log in logs)
-
-        # Verify metadata contains session details
-        session_log = next(log for log in logs if log.action == ActionType.AUDIT_SESSION_CREATED)
-        assert "session_id" in session_log.metadata
-        assert session_log.metadata["justification"]["category"] == "security_incident"
-        assert "rate_limit" in session_log.metadata
+    # Verify metadata contains session details
+    session_log = next(log for log in data["logs"] if log["action"] == "audit_session_created")
+    assert "session_id" in session_log["metadata"]
+    assert session_log["metadata"]["justification"]["category"] == "security_incident"
+    assert "rate_limit" in session_log["metadata"]
 
 
 @pytest.mark.asyncio
@@ -169,7 +186,8 @@ async def test_session_extension_on_active_use(client, auth_headers):
     )
 
     assert create_response.status_code == 200
-    cookies = create_response.cookies
+    # Extract cookie as dict to avoid domain/path matching issues
+    cookies = {"audit_session_id": create_response.cookies.get("audit_session_id")}
 
     # Mock Redis to track extend_session calls
     with patch.object(AuditSessionService, "extend_session") as mock_extend:
@@ -201,18 +219,21 @@ async def test_tenant_isolation_in_sessions(client, auth_headers, test_user_2, t
     )
 
     assert user1_response.status_code == 200
-    user1_session_cookie = user1_response.cookies
+    # Extract cookie as dict to avoid domain/path matching issues
+    user1_session_cookies = {
+        "audit_session_id": user1_response.cookies.get("audit_session_id")
+    }
 
     # User 2 (different tenant) tries to use user 1's session
     # This should fail due to tenant isolation validation
     auth_headers_user2 = {
-        "Authorization": f"Bearer {test_user_2.token}"  # Different tenant
+        "X-API-Key": test_user_2.token  # Different tenant - using API key
     }
 
     response = await client.get(
         "/api/v1/audit/logs",
         headers=auth_headers_user2,
-        cookies=user1_session_cookie  # Using user 1's session cookie
+        cookies=user1_session_cookies  # Using user 1's session cookie
     )
 
     # Should be rejected due to tenant mismatch
@@ -234,6 +255,8 @@ async def test_session_expiration_returns_401(client, auth_headers):
     )
 
     assert create_response.status_code == 200
+    # Extract cookie as dict to avoid domain/path matching issues
+    cookies = {"audit_session_id": create_response.cookies.get("audit_session_id")}
 
     # Simulate expired session by clearing Redis
     with patch.object(AuditSessionService, "validate_session") as mock_validate:
@@ -242,7 +265,7 @@ async def test_session_expiration_returns_401(client, auth_headers):
         response = await client.get(
             "/api/v1/audit/logs",
             headers=auth_headers,
-            cookies=create_response.cookies
+            cookies=cookies
         )
 
         assert response.status_code == 401

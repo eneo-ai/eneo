@@ -60,9 +60,17 @@ async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
         )
         results = await session.execute(query)
         for user_id, email, username in results:
+            # Handle NULL email safely - use username, email prefix, or "Unknown"
+            if username:
+                display_name = username
+            elif email:
+                display_name = email.split('@')[0]
+            else:
+                display_name = "Unknown"
+
             user_map[user_id] = {
                 "email": email,
-                "name": username or email.split('@')[0]  # Use username or email prefix
+                "name": display_name,
             }
 
     # Convert logs to response models and enrich with actor info
@@ -583,6 +591,12 @@ async def export_audit_logs(
     from_date: Optional[datetime] = Query(None, description="Filter from date"),
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
     format: str = Query("csv", description="Export format: csv or json"),
+    max_records: Optional[int] = Query(
+        None,
+        ge=1,
+        le=100000,
+        description="Maximum records to export (default: 50000, max: 100000)"
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
@@ -594,10 +608,16 @@ async def export_audit_logs(
 
     Use user_id for GDPR Article 15 data subject access requests.
 
+    Memory Protection:
+    - Default limit: 50,000 records (configurable via max_records parameter)
+    - Response includes X-Records-Truncated header if limit was hit
+    - Response includes X-Total-Records header with total matching count
+
     Requires: Authentication (JWT token or API key via X-API-Key header)
     Requires: Admin permissions
     Security: Only exports logs for the authenticated user's tenant
     """
+    from intric.audit.domain.constants import MAX_EXPORT_RECORDS_DEFAULT
     from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
@@ -611,6 +631,9 @@ async def export_audit_logs(
     export_format = format.lower().strip()
     if export_format not in ["csv", "json"]:
         export_format = "csv"  # Default to CSV for invalid formats
+
+    # Apply default export limit if not specified
+    effective_max_records = max_records if max_records is not None else MAX_EXPORT_RECORDS_DEFAULT
 
     # Build comprehensive metadata for compliance tracking
     metadata = {
@@ -660,7 +683,14 @@ async def export_audit_logs(
             page_size=1,  # Just get count
         )
 
-    metadata["total_records_exported"] = export_count
+    # Determine if truncation will occur
+    is_truncated = export_count > effective_max_records
+    records_exported = min(export_count, effective_max_records)
+
+    metadata["total_records_exported"] = records_exported
+    metadata["total_records_matching"] = export_count
+    metadata["was_truncated"] = is_truncated
+    metadata["max_records_limit"] = effective_max_records
 
     # Build concise description for export
     if user_id:
@@ -670,6 +700,9 @@ async def export_audit_logs(
         if filters_applied:
             description += ", filtered"
         description += ")"
+
+    if is_truncated:
+        description += f" [truncated to {effective_max_records} of {export_count}]"
 
     # Log the export with comprehensive metadata
     await audit_service.log(
@@ -685,6 +718,13 @@ async def export_audit_logs(
     # Generate timestamp for filename
     timestamp = datetime.now().isoformat().split('T')[0]
 
+    # Build response headers for truncation info
+    response_headers = {
+        "X-Total-Records": str(export_count),
+        "X-Records-Truncated": "true" if is_truncated else "false",
+        "X-Max-Records-Limit": str(effective_max_records),
+    }
+
     if export_format == "json":
         content = await audit_service.export_jsonl(
             tenant_id=current_user.tenant_id,
@@ -693,13 +733,13 @@ async def export_audit_logs(
             action=action,
             from_date=from_date,
             to_date=to_date,
+            max_records=effective_max_records,
         )
+        response_headers["Content-Disposition"] = f"attachment; filename=audit_logs_{timestamp}.jsonl"
         return Response(
             content=content,
             media_type="application/x-ndjson",
-            headers={
-                "Content-Disposition": f"attachment; filename=audit_logs_{timestamp}.jsonl"
-            },
+            headers=response_headers,
         )
     else:
         content = await audit_service.export_csv(
@@ -709,13 +749,13 @@ async def export_audit_logs(
             action=action,
             from_date=from_date,
             to_date=to_date,
+            max_records=effective_max_records,
         )
+        response_headers["Content-Disposition"] = f"attachment; filename=audit_logs_{timestamp}.csv"
         return Response(
             content=content,
             media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename=audit_logs_{timestamp}.csv"
-            },
+            headers=response_headers,
         )
 
 

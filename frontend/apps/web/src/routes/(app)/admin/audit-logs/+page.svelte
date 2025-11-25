@@ -175,6 +175,7 @@
       transcription_model_updated: m.audit_action_transcription_model_updated,
       audit_log_viewed: m.audit_action_audit_log_viewed,
       audit_log_exported: m.audit_action_audit_log_exported,
+      audit_session_created: m.audit_action_audit_session_created,
     };
     return labels[action]?.() || action;
   }
@@ -245,6 +246,7 @@
     { value: "retention_policy_applied" as ActionType, label: m.audit_action_retention_policy_applied(), category: "system" },
     { value: "audit_log_viewed" as ActionType, label: m.audit_action_audit_log_viewed(), category: "system" },
     { value: "audit_log_exported" as ActionType, label: m.audit_action_audit_log_exported(), category: "system" },
+    { value: "audit_session_created" as ActionType, label: m.audit_action_audit_session_created(), category: "system" },
   ]);
 
   // Create store for Select component
@@ -779,6 +781,7 @@
             <div class="space-y-3">
               <div class="rounded-lg bg-primary p-4 space-y-3">
                 <div class="max-w-xl">
+                  <!-- svelte-ignore a11y_label_has_associated_control -->
                   <label class="text-xs font-semibold text-default block mb-2">{m.audit_retention_period_label()}</label>
                   <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
                     <div class="flex items-center gap-2">
@@ -969,6 +972,7 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <!-- Date Range Filter -->
               <div>
+                <!-- svelte-ignore a11y_label_has_associated_control -->
                 <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_date_range()}</label>
                 <div class="h-10">
                   <Input.DateRange bind:value={dateRange} class="w-full h-full" />
@@ -977,6 +981,7 @@
 
               <!-- Action Type Filter -->
               <div>
+                <!-- svelte-ignore a11y_label_has_associated_control -->
                 <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_action_type()}</label>
                 <Select.Root customStore={actionStore}>
                   <Select.Trigger class="w-full h-10 text-sm truncate" placeholder="Select action type" />
@@ -990,6 +995,7 @@
 
               <!-- User Filter -->
               <div class="min-w-0">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
                 <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
                 <div class="relative h-10">
                   <Input.Text

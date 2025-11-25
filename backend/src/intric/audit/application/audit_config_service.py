@@ -167,6 +167,7 @@ class AuditConfigService:
         Update audit category configurations for a tenant.
 
         Performs upsert for each category and invalidates Redis cache immediately.
+        Also invalidates action-level caches to prevent stale cached values.
 
         Args:
             tenant_id: Tenant identifier
@@ -179,13 +180,31 @@ class AuditConfigService:
             # Update database
             await self.repository.update(tenant_id, update.category, update.enabled)
 
-            # Invalidate cache immediately (critical for multi-worker consistency)
+            # Invalidate category cache immediately (critical for multi-worker consistency)
             cache_key = self._cache_key(tenant_id, update.category)
             try:
                 await self.redis.delete(cache_key)
-                logger.info(f"Invalidated cache for {cache_key}")
+                logger.info(f"Invalidated category cache for {cache_key}")
             except Exception as e:
-                logger.warning(f"Failed to invalidate cache for {cache_key}: {e}")
+                logger.warning(f"Failed to invalidate category cache for {cache_key}: {e}")
+
+            # Also invalidate all action caches for this category
+            # This prevents stale action-level cache from returning wrong values
+            actions_in_category = [
+                action for action, cat in CATEGORY_MAPPINGS.items()
+                if cat == update.category
+            ]
+            for action in actions_in_category:
+                action_cache_key = self._action_cache_key(tenant_id, action)
+                try:
+                    await self.redis.delete(action_cache_key)
+                except Exception as e:
+                    logger.warning(f"Failed to invalidate action cache {action_cache_key}: {e}")
+
+            if actions_in_category:
+                logger.info(
+                    f"Invalidated {len(actions_in_category)} action caches for category {update.category}"
+                )
 
         # Return updated config
         return await self.get_config(tenant_id)

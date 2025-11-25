@@ -14,8 +14,12 @@ MAX_PAGE_SIZE = 1000
 EXPORT_BATCH_SIZE = 1000
 """Batch size for streaming CSV/JSONL exports to prevent memory exhaustion."""
 
-MAX_EXPORT_RECORDS_DEFAULT = None
-"""Default maximum records for export (None = unlimited with streaming)."""
+MAX_EXPORT_RECORDS_DEFAULT = 50000
+"""Default maximum records for export.
+
+This prevents memory exhaustion and ensures reasonable response times.
+Can be overridden via max_records query parameter.
+"""
 
 # Retention policy constraints
 MIN_RETENTION_DAYS = 1
