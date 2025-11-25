@@ -14,6 +14,7 @@ from intric.main.container.container import Container
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.config import SETTINGS
+from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.crawl_dependencies.crawl_models import (
     CrawlTask,
 )
@@ -540,16 +541,24 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # We only enforce max_age here, not max_retries.
             # This prevents jobs from being abandoned just because they're waiting for a slot.
 
+            # Get per-tenant max age setting (falls back to env default)
+            tenant_crawler_settings = tenant.crawler_settings if tenant else None
+            max_age_seconds = get_crawler_setting(
+                "crawl_job_max_age_seconds",
+                tenant_crawler_settings,
+                default=settings.crawl_job_max_age_seconds,
+            )
+
             # Update stats with is_actual_failure=False (this is a busy signal, not a real failure)
             failure_count, job_age = await _update_job_retry_stats(
                 job_id=job_id,
                 redis_client=redis_client,
                 is_actual_failure=False,  # CRITICAL: Don't count busy waits as failures
-                max_age_seconds=settings.crawl_job_max_age_seconds,
+                max_age_seconds=max_age_seconds,
             )
 
             # Check if max job age exceeded (ONLY age check for busy signals)
-            if job_age > settings.crawl_job_max_age_seconds:
+            if job_age > max_age_seconds:
                 # P0 FIX: Update crawl_run status before abandoning job
                 # Why: Prevents orphaned DB records and provides failure visibility
                 try:
@@ -583,7 +592,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "website_id": str(params.website_id),
                         "url": params.url,
                         "job_age_seconds": job_age,
-                        "max_age_seconds": settings.crawl_job_max_age_seconds,
+                        "max_age_seconds": max_age_seconds,
                         "failure_count": failure_count,
                         "failure_reason": "max_age_exceeded_busy",
                         "metric_name": "crawl.job.abandoned.max_age",
@@ -592,12 +601,19 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 raise RuntimeError(
                     f"Crawl job {job_id} abandoned after {job_age:.0f}s "
-                    f"(max: {settings.crawl_job_max_age_seconds}s) - still waiting for concurrency slot"
+                    f"(max: {max_age_seconds}s) - still waiting for concurrency slot"
                 )
 
             # Calculate shorter backoff for busy signals (we're just waiting for a slot, not a failure)
             # Use random jitter to prevent thundering herd when slots open up
             retry_delay = random.uniform(10, 30)  # Short random delay for busy waits
+
+            # Get per-tenant concurrency limit for logging
+            concurrency_limit = get_crawler_setting(
+                "tenant_worker_concurrency_limit",
+                tenant_crawler_settings,
+                default=settings.tenant_worker_concurrency_limit,
+            )
 
             logger.warning(
                 "Tenant concurrency limit reached, requeueing crawl (busy wait)",
@@ -607,7 +623,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "tenant_slug": tenant.slug,
                     "website_id": str(params.website_id),
                     "url": params.url,
-                    "max_concurrent": settings.tenant_worker_concurrency_limit,
+                    "max_concurrent": concurrency_limit,
                     "failure_count": failure_count,
                     "retry_delay_seconds": retry_delay,
                     "job_age_seconds": job_age,
@@ -748,7 +764,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 process_start = time.time()
                 # Get job repo for heartbeat updates
                 job_repo = container.job_repo()
-                heartbeat_interval_seconds = settings.crawl_heartbeat_interval_seconds
+                # Get per-tenant heartbeat interval (falls back to env default)
+                current_tenant = container.tenant()
+                heartbeat_interval_seconds = get_crawler_setting(
+                    "crawl_heartbeat_interval_seconds",
+                    current_tenant.crawler_settings if current_tenant else None,
+                    default=settings.crawl_heartbeat_interval_seconds,
+                )
                 last_heartbeat_time = time.time()
 
                 # Import for suicide check

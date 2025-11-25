@@ -57,6 +57,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
+    crawler_settings: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("slug")
     @classmethod
@@ -163,6 +164,29 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                 raise ValueError("allowed_domains must be a list")
             if not all(isinstance(d, str) for d in v["allowed_domains"]):
                 raise ValueError("allowed_domains must contain only strings")
+
+        return v
+
+    @field_validator("crawler_settings")
+    @classmethod
+    def validate_crawler_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate JSONB structure for crawler settings.
+
+        All fields are optional - only validates types and ranges for provided fields.
+        Missing fields will fall back to environment variable defaults at runtime.
+
+        Uses CRAWLER_SETTING_SPECS from crawler_settings_helper.py as single source of truth.
+        """
+        if not v:
+            return {}
+
+        # Import here to avoid circular dependency
+        from intric.tenants.crawler_settings_helper import validate_crawler_setting
+
+        for key, value in v.items():
+            errors = validate_crawler_setting(key, value)
+            if errors:
+                raise ValueError(errors[0])
 
         return v
 

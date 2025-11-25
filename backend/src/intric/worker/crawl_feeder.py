@@ -24,6 +24,7 @@ import redis.asyncio as aioredis
 from intric.jobs.job_manager import job_manager
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.tenants.crawler_settings_helper import get_crawler_setting
 
 logger = get_logger(__name__)
 
@@ -127,8 +128,43 @@ class CrawlFeeder:
         "return current\n"
     )
 
+    async def _get_tenant_crawler_settings(
+        self, tenant_id: UUID
+    ) -> dict | None:
+        """Fetch tenant's crawler_settings from the database.
+
+        Why: Feeder needs per-tenant settings for concurrency limits and batch sizes.
+        Uses own session (not container) since feeder is a long-running service.
+
+        Args:
+            tenant_id: Tenant identifier
+
+        Returns:
+            Dict of crawler_settings or None if tenant not found
+        """
+        from sqlalchemy import select
+
+        from intric.database.database import sessionmanager
+        from intric.database.tables.tenant_table import Tenants
+
+        try:
+            async with sessionmanager.session() as session:
+                stmt = select(Tenants.crawler_settings).where(Tenants.id == tenant_id)
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                return row if row else {}
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch tenant crawler settings",
+                extra={"tenant_id": str(tenant_id), "error": str(exc)},
+            )
+            return None
+
     async def _try_acquire_slot(
-        self, tenant_id: UUID, redis_client: aioredis.Redis
+        self,
+        tenant_id: UUID,
+        redis_client: aioredis.Redis,
+        tenant_crawler_settings: dict | None = None,
     ) -> bool:
         """Atomically try to acquire a concurrency slot for this tenant.
 
@@ -138,12 +174,17 @@ class CrawlFeeder:
         Args:
             tenant_id: Tenant identifier
             redis_client: Redis connection
+            tenant_crawler_settings: Optional tenant-specific settings for concurrency limit
 
         Returns:
             True if slot acquired, False if at capacity
         """
         key = f"tenant:{tenant_id}:active_jobs"
-        max_concurrent = self.settings.tenant_worker_concurrency_limit
+        max_concurrent = get_crawler_setting(
+            "tenant_worker_concurrency_limit",
+            tenant_crawler_settings,
+            default=self.settings.tenant_worker_concurrency_limit,
+        )
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
 
         try:
@@ -214,7 +255,10 @@ class CrawlFeeder:
             )
 
     async def _get_available_capacity(
-        self, tenant_id: UUID, redis_client: aioredis.Redis
+        self,
+        tenant_id: UUID,
+        redis_client: aioredis.Redis,
+        tenant_crawler_settings: dict | None = None,
     ) -> int:
         """Check available crawl capacity for this tenant (read-only).
 
@@ -224,6 +268,7 @@ class CrawlFeeder:
         Args:
             tenant_id: Tenant identifier
             redis_client: Redis connection
+            tenant_crawler_settings: Optional tenant-specific settings for concurrency limit
 
         Returns:
             Number of jobs that can be enqueued (0 if at capacity)
@@ -234,7 +279,11 @@ class CrawlFeeder:
 
         try:
             active_jobs_bytes = await redis_client.get(key)
-            max_concurrent = self.settings.tenant_worker_concurrency_limit
+            max_concurrent = get_crawler_setting(
+                "tenant_worker_concurrency_limit",
+                tenant_crawler_settings,
+                default=self.settings.tenant_worker_concurrency_limit,
+            )
 
             # Allow capacity check even if key doesn't exist (will be 0 active)
             # Why: _try_acquire_slot() handles actual atomic acquisition
@@ -511,15 +560,26 @@ class CrawlFeeder:
             tenant_id: Tenant identifier
             redis_client: Redis connection
         """
+        # Fetch tenant-specific crawler settings (supports per-tenant overrides)
+        # Why: Different tenants may have different concurrency limits and batch sizes
+        tenant_crawler_settings = await self._get_tenant_crawler_settings(tenant_id)
+
         # Check available capacity (read-only hint for batch sizing)
-        available = await self._get_available_capacity(tenant_id, redis_client)
+        available = await self._get_available_capacity(
+            tenant_id, redis_client, tenant_crawler_settings
+        )
 
         if available <= 0:
             return  # No capacity, skip this tenant
 
         # Get pending jobs (limit to available capacity and batch size)
         # Why: Batch size prevents enqueueing too many at once
-        limit = min(available, self.settings.crawl_feeder_batch_size)
+        batch_size = get_crawler_setting(
+            "crawl_feeder_batch_size",
+            tenant_crawler_settings,
+            default=self.settings.crawl_feeder_batch_size,
+        )
+        limit = min(available, batch_size)
         pending_jobs = await self._get_pending_crawls(tenant_id, redis_client, limit)
 
         if not pending_jobs:
@@ -556,7 +616,9 @@ class CrawlFeeder:
 
             # FIX: Atomically acquire slot BEFORE enqueueing
             # Why: Eliminates race condition between feeder GET and worker INCR
-            slot_acquired = await self._try_acquire_slot(tenant_id, redis_client)
+            slot_acquired = await self._try_acquire_slot(
+                tenant_id, redis_client, tenant_crawler_settings
+            )
 
             if not slot_acquired:
                 # At capacity - stop processing this tenant
