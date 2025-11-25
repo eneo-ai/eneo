@@ -5,6 +5,9 @@ import magic
 import pptx
 from docx2python import docx2python
 from pypdf import PdfReader
+from pypdf.errors import PdfStreamError, PdfReadError
+
+from intric.main.exceptions import BadRequestException
 
 
 class MimeTypesBase(str, Enum):
@@ -57,10 +60,16 @@ class TextExtractor:
 
     @staticmethod
     def extract_from_pdf(filepath: Path) -> str:
-        reader = PdfReader(filepath)
-        extracted_text = " ".join([page.extract_text() for page in reader.pages])
-        sanitized_text = TextSanitizer.sanitize(extracted_text)
-        return sanitized_text
+        try:
+            reader = PdfReader(filepath)
+            extracted_text = " ".join([page.extract_text() for page in reader.pages])
+            sanitized_text = TextSanitizer.sanitize(extracted_text)
+            return sanitized_text
+        except (PdfStreamError, PdfReadError) as e:
+            raise BadRequestException(
+                f"Cannot extract text from PDF: The file appears to be corrupted, malformed, or not a valid PDF. "
+                f"Please check the file and try again. Error: {str(e)}"
+            )
 
     @staticmethod
     def extract_from_docx(filepath: Path) -> str:
