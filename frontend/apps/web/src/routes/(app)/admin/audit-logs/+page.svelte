@@ -18,6 +18,7 @@
   import { IconCheck } from "@intric/icons/check";
   import { Clock, CircleCheck, CircleX, Calendar, Shield, FileText, Settings } from "lucide-svelte";
   import { slide, fade } from "svelte/transition";
+  import { onDestroy } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
@@ -95,6 +96,7 @@
   let debounceTimer: ReturnType<typeof setTimeout>;
   let userSearchTimer: ReturnType<typeof setTimeout>;
   let isExporting = $state(false);
+  let isInitializingFromUrl = false;  // Flag to prevent auto-apply during URL initialization
 
   // Retention policy state - initialize from server data
   let retentionDays = $state<number>(data.retentionPolicy?.retention_days ?? 365);
@@ -264,6 +266,9 @@
     const action = url.searchParams.get("action");
     const actorId = url.searchParams.get("actor_id");
 
+    // Set flag to prevent auto-apply effect from triggering during URL initialization
+    isInitializingFromUrl = true;
+
     // Set date range from URL
     if (fromDate && toDate) {
       try {
@@ -304,6 +309,11 @@
       selectedUser = null;
       userSearchQuery = "";
     }
+
+    // Reset flag after the effect cycle completes
+    queueMicrotask(() => {
+      isInitializingFromUrl = false;
+    });
   });
 
   // Date preset functions
@@ -570,6 +580,9 @@
 
   // Auto-apply filters on any filter change (consolidated for performance)
   $effect(() => {
+    // Skip auto-apply when initializing from URL to prevent redirect loops
+    if (isInitializingFromUrl) return;
+
     // Track filter changes and apply with debounce
     const hasDateFilter = dateRange?.start && dateRange?.end;
     const hasActionFilter = selectedAction !== undefined && selectedAction !== "all";
@@ -581,6 +594,12 @@
         applyFilters();
       }, 300);
     }
+  });
+
+  // Cleanup timers on component unmount to prevent navigation issues
+  onDestroy(() => {
+    clearTimeout(debounceTimer);
+    clearTimeout(userSearchTimer);
   });
 
   // Count active filters
@@ -673,7 +692,7 @@
   <Page.Main>
     {#if !(activeTab === 'logs' && !hasSession)}
     <!-- Description with better spacing and visual treatment -->
-    <div class="mb-6 px-4 sm:px-6 lg:px-8">
+    <div class="mb-6 pt-4 px-4 sm:px-6 lg:px-8">
       <p class="text-sm text-muted leading-relaxed">
         {m.audit_logs_description()}
       </p>
@@ -714,7 +733,7 @@
           <!-- Access Justification Form -->
           <AccessJustificationForm onSubmit={handleJustificationSubmit} />
         {:else}
-        <div class="px-4 sm:px-6 lg:px-8">
+        <div class="px-4 pb-8 sm:px-6 lg:px-8">
         <!-- Retention Policy Section -->
         <div class="mb-8 rounded-xl border border-default bg-subtle p-5">
           <div class="flex items-center justify-between mb-3">
@@ -1243,7 +1262,7 @@
         {/if} <!-- End of justification check -->
       {:else if activeTab === 'config'}
         <!-- Configuration Tab Content -->
-        <div class="px-4 sm:px-6 lg:px-8">
+        <div class="px-4 pb-8 sm:px-6 lg:px-8">
           <AuditConfigTab />
         </div>
       {/if}

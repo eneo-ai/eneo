@@ -1,7 +1,6 @@
 <script lang="ts">
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconKey } from "@intric/icons/key";
-  import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";
@@ -30,11 +29,6 @@
       icon: IconKey,
       label: m.api_keys(),
       url: "/account/api-keys"
-    },
-    {
-      icon: IconHistory,
-      label: "Audit Logs",
-      url: "/account/audit"
     }
   ];
 </script>

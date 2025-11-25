@@ -113,9 +113,9 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="px-4 sm:px-6 lg:px-8">
-  <div class="max-w-2xl mx-auto py-12">
-    <div class="rounded-xl border border-default bg-subtle p-8 shadow-sm">
+<div class="px-4 sm:px-6 lg:px-8 flex items-center justify-center min-h-[60vh]">
+  <div class="w-full max-w-xl py-12">
+    <div class="rounded-2xl border border-default bg-primary p-8 shadow-lg ring-1 ring-black/5 dark:ring-white/5">
       <!-- Header -->
       <div class="flex items-start gap-4 mb-6">
         <div class="rounded-lg bg-accent-default/15 p-2.5">
