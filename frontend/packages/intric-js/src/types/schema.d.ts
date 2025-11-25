@@ -316,10 +316,6 @@ export interface paths {
     /** Transfer Assistant To Space */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
   };
-  "/api/v1/assistants/{id}/prompts/": {
-    /** Get Prompts */
-    get: operations["get_prompts_api_v1_assistants__id__prompts__get"];
-  };
   "/api/v1/assistants/{id}/publish/": {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
@@ -1548,13 +1544,6 @@ export interface paths {
      */
     patch: operations["update_action_config_api_v1_audit_config_actions_patch"];
   };
-  "/api/v1/audit/session-debug": {
-    /**
-     * Debug Session
-     * @description Debug endpoint to check if audit session cookie is being received.
-     */
-    get: operations["debug_session_api_v1_audit_session_debug_get"];
-  };
   "/api/v1/audit/access-session/rate-limit": {
     /**
      * Reset Rate Limit
@@ -1635,6 +1624,11 @@ export interface paths {
      * - json: JSON Lines format (one JSON object per line, for large exports)
      *
      * Use user_id for GDPR Article 15 data subject access requests.
+     *
+     * Memory Protection:
+     * - Default limit: 50,000 records (configurable via max_records parameter)
+     * - Response includes X-Records-Truncated header if limit was hit
+     * - Response includes X-Total-Records header with total matching count
      *
      * Requires: Authentication (JWT token or API key via X-API-Key header)
      * Requires: Admin permissions
@@ -11088,28 +11082,6 @@ export interface operations {
       };
     };
   };
-  /** Get Prompts */
-  get_prompts_api_v1_assistants__id__prompts__get: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["PaginatedResponse_PromptSparse_"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   /** Publish Assistant */
   publish_assistant_api_v1_assistants__id__publish__post: {
     parameters: {
@@ -16495,20 +16467,6 @@ export interface operations {
     };
   };
   /**
-   * Debug Session
-   * @description Debug endpoint to check if audit session cookie is being received.
-   */
-  debug_session_api_v1_audit_session_debug_get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  /**
    * Reset Rate Limit
    * @description Admin utility: Reset audit session rate limit for current user.
    *
@@ -16669,6 +16627,11 @@ export interface operations {
    *
    * Use user_id for GDPR Article 15 data subject access requests.
    *
+   * Memory Protection:
+   * - Default limit: 50,000 records (configurable via max_records parameter)
+   * - Response includes X-Records-Truncated header if limit was hit
+   * - Response includes X-Total-Records header with total matching count
+   *
    * Requires: Authentication (JWT token or API key via X-API-Key header)
    * Requires: Admin permissions
    * Security: Only exports logs for the authenticated user's tenant
@@ -16688,6 +16651,8 @@ export interface operations {
         to_date?: string | null;
         /** @description Export format: csv or json */
         format?: string;
+        /** @description Maximum records to export (default: 50000, max: 100000) */
+        max_records?: number | null;
       };
     };
     responses: {

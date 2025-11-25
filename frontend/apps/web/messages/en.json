@@ -1502,6 +1502,7 @@
   "audit_action_transcription_model_updated": "Transcription Model Updated",
   "audit_action_audit_log_viewed": "Audit Logs Viewed",
   "audit_action_audit_log_exported": "Audit Logs Exported",
+  "audit_action_audit_session_created": "Audit Session Created",
   "audit_clear_filter": "Clear {count} filter(s)",
   "audit_showing_results": "Showing {shown} of {total} audit logs",
   "audit_page_info": "(Page {current} of {total})",

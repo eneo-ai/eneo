@@ -87,7 +87,7 @@ class AuditSessionService:
             session_id: The session UUID
 
         Returns:
-            Session data dict or None if session doesn't exist or expired
+            Session data dict or None if session doesn't exist, expired, or corrupted
 
         Raises:
             HTTPException: 503 Service Unavailable if Redis is down
@@ -97,7 +97,20 @@ class AuditSessionService:
             if not data:
                 return None
 
-            return json.loads(data.decode("utf-8"))
+            parsed = json.loads(data.decode("utf-8"))
+
+            # Validate that parsed data is a dict with required keys
+            if not isinstance(parsed, dict):
+                logger.warning(
+                    f"Corrupted session data: expected dict, got {type(parsed).__name__}"
+                )
+                return None
+
+            return parsed
+        except json.JSONDecodeError as e:
+            # Handle corrupted JSON in Redis (should not happen in normal operation)
+            logger.warning(f"Corrupted session JSON for {session_id}: {e}")
+            return None
         except redis.exceptions.RedisError as e:
             logger.error(f"Redis error retrieving audit session: {e}", exc_info=True)
             raise HTTPException(
@@ -128,15 +141,31 @@ class AuditSessionService:
         if not session:
             return None
 
-        # Verify user owns this session (constant-time comparison for defense-in-depth)
-        if not secrets.compare_digest(session["user_id"], str(user_id)):
-            return None
+        try:
+            # Verify required keys exist before accessing them
+            session_user_id = session.get("user_id")
+            session_tenant_id = session.get("tenant_id")
 
-        # Verify tenant isolation (constant-time comparison for defense-in-depth)
-        if not secrets.compare_digest(session["tenant_id"], str(tenant_id)):
-            return None
+            if session_user_id is None or session_tenant_id is None:
+                logger.warning(
+                    f"Session {session_id} missing required keys: "
+                    f"user_id={session_user_id is not None}, tenant_id={session_tenant_id is not None}"
+                )
+                return None
 
-        return session
+            # Verify user owns this session (constant-time comparison for defense-in-depth)
+            if not secrets.compare_digest(str(session_user_id), str(user_id)):
+                return None
+
+            # Verify tenant isolation (constant-time comparison for defense-in-depth)
+            if not secrets.compare_digest(str(session_tenant_id), str(tenant_id)):
+                return None
+
+            return session
+        except (TypeError, AttributeError) as e:
+            # Handle unexpected data types in session
+            logger.warning(f"Invalid session data type for {session_id}: {e}")
+            return None
 
     async def revoke_session(self, session_id: str) -> None:
         """

@@ -135,6 +135,7 @@
       <form onsubmit={(e) => { e.preventDefault(); submitJustification(); }} class="space-y-5">
         <!-- Category Select -->
         <div>
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="block text-sm font-semibold text-default mb-2">
             {m.audit_access_reason_label()} <span class="text-red-600 dark:text-red-400">*</span>
           </label>

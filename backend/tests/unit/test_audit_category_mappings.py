@@ -143,6 +143,7 @@ class TestCategoryMappings:
     def test_audit_access_mapping(self):
         """Verify audit access action types are correctly mapped."""
         audit_actions = [
+            ActionType.AUDIT_SESSION_CREATED,
             ActionType.AUDIT_LOG_VIEWED,
             ActionType.AUDIT_LOG_EXPORTED,
         ]
@@ -265,7 +266,7 @@ class TestCategoryDistribution:
             'file_operations': 2,
             'integration_events': 11,
             'system_actions': 3,
-            'audit_access': 2,
+            'audit_access': 3,  # Includes AUDIT_SESSION_CREATED
         }
 
         for category, expected_count in expected_counts.items():

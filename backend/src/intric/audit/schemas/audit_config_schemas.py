@@ -1,6 +1,22 @@
 """Pydantic schemas for audit category configuration."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from intric.audit.domain.action_types import ActionType
+
+# Valid category names - must match CATEGORY_DESCRIPTIONS in category_mappings.py
+VALID_CATEGORIES = frozenset({
+    "admin_actions",
+    "user_actions",
+    "security_events",
+    "file_operations",
+    "integration_events",
+    "system_actions",
+    "audit_access",
+})
+
+# Valid action names - derived from ActionType enum
+VALID_ACTIONS = frozenset(action.value for action in ActionType)
 
 
 class CategoryConfig(BaseModel):
@@ -34,6 +50,17 @@ class CategoryUpdate(BaseModel):
     """
     category: str = Field(..., description="Category name to update")
     enabled: bool = Field(..., description="New enabled state")
+
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: str) -> str:
+        """Validate that category name is one of the allowed values."""
+        if v not in VALID_CATEGORIES:
+            valid_list = ", ".join(sorted(VALID_CATEGORIES))
+            raise ValueError(
+                f"Invalid category '{v}'. Must be one of: {valid_list}"
+            )
+        return v
 
     class Config:
         json_schema_extra = {
@@ -161,6 +188,17 @@ class ActionUpdate(BaseModel):
     """
     action: str = Field(..., description="Action name to update")
     enabled: bool = Field(..., description="New enabled state")
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str) -> str:
+        """Validate that action name is one of the allowed ActionType values."""
+        if v not in VALID_ACTIONS:
+            raise ValueError(
+                f"Invalid action '{v}'. Must be a valid ActionType value. "
+                f"See ActionType enum for valid values."
+            )
+        return v
 
     class Config:
         json_schema_extra = {
