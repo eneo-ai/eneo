@@ -516,7 +516,7 @@ class CrawlFeeder:
                         and_(
                             Jobs.task == "CRAWL",  # Only crawl jobs
                             Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
-                            Jobs.created_at < cutoff_time,
+                            Jobs.updated_at < cutoff_time,
                         )
                     )
                     .values(status=Status.FAILED)
