@@ -11,6 +11,8 @@ from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_log_audit_event_task(db_session, test_tenant, test_user):

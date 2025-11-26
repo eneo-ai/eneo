@@ -3,6 +3,8 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 
+pytestmark = pytest.mark.integration
+
 
 class TestExportAuthentication:
     """Tests for export endpoint authentication."""

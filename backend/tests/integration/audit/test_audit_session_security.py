@@ -7,6 +7,8 @@ import redis.exceptions
 
 from intric.audit.infrastructure.audit_session_service import AuditSessionService
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_environment_aware_cookies_in_development(client, auth_headers, monkeypatch):

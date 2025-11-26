@@ -3,8 +3,11 @@ Integration tests for production bugs found through code review.
 These tests verify API-level behavior and error handling.
 """
 
+import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
+
+pytestmark = pytest.mark.integration
 
 
 class TestRetentionPolicyValidation:

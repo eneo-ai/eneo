@@ -8,6 +8,8 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_audit_logs_requires_authentication(client, test_tenant, test_user, db_session):
