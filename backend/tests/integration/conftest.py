@@ -288,11 +288,19 @@ def override_settings_for_session(test_settings: Settings):
     # Set test settings
     set_settings(test_settings)
 
-    # Reinitialize auth definitions with new settings
-    # This is needed because API_KEY_HEADER and OAUTH2_SCHEME are created at import time
+    # CRITICAL: Mutate the existing API_KEY_HEADER object's internal model.name
+    #
+    # Why mutation instead of replacement?
+    # - API_KEY_HEADER is created at module import time with the original settings
+    # - container.py's _get_container_with_user function captures API_KEY_HEADER
+    #   in its function signature: api_key: str = Security(API_KEY_HEADER)
+    # - Python evaluates default arguments at FUNCTION DEFINITION time, not call time
+    # - So even if we update container_module.API_KEY_HEADER, the function already
+    #   has a reference to the OLD object
+    # - By MUTATING the existing object's model.name attribute, all references
+    #   (including the one captured in the function signature) see the new header name
     import intric.server.dependencies.auth_definitions as auth_defs
-    auth_defs.OAUTH2_SCHEME = auth_defs._get_oauth2_scheme()
-    auth_defs.API_KEY_HEADER = auth_defs._get_api_key_header()
+    auth_defs.API_KEY_HEADER.model.name = test_settings.api_key_header_name
 
     # Verify settings are correct
     print("\n=== Integration Test Setup Verification ===")
@@ -344,6 +352,18 @@ async def setup_database(test_settings: Settings):
         user_email="test@example.com",
         user_password="test_password",
     )
+
+    # Create required feature flags for initial setup
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'audit_logging_enabled',
+            'Global feature flag to enable/disable audit logging',
+            true, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    conn.commit()
+    cursor.close()
 
     conn.close()
 
@@ -431,13 +451,21 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         user_password="test_password",
     )
 
-    # Recreate using_templates feature flag (required for template tests)
+    # Recreate required feature flags
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
         VALUES (gen_random_uuid(), 'using_templates',
             'Enable tenant-scoped template management for Assistants and Apps',
             false, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    # Add audit_logging_enabled feature flag (required for audit tests)
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'audit_logging_enabled',
+            'Global feature flag to enable/disable audit logging',
+            true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
     conn.commit()
@@ -482,9 +510,13 @@ async def app(setup_database):
 async def client(app) -> AsyncGenerator[AsyncClient, None]:
     """
     Create an async HTTP client for testing the FastAPI application.
+
+    Note: base_url uses "test.local" to ensure cookies work correctly.
+    Cookies are set without an explicit domain, so they default to the request host.
+    Using a consistent domain ensures httpx sends cookies on subsequent requests.
     """
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://test.local"
     ) as client:
         yield client
 

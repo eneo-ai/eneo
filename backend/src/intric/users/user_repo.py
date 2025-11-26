@@ -162,12 +162,15 @@ class UsersRepository:
 
         return await self._get_models_from_query(query=query, with_deleted=False)
 
-    async def _get_roles(self, roles: list[ModelId] | None):
+    async def _get_roles(self, roles: list[ModelId] | None, tenant_id: UUID):
         if roles is None:
             return []
 
         roles_ids = [role.id for role in roles]
-        stmt = sa.select(Roles).filter(Roles.id.in_(roles_ids))
+        stmt = sa.select(Roles).filter(
+            Roles.id.in_(roles_ids),
+            Roles.tenant_id == tenant_id
+        )
         roles = await self.session.scalars(stmt)
 
         return roles.all()
@@ -195,7 +198,7 @@ class UsersRepository:
             )
             entry_in_db = await self.delegate.get_record_from_query(query=stmt)
             # TODO should be refactored when we will remove int id field from tables
-            entry_in_db.roles = await self._get_roles(user.roles)
+            entry_in_db.roles = await self._get_roles(user.roles, user.tenant_id)
             entry_in_db.predefined_roles = await self._get_predefined_roles(
                 user.predefined_roles
             )
@@ -222,7 +225,7 @@ class UsersRepository:
 
         # TODO should be refactored when we will remove int id field from tables
         if "roles" in user.model_dump(exclude_unset=True):
-            entry_in_db.roles = await self._get_roles(user.roles)
+            entry_in_db.roles = await self._get_roles(user.roles, entry_in_db.tenant_id)
 
         if "predefined_roles" in user.model_dump(exclude_unset=True):
             entry_in_db.predefined_roles = await self._get_predefined_roles(

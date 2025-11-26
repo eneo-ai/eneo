@@ -26,6 +26,7 @@ async def add_module(
     module: ModuleBase, container: Container = Depends(get_container())
 ):
     module_repo = container.module_repo()
+    # Note: Global module addition is system-level - no tenant-specific audit logging
     return await module_repo.add(module)
 
 
@@ -36,9 +37,41 @@ async def add_module_to_tenant(
     container: Container = Depends(get_container()),
 ):
     """Value is a list of module `id`'s to add to the `tenant_id`."""
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     tenant_service = container.tenant_service()
 
-    return await tenant_service.add_modules(
+    # Add modules to tenant
+    updated_tenant = await tenant_service.add_modules(
         tenant_id=tenant_id, list_of_module_ids=module_ids
     )
+
+    # Audit logging (sysadmin operation)
+    session = container.session()
+    audit_repo = AuditLogRepositoryImpl(session)
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=tenant_id,  # System actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.MODULE_ADDED_TO_TENANT,
+        entity_type=EntityType.MODULE,
+        entity_id=tenant_id,  # Use tenant as entity ID
+        description=f"Sysadmin added {len(module_ids)} module(s) to tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "super_duper_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": updated_tenant.name,
+                "module_count": len(module_ids),
+                "module_ids": [str(m.id) for m in module_ids],
+            },
+        },
+    )
+
+    return updated_tenant

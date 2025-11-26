@@ -20,6 +20,7 @@
 
   // Initialize from server data
   let usingTemplates = $state(data.settings.using_templates);
+  let auditLoggingEnabled = $state(data.settings.audit_logging_enabled);
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -45,6 +46,31 @@
       usingTemplates = previousValue; // Revert on error
     }
   }
+
+  // Handle audit logging toggle change
+  async function handleToggleAuditLogging({ current, next }: { current: boolean; next: boolean }) {
+    console.log(`[Admin] Toggling audit logging from ${current} to ${next}`);
+
+    const previousValue = auditLoggingEnabled;
+    auditLoggingEnabled = next; // Optimistic UI update
+
+    try {
+      const updatedSettings = await intric.settings.updateAuditLogging(next);
+      console.log(`[Admin] Backend returned audit_logging_enabled:`, updatedSettings.audit_logging_enabled);
+
+      // Update from server response
+      auditLoggingEnabled = updatedSettings.audit_logging_enabled;
+
+      // Invalidate all page data to refresh audit logging state
+      await Promise.all([
+        invalidate('admin:layout'),  // Trigger audit config refresh
+        invalidateAll()              // Refresh all other data
+      ]);
+    } catch (error) {
+      console.error("[Admin] Error updating audit logging setting:", error);
+      auditLoggingEnabled = previousValue; // Revert on error
+    }
+  }
 </script>
 
 <svelte:head>
@@ -65,6 +91,9 @@
       <Settings.Group title={m.features()}>
         <Settings.Row title={m.enable_templates()} description={m.enable_templates_description()}>
           <Input.Switch bind:value={usingTemplates} sideEffect={handleToggleTemplates} />
+        </Settings.Row>
+        <Settings.Row title={m.enable_audit_logging()} description={m.enable_audit_logging_description()}>
+          <Input.Switch bind:value={auditLoggingEnabled} sideEffect={handleToggleAuditLogging} />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

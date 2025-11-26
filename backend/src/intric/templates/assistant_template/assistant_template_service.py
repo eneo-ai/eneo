@@ -319,7 +319,7 @@ class AssistantTemplateService:
         template_id: "UUID",
         tenant_id: "UUID",
         user_id: "UUID",
-    ) -> None:
+    ) -> "AssistantTemplate":
         """Soft-delete tenant-scoped template.
 
         Business logic:
@@ -330,6 +330,9 @@ class AssistantTemplateService:
         - Assistants using this template continue to work (FK has ondelete="SET NULL")
 
         Time complexity: O(log n) for ownership check + soft-delete
+
+        Returns:
+            The deleted template object
         """
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
@@ -345,6 +348,8 @@ class AssistantTemplateService:
         result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id, user_id=user_id)
         if not result:
             raise NotFoundException("Template not found")
+
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def rollback_template(

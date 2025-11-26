@@ -16,6 +16,7 @@
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages";
+  import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
 
   export let data;
   const {
@@ -247,6 +248,28 @@
         >
           <SelectBehaviourV2 bind:kwArgs={$update.completion_model_kwargs} isDisabled={false} {aria}
           ></SelectBehaviourV2>
+        </Settings.Row>
+      </Settings.Group>
+
+      <Settings.Group title={m.security_and_privacy()}>
+        <Settings.Row
+          hasChanges={$currentChanges.diff.data_retention_days !== undefined}
+          revertFn={() => {
+            discardChanges("data_retention_days");
+          }}
+          title={m.conversation_retention_title()}
+          description={m.conversation_retention_app_description()}
+          let:labelId
+          let:descriptionId
+        >
+          <RetentionPolicyInput
+            bind:value={$update.data_retention_days}
+            hasChanges={$currentChanges.diff.data_retention_days !== undefined}
+            inheritedDays={$currentSpace.data_retention_days}
+            inheritedFrom="space"
+            {labelId}
+            {descriptionId}
+          />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

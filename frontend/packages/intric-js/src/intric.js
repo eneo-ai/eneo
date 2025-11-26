@@ -26,6 +26,7 @@ import { initIntegrations } from "./endpoints/integrations";
 import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
 import { initSettings } from "./endpoints/settings";
+import { initAudit } from "./endpoints/audit";
 import { initCredentials } from "./endpoints/credentials";
 
 /**
@@ -67,6 +68,7 @@ export function createIntric(args) {
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
     settings: initSettings(client),
+    audit: initAudit(client),
     credentials: initCredentials(client),
     client
   };
