@@ -6,7 +6,7 @@ After bugs are fixed, these tests should pass.
 
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -100,7 +100,7 @@ class TestSessionValidationBugs:
         session_service.redis.get.return_value = b"{}"
 
         # get_session returns the empty dict, but validate_session will crash
-        result = await session_service.get_session("session-123")
+        await session_service.get_session("session-123")
 
         # get_session might succeed (returns {}), but subsequent validate_session will fail
         # This tests the full flow
@@ -162,7 +162,6 @@ class TestGdprExportBugs:
         """
         # This test requires a real database integration test
         # For unit test, we verify the SQL structure handles this correctly
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
         # The key insight: if log_metadata["target"]["id"] doesn't exist,
         # PostgreSQL JSON accessor returns NULL, and NULL == str(user_id) is FALSE
@@ -200,7 +199,6 @@ class TestRetentionServiceBugs:
         The service should raise ValueError for days outside valid range,
         and the route should catch this and return 400 Bad Request.
         """
-        from intric.audit.application.retention_service import RetentionService
 
         # Valid range is 1-2555 days
         # Test behavior with edge cases
@@ -259,7 +257,7 @@ class TestConfigValidationBugs:
         # If schema doesn't validate, this will succeed (bug exists)
         # If schema validates, this will raise ValidationError (bug fixed)
         try:
-            request = AuditConfigUpdateRequest(
+            AuditConfigUpdateRequest(
                 updates=[{"category": "not_a_real_category", "enabled": False}]
             )
             # If we reach here, validation didn't catch invalid category
@@ -285,7 +283,7 @@ class TestConfigValidationBugs:
         from intric.audit.schemas.audit_config_schemas import ActionConfigUpdateRequest
 
         try:
-            request = ActionConfigUpdateRequest(
+            ActionConfigUpdateRequest(
                 updates=[{"action": "fake_action_name", "enabled": False}]
             )
             pytest.fail(

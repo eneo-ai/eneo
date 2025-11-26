@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_debug_api_key_value(admin_user_api_key):
     """Print the actual API key value."""
-    print(f"\n=== DEBUG: API Key Object ===")
+    print("\n=== DEBUG: API Key Object ===")
     print(f"Type: {type(admin_user_api_key)}")
     print(f"Key: {admin_user_api_key.key}")
     print(f"Hashed Key: {admin_user_api_key.hashed_key}")
@@ -16,7 +16,7 @@ async def test_debug_api_key_value(admin_user_api_key):
 @pytest.mark.asyncio
 async def test_debug_auth_headers(auth_headers):
     """Print auth headers."""
-    print(f"\n=== DEBUG: Auth Headers ===")
+    print("\n=== DEBUG: Auth Headers ===")
     print(f"Headers: {auth_headers}")
     assert "X-API-Key" in auth_headers
 
@@ -24,7 +24,7 @@ async def test_debug_auth_headers(auth_headers):
 @pytest.mark.asyncio
 async def test_debug_direct_request(client, admin_user_api_key):
     """Test API key directly without auth_headers fixture."""
-    print(f"\n=== DEBUG: Direct API key test ===")
+    print("\n=== DEBUG: Direct API key test ===")
     print(f"Using key: {admin_user_api_key.key[:20]}...")
     
     response = await client.get(
@@ -39,7 +39,7 @@ async def test_debug_direct_request(client, admin_user_api_key):
 @pytest.mark.asyncio
 async def test_debug_via_auth_headers(client, auth_headers):
     """Test API key via auth_headers fixture."""
-    print(f"\n=== DEBUG: Via auth_headers fixture ===")
+    print("\n=== DEBUG: Via auth_headers fixture ===")
     print(f"Headers: {auth_headers}")
     
     response = await client.get(
@@ -54,7 +54,7 @@ async def test_debug_via_auth_headers(client, auth_headers):
 @pytest.mark.asyncio
 async def test_debug_session_endpoint(client, auth_headers):
     """Test the audit session endpoint directly."""
-    print(f"\n=== DEBUG: Session endpoint test ===")
+    print("\n=== DEBUG: Session endpoint test ===")
     print(f"Headers: {auth_headers}")
     
     response = await client.post(
@@ -83,7 +83,7 @@ async def test_debug_header_name(debug_auth_config):
 @pytest.mark.asyncio
 async def test_debug_full_trace(client, admin_user_api_key, admin_user, db_container):
     """Full trace of what's happening."""
-    print(f"\n=== FULL TRACE ===")
+    print("\n=== FULL TRACE ===")
     print(f"1. Admin user ID: {admin_user.id}")
     print(f"2. Admin user email: {admin_user.email}")
     print(f"3. API key created: {admin_user_api_key.key[:20]}...")
@@ -122,7 +122,7 @@ async def test_debug_api_key_header_extraction(client, admin_user_api_key):
     from intric.server.dependencies.auth_definitions import API_KEY_HEADER
     from intric.main.config import get_settings
     
-    print(f"\n=== API KEY HEADER CONFIGURATION ===")
+    print("\n=== API KEY HEADER CONFIGURATION ===")
     print(f"API_KEY_HEADER.model.name: {API_KEY_HEADER.model.name}")
     print(f"get_settings().api_key_header_name: {get_settings().api_key_header_name}")
     print(f"Test API key: {admin_user_api_key.key[:30]}...")
@@ -155,7 +155,7 @@ async def test_debug_api_key_header_extraction(client, admin_user_api_key):
 @pytest.mark.asyncio
 async def test_debug_user_permissions(admin_user, db_container):
     """Check user permissions and roles."""
-    print(f"\n=== USER PERMISSIONS DEBUG ===")
+    print("\n=== USER PERMISSIONS DEBUG ===")
     print(f"User ID: {admin_user.id}")
     print(f"User email: {admin_user.email}")
     print(f"User roles: {getattr(admin_user, 'roles', 'N/A')}")
@@ -169,7 +169,7 @@ async def test_debug_user_permissions(admin_user, db_container):
     print(f"Has ADMIN permission: {has_admin}")
     
     # List all attributes
-    print(f"\nAll user attributes:")
+    print("\nAll user attributes:")
     for attr in dir(admin_user):
         if not attr.startswith('_'):
             try:
@@ -186,7 +186,7 @@ async def test_debug_authentication_path(client, admin_user_api_key):
     import logging
     logging.getLogger("intric").setLevel(logging.DEBUG)
     
-    print(f"\n=== TRACING AUTHENTICATION ===")
+    print("\n=== TRACING AUTHENTICATION ===")
     print(f"API Key: {admin_user_api_key.key[:30]}...")
     
     # Make request to audit endpoint with more logging
@@ -202,13 +202,12 @@ async def test_debug_authentication_path(client, admin_user_api_key):
 @pytest.mark.asyncio
 async def test_debug_direct_service_call(admin_user_api_key, db_container):
     """Directly call the service to verify auth works."""
-    from intric.authentication.auth_service import AuthService
     
     async with db_container() as container:
         auth_service = container.auth_service()
         
         # Try to get API key directly
-        print(f"\n=== DIRECT SERVICE CALL ===")
+        print("\n=== DIRECT SERVICE CALL ===")
         print(f"Plain key: {admin_user_api_key.key[:30]}...")
         
         key = await auth_service.get_api_key(admin_user_api_key.key)
@@ -219,13 +218,10 @@ async def test_debug_direct_service_call(admin_user_api_key, db_container):
 @pytest.mark.asyncio
 async def test_debug_container_dependencies(client, admin_user_api_key):
     """Check how API key is extracted in different dependencies."""
-    from fastapi.testclient import TestClient
-    from intric.server.dependencies.container import get_container
     from intric.server.dependencies.auth_definitions import API_KEY_HEADER
     from intric.authentication.auth_dependencies import _get_api_key_from_header
-    from starlette.requests import Request
     
-    print(f"\n=== DEPENDENCY ANALYSIS ===")
+    print("\n=== DEPENDENCY ANALYSIS ===")
     print(f"API_KEY_HEADER type: {type(API_KEY_HEADER)}")
     print(f"API_KEY_HEADER.model.name: {API_KEY_HEADER.model.name}")
     print(f"_get_api_key_from_header type: {type(_get_api_key_from_header)}")
@@ -263,12 +259,11 @@ async def test_debug_container_dependencies(client, admin_user_api_key):
 @pytest.mark.asyncio
 async def test_debug_full_container_flow(client, admin_user_api_key):
     """Check full container flow with API key."""
-    from fastapi import FastAPI, Depends, Security
+    from fastapi import FastAPI, Depends
     from intric.server.dependencies.container import get_container
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER, OAUTH2_SCHEME
     from intric.main.container.container import Container
     
-    print(f"\n=== FULL CONTAINER FLOW TEST ===")
+    print("\n=== FULL CONTAINER FLOW TEST ===")
     
     # Create a test endpoint using same pattern as audit routes
     test_app = FastAPI()
@@ -290,16 +285,16 @@ async def test_debug_full_container_flow(client, admin_user_api_key):
         print(f"Body: {response.text}")
         
         if response.status_code != 200:
-            print(f"FAILED - same pattern fails in isolated app too")
+            print("FAILED - same pattern fails in isolated app too")
         else:
-            print(f"SUCCESS - pattern works in isolated app")
+            print("SUCCESS - pattern works in isolated app")
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_debug_compare_endpoints(client, admin_user_api_key):
     """Compare how both endpoints handle the same API key."""
     
-    print(f"\n=== COMPARE ENDPOINTS ===")
+    print("\n=== COMPARE ENDPOINTS ===")
     print(f"API Key: {admin_user_api_key.key[:30]}...")
     
     # First test /users/me
@@ -330,13 +325,13 @@ async def test_debug_http_database_connection(client, admin_user_api_key, test_s
     """Check which database the HTTP handler is using."""
     from intric.database.database import sessionmanager
     
-    print(f"\n=== HTTP DATABASE CONNECTION ===")
+    print("\n=== HTTP DATABASE CONNECTION ===")
     print(f"Test settings postgres_host: {test_settings.postgres_host}")
     print(f"Test settings postgres_db: {test_settings.postgres_db}")
     print(f"Test settings postgres_port: {test_settings.postgres_port}")
     
     # Check sessionmanager
-    print(f"\nSessionmanager settings:")
+    print("\nSessionmanager settings:")
     print(f"  _engine: {sessionmanager._engine}")
     print(f"  _sessionmaker: {sessionmanager._sessionmaker}")
     
@@ -371,7 +366,7 @@ async def test_debug_trace_authenticate(client, admin_user_api_key, monkeypatch)
     monkeypatch.setattr(user_service_module.UserService, "authenticate", traced_authenticate)
     
     # Test /users/me/
-    print(f"\n=== Testing /users/me/ ===")
+    print("\n=== Testing /users/me/ ===")
     response1 = await client.get(
         "/api/v1/users/me/",
         headers={"X-API-Key": admin_user_api_key.key}
@@ -379,7 +374,7 @@ async def test_debug_trace_authenticate(client, admin_user_api_key, monkeypatch)
     print(f"Response: {response1.status_code}")
     
     # Test /audit/access-session
-    print(f"\n=== Testing /audit/access-session ===")
+    print("\n=== Testing /audit/access-session ===")
     response2 = await client.post(
         "/api/v1/audit/access-session",
         json={"category": "test", "description": "Trace test"},
@@ -396,9 +391,8 @@ async def test_debug_api_key_header_actual(client, admin_user_api_key):
     """Check what header API_KEY_HEADER actually looks for."""
     from intric.server.dependencies.auth_definitions import API_KEY_HEADER
     from intric.main.config import get_settings
-    import inspect
     
-    print(f"\n=== API_KEY_HEADER DETAILS ===")
+    print("\n=== API_KEY_HEADER DETAILS ===")
     print(f"API_KEY_HEADER: {API_KEY_HEADER}")
     print(f"API_KEY_HEADER type: {type(API_KEY_HEADER)}")
     print(f"API_KEY_HEADER.model: {API_KEY_HEADER.model}")
@@ -414,7 +408,7 @@ async def test_debug_api_key_header_actual(client, admin_user_api_key):
     if API_KEY_HEADER.model.name != settings.api_key_header_name:
         print(f"\n>>> MISMATCH! API_KEY_HEADER uses '{API_KEY_HEADER.model.name}' but settings say '{settings.api_key_header_name}'")
     else:
-        print(f"\n>>> Header names MATCH")
+        print("\n>>> Header names MATCH")
     
     # Now let's send with the EXACT header name API_KEY_HEADER uses
     print(f"\nTesting with header '{API_KEY_HEADER.model.name}':")
@@ -441,14 +435,14 @@ async def test_debug_request_headers(client, admin_user_api_key, app):
             "x_api_key_lower": request.headers.get("x-api-key"),
         }
     
-    print(f"\n=== REQUEST HEADERS INSPECTION ===")
+    print("\n=== REQUEST HEADERS INSPECTION ===")
     
     # Test with POST
     response = await client.post(
         "/debug/inspect-headers",
         headers={"X-API-Key": admin_user_api_key.key}
     )
-    print(f"POST /debug/inspect-headers:")
+    print("POST /debug/inspect-headers:")
     print(f"  Status: {response.status_code}")
     data = response.json()
     print(f"  Headers received: {list(data['headers'].keys())}")
@@ -459,7 +453,7 @@ async def test_debug_request_headers(client, admin_user_api_key, app):
         "/debug/inspect-headers",
         headers={"X-API-Key": admin_user_api_key.key}
     )
-    print(f"\nGET /debug/inspect-headers:")
+    print("\nGET /debug/inspect-headers:")
     print(f"  Status: {response2.status_code}")
 
 @pytest.mark.integration
@@ -469,7 +463,7 @@ async def test_debug_api_key_header_instances():
     from intric.server.dependencies.auth_definitions import API_KEY_HEADER as auth_def_header
     from intric.server.dependencies.container import API_KEY_HEADER as container_header
     
-    print(f"\n=== API_KEY_HEADER INSTANCES ===")
+    print("\n=== API_KEY_HEADER INSTANCES ===")
     print(f"auth_definitions.API_KEY_HEADER: {id(auth_def_header)} - name={auth_def_header.model.name}")
     print(f"container.API_KEY_HEADER: {id(container_header)} - name={container_header.model.name}")
     print(f"Same instance: {auth_def_header is container_header}")

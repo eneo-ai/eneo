@@ -1,6 +1,5 @@
 """Unit tests for CSV injection prevention in audit service."""
 
-import pytest
 
 from intric.audit.application.audit_service import _sanitize_csv_cell
 

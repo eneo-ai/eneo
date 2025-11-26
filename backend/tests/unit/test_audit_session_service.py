@@ -2,7 +2,7 @@
 
 import json
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -279,7 +279,6 @@ class TestValidateSession:
         """Verify validation uses secrets.compare_digest for timing attack prevention."""
         # This test verifies the implementation uses constant-time comparison
         # by checking that the code imports and uses secrets.compare_digest
-        import secrets
 
         user_id = uuid4()
         tenant_id = uuid4()

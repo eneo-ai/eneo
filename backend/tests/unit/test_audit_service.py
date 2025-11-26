@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_service import AuditService, _sanitize_csv_cell
+from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.audit_log import AuditLog

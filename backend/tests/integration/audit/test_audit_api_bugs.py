@@ -3,7 +3,6 @@ Integration tests for production bugs found through code review.
 These tests verify API-level behavior and error handling.
 """
 
-import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
@@ -337,8 +336,8 @@ class TestCsvExportMemoryLimit:
 
         # Total records header should indicate actual count
         assert total_records_header is not None, (
-            f"Missing X-Total-Records header. "
-            f"This header should indicate total matching records (before truncation)."
+            "Missing X-Total-Records header. "
+            "This header should indicate total matching records (before truncation)."
         )
         assert int(total_records_header) >= logs_to_create, (
             f"X-Total-Records={total_records_header} should be >= {logs_to_create}"

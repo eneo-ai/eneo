@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import redis.exceptions
 
-from intric.audit.domain.action_types import ActionType
 from intric.audit.infrastructure.audit_session_service import AuditSessionService
 
 
