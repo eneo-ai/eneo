@@ -26,6 +26,9 @@ class Tenants(BasePublic):
     federation_config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    crawler_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
 
     # relationships
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
