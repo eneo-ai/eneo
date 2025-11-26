@@ -197,10 +197,15 @@ async function parseResponse(response) {
       parsed = JSON.parse(text); //
     }
   } catch (err) {
-    throw new PartialError("RESPONSE", response.status, {
-      message: `Could not parse server response (1).\n${text ? text : "No body received"}`,
-      intric_error_code: 0
-    }, response.headers);
+    throw new PartialError(
+      "RESPONSE",
+      response.status,
+      {
+        message: `Could not parse server response (1).\n${text ? text : "No body received"}`,
+        intric_error_code: 0
+      },
+      response.headers
+    );
   }
 
   if (response.ok) {

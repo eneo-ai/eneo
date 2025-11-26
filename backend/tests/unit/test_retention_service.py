@@ -320,7 +320,7 @@ class TestUpdatePolicy:
         mock_result.scalar_one_or_none.return_value = updated_policy
         mock_session.execute.return_value = mock_result
 
-        result = await retention_service.update_policy(
+        await retention_service.update_policy(
             tenant_id=tenant_id,
             retention_days=180,
         )

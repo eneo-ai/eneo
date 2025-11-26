@@ -1,6 +1,6 @@
 """Unit tests for audit domain models."""
 
-from dataclasses import FrozenInstanceError, is_dataclass
+from dataclasses import is_dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 

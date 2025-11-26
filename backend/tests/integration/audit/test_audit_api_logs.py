@@ -1,7 +1,5 @@
 """Integration tests for the /audit/logs API endpoint."""
 
-import pytest
-from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
 

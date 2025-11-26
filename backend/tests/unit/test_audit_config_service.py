@@ -1,8 +1,8 @@
 """Unit tests for AuditConfigService - testing all 7 categories and configurations."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4, UUID
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from intric.audit.application.audit_config_service import (
     AuditConfigService,
