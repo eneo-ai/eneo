@@ -4,8 +4,6 @@ Revises: 20251121_set_embedding_org, d5c001343e52
 Create Date: 2025-11-26 07:24:48.005458
 """
 
-from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic
