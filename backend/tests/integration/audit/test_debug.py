@@ -1,6 +1,8 @@
 """Debug test to understand API key authentication issue."""
 import pytest
 
+pytestmark = pytest.mark.integration
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_debug_api_key_value(admin_user_api_key):

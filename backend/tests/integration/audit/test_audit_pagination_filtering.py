@@ -1,6 +1,9 @@
 """Integration tests for audit log pagination and filtering."""
 
+import pytest
 from datetime import datetime, timezone, timedelta
+
+pytestmark = pytest.mark.integration
 
 
 class TestPaginationBasics:

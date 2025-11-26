@@ -7,6 +7,8 @@ from intric.audit.infrastructure.audit_config_repository import AuditConfigRepos
 from intric.audit.schemas.audit_config_schemas import CategoryUpdate
 from intric.worker.redis import get_redis
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 async def seeded_tenant(db_session, test_tenant):
