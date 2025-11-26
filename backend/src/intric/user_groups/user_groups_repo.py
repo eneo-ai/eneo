@@ -11,7 +11,6 @@ from intric.database.repositories.base import (
     BaseRepositoryDelegate,
     RelationshipOption,
 )
-from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.user_groups_table import UserGroups
 from intric.database.tables.users_table import Users
 from intric.main.exceptions import UniqueException
@@ -37,9 +36,7 @@ class UserGroupsRepository:
         return [
             selectinload(UserGroups.users).selectinload(Users.roles),
             selectinload(UserGroups.users).selectinload(Users.predefined_roles),
-            selectinload(UserGroups.users)
-            .selectinload(Users.tenant)
-            .selectinload(Tenants.modules),
+            selectinload(UserGroups.users).selectinload(Users.tenant),
             selectinload(UserGroups.users).selectinload(Users.api_key),
         ]
 
@@ -61,7 +58,7 @@ class UserGroupsRepository:
                 options=[
                     selectinload(Users.roles),
                     selectinload(Users.predefined_roles),
-                    selectinload(Users.tenant).selectinload(Tenants.modules),
+                    selectinload(Users.tenant),
                     selectinload(Users.api_key),
                 ],
             ),

@@ -1,11 +1,10 @@
 from typing import Any, Optional
 
-from sqlalchemy import BigInteger, Column, ForeignKey, String, Table
+from sqlalchemy import BigInteger, String
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
-from intric.database.tables.base_class import Base, BasePublic
-from intric.database.tables.module_table import Modules
+from intric.database.tables.base_class import BasePublic
 from intric.tenants.tenant import TenantState
 
 
@@ -29,14 +28,3 @@ class Tenants(BasePublic):
     crawler_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
-
-    # relationships
-    modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
-
-
-tenants_modules_table = Table(
-    "tenants_modules",
-    Base.metadata,
-    Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),
-    Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),
-)

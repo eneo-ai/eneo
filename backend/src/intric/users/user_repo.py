@@ -11,7 +11,6 @@ from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.roles_table import PredefinedRoles, Roles
 from intric.database.tables.spaces_table import Spaces
-from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.database.tables.widget_table import Widgets
 from intric.main.exceptions import UniqueException
@@ -48,7 +47,7 @@ class UsersRepository:
         return [
             selectinload(Users.roles),
             selectinload(Users.predefined_roles),
-            selectinload(Users.tenant).selectinload(Tenants.modules),
+            selectinload(Users.tenant),
             selectinload(Users.api_key),
             selectinload(Users.user_groups),
         ]
@@ -373,7 +372,7 @@ class UsersRepository:
         query = query.options(
             selectinload(Users.roles),
             selectinload(Users.predefined_roles),
-            selectinload(Users.tenant).selectinload(Tenants.modules),
+            selectinload(Users.tenant),
             selectinload(Users.api_key),
             selectinload(Users.user_groups),
         )

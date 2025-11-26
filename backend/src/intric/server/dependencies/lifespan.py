@@ -6,7 +6,6 @@ from intric.database.database import sessionmanager
 from intric.jobs.job_manager import job_manager
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
-from intric.server.dependencies.modules import init_modules
 from intric.server.dependencies.predefined_roles import init_predefined_roles
 from intric.server.websockets.websocket_manager import websocket_manager
 
@@ -30,9 +29,6 @@ async def startup():
 
     # init predefined roles
     await init_predefined_roles()
-
-    # init modules
-    await init_modules()
 
 
 async def shutdown():

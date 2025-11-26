@@ -63,7 +63,6 @@ from intric.transcription_models.presentation.transcription_models_router import
 from intric.user_groups.user_groups_router import router as user_groups_router
 from intric.users.user_router import router as users_router
 from intric.websites.presentation.website_router import router as website_router
-from intric.modules.module_router import router as module_router
 from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.tenants.presentation.tenant_credentials_router import (
     router as tenant_credentials_router,
@@ -147,7 +146,6 @@ router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
-router.include_router(module_router, prefix="/modules", tags=["modules"])
 router.include_router(federation_router, prefix="", tags=["authentication"])  # Public auth endpoints (no prefix)
 router.include_router(documentation_router, prefix="")
 

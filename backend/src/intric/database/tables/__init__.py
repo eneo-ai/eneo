@@ -17,7 +17,6 @@ import intric.database.tables.info_blobs_table
 import intric.database.tables.integration_table
 import intric.database.tables.job_table
 import intric.database.tables.logging_table
-import intric.database.tables.module_table
 import intric.database.tables.prompts_table
 import intric.database.tables.questions_table
 import intric.database.tables.roles_table

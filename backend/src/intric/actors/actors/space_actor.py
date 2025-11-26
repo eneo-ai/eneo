@@ -2,7 +2,6 @@ from enum import Enum
 from typing import TYPE_CHECKING, Union
 
 from intric.main.models import ResourcePermission
-from intric.modules.module import Modules
 from intric.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -401,12 +400,6 @@ class SpaceActor:
                 resource_type == SpaceResourceType.WEBSITE and action == SpaceAction.READ
             ):
                 return False
-
-        if (
-            resource_type == SpaceResourceType.SERVICE
-            and Modules.INTRIC_APPLICATIONS not in self.user.modules
-        ):
-            return False
 
         if role == SpaceRole.VIEWER and resource_type in PUBLISHABLE_RESOURCES:
             if resource is not None and not resource.published:

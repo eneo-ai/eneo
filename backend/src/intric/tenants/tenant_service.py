@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.main.exceptions import NotFoundException
-from intric.main.models import ModelId
 from intric.tenants.crawler_settings_helper import get_all_crawler_settings
 from intric.tenants.masking import mask_api_key
 from intric.tenants.provider_field_config import validate_provider_credentials
@@ -74,9 +73,6 @@ class TenantService:
 
         tenant_update = TenantUpdate(**tenant_update.model_dump(exclude_unset=True), id=tenant.id)
         return await self.repo.update_tenant(tenant_update)
-
-    async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
-        return await self.repo.add_modules(list_of_module_ids, tenant_id)
 
     async def set_credential(
         self,

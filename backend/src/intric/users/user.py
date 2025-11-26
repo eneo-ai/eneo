@@ -251,11 +251,6 @@ class UserInDB(InDB, UserAdd):
 
     @computed_field
     @property
-    def modules(self) -> list[str]:
-        return [module.name for module in self.tenant.modules]
-
-    @computed_field
-    @property
     def user_groups_ids(self) -> set[int]:
         return {user_group.id for user_group in self.user_groups}
 

@@ -163,7 +163,6 @@ from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
 from intric.limits.limit_service import LimitService
 from intric.main.aiohttp_client import aiohttp_client
-from intric.modules.module_repo import ModuleRepository
 from intric.predefined_roles.predefined_role_service import PredefinedRolesService
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
 from intric.prompts.api.prompt_assembler import PromptAssembler
@@ -514,8 +513,6 @@ class Container(containers.DeclarativeContainer):
     feature_flag_repo = providers.Factory(
         FeatureFlagRepository, db_session=session
     )
-
-    module_repo = providers.Factory(ModuleRepository, session=session)
 
     security_classification_repo = providers.Factory(
         SecurityClassificationRepoImpl,

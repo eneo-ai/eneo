@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic.networks import HttpUrl
 
 from intric.main.models import InDB
-from intric.modules.module import ModuleInDB
 
 
 class TenantState(str, Enum):
@@ -54,7 +53,6 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
-    modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)

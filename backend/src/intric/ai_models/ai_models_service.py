@@ -1,16 +1,13 @@
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
-    CompletionModel,
     CompletionModelFamily,
     CompletionModelPublic,
-    ModelHostingLocation,
 )
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
 from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
     EmbeddingModelUpdateFlags,
 )
@@ -19,7 +16,6 @@ from intric.ai_models.embedding_models.embedding_models_repo import (
 )
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.modules.module import Modules
 from intric.roles.permissions import Permission, validate_permissions
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
@@ -37,24 +33,6 @@ class AIModelsService:
         self.embedding_model_repo = embedding_model_repo
         self.completion_model_repo = completion_model_repo
         self.tenant_repo = tenant_repo
-
-    def _is_locked(
-        self,
-        model: CompletionModel | EmbeddingModelLegacy,
-    ):
-        if model.hosting == ModelHostingLocation.EU:
-            if Modules.EU_HOSTING not in self.user.modules:
-                return True
-        return False
-
-    def _can_access(
-        self,
-        model: CompletionModel | EmbeddingModelLegacy,
-    ):
-        if not self._is_locked(model) and not model.is_deprecated and model.is_org_enabled:
-            return True
-
-        return False
 
     def _get_latest_available_model(
         self, models: list[CompletionModelPublic | EmbeddingModelPublicLegacy]
@@ -77,8 +55,8 @@ class AIModelsService:
             models.append(
                 EmbeddingModelPublicLegacy(
                     **model.model_dump(),
-                    is_locked=self._is_locked(model),
-                    can_access=self._can_access(model),
+                    is_locked=model.is_locked,
+                    can_access=model.can_access,
                 )
             )
 
@@ -90,14 +68,13 @@ class AIModelsService:
         if model.is_deprecated:
             raise BadRequestException(f"EmbeddingModel {model.name} not supported anymore.")
 
-        can_access = self._can_access(model)
-        if not can_access:
+        if not model.can_access:
             raise UnauthorizedException("Unauthorized. User has no permissions to access.")
 
         return EmbeddingModelPublicLegacy(
             **model.model_dump(),
-            is_locked=self._is_locked(model),
-            can_access=can_access,
+            is_locked=model.is_locked,
+            can_access=model.can_access,
         )
 
     async def get_latest_available_embedding_model(self):
@@ -125,8 +102,8 @@ class AIModelsService:
             models.append(
                 CompletionModelPublic(
                     **model.model_dump(),
-                    is_locked=self._is_locked(model),
-                    can_access=self._can_access(model),
+                    is_locked=model.is_locked,
+                    can_access=model.can_access,
                 )
             )
 
@@ -147,6 +124,6 @@ class AIModelsService:
         )
         return EmbeddingModelPublicLegacy(
             **model.model_dump(),
-            is_locked=self._is_locked(model),
-            can_access=self._can_access(model),
+            is_locked=model.is_locked,
+            can_access=model.can_access,
         )

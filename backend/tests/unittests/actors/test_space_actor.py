@@ -3,15 +3,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from intric.actors import SpaceAction, SpaceActor, SpaceResourceType
-from intric.modules.module import Modules
 
 
 # Mocking external dependencies
 class MockUser:
-    def __init__(self, id, permissions=None, modules=None, role=None):
+    def __init__(self, id, permissions=None, role=None):
         self.id = id
         self.permissions = permissions or []
-        self.modules = modules or []
         self.role = role
 
 
@@ -154,7 +152,6 @@ def test_viewer_cannot_edit_shared_space(
 def test_owner_can_not_create_services_without_services_permission(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    owner_user.modules.append(Modules.INTRIC_APPLICATIONS)
     actor = SpaceActor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
@@ -173,19 +170,6 @@ def test_owner_can_not_create_services_without_services_permission(
     )
 
 
-def test_owner_can_not_create_services_without_applications_modules(
-    owner_user: MockUser, personal_space: MockSpace
-):
-    owner_user.permissions.append(MockPermission.SERVICES)
-    actor = SpaceActor(owner_user, personal_space)
-    assert (
-        actor.can_perform_action(
-            action=SpaceAction.CREATE, resource_type=SpaceResourceType.SERVICE
-        )
-        is False
-    )
-
-
 def test_no_one_can_publish_apps_in_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
@@ -201,7 +185,6 @@ def test_no_one_can_publish_apps_in_personal_space(
 def test_no_one_can_publish_services_in_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    owner_user.modules.append(Modules.INTRIC_APPLICATIONS)
     actor = SpaceActor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
@@ -215,7 +198,6 @@ def test_viewers_can_only_read_published_resources(
     viewer_user: MockUser, shared_space: MockSpace
 ):
     resource = MagicMock(published=False)
-    viewer_user.modules.append(Modules.INTRIC_APPLICATIONS)
     viewer = SpaceActor(viewer_user, shared_space)
 
     assert (

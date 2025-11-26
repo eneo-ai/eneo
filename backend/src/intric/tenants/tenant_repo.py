@@ -9,14 +9,11 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from intric.database.repositories.base import BaseRepositoryDelegate
-from intric.database.tables.module_table import Modules
 from intric.database.tables.tenant_table import Tenants
 from intric.main import exceptions
 from intric.main.logging import get_logger
-from intric.main.models import ModelId
 from intric.tenants.masking import mask_api_key
 from intric.tenants.tenant import TenantBase, TenantInDB, TenantUpdate
 
@@ -36,7 +33,6 @@ class TenantRepository:
             session,
             Tenants,
             TenantInDB,
-            with_options=[selectinload(Tenants.modules)],
         )
         self.session = session
         self.encryption = encryption_service
@@ -65,7 +61,6 @@ class TenantRepository:
                     .where(Tenants.id == tenant_in_db.id)
                     .values(slug=slug, updated_at=datetime.now(timezone.utc))
                     .returning(Tenants)
-                    .options(selectinload(Tenants.modules))
                 )
                 tenant_in_db = await self.delegate.get_model_from_query(stmt)
                 logger.info(
@@ -86,22 +81,6 @@ class TenantRepository:
 
         return await self.delegate.get_all()
 
-    async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
-        module_ids = [module.id for module in list_of_module_ids]
-        module_stmt = sa.select(Modules).filter(Modules.id.in_(module_ids))
-        modules = await self.session.scalars(module_stmt)
-
-        tenant_stmt = (
-            sa.select(Tenants)
-            .where(Tenants.id == tenant_id)
-            .options(selectinload(Tenants.modules))
-        )
-        tenant = await self.session.scalar(tenant_stmt)
-
-        tenant.modules = modules.all()
-
-        return TenantInDB.model_validate(tenant)
-
     async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB:
         return await self.delegate.update(tenant)
 
@@ -117,7 +96,6 @@ class TenantRepository:
             .where(Tenants.id == tenant_id)
             .values(privacy_policy=privacy_policy)
             .returning(Tenants)
-            .options(selectinload(Tenants.modules))
         )
 
         return await self.delegate.get_model_from_query(stmt)
@@ -184,7 +162,6 @@ class TenantRepository:
                 )
             )
             .returning(Tenants)
-            .options(selectinload(Tenants.modules))
         )
         return await self.delegate.get_model_from_query(stmt)
 
@@ -214,7 +191,6 @@ class TenantRepository:
                 )
             )
             .returning(Tenants)
-            .options(selectinload(Tenants.modules))
         )
         return await self.delegate.get_model_from_query(stmt)
 
@@ -355,7 +331,6 @@ class TenantRepository:
         stmt = (
             sa.select(Tenants)
             .where(Tenants.slug == slug)
-            .options(selectinload(Tenants.modules))
         )
         result = await self.session.execute(stmt)
         tenant = result.scalar_one_or_none()
@@ -521,7 +496,6 @@ class TenantRepository:
         stmt = (
             sa.select(Tenants)
             .where(Tenants.state == TenantState.ACTIVE.value)
-            .options(selectinload(Tenants.modules))
         )
         result = await self.session.execute(stmt)
         tenants = result.scalars().all()
@@ -556,7 +530,6 @@ class TenantRepository:
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)
-            .options(selectinload(Tenants.modules))
         )
         return await self.delegate.get_model_from_query(stmt)
 
@@ -580,6 +553,5 @@ class TenantRepository:
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)
-            .options(selectinload(Tenants.modules))
         )
         return await self.delegate.get_model_from_query(stmt)
