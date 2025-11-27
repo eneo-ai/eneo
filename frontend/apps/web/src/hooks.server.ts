@@ -23,7 +23,8 @@ const authHandle: Handle = async ({ event, resolve }) => {
 
   // Load feature flags and environment BEFORE authentication check
   // This ensures login page has access to federation configuration flags
-  event.locals.featureFlags = await getFeatureFlags();
+  // Pass event.fetch so URL rewriting in handleFetch works correctly
+  event.locals.featureFlags = await getFeatureFlags(event.fetch);
   event.locals.environment = getEnvironmentConfig();
 
   const tokens = authenticateUser(event);

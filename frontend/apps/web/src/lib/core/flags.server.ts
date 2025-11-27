@@ -122,7 +122,7 @@ function isConfigured(value: unknown): boolean {
   return value.trim().length > 0;
 }
 
-export async function getFeatureFlags() {
+export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   // UI Features (enabled by default)
   const showWebSearch = getFlagFromEnv("SHOW_WEB_SEARCH", false);
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
@@ -147,7 +147,7 @@ export async function getFeatureFlags() {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 
-    const response = await fetch(`${backendUrl}/api/v1/auth/federation-status`, {
+    const response = await fetchFn(`${backendUrl}/api/v1/auth/federation-status`, {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
