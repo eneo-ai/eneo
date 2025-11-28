@@ -1,45 +1,62 @@
 """Unit tests for tenant-aware crawler timeout (crawl_max_length).
 
-Tests the asyncio.wait_for() based timeout implementation that replaced
-the crochet decorator. The timeout is now dynamically resolved at runtime
-based on tenant settings.
+Tests the crochet.run_in_reactor() + EventualResult.wait() timeout implementation
+that provides runtime-configurable timeouts while properly integrating with
+Twisted's reactor for Scrapy crawls.
 
 Test categories:
-- Timeout enforcement: Verifies asyncio.TimeoutError triggers CrawlerException
+- Timeout enforcement: Verifies crochet.TimeoutError triggers CrawlerException
 - Tenant settings resolution: Tests get_crawler_setting() integration
 - Edge cases: Very short timeouts, missing settings, error handling
 """
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock, patch
 
+import crochet
 import pytest
+
+# Setup crochet BEFORE importing Crawler (which uses @crochet.run_in_reactor decorator)
+# This initializes Twisted's reactor in a way that's compatible with our test process.
+crochet.setup()
 
 from intric.crawler.crawler import Crawler
 from intric.main.exceptions import CrawlerException
 
 
+class MockEventualResult:
+    """Mock for crochet's EventualResult that simulates blocking wait behavior."""
+
+    def __init__(self, delay: float = 0, should_timeout: bool = False):
+        self.delay = delay
+        self.should_timeout = should_timeout
+
+    def wait(self, timeout: float = None):
+        """Simulate EventualResult.wait() behavior."""
+        if self.should_timeout or (timeout and self.delay > timeout):
+            time.sleep(min(timeout, 0.1))  # Sleep briefly to simulate timeout
+            raise crochet.TimeoutError("Crawl exceeded timeout")
+        time.sleep(min(self.delay, 0.1))  # Quick sleep for fast tests
+        return None
+
+
 class TestCrawlerTimeoutEnforcement:
-    """Tests that crawl timeout is properly enforced via asyncio.wait_for()."""
+    """Tests that crawl timeout is properly enforced via EventualResult.wait()."""
 
     @pytest.mark.asyncio
     async def test_timeout_triggers_crawler_exception(self):
         """When crawl exceeds max_length, CrawlerException is raised.
 
-        This is the CRITICAL test - verifies the crochet replacement works.
+        This is the CRITICAL test - verifies the crochet integration works.
         """
-
-        # Simulate a slow crawl that takes longer than the timeout
-        async def slow_crawl(*args, **kwargs):
-            await asyncio.sleep(10)  # Will timeout before this completes
+        # Mock the deferred method to return a slow EventualResult
+        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            # Make the sync method block for 10 seconds when called in thread
-            mock_sync.side_effect = lambda *args, **kwargs: asyncio.run(slow_crawl())
-
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ):
             with pytest.raises(CrawlerException) as exc_info:
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
@@ -59,15 +76,11 @@ class TestCrawlerTimeoutEnforcement:
     @pytest.mark.asyncio
     async def test_sitemap_timeout_triggers_crawler_exception(self):
         """Sitemap crawl also respects timeout and raises CrawlerException."""
-
-        async def slow_crawl(*args, **kwargs):
-            await asyncio.sleep(10)
+        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
         with patch.object(
-            Crawler, "_run_sitemap_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = lambda *args, **kwargs: asyncio.run(slow_crawl())
-
+            Crawler, "_run_sitemap_crawl_deferred", return_value=mock_result
+        ):
             with pytest.raises(CrawlerException) as exc_info:
                 await Crawler._run_sitemap_crawl_with_timeout(
                     sitemap_url="https://example.com/sitemap.xml",
@@ -85,16 +98,12 @@ class TestCrawlerTimeoutEnforcement:
     @pytest.mark.asyncio
     async def test_successful_crawl_within_timeout(self):
         """Crawl completes successfully when within timeout limit."""
-
-        def fast_crawl(*args, **kwargs):
-            # Simulates a fast crawl that completes quickly
-            return None  # Success
+        # Fast crawl that completes quickly
+        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = fast_crawl
-
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ) as mock_deferred:
             # Should complete without exception
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
@@ -107,8 +116,8 @@ class TestCrawlerTimeoutEnforcement:
                 max_length=60,  # 60 second timeout - plenty of time
             )
 
-            # Verify the sync method was called
-            mock_sync.assert_called_once()
+            # Verify the deferred method was called
+            mock_deferred.assert_called_once()
 
 
 class TestCrawlerTenantSettingsResolution:
@@ -213,15 +222,11 @@ class TestCrawlerTimeoutEdgeCases:
     @pytest.mark.asyncio
     async def test_very_short_timeout_still_works(self):
         """Extremely short timeout (1 second) still properly triggers."""
-
-        async def slow_crawl(*args, **kwargs):
-            await asyncio.sleep(5)
+        mock_result = MockEventualResult(delay=5, should_timeout=True)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = lambda *args, **kwargs: asyncio.run(slow_crawl())
-
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ):
             start_time = asyncio.get_event_loop().time()
             with pytest.raises(CrawlerException):
                 await Crawler._run_crawl_with_timeout(
@@ -239,15 +244,11 @@ class TestCrawlerTimeoutEdgeCases:
     @pytest.mark.asyncio
     async def test_timeout_message_includes_url(self):
         """Timeout exception message includes the URL for debugging."""
-
-        async def slow_crawl(*args, **kwargs):
-            await asyncio.sleep(10)
+        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = lambda *args, **kwargs: asyncio.run(slow_crawl())
-
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ):
             test_url = "https://slow-website.example.com/very/long/path"
             with pytest.raises(CrawlerException) as exc_info:
                 await Crawler._run_crawl_with_timeout(
@@ -265,15 +266,11 @@ class TestCrawlerTimeoutEdgeCases:
     @pytest.mark.parametrize("timeout_value", [1, 2])
     async def test_timeout_message_includes_seconds(self, timeout_value):
         """Timeout exception message includes the max_length value."""
-
-        async def slow_crawl(*args, **kwargs):
-            await asyncio.sleep(10)
+        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = lambda *args, **kwargs: asyncio.run(slow_crawl())
-
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ):
             with pytest.raises(CrawlerException) as exc_info:
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
@@ -285,44 +282,37 @@ class TestCrawlerTimeoutEdgeCases:
             assert f"exceeded {timeout_value} seconds" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_crawler_passes_settings_to_sync_method(self):
-        """Tenant crawler settings are passed through to sync method."""
+    async def test_crawler_passes_settings_to_deferred_method(self):
+        """Tenant crawler settings are passed through to deferred method."""
         tenant_settings = {
             "download_timeout": 120,
             "retry_times": 5,
         }
 
-        def capture_args(*args, **kwargs):
-            return kwargs
+        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = capture_args
-
-            # Note: This will complete quickly since the mock returns immediately
-            try:
-                await Crawler._run_crawl_with_timeout(
-                    url="https://example.com",
-                    download_files=True,
-                    filepath="/tmp/test.jsonl",
-                    files_dir="/tmp/files",
-                    http_user="user",
-                    http_pass="pass",
-                    tenant_crawler_settings=tenant_settings,
-                    max_length=60,
-                )
-            except Exception:
-                pass  # We just want to verify the call
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ) as mock_deferred:
+            await Crawler._run_crawl_with_timeout(
+                url="https://example.com",
+                download_files=True,
+                filepath="/tmp/test.jsonl",
+                files_dir="/tmp/files",
+                http_user="user",
+                http_pass="pass",
+                tenant_crawler_settings=tenant_settings,
+                max_length=60,
+            )
 
             # Verify all params were passed correctly
-            mock_sync.assert_called_once()
-            call_kwargs = mock_sync.call_args
+            mock_deferred.assert_called_once()
+            call_args = mock_deferred.call_args
             # Check positional args
-            assert call_kwargs[0][0] == "https://example.com"  # url
-            assert call_kwargs[0][1] is True  # download_files
+            assert call_args[0][0] == "https://example.com"  # url
+            assert call_args[0][1] is True  # download_files
             # Check keyword args
-            assert call_kwargs[1]["tenant_crawler_settings"] == tenant_settings
+            assert call_args[1]["tenant_crawler_settings"] == tenant_settings
 
 
 class TestCrawlerTimeoutIsolation:
@@ -375,63 +365,53 @@ class TestCrawlerTimeoutIsolation:
 
 
 class TestCrawlerNoRegressions:
-    """Tests ensuring no regressions from crochet removal."""
+    """Tests ensuring no regressions from crochet integration."""
 
     @pytest.mark.asyncio
     async def test_all_parameters_still_passed_correctly(self):
         """Verify all existing parameters are still passed through correctly."""
         tenant_settings = {"download_timeout": 100}
-
-        def verify_params(*args, **kwargs):
-            assert kwargs["filepath"] == "/tmp/test.jsonl"
-            assert kwargs["files_dir"] == "/tmp/files"
-            assert kwargs["http_user"] == "testuser"
-            assert kwargs["http_pass"] == "testpass"
-            assert kwargs["tenant_crawler_settings"] == tenant_settings
+        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = verify_params
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ) as mock_deferred:
+            await Crawler._run_crawl_with_timeout(
+                url="https://example.com",
+                download_files=True,
+                filepath="/tmp/test.jsonl",
+                files_dir="/tmp/files",
+                http_user="testuser",
+                http_pass="testpass",
+                tenant_crawler_settings=tenant_settings,
+                max_length=60,
+            )
 
-            try:
-                await Crawler._run_crawl_with_timeout(
-                    url="https://example.com",
-                    download_files=True,
-                    filepath="/tmp/test.jsonl",
-                    files_dir="/tmp/files",
-                    http_user="testuser",
-                    http_pass="testpass",
-                    tenant_crawler_settings=tenant_settings,
-                    max_length=60,
-                )
-            except Exception:
-                pass
-
-            mock_sync.assert_called_once()
+            mock_deferred.assert_called_once()
+            call_args = mock_deferred.call_args
+            # Check keyword args
+            assert call_args[1]["filepath"] == "/tmp/test.jsonl"
+            assert call_args[1]["files_dir"] == "/tmp/files"
+            assert call_args[1]["http_user"] == "testuser"
+            assert call_args[1]["http_pass"] == "testpass"
+            assert call_args[1]["tenant_crawler_settings"] == tenant_settings
 
     @pytest.mark.asyncio
     async def test_download_files_flag_passed_correctly(self):
         """Ensure download_files parameter works as before."""
-
-        def check_download_files(*args, **kwargs):
-            # download_files should be second positional arg
-            assert args[1] is True
+        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
 
         with patch.object(
-            Crawler, "_run_crawl_sync", new_callable=MagicMock
-        ) as mock_sync:
-            mock_sync.side_effect = check_download_files
+            Crawler, "_run_crawl_deferred", return_value=mock_result
+        ) as mock_deferred:
+            await Crawler._run_crawl_with_timeout(
+                url="https://example.com",
+                download_files=True,  # Should be passed through
+                filepath="/tmp/test.jsonl",
+                files_dir="/tmp/files",
+                max_length=60,
+            )
 
-            try:
-                await Crawler._run_crawl_with_timeout(
-                    url="https://example.com",
-                    download_files=True,  # Should be passed through
-                    filepath="/tmp/test.jsonl",
-                    files_dir="/tmp/files",
-                    max_length=60,
-                )
-            except Exception:
-                pass
-
-            mock_sync.assert_called_once()
+            mock_deferred.assert_called_once()
+            # download_files should be second positional arg
+            assert mock_deferred.call_args[0][1] is True

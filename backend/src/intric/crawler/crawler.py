@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any, Iterable, Optional
 
+import crochet
 from scrapy.crawler import CrawlerRunner
 
 from intric.crawler.parse_html import CrawledPage
@@ -75,12 +76,14 @@ def create_runner(
 class Crawler:
     """Web crawler with tenant-aware timeout support.
 
-    The crawler uses asyncio.wait_for() for dynamic timeout control,
-    allowing each tenant to have their own crawl_max_length setting.
+    The crawler uses crochet.run_in_reactor() + EventualResult.wait() for
+    dynamic timeout control, allowing each tenant to have their own
+    crawl_max_length setting while properly integrating with Twisted's reactor.
     """
 
+    @crochet.run_in_reactor
     @staticmethod
-    def _run_crawl_sync(
+    def _run_crawl_deferred(
         url: str,
         download_files: bool = False,
         *,
@@ -90,10 +93,11 @@ class Crawler:
         http_pass: str = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
     ):
-        """Synchronous Scrapy crawler - no timeout decorator.
+        """Run crawl in Twisted reactor, returns EventualResult.
 
-        This method runs the actual Scrapy crawl in a blocking manner.
-        Timeout is handled by the async wrapper.
+        The @crochet.run_in_reactor() decorator schedules this function
+        to run in Twisted's reactor thread and returns an EventualResult
+        that wraps the Deferred from runner.crawl().
         """
         files_dir = files_dir if download_files else None
         runner = create_runner(
@@ -103,8 +107,9 @@ class Crawler:
         )
         return runner.crawl(CrawlSpider, url=url, http_user=http_user, http_pass=http_pass)
 
+    @crochet.run_in_reactor
     @staticmethod
-    def _run_sitemap_crawl_sync(
+    def _run_sitemap_crawl_deferred(
         sitemap_url: str,
         *,
         filepath: Path,
@@ -113,10 +118,11 @@ class Crawler:
         http_pass: str = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
     ):
-        """Synchronous sitemap crawler - no timeout decorator.
+        """Run sitemap crawl in Twisted reactor, returns EventualResult.
 
-        This method runs the actual Scrapy sitemap crawl in a blocking manner.
-        Timeout is handled by the async wrapper.
+        The @crochet.run_in_reactor() decorator schedules this function
+        to run in Twisted's reactor thread and returns an EventualResult
+        that wraps the Deferred from runner.crawl().
         """
         runner = create_runner(
             filepath=filepath,
@@ -140,24 +146,27 @@ class Crawler:
     ) -> None:
         """Async wrapper with tenant-aware timeout for regular crawl.
 
-        Uses asyncio.wait_for() to enforce dynamic timeout based on tenant settings.
-        This replaces the crochet decorator which evaluated timeout at import time.
+        Uses crochet's EventualResult.wait(timeout) to block until crawl
+        completes or timeout is reached. The timeout is evaluated at runtime,
+        allowing per-tenant configuration.
         """
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(
-                    Crawler._run_crawl_sync,
-                    url,
-                    download_files,
-                    filepath=filepath,
-                    files_dir=files_dir,
-                    http_user=http_user,
-                    http_pass=http_pass,
-                    tenant_crawler_settings=tenant_crawler_settings,
-                ),
-                timeout=max_length,
+
+        def blocking_crawl():
+            eventual_result = Crawler._run_crawl_deferred(
+                url,
+                download_files,
+                filepath=filepath,
+                files_dir=files_dir,
+                http_user=http_user,
+                http_pass=http_pass,
+                tenant_crawler_settings=tenant_crawler_settings,
             )
-        except asyncio.TimeoutError:
+            # Block until crawl completes or timeout - runtime timeout value!
+            eventual_result.wait(timeout=max_length)
+
+        try:
+            await asyncio.to_thread(blocking_crawl)
+        except crochet.TimeoutError:
             raise CrawlerException(
                 f"Crawl timeout: exceeded {max_length} seconds for {url}"
             )
@@ -175,23 +184,26 @@ class Crawler:
     ) -> None:
         """Async wrapper with tenant-aware timeout for sitemap crawl.
 
-        Uses asyncio.wait_for() to enforce dynamic timeout based on tenant settings.
-        This replaces the crochet decorator which evaluated timeout at import time.
+        Uses crochet's EventualResult.wait(timeout) to block until crawl
+        completes or timeout is reached. The timeout is evaluated at runtime,
+        allowing per-tenant configuration.
         """
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(
-                    Crawler._run_sitemap_crawl_sync,
-                    sitemap_url,
-                    filepath=filepath,
-                    files_dir=files_dir,
-                    http_user=http_user,
-                    http_pass=http_pass,
-                    tenant_crawler_settings=tenant_crawler_settings,
-                ),
-                timeout=max_length,
+
+        def blocking_crawl():
+            eventual_result = Crawler._run_sitemap_crawl_deferred(
+                sitemap_url,
+                filepath=filepath,
+                files_dir=files_dir,
+                http_user=http_user,
+                http_pass=http_pass,
+                tenant_crawler_settings=tenant_crawler_settings,
             )
-        except asyncio.TimeoutError:
+            # Block until crawl completes or timeout - runtime timeout value!
+            eventual_result.wait(timeout=max_length)
+
+        try:
+            await asyncio.to_thread(blocking_crawl)
+        except crochet.TimeoutError:
             raise CrawlerException(
                 f"Crawl timeout: exceeded {max_length} seconds for {sitemap_url}"
             )
