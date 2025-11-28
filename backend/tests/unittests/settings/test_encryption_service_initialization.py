@@ -84,6 +84,7 @@ class TestEncryptionServiceInitialization:
             {
                 "ENCRYPTION_KEY": "",
                 "TENANT_CREDENTIALS_ENABLED": "false",
+                "FEDERATION_PER_TENANT_ENABLED": "false",
             },
             clear=False,
         ):
@@ -109,6 +110,7 @@ class TestEncryptionServiceInitialization:
             {
                 "ENCRYPTION_KEY": "invalid-not-base64-fernet-key",
                 "TENANT_CREDENTIALS_ENABLED": "false",  # Avoid validation failure
+                "FEDERATION_PER_TENANT_ENABLED": "false",  # Avoid validation failure
             },
             clear=False,
         ):

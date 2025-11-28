@@ -11,7 +11,7 @@ declare global {
       code: IntricErrorCode;
     }
     interface Locals {
-      featureFlags: ReturnType<typeof getFeatureFlags>;
+      featureFlags: Awaited<ReturnType<typeof getFeatureFlags>>;
       environment: ReturnType<typeof getEnvironmentConfig>;
       id_token: string | null;
       access_token: string | null;
