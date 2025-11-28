@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
-from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
     CrawlAlreadyRunningException,
@@ -10,6 +9,7 @@ from intric.main.exceptions import (
 )
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, Status  # Status used for job status check
+from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.website import UpdateInterval, Website
 
 logger = get_logger(__name__)
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from intric.actors.actor_manager import ActorManager
     from intric.spaces.space_repo import SpaceRepository
     from intric.spaces.space_service import SpaceService
+    from intric.tenants.tenant_repo import TenantRepository
     from intric.users.user import UserInDB
     from intric.websites.domain.crawl_run import CrawlRun, CrawlType
     from intric.websites.domain.crawl_run_repo import CrawlRunRepository
@@ -33,6 +34,7 @@ class WebsiteCRUDService:
         crawl_run_repo: "CrawlRunRepository",
         actor_manager: "ActorManager",
         crawl_service: "CrawlService",
+        tenant_repo: "TenantRepository",
     ):
         self.user = user
         self.space_service = space_service
@@ -40,6 +42,7 @@ class WebsiteCRUDService:
         self.crawl_run_repo = crawl_run_repo
         self.actor_manager = actor_manager
         self.crawl_service = crawl_service
+        self.tenant_repo = tenant_repo
 
     async def create_website(
         self,
@@ -85,8 +88,7 @@ class WebsiteCRUDService:
 
         await self.crawl_service.crawl(website=new_website)
 
-        refreshed_space = await self.space_repo.one(space_id)
-        return refreshed_space.get_website(website_id=new_website.id)
+        return new_website
 
     async def get_website(self, id: UUID) -> Website:
         space = await self.space_service.get_space_by_website(id)
@@ -184,9 +186,12 @@ class WebsiteCRUDService:
             if not job:
                 return True  # Job not found, allow new crawl
 
-            # Check if job is stale
-            settings = get_settings()
-            threshold_minutes = settings.crawl_stale_threshold_minutes
+            # Check if job is stale - use tenant-aware setting
+            tenant = await self.tenant_repo.get(self.user.tenant_id)
+            tenant_settings = tenant.crawler_settings if tenant else None
+            threshold_minutes = get_crawler_setting(
+                "crawl_stale_threshold_minutes", tenant_settings
+            )
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
 
             # Use updated_at if available, otherwise created_at

@@ -45,6 +45,7 @@ class CrawlerSettingsUpdate(BaseModel):
         {
             "crawl_max_length": 14400,
             "download_timeout": 90,
+            "download_max_size": 10485760,
             "dns_timeout": 30,
             "retry_times": 2,
             "closespider_itemcount": 20000,
@@ -80,6 +81,13 @@ class CrawlerSettingsUpdate(BaseModel):
         le=_SPECS["download_timeout"]["max"],
         description=_SPECS["download_timeout"]["description"],
         examples=[90],
+    )
+    download_max_size: int | None = Field(
+        None,
+        ge=_SPECS["download_max_size"]["min"],
+        le=_SPECS["download_max_size"]["max"],
+        description=_SPECS["download_max_size"]["description"],
+        examples=[10485760],
     )
     dns_timeout: int | None = Field(
         None,
@@ -188,6 +196,7 @@ class CrawlerSettingsResponse(BaseModel):
             "settings": {
                 "crawl_max_length": 14400,
                 "download_timeout": 90,
+                "download_max_size": 10485760,
                 "dns_timeout": 30,
                 "retry_times": 2,
                 "closespider_itemcount": 20000,
@@ -214,6 +223,7 @@ class CrawlerSettingsResponse(BaseModel):
             {
                 "crawl_max_length": 14400,
                 "download_timeout": 90,
+                "download_max_size": 10485760,
                 "dns_timeout": 30,
                 "retry_times": 2,
                 "closespider_itemcount": 20000,

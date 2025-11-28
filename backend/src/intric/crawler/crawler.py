@@ -5,17 +5,16 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
-import crochet
 from scrapy.crawler import CrawlerRunner
 
 from intric.crawler.parse_html import CrawledPage
 from intric.crawler.pipelines import FileNamePipeline
 from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider
-from intric.main.config import get_settings
 from intric.main.exceptions import CrawlerException
+from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.crawl_run import CrawlType
 
 
@@ -25,20 +24,44 @@ class Crawl:
     files: Optional[Iterable[Path]]
 
 
-def create_runner(filepath: str, files_dir: Optional[str] = None):
-    app_settings = get_settings()
+def create_runner(
+    filepath: str,
+    files_dir: Optional[str] = None,
+    tenant_crawler_settings: dict[str, Any] | None = None,
+):
+    """Create a Scrapy CrawlerRunner with tenant-aware settings.
+
+    Settings are resolved in priority order:
+    1. Tenant-specific override (from DB via API)
+    2. Environment variable default
+    3. Hardcoded default
+
+    Args:
+        filepath: Path to output JSONL file for crawled pages
+        files_dir: Optional directory for downloaded files
+        tenant_crawler_settings: Optional tenant-specific settings from DB
+    """
     settings = {
         "FEEDS": {filepath: {"format": "jsonl", "item_classes": [CrawledPage]}},
-        "CLOSESPIDER_ITEMCOUNT": app_settings.closespider_itemcount,
-        "AUTOTHROTTLE_ENABLED": app_settings.autothrottle_enabled,
-        "ROBOTSTXT_OBEY": app_settings.obey_robots,
-        "DOWNLOAD_MAXSIZE": app_settings.upload_max_file_size,
+        # All settings use get_crawler_setting() for tenant-aware resolution
+        "CLOSESPIDER_ITEMCOUNT": get_crawler_setting(
+            "closespider_itemcount", tenant_crawler_settings
+        ),
+        "AUTOTHROTTLE_ENABLED": get_crawler_setting(
+            "autothrottle_enabled", tenant_crawler_settings
+        ),
+        "ROBOTSTXT_OBEY": get_crawler_setting("obey_robots", tenant_crawler_settings),
+        "DOWNLOAD_MAXSIZE": get_crawler_setting(
+            "download_max_size", tenant_crawler_settings
+        ),
         # Timeout settings to fail faster on unreachable sites
         # Why: Default 180s timeout × 3 retries = ~13 min waste per unreachable site
         # These are per-REQUEST timeouts, NOT total crawl time (crawl_max_length handles that)
-        "DOWNLOAD_TIMEOUT": 90,  # 90s per request (conservative, down from 180s default)
-        "DNS_TIMEOUT": 30,  # 30s for DNS resolution (down from 60s default)
-        "RETRY_TIMES": 2,  # 2 retries (3 total attempts) - keep Scrapy default
+        "DOWNLOAD_TIMEOUT": get_crawler_setting(
+            "download_timeout", tenant_crawler_settings
+        ),
+        "DNS_TIMEOUT": get_crawler_setting("dns_timeout", tenant_crawler_settings),
+        "RETRY_TIMES": get_crawler_setting("retry_times", tenant_crawler_settings),
         "RETRY_ENABLED": True,
     }
 
@@ -50,9 +73,14 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
 
 
 class Crawler:
-    @crochet.wait_for(get_settings().crawl_max_length)
+    """Web crawler with tenant-aware timeout support.
+
+    The crawler uses asyncio.wait_for() for dynamic timeout control,
+    allowing each tenant to have their own crawl_max_length setting.
+    """
+
     @staticmethod
-    def _run_crawl(
+    def _run_crawl_sync(
         url: str,
         download_files: bool = False,
         *,
@@ -60,29 +88,131 @@ class Crawler:
         files_dir: Optional[Path],
         http_user: str = None,
         http_pass: str = None,
+        tenant_crawler_settings: dict[str, Any] | None = None,
     ):
+        """Synchronous Scrapy crawler - no timeout decorator.
+
+        This method runs the actual Scrapy crawl in a blocking manner.
+        Timeout is handled by the async wrapper.
+        """
         files_dir = files_dir if download_files else None
-        runner = create_runner(filepath=filepath, files_dir=files_dir)
+        runner = create_runner(
+            filepath=filepath,
+            files_dir=files_dir,
+            tenant_crawler_settings=tenant_crawler_settings,
+        )
         return runner.crawl(CrawlSpider, url=url, http_user=http_user, http_pass=http_pass)
 
-    @crochet.wait_for(get_settings().crawl_max_length)
     @staticmethod
-    def _run_sitemap_crawl(
+    def _run_sitemap_crawl_sync(
         sitemap_url: str,
         *,
         filepath: Path,
         files_dir: Optional[Path],
         http_user: str = None,
         http_pass: str = None,
+        tenant_crawler_settings: dict[str, Any] | None = None,
     ):
-        runner = create_runner(filepath=filepath)
-        return runner.crawl(SitemapSpider, sitemap_url=sitemap_url, http_user=http_user, http_pass=http_pass)
+        """Synchronous sitemap crawler - no timeout decorator.
+
+        This method runs the actual Scrapy sitemap crawl in a blocking manner.
+        Timeout is handled by the async wrapper.
+        """
+        runner = create_runner(
+            filepath=filepath,
+            tenant_crawler_settings=tenant_crawler_settings,
+        )
+        return runner.crawl(
+            SitemapSpider, sitemap_url=sitemap_url, http_user=http_user, http_pass=http_pass
+        )
+
+    @staticmethod
+    async def _run_crawl_with_timeout(
+        url: str,
+        download_files: bool = False,
+        *,
+        filepath: Path,
+        files_dir: Optional[Path],
+        http_user: str = None,
+        http_pass: str = None,
+        tenant_crawler_settings: dict[str, Any] | None = None,
+        max_length: int,
+    ) -> None:
+        """Async wrapper with tenant-aware timeout for regular crawl.
+
+        Uses asyncio.wait_for() to enforce dynamic timeout based on tenant settings.
+        This replaces the crochet decorator which evaluated timeout at import time.
+        """
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    Crawler._run_crawl_sync,
+                    url,
+                    download_files,
+                    filepath=filepath,
+                    files_dir=files_dir,
+                    http_user=http_user,
+                    http_pass=http_pass,
+                    tenant_crawler_settings=tenant_crawler_settings,
+                ),
+                timeout=max_length,
+            )
+        except asyncio.TimeoutError:
+            raise CrawlerException(
+                f"Crawl timeout: exceeded {max_length} seconds for {url}"
+            )
+
+    @staticmethod
+    async def _run_sitemap_crawl_with_timeout(
+        sitemap_url: str,
+        *,
+        filepath: Path,
+        files_dir: Optional[Path],
+        http_user: str = None,
+        http_pass: str = None,
+        tenant_crawler_settings: dict[str, Any] | None = None,
+        max_length: int,
+    ) -> None:
+        """Async wrapper with tenant-aware timeout for sitemap crawl.
+
+        Uses asyncio.wait_for() to enforce dynamic timeout based on tenant settings.
+        This replaces the crochet decorator which evaluated timeout at import time.
+        """
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    Crawler._run_sitemap_crawl_sync,
+                    sitemap_url,
+                    filepath=filepath,
+                    files_dir=files_dir,
+                    http_user=http_user,
+                    http_pass=http_pass,
+                    tenant_crawler_settings=tenant_crawler_settings,
+                ),
+                timeout=max_length,
+            )
+        except asyncio.TimeoutError:
+            raise CrawlerException(
+                f"Crawl timeout: exceeded {max_length} seconds for {sitemap_url}"
+            )
 
     @asynccontextmanager
-    async def _crawl(self, func, **kwargs):
+    async def _crawl(self, func, *, max_length: int, **kwargs):
+        """Execute crawl function with timeout and yield results.
+
+        Args:
+            func: The async crawl function to execute
+            max_length: Tenant-aware timeout in seconds
+            **kwargs: Additional arguments for the crawl function
+        """
         with NamedTemporaryFile() as tmp_file:
             with TemporaryDirectory() as tmp_dir:
-                await asyncio.to_thread(func, filepath=tmp_file.name, files_dir=tmp_dir, **kwargs)
+                await func(
+                    filepath=tmp_file.name,
+                    files_dir=tmp_dir,
+                    max_length=max_length,
+                    **kwargs,
+                )
 
                 # If the result file is empty
                 # (This will fail if the expected result is no pages but some files)
@@ -111,23 +241,46 @@ class Crawler:
         crawl_type: CrawlType = CrawlType.CRAWL,
         http_user: str = None,
         http_pass: str = None,
+        tenant_crawler_settings: dict[str, Any] | None = None,
     ):
+        """Execute a web crawl with tenant-aware settings.
+
+        Args:
+            url: URL to crawl (or sitemap URL for SITEMAP crawl type)
+            download_files: Whether to download linked files
+            crawl_type: Type of crawl (CRAWL or SITEMAP)
+            http_user: HTTP basic auth username (optional)
+            http_pass: HTTP basic auth password (optional)
+            tenant_crawler_settings: Tenant-specific settings from DB (optional)
+                If provided, these override environment variable defaults.
+
+        Note:
+            crawl_max_length is now tenant-aware. The timeout is resolved at runtime
+            from tenant settings (if provided) or falls back to environment default.
+        """
+        # Get tenant-aware max crawl length (resolved at runtime, not import time)
+        max_length = get_crawler_setting("crawl_max_length", tenant_crawler_settings)
+
         if crawl_type == CrawlType.CRAWL:
             async with self._crawl(
-                self._run_crawl,
+                self._run_crawl_with_timeout,
+                max_length=max_length,
                 url=url,
                 download_files=download_files,
                 http_user=http_user,
                 http_pass=http_pass,
+                tenant_crawler_settings=tenant_crawler_settings,
             ) as crawl_result:
                 yield crawl_result
 
         elif crawl_type == CrawlType.SITEMAP:
             async with self._crawl(
-                self._run_sitemap_crawl,
+                self._run_sitemap_crawl_with_timeout,
+                max_length=max_length,
                 sitemap_url=url,
                 http_user=http_user,
                 http_pass=http_pass,
+                tenant_crawler_settings=tenant_crawler_settings,
             ) as crawl_result:
                 yield crawl_result
 
