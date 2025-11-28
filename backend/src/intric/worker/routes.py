@@ -31,18 +31,18 @@ async def crawl(job_id: str, params: CrawlTask, container: Container):
 
 
 @worker.cron_job(
-    hour=1, minute=0
-)  # Daily at 1:00 UTC (2:00 AM Swedish winter, 3:00 AM summer)
+    minute=0
+)  # Hourly at :00 - enables true ~24h scheduling for DAILY websites
 async def crawl_all_websites(container: Container):
-    """Daily cron job to process websites based on their update intervals.
+    """Hourly cron job to check and queue websites based on their update intervals.
 
-    Why: Single daily cron is simpler to maintain than multiple schedules.
-    Runs at 1:00 UTC to minimize user impact (2 AM Swedish winter / 3 AM Swedish summer).
+    Why: Hourly checks ensure DAILY websites are scheduled ~24 hours after last crawl,
+    not up to ~39 hours with single daily cron. Query is fast (indexed) and lightweight.
 
     Schedule handles:
-    - DAILY: Every day
-    - EVERY_OTHER_DAY: Every 2 days based on last crawl
-    - WEEKLY: Fridays (preserving existing behavior)
+    - DAILY: ~24 hours after last crawl
+    - EVERY_OTHER_DAY: ~48 hours after last crawl
+    - WEEKLY: Fridays only, ~7 days after last crawl
     - NEVER: Skipped
     """
     return await queue_website_crawls(container=container)
