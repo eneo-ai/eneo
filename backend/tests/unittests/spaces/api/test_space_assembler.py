@@ -132,3 +132,19 @@ def test_only_org_enabled_embedding_models_are_returned(
     space_public = space_assembler.from_space_to_model(space)
 
     assert space_public.embedding_models == []
+
+
+def test_no_applications_included_in_space_sparse(
+    space: Space, space_assembler: SpaceAssembler
+):
+    space_sparse = space_assembler.from_space_to_sparse_model(space, include_applications=False)
+
+    assert space_sparse.applications == None
+
+
+def test_applications_included_in_space_sparse(
+    space: Space, space_assembler: SpaceAssembler
+):
+    space_sparse = space_assembler.from_space_to_sparse_model(space, include_applications=True)
+
+    assert space_sparse.applications != None

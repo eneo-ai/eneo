@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 from intric.apps.apps.api.app_models import AppPublic
 from intric.assistants.api.assistant_models import AssistantPublic
@@ -160,16 +160,17 @@ async def delete_space(
     status_code=200,
 )
 async def get_spaces(
+    include_applications: bool = Query(default=False, description="Includes published applications on each space"),
+    include_personal: bool = Query(default=False,  description="Includes your personal space"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces()
-    spaces = [assembler.from_space_to_sparse_model(space) for space in spaces]
+    spaces = await service.get_spaces(include_personal=include_personal)
+    spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)
-
 
 @router.get(
     "/{id}/applications/",
