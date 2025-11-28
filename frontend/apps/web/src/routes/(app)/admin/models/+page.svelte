@@ -32,13 +32,25 @@
   </Page.Header>
   <Page.Main>
     <Page.Tab id="completion_models">
-      <CompletionModelsTable completionModels={data.models.completionModels} />
+      <CompletionModelsTable
+        completionModels={data.models.completionModels}
+        credentials={data.credentials}
+        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
+      />
     </Page.Tab>
     <Page.Tab id="embedding_models">
-      <EmbeddingModelsTable embeddingModels={data.models.embeddingModels} />
+      <EmbeddingModelsTable
+        embeddingModels={data.models.embeddingModels}
+        credentials={data.credentials}
+        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
+      />
     </Page.Tab>
     <Page.Tab id="transcription_models">
-      <TranscriptionModelsTable transcriptionModels={data.models.transcriptionModels} />
+      <TranscriptionModelsTable
+        transcriptionModels={data.models.transcriptionModels}
+        credentials={data.credentials}
+        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
+      />
     </Page.Tab>
   </Page.Main>
 </Page.Root>

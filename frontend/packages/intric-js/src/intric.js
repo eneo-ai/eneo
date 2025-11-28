@@ -25,6 +25,8 @@ import { initGroupChats } from "./endpoints/group-chats";
 import { initIntegrations } from "./endpoints/integrations";
 import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
+import { initSettings } from "./endpoints/settings";
+import { initCredentials } from "./endpoints/credentials";
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -64,6 +66,8 @@ export function createIntric(args) {
     integrations: initIntegrations(client),
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
+    settings: initSettings(client),
+    credentials: initCredentials(client),
     client
   };
 }

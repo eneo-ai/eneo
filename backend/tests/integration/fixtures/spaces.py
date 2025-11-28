@@ -39,13 +39,45 @@ def space_factory(admin_user):
         model_ids: List[UUID] = None,
         **extra
     ) -> Spaces:
-        """Create a space with access to the specified models."""
+        """Create a space with access to the specified models.
+
+        Creates a child space (with tenant_space_id set to org space) to avoid
+        UNIQUE CONSTRAINT violations on org spaces.
+        """
+        from sqlalchemy import select
+
         if model_ids is None:
             model_ids = []
 
+        # Get or create org space for this tenant
+        from intric.database.tables.spaces_table import Spaces as SpacesTable
+
+        org_space = (
+            await session.execute(
+                select(SpacesTable).where(
+                    (SpacesTable.tenant_id == admin_user.tenant_id) &
+                    (SpacesTable.user_id.is_(None)) &
+                    (SpacesTable.tenant_space_id.is_(None))
+                )
+            )
+        ).scalar_one_or_none()
+
+        if org_space is None:
+            # Create org space if it doesn't exist
+            org_space = Spaces(
+                name=f"Org Space for {admin_user.tenant_id}",
+                tenant_id=admin_user.tenant_id,
+                user_id=None,
+                tenant_space_id=None,
+            )
+            session.add(org_space)
+            await session.flush()
+
+        # Create child space under org space
         space = Spaces(
             name=name,
             tenant_id=admin_user.tenant_id,
+            tenant_space_id=org_space.id,  # Make it a child space
             **extra
         )
 

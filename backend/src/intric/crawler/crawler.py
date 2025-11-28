@@ -33,6 +33,13 @@ def create_runner(filepath: str, files_dir: Optional[str] = None):
         "AUTOTHROTTLE_ENABLED": app_settings.autothrottle_enabled,
         "ROBOTSTXT_OBEY": app_settings.obey_robots,
         "DOWNLOAD_MAXSIZE": app_settings.upload_max_file_size,
+        # Timeout settings to fail faster on unreachable sites
+        # Why: Default 180s timeout × 3 retries = ~13 min waste per unreachable site
+        # These are per-REQUEST timeouts, NOT total crawl time (crawl_max_length handles that)
+        "DOWNLOAD_TIMEOUT": 90,  # 90s per request (conservative, down from 180s default)
+        "DNS_TIMEOUT": 30,  # 30s for DNS resolution (down from 60s default)
+        "RETRY_TIMES": 2,  # 2 retries (3 total attempts) - keep Scrapy default
+        "RETRY_ENABLED": True,
     }
 
     if files_dir is not None:
@@ -80,7 +87,9 @@ class Crawler:
                 # If the result file is empty
                 # (This will fail if the expected result is no pages but some files)
                 if os.stat(tmp_file.name).st_size == 0:
-                    raise CrawlerException("Crawl failed")
+                    # Extract URL for better error context in logs
+                    url = kwargs.get("url") or kwargs.get("sitemap_url", "unknown")
+                    raise CrawlerException(f"Crawl failed for {url}: no pages returned")
 
                 def _iter_pages():
                     with open(tmp_file.name) as f:

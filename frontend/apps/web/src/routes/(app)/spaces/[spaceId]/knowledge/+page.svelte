@@ -23,6 +23,8 @@
 
   let selectedTab = writable<string>();
   let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+  let isOrgSpace = $currentSpace.organization;
+  let isPersonalSpace = $currentSpace.personal;
 
   // Website selection state (shared with WebsiteTable)
   let selectedWebsiteIds = writable<Set<string>>(new Set());
@@ -59,6 +61,7 @@
     isBulkRecrawling = false;
   }
 
+
   $: userCanSeeCollections = $currentSpace.hasPermission("read", "collection");
   $: userCanSeeWebsites = $currentSpace.hasPermission("read", "website");
   $: userCanSeeIntegrations =
@@ -79,7 +82,7 @@
       {#if userCanSeeCollections}
         <Page.TabTrigger tab="collections">{m.collections()}</Page.TabTrigger>
       {/if}
-      {#if userCanSeeWebsites}
+      {#if userCanSeeWebsites && !isPersonalSpace}
         <Page.TabTrigger tab="websites">{m.websites()}</Page.TabTrigger>
       {/if}
       {#if userCanSeeIntegrations}

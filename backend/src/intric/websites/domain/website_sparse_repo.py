@@ -57,17 +57,13 @@ class WebsiteSparseRepository:
         Returns:
             List of websites due for crawling
         """
-        # Calculate threshold timestamps with timezone awareness
-        # Why: Comparing against TIMESTAMP(timezone=True) column requires timezone-aware datetimes
-        one_day_ago = datetime.combine(
-            today, datetime.min.time(), tzinfo=timezone.utc
-        ) - timedelta(days=1)
-        two_days_ago = datetime.combine(
-            today, datetime.min.time(), tzinfo=timezone.utc
-        ) - timedelta(days=2)
-        seven_days_ago = datetime.combine(
-            today, datetime.min.time(), tzinfo=timezone.utc
-        ) - timedelta(days=7)
+        # Calculate threshold timestamps using rolling window from current time
+        # Why: Use actual elapsed time, not midnight-to-midnight boundaries
+        # This ensures websites are scheduled ~24h after last crawl, not at next midnight
+        now_utc = datetime.now(timezone.utc)
+        one_day_ago = now_utc - timedelta(days=1)
+        two_days_ago = now_utc - timedelta(days=2)
+        seven_days_ago = now_utc - timedelta(days=7)
 
         # DAILY: crawl if last_crawled_at is NULL or >= 1 day ago
         cond_daily = sa.and_(
@@ -104,8 +100,6 @@ class WebsiteSparseRepository:
         # Circuit breaker condition: Only crawl sites that are not in backoff period
         # Why: Prevent wasted resources on persistently failing websites
         # NULL = no failures, non-NULL = backoff until this time
-        # Use explicit UTC to match timezone-aware column and avoid DB timezone issues
-        now_utc = datetime.now(timezone.utc)
         cond_circuit_breaker = sa.or_(
             WebsitesTable.next_retry_at.is_(None),
             WebsitesTable.next_retry_at <= now_utc,

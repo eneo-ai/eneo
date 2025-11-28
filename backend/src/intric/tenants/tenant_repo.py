@@ -527,3 +527,59 @@ class TenantRepository:
         tenants = result.scalars().all()
 
         return [TenantInDB.model_validate(tenant) for tenant in tenants]
+
+    async def update_crawler_settings(
+        self,
+        tenant_id: UUID,
+        crawler_settings: dict[str, Any],
+    ) -> TenantInDB:
+        """Atomically merge crawler settings for a tenant.
+
+        Uses PostgreSQL's || operator to merge JSONB objects atomically,
+        preventing lost-update race conditions when concurrent updates occur.
+        Only provided keys are updated; existing keys are preserved.
+
+        Args:
+            tenant_id: The UUID of the tenant
+            crawler_settings: Partial crawler settings dict to merge
+
+        Returns:
+            Updated TenantInDB instance
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                crawler_settings=func.coalesce(
+                    Tenants.crawler_settings, cast({}, JSONB)
+                ).op("||")(cast(crawler_settings, JSONB)),
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        return await self.delegate.get_model_from_query(stmt)
+
+    async def clear_crawler_settings(
+        self,
+        tenant_id: UUID,
+    ) -> TenantInDB:
+        """Clear all crawler settings for a tenant, reverting to defaults.
+
+        Args:
+            tenant_id: The UUID of the tenant
+
+        Returns:
+            Updated TenantInDB instance
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                crawler_settings={},
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        return await self.delegate.get_model_from_query(stmt)

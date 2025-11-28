@@ -13,9 +13,13 @@
   import { IconBulb } from "@intric/icons/bulb";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie } from "lucide-svelte";
+  import { ChartPie, LayoutTemplate } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
+  import { getAppContext } from "$lib/core/AppContext.js";
+
+  const { settings } = getAppContext();
+
   let currentRoute = "";
   $: currentRoute = $page.url.pathname;
 
@@ -42,6 +46,14 @@
     icon={IconCPU}
     label={m.models()}
   />
+  {#if settings?.using_templates}
+    <Navigation.Link
+      href="/admin/templates"
+      isActive={isSelected("/admin/templates", currentRoute)}
+      icon={LayoutTemplate}
+      label={m.templates()}
+    />
+  {/if}
   <Navigation.Link
     href="/admin/security-classifications"
     isActive={isSelected("/admin/security-classifications", currentRoute)}
@@ -68,8 +80,8 @@
   </Navigation.Link>
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link
-    href="/admin/legacy/users"
-    isActive={isSelected("/admin/legacy/users", currentRoute)}
+    href="/admin/users"
+    isActive={isSelected("/admin/users", currentRoute)}
     icon={IconAssistant}
     label={m.users()}
   />

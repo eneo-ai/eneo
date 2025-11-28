@@ -23,10 +23,11 @@
 
   $: section = $page.url.pathname.split("/")[3];
   $: chatPartnerIsDefined = $page.url.searchParams.get("type") !== null;
+  $: isOrgSpace = $currentSpace.organization === true;
 </script>
 
 <Navigation.Menu>
-  {#if $currentSpace.hasPermission("read", "default_assistant") && $currentSpace.personal}
+  {#if !isOrgSpace && $currentSpace.hasPermission("read", "default_assistant") && $currentSpace.personal}
     <Navigation.Link
       href="/spaces/{$currentSpace.routeId}/chat?tab=chat"
       isActive={section === "chat" && !chatPartnerIsDefined}
@@ -36,14 +37,16 @@
     <div class="border-default my-2 border-b-[0.5px]"></div>
   {/if}
 
-  <Navigation.Link
-    href="/spaces/{$currentSpace.routeId}/overview"
-    isActive={section === "overview"}
-    icon={IconOverview}
-    label={m.overview()}
-  />
+  {#if !isOrgSpace}
+    <Navigation.Link
+      href="/spaces/{$currentSpace.routeId}/overview"
+      isActive={section === "overview"}
+      icon={IconOverview}
+      label={m.overview()}
+    />
+  {/if}
 
-  {#if $currentSpace.hasPermission("read", "assistant")}
+  {#if !isOrgSpace && $currentSpace.hasPermission("read", "assistant")}
     <Navigation.Link
       href="/spaces/{$currentSpace.routeId}/assistants"
       isActive={section === "assistants" || (section === "chat" && chatPartnerIsDefined)}
@@ -51,7 +54,7 @@
       label={m.assistants()}
     />
   {/if}
-  {#if $currentSpace.hasPermission("read", "app")}
+  {#if !isOrgSpace && $currentSpace.hasPermission("read", "app")}
     <Navigation.Link
       href="/spaces/{$currentSpace.routeId}/apps"
       isActive={section === "apps"}
@@ -77,7 +80,7 @@
       label={m.services()}
     />
   {/if}
-  {#if $currentSpace.hasPermission("read", "member")}
+  {#if !isOrgSpace && $currentSpace.hasPermission("read", "member")}
     <div class="border-default my-2 border-b-[0.5px]"></div>
     <Navigation.Link
       href="/spaces/{$currentSpace.routeId}/members"
