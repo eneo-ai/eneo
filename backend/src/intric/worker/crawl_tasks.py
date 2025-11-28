@@ -757,6 +757,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 crawl_type=params.crawl_type,
                 http_user=http_user,  # Pass auth credentials as strings
                 http_pass=http_pass,
+                # Pass tenant settings for tenant-aware Scrapy configuration
+                tenant_crawler_settings=tenant.crawler_settings if tenant else None,
             ) as crawl:
                 timings["crawl_and_parse"] = time.time() - start
 

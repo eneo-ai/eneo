@@ -154,7 +154,6 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
 
     if (response.ok) {
       federationStatus = await response.json();
-      console.log("[FeatureFlags] Federation status:", federationStatus);
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {

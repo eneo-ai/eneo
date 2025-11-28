@@ -75,6 +75,9 @@ class Worker:
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
+        # Job timeout is a safety net - uses global env default as upper bound.
+        # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
+        # which respects tenant-specific crawl_max_length settings.
         self.job_timeout = settings.crawl_max_length + 60 * 60  # crawl window + 1h buffer
         self.max_jobs = settings.worker_max_jobs
         self.expires_extra_ms = 604800000  # 1 week

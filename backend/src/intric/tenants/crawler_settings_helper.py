@@ -32,6 +32,13 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "default": 90,
         "description": "Per-request download timeout in seconds (10s to 5 min)",
     },
+    "download_max_size": {
+        "type": int,
+        "min": 1048576,
+        "max": 1073741824,
+        "env_attr": "download_max_size",
+        "description": "Maximum file size for crawler downloads in bytes (1MB to 1GB)",
+    },
     "dns_timeout": {
         "type": int,
         "min": 5,

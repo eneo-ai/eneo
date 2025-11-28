@@ -211,6 +211,7 @@ class Settings(BaseSettings):
     # Crawl - Scrapy crawler settings
     crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally

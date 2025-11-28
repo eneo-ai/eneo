@@ -726,6 +726,7 @@ class Container(containers.DeclarativeContainer):
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
         crawl_service=crawl_service,
+        tenant_repo=tenant_repo,
     )
     info_blob_service = providers.Factory(
         InfoBlobService,

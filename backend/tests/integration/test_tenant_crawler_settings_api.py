@@ -63,7 +63,7 @@ class TestUpdateCrawlerSettings:
         assert response.status_code == 200
         data = response.json()
         assert "settings" in data
-        assert len(data["settings"]) == 14
+        assert len(data["settings"]) == 15
 
     async def test_validation_rejects_out_of_range_below_min(
         self, client, test_tenant, super_api_key
@@ -139,6 +139,40 @@ class TestUpdateCrawlerSettings:
         assert data["settings"]["obey_robots"] is False
         assert data["settings"]["autothrottle_enabled"] is False
 
+    async def test_update_download_max_size(self, client, test_tenant, super_api_key):
+        """download_max_size setting can be updated."""
+        response = await client.put(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            json={"download_max_size": 52428800},  # 50MB
+            headers={"X-API-Key": super_api_key},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["settings"]["download_max_size"] == 52428800
+        assert "download_max_size" in data["overrides"]
+
+    async def test_download_max_size_validation_below_min(
+        self, client, test_tenant, super_api_key
+    ):
+        """Pydantic validation rejects download_max_size below minimum (1MB)."""
+        response = await client.put(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            json={"download_max_size": 500000},  # Below 1MB minimum
+            headers={"X-API-Key": super_api_key},
+        )
+        assert response.status_code == 422
+
+    async def test_download_max_size_validation_above_max(
+        self, client, test_tenant, super_api_key
+    ):
+        """Pydantic validation rejects download_max_size above maximum (1GB)."""
+        response = await client.put(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            json={"download_max_size": 2147483648},  # Above 1GB maximum
+            headers={"X-API-Key": super_api_key},
+        )
+        assert response.status_code == 422
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -163,7 +197,7 @@ class TestGetCrawlerSettings:
         data = response.json()
         assert data["overrides"] == []
         assert "download_timeout" in data["settings"]
-        assert len(data["settings"]) == 14
+        assert len(data["settings"]) == 15
 
     async def test_returns_merged_settings_after_update(
         self, client, test_tenant, super_api_key
