@@ -42,14 +42,15 @@ class TestCrawlerSettingSpecs:
             )
 
     def test_expected_settings_count(self):
-        """Verify we have all 14 crawler settings."""
-        assert len(CRAWLER_SETTING_SPECS) == 14
+        """Verify we have all 15 crawler settings."""
+        assert len(CRAWLER_SETTING_SPECS) == 15
 
     def test_known_settings_present(self):
         """Verify all known settings are present."""
         expected = [
             "crawl_max_length",
             "download_timeout",
+            "download_max_size",
             "dns_timeout",
             "retry_times",
             "closespider_itemcount",
@@ -105,6 +106,7 @@ class TestGetCrawlerSetting:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
+            mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
@@ -141,6 +143,7 @@ class TestGetAllCrawlerSettings:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
+            mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
@@ -155,7 +158,7 @@ class TestGetAllCrawlerSettings:
             result = get_all_crawler_settings({})
             assert "download_timeout" in result
             assert "crawl_max_length" in result
-            assert len(result) == 14
+            assert len(result) == 15
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
@@ -163,6 +166,7 @@ class TestGetAllCrawlerSettings:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
+            mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
@@ -187,6 +191,7 @@ class TestGetAllCrawlerSettings:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
+            mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
@@ -199,7 +204,7 @@ class TestGetAllCrawlerSettings:
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings(None)
-            assert len(result) == 14
+            assert len(result) == 15
 
 
 class TestValidateCrawlerSetting:

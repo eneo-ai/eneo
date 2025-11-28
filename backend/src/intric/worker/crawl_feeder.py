@@ -148,7 +148,7 @@ class CrawlFeeder:
         from intric.database.tables.tenant_table import Tenants
 
         try:
-            async with sessionmanager.session() as session:
+            async with sessionmanager.session() as session, session.begin():
                 stmt = select(Tenants.crawler_settings).where(Tenants.id == tenant_id)
                 result = await session.execute(stmt)
                 row = result.scalar_one_or_none()
@@ -159,6 +159,81 @@ class CrawlFeeder:
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
             return None
+
+    async def _get_minimum_feeder_interval(
+        self, redis_client: aioredis.Redis
+    ) -> int:
+        """Get minimum feeder interval across all active tenants.
+
+        Why: Singleton feeder serves all tenants with one loop. To respect
+        per-tenant intervals, we use the shortest interval configured by
+        any tenant with pending jobs. This ensures responsive scheduling
+        for tenants who need faster polling.
+
+        Args:
+            redis_client: Redis connection for scanning tenant queues
+
+        Returns:
+            Minimum interval in seconds across active tenants.
+            Falls back to global default if no tenant overrides exist.
+        """
+        # Get all tenant IDs with pending jobs
+        pattern = "tenant:*:crawl_pending"
+        tenant_ids: list[UUID] = []
+
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = await redis_client.scan(
+                    cursor=cursor, match=pattern, count=100
+                )
+                for key_bytes in keys:
+                    key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+                    # Extract tenant_id from key: tenant:{uuid}:crawl_pending
+                    parts = key.split(":")
+                    if len(parts) >= 2:
+                        try:
+                            tenant_ids.append(UUID(parts[1]))
+                        except ValueError:
+                            continue
+                if cursor == 0:
+                    break
+        except Exception as exc:
+            logger.warning(
+                "Failed to scan tenant queues for interval calculation",
+                extra={"error": str(exc)},
+            )
+            return self.settings.crawl_feeder_interval_seconds
+
+        if not tenant_ids:
+            return self.settings.crawl_feeder_interval_seconds
+
+        # Get minimum interval across all active tenants
+        min_interval = self.settings.crawl_feeder_interval_seconds
+
+        for tenant_id in tenant_ids:
+            try:
+                tenant_settings = await self._get_tenant_crawler_settings(tenant_id)
+                interval = get_crawler_setting(
+                    "crawl_feeder_interval_seconds",
+                    tenant_settings,
+                    default=self.settings.crawl_feeder_interval_seconds,
+                )
+                min_interval = min(min_interval, interval)
+            except Exception:
+                # Skip tenant on error, use current min
+                continue
+
+        logger.debug(
+            "Calculated minimum feeder interval",
+            extra={
+                "min_interval": min_interval,
+                "active_tenants": len(tenant_ids),
+                "global_default": self.settings.crawl_feeder_interval_seconds,
+            },
+        )
+
+        return min_interval
 
     async def _try_acquire_slot(
         self,
@@ -791,14 +866,18 @@ class CrawlFeeder:
                     # Why: Keeps us as leader for next cycle
                     await self._refresh_leader_lock(redis_client)
 
-                    # Sleep until next cycle
-                    await asyncio.sleep(self.settings.crawl_feeder_interval_seconds)
+                    # Sleep until next cycle using tenant-aware interval
+                    # Why: Use shortest interval among active tenants for responsive scheduling
+                    sleep_interval = await self._get_minimum_feeder_interval(redis_client)
+                    await asyncio.sleep(sleep_interval)
 
                 except Exception as exc:
                     logger.error(f"Error in feeder loop: {exc}")
                     # Continue running even on errors
                     # Why: Feeder should be resilient, not crash the worker
-                    await asyncio.sleep(self.settings.crawl_feeder_interval_seconds)
+                    # Use tenant-aware interval even in error recovery
+                    sleep_interval = await self._get_minimum_feeder_interval(redis_client)
+                    await asyncio.sleep(sleep_interval)
         finally:
             # Always close Redis client on exit
             # Why: Prevents connection leaks on worker shutdown/reload

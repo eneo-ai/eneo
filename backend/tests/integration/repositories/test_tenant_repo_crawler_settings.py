@@ -266,4 +266,4 @@ class TestCrawlerSettingsIntegrationWithHelper:
             # Verify defaults still present
             assert "dns_timeout" in all_settings
             assert "crawl_max_length" in all_settings
-            assert len(all_settings) == 14
+            assert len(all_settings) == 15  # Updated: now includes download_max_size
