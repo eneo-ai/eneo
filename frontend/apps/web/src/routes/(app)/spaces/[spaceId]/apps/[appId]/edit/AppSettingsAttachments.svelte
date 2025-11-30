@@ -11,6 +11,7 @@
   import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
   import type { UploadedFile } from "@intric/intric-js";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
+  import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
 
   // This is only the new uploads, it is bound to the attachment upload
   const intric = getIntric();
@@ -69,9 +70,16 @@
     <UploadedFileIcon {file}></UploadedFileIcon>
 
     <div class="flex flex-grow items-center justify-between gap-1">
-      <span class="line-clamp-1">
-        {file.name}
-      </span>
+      <AttachmentPreview {file} isTableView={true}>
+        {#snippet children({ showFile }: { showFile: () => void })}
+          <button
+            on:click={showFile}
+            class="line-clamp-1 cursor-pointer text-left hover:underline"
+          >
+            {file.name}
+          </button>
+        {/snippet}
+      </AttachmentPreview>
       <span class="text-secondary line-clamp-1 text-right text-sm">
         {formatFileType(file.mimetype)} · {formatBytes(file.size)}
       </span>

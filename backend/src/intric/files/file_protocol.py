@@ -80,34 +80,43 @@ class FileProtocol:
 
         return FileBaseWithContent(**file_base_kwargs)
 
-    async def text_to_domain(self, upload_file: UploadFile):
+    async def text_to_domain(self, upload_file: UploadFile, max_size: int | None = None):
+        if max_size is None:
+            max_size = get_settings().upload_file_to_session_max_size
+
         return await self._get_content(
             upload_file,
             file_type=FileType.TEXT,
-            max_size=get_settings().upload_file_to_session_max_size,
+            max_size=max_size,
             extractor=self.text_extractor.extract,
         )
 
-    async def image_to_domain(self, upload_file: UploadFile):
+    async def image_to_domain(self, upload_file: UploadFile, max_size: int | None = None):
+        if max_size is None:
+            max_size = get_settings().upload_image_to_session_max_size
+
         return await self._get_content(
             upload_file,
             file_type=FileType.IMAGE,
-            max_size=get_settings().upload_image_to_session_max_size,
+            max_size=max_size,
             extractor=self.image_extractor.extract,
         )
 
-    async def audio_to_domain(self, upload_file: UploadFile):
+    async def audio_to_domain(self, upload_file: UploadFile, max_size: int | None = None):
+        if max_size is None:
+            max_size = get_settings().transcription_max_file_size
+
         return await self._get_content(
             upload_file,
             file_type=FileType.AUDIO,
-            max_size=get_settings().transcription_max_file_size,
+            max_size=max_size,
             extractor=bytes_extractor,
         )
 
-    async def to_domain(self, upload_file: UploadFile):
+    async def to_domain(self, upload_file: UploadFile, max_size: int | None = None):
         if ImageMimeTypes.has_value(upload_file.content_type):
-            return await self.image_to_domain(upload_file)
+            return await self.image_to_domain(upload_file, max_size=max_size)
         elif AudioMimeTypes.has_value(upload_file.content_type):
-            return await self.audio_to_domain(upload_file)
+            return await self.audio_to_domain(upload_file, max_size=max_size)
 
-        return await self.text_to_domain(upload_file)
+        return await self.text_to_domain(upload_file, max_size=max_size)
