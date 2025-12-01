@@ -135,7 +135,8 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     description: Optional[str]
     personal: bool
     organization: bool 
-
+    applications: Optional[Applications] = None
+    default_assistant: Optional[DefaultAssistant] = None
 
 class SpaceDashboard(SpaceSparse):
     applications: Applications
