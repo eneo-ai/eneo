@@ -5,11 +5,18 @@ import sys
 from typing import Optional
 from urllib.parse import urlparse
 
-from intric.definitions import ROOT_DIR
+from pathlib import Path
+
 from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-MANIFEST_LOCATION = f"{ROOT_DIR}/.release-please-manifest.json"
+# Version manifest lookup:
+# - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
+#   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
+# - Local dev: __file__ points to source tree, so we traverse up from this file's location
+#   (src/intric/main/config.py -> 4 levels up -> backend/.release-please-manifest.json)
+_DOCKER_MANIFEST = Path("/app/.release-please-manifest.json")
+_LOCAL_MANIFEST = Path(__file__).resolve().parent.parent.parent.parent / ".release-please-manifest.json"
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -84,8 +91,11 @@ def validate_public_origin(origin: str | None) -> str | None:
 
 
 def _set_app_version():
+    # Try Docker path first, then local dev path
+    manifest_path = _DOCKER_MANIFEST if _DOCKER_MANIFEST.exists() else _LOCAL_MANIFEST
+
     try:
-        with open(MANIFEST_LOCATION) as f:
+        with open(manifest_path) as f:
             manifest_data = json.load(f)
 
         version = manifest_data["."]
