@@ -482,6 +482,7 @@
   "include_follow_up_questions": "Include follow-up questions",
   "incorrect_credentials": "Incorrect credentials. Please provide a valid username and a valid password.",
   "input_data_required_tooltip": "Input data is required to run this app",
+  "input_files": "Input files",
   "input_description_description": "A label telling this app's users what data to provide via this input.",
   "input_type_description": "Select what type of media this input accepts and the kind of interface to display.",
   "insights_description": "Collect insights about this assistant's usage and allow space editors and admins to access the full history of user questions.",
