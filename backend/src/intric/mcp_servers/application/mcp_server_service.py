@@ -42,7 +42,6 @@ class MCPServerService:
         self,
         name: str,
         http_url: str,
-        transport_type: str = "sse",
         http_auth_type: str = "none",
         description: str | None = None,
         http_auth_config_schema: dict | None = None,
@@ -50,12 +49,11 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
     ) -> MCPServer:
-        """Create a new MCP server for the tenant (admin only, HTTP-only)."""
+        """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport)."""
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
             http_url=http_url,
-            transport_type=transport_type,
             http_auth_type=http_auth_type,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
@@ -78,7 +76,6 @@ class MCPServerService:
         mcp_server_id: UUID,
         name: str | None = None,
         http_url: str | None = None,
-        transport_type: str | None = None,
         http_auth_type: str | None = None,
         description: str | None = None,
         http_auth_config_schema: dict | None = None,
@@ -86,15 +83,13 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
     ) -> MCPServer:
-        """Update an MCP server in global catalog (admin only, HTTP-only)."""
+        """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport)."""
         mcp_server = await self.repo.one(id=mcp_server_id)
 
         if name is not None:
             mcp_server.name = name
         if http_url is not None:
             mcp_server.http_url = http_url
-        if transport_type is not None:
-            mcp_server.transport_type = transport_type
         if http_auth_type is not None:
             mcp_server.http_auth_type = http_auth_type
         if description is not None:

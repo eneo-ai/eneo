@@ -15,13 +15,12 @@ class BaseListModel(BaseModel, Generic[T]):
 
 
 class MCPServerPublic(BaseModel):
-    """Public DTO for MCP server (HTTP-only)."""
+    """Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport)."""
 
     id: UUID
     name: str
     description: Optional[str]
     http_url: str
-    transport_type: str  # "sse", "streamable_http"
     http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
     http_auth_config_schema: Optional[dict]
     tags: Optional[list[str]]
@@ -34,11 +33,10 @@ class MCPServerList(BaseListModel[MCPServerPublic]):
 
 
 class MCPServerCreate(BaseModel):
-    """DTO for creating an MCP server (admin only, HTTP-only)."""
+    """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: str
     http_url: str
-    transport_type: Literal["sse", "streamable_http"] = "sse"
     http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None
@@ -48,11 +46,10 @@ class MCPServerCreate(BaseModel):
 
 
 class MCPServerUpdate(BaseModel):
-    """DTO for updating an MCP server (admin only, HTTP-only)."""
+    """DTO for updating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: Optional[str] = None
     http_url: Optional[str] = None
-    transport_type: Optional[Literal["sse", "streamable_http"]] = None
     http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None

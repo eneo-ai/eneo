@@ -36,7 +36,6 @@ class MCPServer(Entity):
         name: str,
         http_url: str,
         description: Optional[str] = None,
-        transport_type: str = "sse",
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict] = None,
         is_enabled: bool = True,
@@ -54,7 +53,6 @@ class MCPServer(Entity):
         self.name = name
         self.description = description
         self.http_url = http_url
-        self.transport_type = transport_type
         self.http_auth_type = http_auth_type
         self.http_auth_config_schema = http_auth_config_schema
         self.is_enabled = is_enabled

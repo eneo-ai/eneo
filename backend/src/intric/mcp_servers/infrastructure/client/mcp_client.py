@@ -4,7 +4,6 @@ import asyncio
 from typing import Any, Optional
 
 from mcp import ClientSession
-from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from intric.main.logging import get_logger
@@ -100,29 +99,16 @@ class MCPClient:
         """Internal connection logic."""
         headers = self._build_auth_headers()
 
-        # Use SSE or Streamable HTTP based on transport type
-        if self.mcp_server.transport_type == "sse":
-            self._streams_context = sse_client(
-                url=self.mcp_server.http_url,
-                headers=headers
-            )
-        elif self.mcp_server.transport_type == "streamable_http":
-            self._streams_context = streamablehttp_client(
-                url=self.mcp_server.http_url,
-                headers=headers
-            )
-        else:
-            raise MCPClientError(f"Unsupported transport type: {self.mcp_server.transport_type}")
+        # Use Streamable HTTP transport (MCP 2025-03-26+ standard)
+        self._streams_context = streamablehttp_client(
+            url=self.mcp_server.http_url,
+            headers=headers
+        )
 
         # Enter the streams context
         streams = await self._streams_context.__aenter__()
-
-        # For streamable_http, we get (read, write, session_id), for SSE we get (read, write)
-        if self.mcp_server.transport_type == "streamable_http":
-            read, write, session_id = streams
-            logger.debug(f"Streamable HTTP session ID: {session_id}")
-        else:
-            read, write = streams
+        read, write, session_id = streams
+        logger.debug(f"Streamable HTTP session ID: {session_id}")
 
         # Create session
         self._session_context = ClientSession(read, write)
@@ -130,7 +116,7 @@ class MCPClient:
 
         # Initialize the session
         await self.session.initialize()
-        logger.info(f"Connected to MCP server: {self.mcp_server.name} via {self.mcp_server.transport_type}")
+        logger.info(f"Connected to MCP server: {self.mcp_server.name}")
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """

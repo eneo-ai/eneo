@@ -182,7 +182,6 @@ async def create_mcp_server(
     mcp_server = await service.create_mcp_server(
         name=data.name,
         http_url=data.http_url,
-        transport_type=data.transport_type,
         http_auth_type=data.http_auth_type,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
@@ -211,7 +210,6 @@ async def update_mcp_server(
         mcp_server_id=id,
         name=data.name,
         http_url=data.http_url,
-        transport_type=data.transport_type,
         http_auth_type=data.http_auth_type,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,

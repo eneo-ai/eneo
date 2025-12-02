@@ -28,7 +28,6 @@ class MCPServerSettingsService:
         self,
         name: str,
         http_url: str,
-        transport_type: str = "sse",
         http_auth_type: str = "none",
         description: str | None = None,
         http_auth_config_schema: dict | None = None,
@@ -38,12 +37,11 @@ class MCPServerSettingsService:
         is_enabled: bool = True,
         env_vars: dict | None = None,
     ) -> MCPServer:
-        """Create a new MCP server for the current tenant."""
+        """Create a new MCP server for the current tenant (uses Streamable HTTP transport)."""
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
             http_url=http_url,
-            transport_type=transport_type,
             http_auth_type=http_auth_type,
             description=description,
             http_auth_config_schema=http_auth_config_schema,

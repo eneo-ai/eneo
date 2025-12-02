@@ -1003,7 +1003,6 @@ class SpaceRepository:
                 name=server.name,
                 description=server.description,
                 http_url=server.http_url,
-                transport_type=server.transport_type,
                 http_auth_type=server.http_auth_type,
                 http_auth_config_schema=server.http_auth_config_schema,
                 is_enabled=server.is_enabled,
