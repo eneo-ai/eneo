@@ -6,7 +6,7 @@ parameter for per-request API key injection, which is required for implementing
 tenant-specific LLM credentials.
 
 Run with:
-    cd backend && poetry run pytest tests/validation/test_litellm_api_key_override.py -v
+    cd backend && uv run pytest tests/validation/test_litellm_api_key_override.py -v
 """
 
 import pytest

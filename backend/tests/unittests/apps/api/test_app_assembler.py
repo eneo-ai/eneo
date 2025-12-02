@@ -98,6 +98,7 @@ def app():
         completion_model=TEST_COMPLETION_MODEL,
         completion_model_kwargs=ModelKwargs(),
         transcription_model=TEST_TRANSCRIPTION_MODEL,
+        icon_id=None,
     )
     app.name = TEST_NAME
 
