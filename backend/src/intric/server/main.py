@@ -1,9 +1,7 @@
 import uvicorn
-from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from fastmcp import FastMCP
 
 from intric.allowed_origins.get_origin_callback import get_origin
 from intric.authentication import auth_dependencies
@@ -19,50 +17,11 @@ from intric.server.routers import router as api_router
 
 logger = get_logger(__name__)
 
-mcp = FastMCP("mcp proxy")
-
-@mcp.tool
-def add_two_numbers(a: int, b: int) -> int:
-    """Add two numbers."""
-    return a + b
-
-config = {
-    "mcpServers": {
-        "math": {
-            "url": "http://host.docker.internal:8080/mcp",
-            "transport": "sse"
-        },
-    }
-}
-
-# Create MCP ASGI app
-# Set path to match where it will be accessed
-mcp_app = mcp.http_app(path="/mcp", transport="streamable-http")
-
-
-
-# Combine both lifecycles
-@asynccontextmanager
-async def combined_lifespan(app: FastAPI):
-    async with app_lifespan(app):
-        async with mcp_app.lifespan(app):
-            yield
-
 
 def get_application():
     app = FastAPI(
-        lifespan=combined_lifespan,
+        lifespan=app_lifespan,
     )
-
-    @app.middleware("http")
-    async def log_mcp_requests(request, call_next):
-        if "/mcp" in request.url.path:
-            logger.info(f"MCP request: {request.method} {request.url.path}")
-            logger.info(f"Headers: {dict(request.headers)}")
-        response = await call_next(request)
-        if "/mcp" in request.url.path:
-            logger.info(f"MCP response status: {response.status_code}")
-        return response
 
     app.add_middleware(RequestContextMiddleware)
 
@@ -75,9 +34,6 @@ def get_application():
         expose_headers=["*"],  # Expose all headers including session-related ones
         callback=get_origin,
     )
-
-    # Mount MCP before including API router to avoid conflicts
-    app.mount(get_settings().api_prefix, mcp_app)
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
 

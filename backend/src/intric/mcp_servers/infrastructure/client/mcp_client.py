@@ -1,15 +1,19 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
-import logging
+import asyncio
 from typing import Any, Optional
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
+from intric.main.logging import get_logger
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# Connection timeout in seconds
+MCP_CONNECTION_TIMEOUT = 30
 
 
 class MCPClientError(Exception):
@@ -59,43 +63,74 @@ class MCPClient:
     async def connect(self) -> None:
         """Connect to the HTTP-based MCP server."""
         try:
-            headers = self._build_auth_headers()
-
-            # Use SSE or Streamable HTTP based on transport type
-            if self.mcp_server.transport_type == "sse":
-                self._streams_context = sse_client(
-                    url=self.mcp_server.http_url,
-                    headers=headers
-                )
-            elif self.mcp_server.transport_type == "streamable_http":
-                self._streams_context = streamablehttp_client(
-                    url=self.mcp_server.http_url,
-                    headers=headers
-                )
-            else:
-                raise MCPClientError(f"Unsupported transport type: {self.mcp_server.transport_type}")
-
-            # Enter the streams context
-            streams = await self._streams_context.__aenter__()
-
-            # For streamable_http, we get (read, write, session_id), for SSE we get (read, write)
-            if self.mcp_server.transport_type == "streamable_http":
-                read, write, session_id = streams
-                logger.debug(f"Streamable HTTP session ID: {session_id}")
-            else:
-                read, write = streams
-
-            # Create session
-            self._session_context = ClientSession(read, write)
-            self.session = await self._session_context.__aenter__()
-
-            # Initialize the session
-            await self.session.initialize()
-            logger.info(f"Connected to MCP server: {self.mcp_server.name} via {self.mcp_server.transport_type}")
-
+            await asyncio.wait_for(
+                self._connect_internal(),
+                timeout=MCP_CONNECTION_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Connection to MCP server {self.mcp_server.name} timed out after {MCP_CONNECTION_TIMEOUT}s")
+            # Clean up any partially initialized contexts
+            await self._cleanup_contexts()
+            raise MCPClientError(f"Connection timed out after {MCP_CONNECTION_TIMEOUT}s")
         except Exception as e:
             logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {e}")
+            await self._cleanup_contexts()
             raise MCPClientError(f"Connection failed: {e}")
+
+    async def _cleanup_contexts(self) -> None:
+        """Clean up any partially initialized contexts."""
+        try:
+            if self._session_context:
+                await self._session_context.__aexit__(None, None, None)
+        except Exception:
+            pass
+        finally:
+            self._session_context = None
+            self.session = None
+
+        try:
+            if self._streams_context:
+                await self._streams_context.__aexit__(None, None, None)
+        except Exception:
+            pass
+        finally:
+            self._streams_context = None
+
+    async def _connect_internal(self) -> None:
+        """Internal connection logic."""
+        headers = self._build_auth_headers()
+
+        # Use SSE or Streamable HTTP based on transport type
+        if self.mcp_server.transport_type == "sse":
+            self._streams_context = sse_client(
+                url=self.mcp_server.http_url,
+                headers=headers
+            )
+        elif self.mcp_server.transport_type == "streamable_http":
+            self._streams_context = streamablehttp_client(
+                url=self.mcp_server.http_url,
+                headers=headers
+            )
+        else:
+            raise MCPClientError(f"Unsupported transport type: {self.mcp_server.transport_type}")
+
+        # Enter the streams context
+        streams = await self._streams_context.__aenter__()
+
+        # For streamable_http, we get (read, write, session_id), for SSE we get (read, write)
+        if self.mcp_server.transport_type == "streamable_http":
+            read, write, session_id = streams
+            logger.debug(f"Streamable HTTP session ID: {session_id}")
+        else:
+            read, write = streams
+
+        # Create session
+        self._session_context = ClientSession(read, write)
+        self.session = await self._session_context.__aenter__()
+
+        # Initialize the session
+        await self.session.initialize()
+        logger.info(f"Connected to MCP server: {self.mcp_server.name} via {self.mcp_server.transport_type}")
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """
@@ -178,22 +213,34 @@ class MCPClient:
             raise MCPClientError(f"Tool call failed: {e}")
 
     async def disconnect(self) -> None:
-        """Disconnect from the MCP server."""
+        """Disconnect from the MCP server.
+
+        Note: Due to anyio's task boundary restrictions, cleanup may fail if
+        disconnect is called from a different task than connect. In this case,
+        we just clear references and let GC handle cleanup.
+        """
+        # Clear session first
+        session_ctx = self._session_context
+        self._session_context = None
+        self.session = None
+
+        streams_ctx = self._streams_context
+        self._streams_context = None
+
+        # Try to properly close contexts, but don't fail if task boundary issues
         try:
-            # Exit session context first
-            if self._session_context:
-                await self._session_context.__aexit__(None, None, None)
-                self._session_context = None
-                self.session = None
+            if session_ctx:
+                await session_ctx.__aexit__(None, None, None)
+        except (RuntimeError, GeneratorExit, BaseException):
+            pass  # Task boundary issue or cleanup error - GC will handle
 
-            # Then exit streams context
-            if self._streams_context:
-                await self._streams_context.__aexit__(None, None, None)
-                self._streams_context = None
+        try:
+            if streams_ctx:
+                await streams_ctx.__aexit__(None, None, None)
+        except (RuntimeError, GeneratorExit, BaseException):
+            pass  # Task boundary issue or cleanup error - GC will handle
 
-            logger.info(f"Disconnected from MCP server: {self.mcp_server.name}")
-        except Exception as e:
-            logger.error(f"Error disconnecting from {self.mcp_server.name}: {e}")
+        logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
 
     async def __aenter__(self):
         """Async context manager entry."""

@@ -1,11 +1,9 @@
 import json
 import re
-from typing import AsyncGenerator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 import litellm
 from litellm import AuthenticationError, APIError, RateLimitError
-from litellm.experimental_mcp_client.client import MCPClient
-from mcp.types import CallToolRequestParams as MCPCallToolRequestParams
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
@@ -22,6 +20,9 @@ from intric.main.config import get_settings
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
 from intric.settings.credential_resolver import CredentialResolver
+
+if TYPE_CHECKING:
+    from intric.mcp_servers.infrastructure.proxy import MCPProxySession
 
 logger = get_logger(__name__)
 
@@ -373,7 +374,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         return tools, tool_to_server_map, execution_guard
 
     async def get_response(
-        self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_servers: list = []
+        self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_proxy: "MCPProxySession | None" = None
     ):
         messages = self.create_query_from_context(context=context)
         kwargs = self._get_kwargs(model_kwargs)
@@ -417,18 +418,13 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                 )
 
-        # Load MCP tools from database (no server connections during setup)
+        # Get MCP tools from proxy (no server connections during setup - lazy)
         tools = []
-        tool_to_server_map = {}
-        execution_guard = None
-        if mcp_servers:
-            tools, tool_to_server_map, execution_guard = await self.setup_mcp_tools(mcp_servers)
-
-        if tools:
-            kwargs['tools'] = tools
-            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools from {len(mcp_servers)} server(s)")
-
-        mcp_session = (tool_to_server_map, tools, execution_guard) if tool_to_server_map else None
+        if mcp_proxy:
+            tools = mcp_proxy.get_tools_for_llm()
+            if tools:
+                kwargs['tools'] = tools
+                logger.debug(f"[MCP] Added {len(tools)} tools to request")
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making completion request with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
@@ -446,56 +442,24 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
             # Check if model wants to call tools
             message = response.choices[0].message
-            if hasattr(message, 'tool_calls') and message.tool_calls and mcp_session:
-                logger.info(f"[LiteLLM] {self.litellm_model}: Model requested {len(message.tool_calls)} tool call(s), executing...")
+            if hasattr(message, 'tool_calls') and message.tool_calls and mcp_proxy:
+                logger.debug(f"[MCP] LLM requested {len(message.tool_calls)} tool call(s)")
 
-                # Extract tools metadata from mcp_session
-                _, tools_metadata = mcp_session
-
-                # Create a lookup map for tool metadata by tool name
-                tool_lookup = {}
-                for tool in tools_metadata:
-                    tool_name = tool['function']['name']
-                    # The tool metadata includes mcp_server_name from MCPManager
-                    tool_lookup[tool_name] = tool
-
-                # Collect unique server names for the header
-                server_names = set()
+                # Validate all tools are allowed
+                allowed_tools = mcp_proxy.get_allowed_tool_names()
                 for tc in message.tool_calls:
-                    tool_meta = tool_lookup.get(tc.function.name, {})
-                    if 'mcp_server_name' in tool_meta:
-                        server_names.add(tool_meta['mcp_server_name'])
+                    if tc.function.name not in allowed_tools:
+                        logger.warning(
+                            f"[SECURITY] Blocked unauthorized tool call: {tc.function.name}",
+                            extra={"allowed_tools": list(allowed_tools)}
+                        )
+                        raise SecurityError(f"Tool '{tc.function.name}' is not authorized")
 
-                # Build header with server names
-                if len(server_names) == 1:
-                    server_list = next(iter(server_names))
-                    tool_info = f"\n\n🔧 **Using {server_list} MCP server**\n"
-                elif len(server_names) > 1:
-                    server_list = ", ".join(sorted(server_names))
-                    tool_info = f"\n\n🔧 **Using MCP servers: {server_list}**\n"
-                else:
-                    tool_info = "\n\n🔧 **Executing MCP tools...**\n"
-
-                # Build informational message about each tool execution
+                # Build tool info header
+                tool_info = "\n\n🔧 **Executing MCP tools...**\n"
                 for i, tc in enumerate(message.tool_calls, 1):
-                    tool_meta = tool_lookup.get(tc.function.name, {})
-                    server_display = tool_meta.get('mcp_server_name', 'Unknown')
-                    original_tool_name = tool_meta.get('original_tool_name', tc.function.name)
-                    tool_display = original_tool_name.replace('-', ' ').replace('_', ' ').title()
-
-                    try:
-                        args = json.loads(tc.function.arguments)
-                        # Special formatting for context7 documentation tools
-                        if 'libraryName' in args:
-                            tool_info += f"{i}. **{server_display}**: Searching for library **{args['libraryName']}**\n"
-                        elif 'context7CompatibleLibraryID' in args:
-                            lib_id = args['context7CompatibleLibraryID'].split('/')[-1]
-                            topic = args.get('topic', 'documentation')
-                            tool_info += f"{i}. **{server_display}**: Fetching **{lib_id}** docs (topic: {topic})\n"
-                        else:
-                            tool_info += f"{i}. **{server_display}**: {tool_display}\n"
-                    except Exception:
-                        tool_info += f"{i}. **{server_display}**: {tool_display}\n"
+                    tool_display = tc.function.name.replace('__', ': ').replace('_', ' ').title()
+                    tool_info += f"{i}. {tool_display}\n"
 
                 # Add assistant message with tool calls to conversation
                 messages.append({
@@ -513,211 +477,32 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     ]
                 })
 
-                # Execute each tool call using connection pooling and security validation
-                tool_to_server_map, _, execution_guard = mcp_session
+                # Execute tools via proxy (parallel, lazy connections)
+                tool_calls = [
+                    (tc.function.name, json.loads(tc.function.arguments) if tc.function.arguments else {})
+                    for tc in message.tool_calls
+                ]
+                results = await mcp_proxy.call_tools_parallel(tool_calls)
 
-                # Create connection pool for reuse across all tool calls
-                # Map server ID to MCPClient instance
-                server_clients = {}
+                # Add results to messages
+                for tc, result in zip(message.tool_calls, results):
+                    # Extract text content from result
+                    result_text = ""
+                    if result.get("content"):
+                        for content_item in result["content"]:
+                            if content_item.get("type") == "text":
+                                result_text += content_item.get("text", "")
+                    if result.get("is_error"):
+                        result_text = json.dumps({"error": result_text or "Tool execution failed"})
 
-                # Identify unique servers needed for these tool calls
-                servers_needed = set()
-                for tool_call in message.tool_calls:
-                    try:
-                        # Validate tool is allowed and get routing info
-                        mcp_server, _ = execution_guard.validate_and_route(tool_call.function.name)
-                        servers_needed.add(id(mcp_server))
-                    except SecurityError as e:
-                        # Log security violation - will handle in loop below
-                        logger.error(f"[SECURITY] {str(e)}")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result_text
+                    })
 
-                # Connect to all needed servers ONCE (connection pooling)
-                for tool_call in message.tool_calls:
-                    try:
-                        mcp_server, _ = execution_guard.validate_and_route(tool_call.function.name)
-                        server_id = id(mcp_server)
-
-                        if server_id not in server_clients:
-                            # Get auth value for MCPClient
-                            auth_value = None
-                            if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
-                                auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
-
-                            # Create client (will connect on first use)
-                            client = MCPClient(
-                                server_url=mcp_server.http_url,
-                                transport_type=getattr(mcp_server, 'transport_type', 'http'),
-                                auth_type=getattr(mcp_server, 'http_auth_type', None),
-                                auth_value=auth_value,
-                                timeout=10.0
-                            )
-                            server_clients[server_id] = (client, mcp_server)
-                    except SecurityError:
-                        # Already logged above
-                        pass
-
-                # Connect all clients in parallel for maximum performance
-                import asyncio
-                import time
-
-                async def connect_client(client):
-                    """Connect a single client."""
-                    await client.__aenter__()
-
-                connection_start = time.time()
-                if server_clients:
-                    await asyncio.gather(*[
-                        connect_client(client) for client, _ in server_clients.values()
-                    ], return_exceptions=True)
-                    connection_time = (time.time() - connection_start) * 1000
-                    logger.info(f"[MCP] Connected to {len(server_clients)} server(s) in {connection_time:.0f}ms")
-
-                # Execute tool calls in parallel (reusing pooled connections)
-                async def execute_single_tool(tool_call):
-                    """Execute a single tool call with security validation and audit logging."""
-                    tool_name = tool_call.function.name
-                    execution_start = time.time()
-
-                    try:
-                        # SECURITY: Validate tool is allowed
-                        mcp_server, original_tool_name = execution_guard.validate_and_route(tool_name)
-                        server_id = id(mcp_server)
-
-                        # Check if we have a connection to this server
-                        if server_id not in server_clients:
-                            logger.error(f"[MCP] No connection for tool: {tool_name}")
-                            return {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps({"error": f"Server not connected for tool {tool_name}"})
-                            }
-
-                        client, _ = server_clients[server_id]
-
-                        # Parse tool arguments
-                        arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-
-                        # Execute tool (use original name without prefix) - REUSING connection
-                        result = await client.call_tool(
-                            MCPCallToolRequestParams(
-                                name=original_tool_name,
-                                arguments=arguments
-                            )
-                        )
-
-                        execution_time = (time.time() - execution_start) * 1000
-
-                        # Handle error results
-                        if result.isError:
-                            error_msg = ""
-                            if hasattr(result, 'content') and result.content:
-                                for content_item in result.content:
-                                    if hasattr(content_item, 'text'):
-                                        error_msg += content_item.text
-
-                            # AUDIT: Log failed execution
-                            logger.warning(
-                                "[MCP AUDIT] Tool execution failed",
-                                extra={
-                                    "tool_name": tool_name,
-                                    "original_tool_name": original_tool_name,
-                                    "server_name": mcp_server.name,
-                                    "duration_ms": execution_time,
-                                    "success": False,
-                                    "error": error_msg
-                                }
-                            )
-
-                            return {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps({"error": error_msg or "Tool execution failed"})
-                            }
-                        else:
-                            # Extract text content from successful result
-                            result_text = ""
-                            if hasattr(result, 'content') and result.content:
-                                for content_item in result.content:
-                                    if hasattr(content_item, 'text'):
-                                        result_text += content_item.text
-
-                            # AUDIT: Log successful execution
-                            logger.info(
-                                "[MCP AUDIT] Tool execution succeeded",
-                                extra={
-                                    "tool_name": tool_name,
-                                    "original_tool_name": original_tool_name,
-                                    "server_name": mcp_server.name,
-                                    "duration_ms": execution_time,
-                                    "success": True,
-                                    "result_length": len(result_text)
-                                }
-                            )
-
-                            return {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": result_text
-                            }
-
-                    except SecurityError as e:
-                        # AUDIT: Log security violation
-                        execution_time = (time.time() - execution_start) * 1000
-                        logger.error(
-                            "[MCP AUDIT] Security violation",
-                            extra={
-                                "tool_name": tool_name,
-                                "duration_ms": execution_time,
-                                "success": False,
-                                "error": str(e),
-                                "violation_type": "unauthorized_tool"
-                            }
-                        )
-
-                        return {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": str(e)})
-                        }
-
-                    except Exception as e:
-                        # AUDIT: Log unexpected error
-                        execution_time = (time.time() - execution_start) * 1000
-                        logger.exception(
-                            "[MCP AUDIT] Tool execution exception",
-                            extra={
-                                "tool_name": tool_name,
-                                "duration_ms": execution_time,
-                                "success": False,
-                                "error": str(e)
-                            }
-                        )
-
-                        return {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
-                        }
-
-                # PERFORMANCE: Execute all tools in parallel
-                tool_results = await asyncio.gather(*[
-                    execute_single_tool(tc) for tc in message.tool_calls
-                ])
-
-                # Add all results to messages
-                messages.extend(tool_results)
-
-                # Close all connections
-                for client, _ in server_clients.values():
-                    try:
-                        await client.__aexit__(None, None, None)
-                    except Exception as e:
-                        logger.warning(f"[MCP] Error closing connection: {e}")
-
-                # Make second completion request with tool results
-                logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up request with tool results")
-                logger.debug(f"[MCP] Follow-up messages: {json.dumps(messages, indent=2)}")
-                # Remove tools from kwargs for follow-up request
+                # Make follow-up completion request with tool results
+                logger.debug("[MCP] Making follow-up request with tool results")
                 follow_up_kwargs = {k: v for k, v in kwargs.items() if k != 'tools'}
                 response = await litellm.acompletion(
                     model=self.litellm_model,
@@ -725,7 +510,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     **follow_up_kwargs
                 )
                 message = response.choices[0].message
-                logger.info(f"[MCP] Follow-up response: {message.content}")
+                logger.debug("[MCP] Follow-up response received")
 
                 # Prepend tool info to the response
                 content = tool_info + (message.content or "")
@@ -795,7 +580,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unexpected error")
             raise OpenAIException("Unknown error occurred") from exc
 
-    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_servers: list = []):
+    async def prepare_streaming(self, context: Context, model_kwargs: ModelKwargs | None = None, mcp_proxy: "MCPProxySession | None" = None):
         """
         Phase 1: Create stream connection before EventSourceResponse.
         Can raise exceptions for authentication, firewall, rate limit errors.
@@ -842,16 +627,13 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     f"[LiteLLM] {self.litellm_model}: Injecting endpoint for streaming {provider}: {endpoint}"
                 )
 
-        # Load MCP tools from database (no server connections during setup)
+        # Get MCP tools from proxy (no server connections during setup - lazy)
         tools = []
-        tool_to_server_map = {}
-        execution_guard = None
-        if mcp_servers:
-            tools, tool_to_server_map, execution_guard = await self.setup_mcp_tools(mcp_servers)
-
-        if tools:
-            kwargs['tools'] = tools
-            logger.info(f"[LiteLLM] {self.litellm_model}: Added {len(tools)} MCP tools to streaming request")
+        if mcp_proxy:
+            tools = mcp_proxy.get_tools_for_llm()
+            if tools:
+                kwargs['tools'] = tools
+                logger.debug(f"[MCP] Added {len(tools)} tools to streaming request")
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Creating streaming connection with {len(messages)} messages and kwargs: {self._mask_sensitive_kwargs(kwargs)}"
@@ -863,14 +645,12 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                 model=self.litellm_model, messages=messages, stream=True, **kwargs
             )
             logger.info(f"[LiteLLM] {self.litellm_model}: Stream connection created successfully")
-            # Store messages, kwargs, and MCP routing map for potential tool execution
+            # Store messages, kwargs, and MCP proxy for potential tool execution
             stream._eneo_context = {
                 'messages': messages,
                 'kwargs': kwargs,
                 'has_tools': bool(tools),
-                'tool_to_server_map': tool_to_server_map,  # Store routing map for tool execution
-                'tools_metadata': tools,  # Store tool metadata for display purposes
-                'execution_guard': execution_guard  # Store security guard for tool validation
+                'mcp_proxy': mcp_proxy,  # Store proxy for tool execution
             }
             return stream
 
@@ -976,297 +756,131 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     if delta and delta.content:
                         yield Completion(text=delta.content)
 
-            # If tool calls were detected, execute them
-            if has_tool_calls and hasattr(stream, '_eneo_context') and stream._eneo_context['has_tools']:
-                logger.info(f"[LiteLLM] {self.litellm_model}: Model requested {len(tool_calls_accumulator)} tool call(s), executing...")
-
-                # Reconstruct tool calls
-                tool_calls = []
-                for idx in sorted(tool_calls_accumulator.keys()):
-                    tc = tool_calls_accumulator[idx]
-                    # Create a simple object to match the expected interface
-                    class ToolCall:
-                        def __init__(self, id, function_name, function_args):
-                            self.id = id
-                            self.type = 'function'
-                            self.function = type('Function', (), {
-                                'name': function_name,
-                                'arguments': function_args
-                            })()
-                    tool_calls.append(ToolCall(tc['id'], tc['function']['name'], tc['function']['arguments']))
-
-                # Get tool metadata from context
-                tools_metadata = stream._eneo_context.get('tools_metadata', [])
-
-                # Create a lookup map for tool metadata by tool name
-                tool_lookup = {}
-                for tool in tools_metadata:
-                    tool_name = tool['function']['name']
-                    tool_lookup[tool_name] = tool
-
-                # Collect unique server names for the header
-                server_names = set()
-                for tc in tool_calls:
-                    tool_meta = tool_lookup.get(tc.function.name, {})
-                    if 'mcp_server_name' in tool_meta:
-                        server_names.add(tool_meta['mcp_server_name'])
-
-                # Build header with server names
-                if len(server_names) == 1:
-                    server_list = next(iter(server_names))
-                    tool_info = f"\n\n🔧 **Using {server_list} MCP server**\n"
-                elif len(server_names) > 1:
-                    server_list = ", ".join(sorted(server_names))
-                    tool_info = f"\n\n🔧 **Using MCP servers: {server_list}**\n"
-                else:
-                    tool_info = "\n\n🔧 **Executing MCP tools...**\n"
-
-                # Build informational message about each tool execution
-                for i, tc in enumerate(tool_calls, 1):
-                    tool_meta = tool_lookup.get(tc.function.name, {})
-                    server_display = tool_meta.get('mcp_server_name', 'Unknown')
-                    original_tool_name = tool_meta.get('original_tool_name', tc.function.name)
-                    tool_display = original_tool_name.replace('-', ' ').replace('_', ' ').title()
-
-                    try:
-                        args = json.loads(tc.function.arguments)
-                        # Special formatting for context7 documentation tools
-                        if 'libraryName' in args:
-                            tool_info += f"{i}. **{server_display}**: Searching for library **{args['libraryName']}**\n"
-                        elif 'context7CompatibleLibraryID' in args:
-                            lib_id = args['context7CompatibleLibraryID'].split('/')[-1]
-                            topic = args.get('topic', 'documentation')
-                            tool_info += f"{i}. **{server_display}**: Fetching **{lib_id}** docs (topic: {topic})\n"
-                        else:
-                            tool_info += f"{i}. **{server_display}**: {tool_display}\n"
-                    except Exception:
-                        tool_info += f"{i}. **{server_display}**: {tool_display}\n"
-
-                yield Completion(text=tool_info)
-
+            # If tool calls were detected, execute them via proxy (with loop for multi-turn)
+            mcp_proxy = stream._eneo_context.get('mcp_proxy') if hasattr(stream, '_eneo_context') else None
+            if has_tool_calls and mcp_proxy and stream._eneo_context.get('has_tools'):
                 # Get context from stream
                 messages = stream._eneo_context['messages']
                 kwargs = stream._eneo_context['kwargs']
+                allowed_tools = mcp_proxy.get_allowed_tool_names()
 
-                # Add assistant message with tool calls
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments
-                            }
-                        } for tc in tool_calls
+                # Loop to handle multiple rounds of tool calls
+                max_tool_rounds = 10  # Safety limit
+                tool_round = 0
+
+                while has_tool_calls and tool_round < max_tool_rounds:
+                    tool_round += 1
+                    logger.debug(f"[MCP] Tool round {tool_round}: LLM requested {len(tool_calls_accumulator)} tool call(s)")
+
+                    # Reconstruct tool calls as simple objects
+                    tool_calls = []
+                    for idx in sorted(tool_calls_accumulator.keys()):
+                        tc = tool_calls_accumulator[idx]
+                        class ToolCall:
+                            def __init__(self, id, function_name, function_args):
+                                self.id = id
+                                self.type = 'function'
+                                self.function = type('Function', (), {
+                                    'name': function_name,
+                                    'arguments': function_args
+                                })()
+                        tool_calls.append(ToolCall(tc['id'], tc['function']['name'], tc['function']['arguments']))
+
+                    # Validate all tools are allowed
+                    for tc in tool_calls:
+                        if tc.function.name not in allowed_tools:
+                            logger.warning(f"[SECURITY] Blocked unauthorized tool call (streaming): {tc.function.name}")
+                            raise SecurityError(f"Tool '{tc.function.name}' is not authorized")
+
+                    # Build tool info header
+                    tool_info = "\n\n🔧 **Executing MCP tools...**\n"
+                    for i, tc in enumerate(tool_calls, 1):
+                        tool_display = tc.function.name.replace('__', ': ').replace('_', ' ').title()
+                        tool_info += f"{i}. {tool_display}\n"
+
+                    yield Completion(text=tool_info)
+
+                    # Add assistant message with tool calls
+                    messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            } for tc in tool_calls
+                        ]
+                    })
+
+                    # Execute tools via proxy (parallel, lazy connections)
+                    proxy_tool_calls = [
+                        (tc.function.name, json.loads(tc.function.arguments) if tc.function.arguments else {})
+                        for tc in tool_calls
                     ]
-                })
+                    results = await mcp_proxy.call_tools_parallel(proxy_tool_calls)
 
-                # Execute tools using connection pooling and security validation (streaming)
-                execution_guard = stream._eneo_context.get('execution_guard')
+                    # Add results to messages
+                    for tc, result in zip(tool_calls, results):
+                        result_text = ""
+                        if result.get("content"):
+                            for content_item in result["content"]:
+                                if content_item.get("type") == "text":
+                                    result_text += content_item.get("text", "")
+                        if result.get("is_error"):
+                            result_text = json.dumps({"error": result_text or "Tool execution failed"})
 
-                # Create connection pool for reuse across all tool calls
-                server_clients = {}
-
-                # Identify and connect to unique servers needed
-                for tool_call in tool_calls:
-                    try:
-                        # Validate tool is allowed and get routing info
-                        mcp_server, _ = execution_guard.validate_and_route(tool_call.function.name)
-                        server_id = id(mcp_server)
-
-                        if server_id not in server_clients:
-                            # Get auth value for MCPClient
-                            auth_value = None
-                            if hasattr(mcp_server, 'env_vars') and mcp_server.env_vars:
-                                auth_value = mcp_server.env_vars.get('token') or mcp_server.env_vars.get('api_key')
-
-                            # Create client
-                            client = MCPClient(
-                                server_url=mcp_server.http_url,
-                                transport_type=getattr(mcp_server, 'transport_type', 'http'),
-                                auth_type=getattr(mcp_server, 'http_auth_type', None),
-                                auth_value=auth_value,
-                                timeout=10.0
-                            )
-                            server_clients[server_id] = (client, mcp_server)
-                    except SecurityError:
-                        # Will handle in execution loop
-                        pass
-
-                # Connect all clients in parallel
-                import asyncio
-                import time
-
-                async def connect_client(client):
-                    await client.__aenter__()
-
-                connection_start = time.time()
-                if server_clients:
-                    await asyncio.gather(*[
-                        connect_client(client) for client, _ in server_clients.values()
-                    ], return_exceptions=True)
-                    connection_time = (time.time() - connection_start) * 1000
-                    logger.info(f"[MCP] Connected to {len(server_clients)} server(s) in {connection_time:.0f}ms (streaming)")
-
-                # Execute tool calls in parallel (reusing connections)
-                async def execute_single_tool_streaming(tool_call):
-                    """Execute a single tool call with security validation and audit logging (streaming)."""
-                    tool_name = tool_call.function.name
-                    execution_start = time.time()
-
-                    try:
-                        # SECURITY: Validate tool is allowed
-                        mcp_server, original_tool_name = execution_guard.validate_and_route(tool_name)
-                        server_id = id(mcp_server)
-
-                        if server_id not in server_clients:
-                            logger.error(f"[MCP] No connection for tool: {tool_name}")
-                            return {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps({"error": f"Server not connected for tool {tool_name}"})
-                            }
-
-                        client, _ = server_clients[server_id]
-
-                        # Parse tool arguments
-                        arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-
-                        # Execute tool (REUSING connection)
-                        result = await client.call_tool(
-                            MCPCallToolRequestParams(
-                                name=original_tool_name,
-                                arguments=arguments
-                            )
-                        )
-
-                        execution_time = (time.time() - execution_start) * 1000
-
-                        # Handle error results
-                        if result.isError:
-                            error_msg = ""
-                            if hasattr(result, 'content') and result.content:
-                                for content_item in result.content:
-                                    if hasattr(content_item, 'text'):
-                                        error_msg += content_item.text
-
-                            # AUDIT: Log failed execution
-                            logger.warning(
-                                "[MCP AUDIT] Tool execution failed (streaming)",
-                                extra={
-                                    "tool_name": tool_name,
-                                    "original_tool_name": original_tool_name,
-                                    "server_name": mcp_server.name,
-                                    "duration_ms": execution_time,
-                                    "success": False,
-                                    "error": error_msg
-                                }
-                            )
-
-                            return {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps({"error": error_msg or "Tool execution failed"})
-                            }
-                        else:
-                            # Extract text content from successful result
-                            result_text = ""
-                            if hasattr(result, 'content') and result.content:
-                                for content_item in result.content:
-                                    if hasattr(content_item, 'text'):
-                                        result_text += content_item.text
-
-                            # AUDIT: Log successful execution
-                            logger.info(
-                                "[MCP AUDIT] Tool execution succeeded (streaming)",
-                                extra={
-                                    "tool_name": tool_name,
-                                    "original_tool_name": original_tool_name,
-                                    "server_name": mcp_server.name,
-                                    "duration_ms": execution_time,
-                                    "success": True,
-                                    "result_length": len(result_text)
-                                }
-                            )
-
-                            return {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": result_text
-                            }
-
-                    except SecurityError as e:
-                        # AUDIT: Log security violation
-                        execution_time = (time.time() - execution_start) * 1000
-                        logger.error(
-                            "[MCP AUDIT] Security violation (streaming)",
-                            extra={
-                                "tool_name": tool_name,
-                                "duration_ms": execution_time,
-                                "success": False,
-                                "error": str(e),
-                                "violation_type": "unauthorized_tool"
-                            }
-                        )
-
-                        return {
+                        messages.append({
                             "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": str(e)})
-                        }
+                            "tool_call_id": tc.id,
+                            "content": result_text
+                        })
 
-                    except Exception as e:
-                        # AUDIT: Log unexpected error
-                        execution_time = (time.time() - execution_start) * 1000
-                        logger.exception(
-                            "[MCP AUDIT] Tool execution exception (streaming)",
-                            extra={
-                                "tool_name": tool_name,
-                                "duration_ms": execution_time,
-                                "success": False,
-                                "error": str(e)
-                            }
-                        )
+                    # Make follow-up streaming request (keep tools for potential next round)
+                    logger.debug(f"[MCP] Making follow-up streaming request (round {tool_round})")
+                    response = await litellm.acompletion(
+                        model=self.litellm_model,
+                        messages=messages,
+                        stream=True,
+                        **kwargs  # Keep tools for multi-turn
+                    )
 
-                        return {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
-                        }
+                    # Process follow-up stream, check for more tool calls
+                    tool_calls_accumulator = {}
+                    has_tool_calls = False
 
-                # PERFORMANCE: Execute all tools in parallel
-                tool_results = await asyncio.gather(*[
-                    execute_single_tool_streaming(tc) for tc in tool_calls
-                ])
+                    async for chunk in response:
+                        if chunk.choices and len(chunk.choices) > 0:
+                            delta = chunk.choices[0].delta
 
-                # Add all results to messages
-                messages.extend(tool_results)
+                            # Accumulate any new tool calls
+                            if delta and hasattr(delta, 'tool_calls') and delta.tool_calls:
+                                has_tool_calls = True
+                                for tc_delta in delta.tool_calls:
+                                    idx = tc_delta.index
+                                    if idx not in tool_calls_accumulator:
+                                        tool_calls_accumulator[idx] = {
+                                            'id': tc_delta.id if hasattr(tc_delta, 'id') else None,
+                                            'type': 'function',
+                                            'function': {'name': '', 'arguments': ''}
+                                        }
+                                    if hasattr(tc_delta, 'id') and tc_delta.id:
+                                        tool_calls_accumulator[idx]['id'] = tc_delta.id
+                                    if hasattr(tc_delta, 'function'):
+                                        if hasattr(tc_delta.function, 'name') and tc_delta.function.name:
+                                            tool_calls_accumulator[idx]['function']['name'] = tc_delta.function.name
+                                        if hasattr(tc_delta.function, 'arguments') and tc_delta.function.arguments:
+                                            tool_calls_accumulator[idx]['function']['arguments'] += tc_delta.function.arguments
 
-                # Close all connections
-                for client, _ in server_clients.values():
-                    try:
-                        await client.__aexit__(None, None, None)
-                    except Exception as e:
-                        logger.warning(f"[MCP] Error closing connection (streaming): {e}")
+                            # Yield text content
+                            if delta and delta.content:
+                                yield Completion(text=delta.content)
 
-                # Make follow-up streaming request with tool results
-                logger.info(f"[LiteLLM] {self.litellm_model}: Making follow-up streaming request with tool results")
-                follow_up_kwargs = {k: v for k, v in kwargs.items() if k != 'tools'}
-                response = await litellm.acompletion(
-                    model=self.litellm_model,
-                    messages=messages,
-                    stream=True,
-                    **follow_up_kwargs
-                )
-
-                async for chunk in response:
-                    if chunk.choices and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if delta and delta.content:
-                            yield Completion(text=delta.content)
+                if tool_round >= max_tool_rounds:
+                    logger.warning(f"[MCP] Reached max tool rounds ({max_tool_rounds}), stopping")
 
             # Send final stop chunk
             logger.info(f"[LiteLLM] {self.litellm_model}: Stream iteration completed")
