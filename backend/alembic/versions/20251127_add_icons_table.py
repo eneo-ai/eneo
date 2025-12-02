@@ -1,7 +1,7 @@
 """add icons table and icon_id to assistants, spaces and apps
 
 Revision ID: 20251127_add_icons
-Revises: 20251121_set_embedding_org
+Revises: bdcbd045fbde
 Create Date: 2025-11-27
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "20251127_add_icons"
-down_revision = "20251121_set_embedding_org"
+down_revision = "bdcbd045fbde"
 branch_labels = None
 depends_on = None
 

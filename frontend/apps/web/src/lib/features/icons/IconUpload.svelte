@@ -2,7 +2,8 @@
   import { IconTrash } from "@intric/icons/trash";
   import { IconUpload } from "@intric/icons/upload";
   import { IconDownload } from "@intric/icons/download";
-  import { Button, Dialog, Spinner } from "@intric/ui";
+  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { Button, Dialog } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
   import { writable } from "svelte/store";
   import * as m from "$lib/paraglide/messages";
@@ -105,7 +106,7 @@
   </Dialog.Root>
 {:else if uploading}
   <div class="border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-4 border-b px-4">
-    <Spinner />
+    <IconLoadingSpinner class="animate-spin" />
     <span class="text-secondary line-clamp-1 text-sm">{m.avatar_uploading()}</span>
   </div>
 {:else}
