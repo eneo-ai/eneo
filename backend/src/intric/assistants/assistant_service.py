@@ -461,6 +461,9 @@ class AssistantService:
                     if chunk.response_type == ResponseType.INTRIC_EVENT:
                         yield chunk
 
+                    if chunk.response_type == ResponseType.TOOL_CALL:
+                        yield chunk
+
                 # Get the references for the whole response
                 reference_chunks = get_references(
                     response_string=response_string,

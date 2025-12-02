@@ -1269,6 +1269,8 @@
   "http_servers": "HTTP Servers:",
   "http_servers_description": "Remote services accessed via HTTP",
   "select_mcp_servers_description": "Enable MCP servers to give this assistant access to external tools and data sources.",
+  "executing_tool": "Executing {tool} from {server}",
+  "executing_tools": "Executing tools",
   "enable_mcp_servers_in_admin": "Enable MCP servers in the admin settings first.",
   "server_type": "Server Type",
   "npm_package": "NPM Package",

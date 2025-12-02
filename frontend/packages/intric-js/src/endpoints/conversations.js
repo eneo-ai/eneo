@@ -90,6 +90,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
      * @param {(data: import("../types/resources").SSE.Intric) => void} [params.callbacks.onIntricEvent] Callback to run when an intric event is received
+     * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {IntricError}
@@ -169,6 +170,10 @@ export function initConversations(client) {
 
                 case "intric_event":
                   callbacks?.onIntricEvent?.(data);
+                  break;
+
+                case "tool_call":
+                  callbacks?.onToolCall?.(data);
                   break;
               }
             } catch (e) {

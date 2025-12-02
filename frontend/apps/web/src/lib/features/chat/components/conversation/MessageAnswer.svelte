@@ -13,8 +13,17 @@
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
 
-  const { current } = getMessageContext();
+  const { current, isLast } = getMessageContext();
   const message = $derived(current());
+  // Tools are still being executed if we're loading and no answer text has arrived yet
+  const toolsStillExecuting = $derived(
+    isLast() && chat.askQuestion.isLoading && message.answer.trim() === ""
+  );
+
+  // Get MCP tool calls from the message (runtime property added during streaming)
+  const mcpToolCalls = $derived(
+    (message as any).mcp_tool_calls as Array<{ server_name: string; tool_name: string }> | undefined
+  );
 
   const showAnswerLabel = $derived.by(() => {
     let hasInfo = message.tools && message.tools.assistants.length > 0;
@@ -41,6 +50,20 @@
       </div>
     {/each}
   {/if}
+
+  {#if mcpToolCalls && mcpToolCalls.length > 0}
+    <div class="mb-4 flex flex-col gap-1">
+      {#each mcpToolCalls as toolCall, idx}
+        {@const isLastToolCall = idx === mcpToolCalls.length - 1}
+        {@const shouldPulse = isLastToolCall && toolsStillExecuting}
+        <span class="bg-accent-dimmer text-accent-stronger inline-flex w-fit items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium {shouldPulse ? 'animate-pulse' : ''}">
+          <span class="text-base">🔧</span>
+          {m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
+        </span>
+      {/each}
+    </div>
+  {/if}
+
   <Markdown
     source={message.answer}
     customRenderers={{

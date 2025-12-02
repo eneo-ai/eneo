@@ -131,6 +131,21 @@ class MCPProxySession:
         """Get total number of available tools."""
         return len(self._tool_registry)
 
+    def get_tool_info(self, prefixed_tool_name: str) -> tuple[str, str] | None:
+        """
+        Get display-friendly server name and original tool name for a prefixed tool.
+
+        Args:
+            prefixed_tool_name: The prefixed tool name (e.g., "local_mcps__resolve_library_id")
+
+        Returns:
+            Tuple of (server_display_name, original_tool_name) or None if not found
+        """
+        if prefixed_tool_name not in self._tool_registry:
+            return None
+        server, original_tool_name = self._tool_registry[prefixed_tool_name]
+        return (server.name, original_tool_name)
+
     async def _get_or_create_client(self, server: MCPServer) -> MCPClient:
         """
         Get existing client or create new connection (lazy).

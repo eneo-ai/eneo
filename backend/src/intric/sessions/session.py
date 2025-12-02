@@ -92,6 +92,7 @@ class SessionResponse(BaseModel):
 
 class IntricEventType(str, Enum):
     GENERATING_IMAGE = "generating_image"
+    TOOL_CALL = "tool_call"
 
 
 class SSEBase(BaseModel):
@@ -111,6 +112,18 @@ class SSEIntricEvent(SSEBase):
     intric_event_type: IntricEventType
 
 
+class ToolCallInfo(BaseModel):
+    """Info about a single tool being called."""
+    server_name: str
+    tool_name: str
+
+
+class SSEToolCall(SSEBase):
+    """Event emitted when MCP tools are being executed."""
+    intric_event_type: IntricEventType = IntricEventType.TOOL_CALL
+    tools: list[ToolCallInfo]
+
+
 class SSEFirstChunk(AskChatResponse):
     pass
 
@@ -121,7 +134,7 @@ class SSEError(SSEBase):
 
 
 # Add the SSE models here in order to include them in the openapi schema
-SSE_MODELS = [SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk, SSEError]
+SSE_MODELS = [SSEText, SSEIntricEvent, SSEToolCall, SSEFiles, SSEFirstChunk, SSEError]
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [IntricEventType]

@@ -153,7 +153,10 @@ class CompletionService:
         function_called = False
 
         async for chunk in completion:
-            # logger.debug(chunk)
+            # Pass through MCP tool call events directly
+            if chunk.response_type == ResponseType.TOOL_CALL:
+                yield chunk
+                continue
 
             if chunk.tool_call:
                 if chunk.tool_call.name:

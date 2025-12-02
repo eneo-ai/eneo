@@ -10,6 +10,8 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
     Context,
     ModelKwargs,
+    ResponseType,
+    ToolCallMetadata,
 )
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
@@ -718,8 +720,6 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         Phase 2: Iterate pre-created stream inside EventSourceResponse.
         Yields error events for mid-stream failures.
         """
-        from intric.ai_models.completion_models.completion_model import ResponseType
-
         try:
             logger.info(f"[LiteLLM] {self.litellm_model}: Starting stream iteration")
 
@@ -792,13 +792,25 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                             logger.warning(f"[SECURITY] Blocked unauthorized tool call (streaming): {tc.function.name}")
                             raise SecurityError(f"Tool '{tc.function.name}' is not authorized")
 
-                    # Build tool info header
-                    tool_info = "\n\n🔧 **Executing MCP tools...**\n"
-                    for i, tc in enumerate(tool_calls, 1):
-                        tool_display = tc.function.name.replace('__', ': ').replace('_', ' ').title()
-                        tool_info += f"{i}. {tool_display}\n"
+                    # Emit structured tool call event for frontend i18n
+                    tool_metadata = []
+                    for tc in tool_calls:
+                        # Use proxy to get display-friendly names
+                        tool_info = mcp_proxy.get_tool_info(tc.function.name) if mcp_proxy else None
+                        if tool_info:
+                            server_name, tool_name = tool_info
+                            tool_metadata.append(ToolCallMetadata(server_name=server_name, tool_name=tool_name))
+                        elif "__" in tc.function.name:
+                            # Fallback to parsing if proxy lookup fails
+                            server, tool = tc.function.name.split("__", 1)
+                            tool_metadata.append(ToolCallMetadata(server_name=server, tool_name=tool))
+                        else:
+                            tool_metadata.append(ToolCallMetadata(server_name="", tool_name=tc.function.name))
 
-                    yield Completion(text=tool_info)
+                    yield Completion(
+                        response_type=ResponseType.TOOL_CALL,
+                        tool_calls_metadata=tool_metadata,
+                    )
 
                     # Add assistant message with tool calls
                     messages.append({

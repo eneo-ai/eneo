@@ -7557,7 +7557,7 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    IntricEventType: "generating_image";
+    IntricEventType: "generating_image" | "tool_call";
   };
   responses: never;
   parameters: never;
@@ -10013,7 +10013,7 @@ export interface operations {
                    * IntricEventType
                    * @enum {string}
                    */
-                  IntricEventType: "generating_image";
+                  IntricEventType: "generating_image" | "tool_call";
                 };
               },
               {

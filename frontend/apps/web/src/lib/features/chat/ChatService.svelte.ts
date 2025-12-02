@@ -285,6 +285,17 @@ export class ChatService {
                 // Also check for a dedicated token_usage event type
                 console.log('[ChatService] Received token_usage event but no turn_tokens found:', event);
               }
+            },
+            onToolCall: (event) => {
+              ensureCurrentSession(event);
+              // Store tool calls for rendering with translations
+              // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+              if (!ref.mcp_tool_calls) {
+                // @ts-expect-error
+                ref.mcp_tool_calls = [];
+              }
+              // @ts-expect-error
+              ref.mcp_tool_calls.push(...event.tools);
             }
           }
         });

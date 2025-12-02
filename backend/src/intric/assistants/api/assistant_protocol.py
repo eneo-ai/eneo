@@ -27,7 +27,9 @@ from intric.sessions.session import (
     SSEFirstChunk,
     SSEIntricEvent,
     SSEText,
+    SSEToolCall,
     SSEError,
+    ToolCallInfo,
 )
 
 if TYPE_CHECKING:
@@ -132,6 +134,15 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
         data = SSEIntricEvent(
             session_id=session_id,
             intric_event_type=IntricEventType.GENERATING_IMAGE,
+        )
+
+    if chunk.response_type == ResponseType.TOOL_CALL:
+        data = SSEToolCall(
+            session_id=session_id,
+            tools=[
+                ToolCallInfo(server_name=tc.server_name, tool_name=tc.tool_name)
+                for tc in (chunk.tool_calls_metadata or [])
+            ],
         )
 
     if chunk.response_type == ResponseType.ERROR:

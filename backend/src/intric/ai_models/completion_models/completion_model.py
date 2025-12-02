@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 class ResponseType(str, Enum):
     TEXT = "text"
     INTRIC_EVENT = "intric_event"
+    TOOL_CALL = "tool_call"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     ERROR = "error"
@@ -46,11 +47,19 @@ class FunctionCall:
 
 
 @dataclass
+class ToolCallMetadata:
+    """Metadata for MCP tool calls to be rendered by frontend."""
+    server_name: str
+    tool_name: str
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
+    tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None

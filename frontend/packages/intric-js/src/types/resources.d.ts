@@ -99,7 +99,12 @@ export namespace SSE {
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
   export type Intric = Omit<components["schemas"]["SSEIntricEvent"], "$defs">;
-  export type Event = Text | FirstChunk | Files | Intric;
+  export type ToolCall = {
+    session_id: string;
+    intric_event_type: "tool_call";
+    tools: Array<{ server_name: string; tool_name: string }>;
+  };
+  export type Event = Text | FirstChunk | Files | Intric | ToolCall;
 }
 
 export type UserTokenUsageSummary = components["schemas"]["UserTokenUsageSummary"];
