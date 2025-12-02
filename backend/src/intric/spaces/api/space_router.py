@@ -104,6 +104,11 @@ async def update_space(
     else:
         security_classification = update_space_req.security_classification
 
+    # Handle icon_id: check if it was provided in the request
+    icon_id = NOT_PROVIDED
+    if "icon_id" in original_request:
+        icon_id = update_space_req.icon_id
+
     space = await service.update_space(
         id=id,
         name=update_space_req.name,
@@ -112,6 +117,7 @@ async def update_space(
         completion_model_ids=_get_model_ids_or_none(update_space_req.completion_models),
         transcription_model_ids=_get_model_ids_or_none(update_space_req.transcription_models),
         security_classification=security_classification,
+        icon_id=icon_id,
     )
 
     return assembler.from_space_to_model(space)

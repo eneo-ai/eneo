@@ -65,6 +65,7 @@ class Assistant(Entity):
         insight_enabled: bool = False,
         data_retention_days: Optional[int] = None,
         metadata_json: Optional[dict] = {},
+        icon_id: Optional[UUID] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -90,6 +91,7 @@ class Assistant(Entity):
         self.data_retention_days = data_retention_days
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
+        self.icon_id = icon_id
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -222,6 +224,7 @@ class Assistant(Entity):
         insight_enabled: bool | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             self.name = name
@@ -260,6 +263,9 @@ class Assistant(Entity):
 
         if metadata_json is not NOT_PROVIDED:
             self.metadata_json = metadata_json
+
+        if icon_id is not NOT_PROVIDED:
+            self.icon_id = icon_id
 
     def get_prompt_text(self):
         if self.prompt is not None:

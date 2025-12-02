@@ -76,6 +76,8 @@ from intric.group_chat.presentation.assemblers.group_chat_assembler import (
 )
 from intric.groups_legacy.group_repo import GroupRepository
 from intric.groups_legacy.group_service import GroupService
+from intric.icons.icon_repo import IconRepository
+from intric.icons.icon_service import IconService
 from intric.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
 from intric.info_blobs.info_blob_service import InfoBlobService
@@ -629,6 +631,10 @@ class Container(containers.DeclarativeContainer):
         repo=security_classification_repo,
         tenant_repo=tenant_repo,
     )
+    icon_repo = providers.Factory(
+        IconRepository,
+        session=session,
+    )
     space_service = providers.Factory(
         SpaceService,
         user=user,
@@ -642,6 +648,7 @@ class Container(containers.DeclarativeContainer):
         transcription_model_service=transcription_model_service,
         actor_manager=actor_manager,
         security_classification_service=security_classification_service,
+        icon_repo=icon_repo,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
     job_service = providers.Factory(
@@ -651,6 +658,11 @@ class Container(containers.DeclarativeContainer):
     )
     file_size_service = providers.Factory(
         FileSizeService,
+    )
+    icon_service = providers.Factory(
+        IconService,
+        icon_repo=icon_repo,
+        file_size_service=file_size_service,
     )
     quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
     task_service = providers.Factory(
@@ -789,6 +801,7 @@ class Container(containers.DeclarativeContainer):
         integration_knowledge_repo=integration_knowledge_repo,
         completion_service=completion_service,
         references_service=references_service,
+        icon_repo=icon_repo,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1012,6 +1025,7 @@ class Container(containers.DeclarativeContainer):
         transcriber=transcriber,
         app_template_service=app_template_service,
         actor_manager=actor_manager,
+        icon_repo=icon_repo,
     )
     app_run_service = providers.Factory(
         AppRunService,

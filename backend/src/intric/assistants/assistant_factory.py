@@ -139,6 +139,7 @@ class AssistantFactory:
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
+            icon_id=assistant_in_db.icon_id,
         )
 
     def create_space_assistant_from_db(
@@ -218,4 +219,5 @@ class AssistantFactory:
             insight_enabled=assistant_in_db.insight_enabled,
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
+            icon_id=assistant_in_db.icon_id,
         )

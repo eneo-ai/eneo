@@ -134,6 +134,7 @@ class AssistantAssembler:
             data_retention_days=assistant.data_retention_days,
             metadata_json=assistant.metadata_json,
             model_info=model_info,
+            icon_id=assistant.icon_id,
         )
 
     def from_assistant_to_default_assistant_model(

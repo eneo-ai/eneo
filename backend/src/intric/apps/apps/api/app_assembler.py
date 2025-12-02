@@ -132,4 +132,5 @@ class AppAssembler:
             permissions=permissions,
             transcription_model=transcription_model,
             data_retention_days=app.data_retention_days,
+            icon_id=app.icon_id,
         )

@@ -71,6 +71,7 @@ class App:
         published: bool,
         source_template: AppTemplate | None = None,
         data_retention_days: Optional[int] = None,
+        icon_id: Optional[UUID] = None,
     ):
         self._input_fields = input_fields
         self._attachments = attachments
@@ -90,6 +91,7 @@ class App:
         self.source_template = source_template
         self.transcription_model = transcription_model
         self.data_retention_days = data_retention_days
+        self.icon_id = icon_id
 
     def _input_field_types(self):
         return [input_field.type for input_field in self.input_fields]
@@ -167,6 +169,7 @@ class App:
         published: bool | None = None,
         transcription_model: "TranscriptionModel" = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             self.name = name
@@ -197,6 +200,9 @@ class App:
 
         if data_retention_days is not NOT_PROVIDED:
             self.data_retention_days = data_retention_days
+
+        if icon_id is not NOT_PROVIDED:
+            self.icon_id = icon_id
 
     def is_valid_input(self, files: list[FileInfo], text: str | None = None):
         if not files and not text:
