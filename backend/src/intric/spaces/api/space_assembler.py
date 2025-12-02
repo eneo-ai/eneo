@@ -389,8 +389,8 @@ class SpaceAssembler:
             icon_id=space.icon_id,
         )
 
-    def from_space_to_sparse_model(self, space: Space) -> SpaceSparse:
-        return SpaceSparse(
+    def from_space_to_sparse_model(self, space: Space, include_applications: bool) -> SpaceSparse:
+        space_sparse = SpaceSparse(
             created_at=space.created_at,
             updated_at=space.updated_at,
             id=space.id,
@@ -401,6 +401,19 @@ class SpaceAssembler:
             permissions=self._get_space_permissions(space),
             icon_id=space.icon_id,
         )
+
+        if include_applications:
+            default_assistant = None
+            if getattr(space, "default_assistant", None) is not None:
+                default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
+                    space.default_assistant,
+                    permissions=self._get_default_assistant_permissions(space),
+                )
+            applications = self._get_applications_model(space, only_published=True)
+            space_sparse.applications = applications
+            space_sparse.default_assistant = default_assistant
+
+        return space_sparse
 
     def from_space_to_dashboard_model(self, space: Space, only_published: bool) -> SpaceDashboard:
         self._set_permissions_on_resources(space)

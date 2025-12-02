@@ -4,6 +4,7 @@ from uuid import UUID
 
 from intric.main.exceptions import NotFoundException
 from intric.main.models import ModelId
+from intric.tenants.crawler_settings_helper import get_all_crawler_settings
 from intric.tenants.masking import mask_api_key
 from intric.tenants.provider_field_config import validate_provider_credentials
 from intric.tenants.tenant import (
@@ -288,3 +289,123 @@ class TenantService:
             })
 
         return credentials
+
+    async def update_crawler_settings(
+        self,
+        tenant_id: UUID,
+        settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Update crawler settings for a tenant (partial update).
+
+        Uses atomic JSONB merge at DB level to prevent race conditions.
+
+        Args:
+            tenant_id: UUID of the tenant
+            settings: Settings to update (only provided keys are changed)
+
+        Returns:
+            Dict containing:
+                - tenant_id: UUID
+                - settings: dict (merged with defaults)
+                - overrides: list[str] (keys that have tenant-specific values)
+                - updated_at: datetime
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        # Early return if no settings provided
+        if not settings:
+            return await self.get_crawler_settings(tenant_id)
+
+        # Atomic merge at DB level (prevents race conditions)
+        updated_tenant = await self.repo.update_crawler_settings(
+            tenant_id=tenant_id,
+            crawler_settings=settings,
+        )
+
+        # Build response with defaults filled in using the helper
+        effective_settings = get_all_crawler_settings(updated_tenant.crawler_settings)
+
+        return {
+            "tenant_id": tenant_id,
+            "settings": effective_settings,
+            "overrides": list(updated_tenant.crawler_settings.keys()),
+            "updated_at": updated_tenant.updated_at,
+        }
+
+    async def get_crawler_settings(
+        self,
+        tenant_id: UUID,
+    ) -> dict[str, Any]:
+        """
+        Get effective crawler settings for a tenant.
+
+        Returns merged view: tenant overrides + environment defaults.
+
+        Args:
+            tenant_id: UUID of the tenant
+
+        Returns:
+            Dict containing:
+                - tenant_id: UUID
+                - settings: dict (effective settings)
+                - overrides: list[str] (keys with tenant-specific values)
+                - updated_at: datetime | None
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        # Get tenant overrides
+        overrides = tenant.crawler_settings or {}
+
+        # Use helper to merge with env defaults (single source of truth)
+        effective_settings = get_all_crawler_settings(overrides)
+
+        return {
+            "tenant_id": tenant_id,
+            "settings": effective_settings,
+            "overrides": list(overrides.keys()),
+            "updated_at": tenant.updated_at if overrides else None,
+        }
+
+    async def delete_crawler_settings(
+        self,
+        tenant_id: UUID,
+    ) -> dict[str, Any]:
+        """
+        Delete all tenant crawler settings, reverting to defaults.
+
+        Args:
+            tenant_id: UUID of the tenant
+
+        Returns:
+            Dict containing:
+                - tenant_id: UUID
+                - deleted_keys: list[str] (keys that were removed)
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        # Get keys before deletion
+        deleted_keys = list((tenant.crawler_settings or {}).keys())
+
+        # Clear settings using dedicated method
+        await self.repo.clear_crawler_settings(tenant_id=tenant_id)
+
+        return {
+            "tenant_id": tenant_id,
+            "deleted_keys": deleted_keys,
+        }

@@ -135,9 +135,16 @@ class Settings(BaseSettings):
     worker_max_jobs: int = 20
     tenant_worker_concurrency_limit: int = 4
     tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
-    tenant_worker_retry_delay_seconds: int = 30
-    tenant_worker_retry_max_delay_seconds: int = 5 * 60
-    tenant_worker_retry_backoff_ttl_seconds: int = 5 * 60
+
+    # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
+    crawl_feeder_enabled: bool = False  # Feature flag for gradual rollout
+    crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
+    crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
+
+    # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
+    orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
+    crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
+    crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
 
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
@@ -204,6 +211,7 @@ class Settings(BaseSettings):
     # Crawl - Scrapy crawler settings
     crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
@@ -218,6 +226,9 @@ class Settings(BaseSettings):
     crawl_page_retry_delay: float = (
         1.0  # Initial retry delay in seconds (exponential backoff)
     )
+
+    # Crawl job age limit (prevents infinite retry loops)
+    crawl_job_max_age_seconds: int = 1800  # Maximum retry window (30 minutes)
 
     # Migration
     migration_auto_recalc_threshold: int = (
@@ -343,38 +354,6 @@ class Settings(BaseSettings):
                 " Increase the TTL to cover the longest crawl duration to avoid leaking slots.",
                 self.tenant_worker_semaphore_ttl_seconds,
                 self.crawl_max_length,
-            )
-            sys.exit(1)
-
-        if self.tenant_worker_retry_delay_seconds < 0:
-            logging.error(
-                "TENANT_WORKER_RETRY_DELAY_SECONDS cannot be negative. Current value: %s",
-                self.tenant_worker_retry_delay_seconds,
-            )
-            sys.exit(1)
-
-        if self.tenant_worker_retry_max_delay_seconds <= 0:
-            logging.error(
-                "TENANT_WORKER_RETRY_MAX_DELAY_SECONDS must be greater than zero. Current value: %s",
-                self.tenant_worker_retry_max_delay_seconds,
-            )
-            sys.exit(1)
-
-        if (
-            self.tenant_worker_retry_max_delay_seconds
-            < self.tenant_worker_retry_delay_seconds
-        ):
-            logging.warning(
-                "TENANT_WORKER_RETRY_MAX_DELAY_SECONDS (%s) is lower than the base retry delay (%s). "
-                "Backoff will be capped at the base delay.",
-                self.tenant_worker_retry_max_delay_seconds,
-                self.tenant_worker_retry_delay_seconds,
-            )
-
-        if self.tenant_worker_retry_backoff_ttl_seconds <= 0:
-            logging.error(
-                "TENANT_WORKER_RETRY_BACKOFF_TTL_SECONDS must be greater than zero. Current value: %s",
-                self.tenant_worker_retry_backoff_ttl_seconds,
             )
             sys.exit(1)
 

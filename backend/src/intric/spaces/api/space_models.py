@@ -146,7 +146,8 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
         default=None,
         description="Icon ID referencing an uploaded icon",
     ) 
-
+    applications: Optional[Applications] = None
+    default_assistant: Optional[DefaultAssistant] = None
 
 class SpaceDashboard(SpaceSparse):
     applications: Applications
