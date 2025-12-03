@@ -120,7 +120,11 @@ class AssistantIntegrationKnowledge(BasePublic):
 
 
 class AssistantMCPServers(BaseCrossReference):
-    """Assistant-level MCP server selection."""
+    """Assistant-level MCP server selection.
+
+    Note: MCP servers are accessed via `Assistants.mcp_servers` (direct many-to-many).
+    This association table follows the same pattern as AssistantsGroups/AssistantsWebsites.
+    """
     __tablename__ = "assistant_mcp_servers"
 
     assistant_id: Mapped[UUID] = mapped_column(
@@ -129,9 +133,6 @@ class AssistantMCPServers(BaseCrossReference):
     mcp_server_id: Mapped[UUID] = mapped_column(
         ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
     )
-
-    # Relationships
-    mcp_server: Mapped[MCPServers] = relationship()
 
 
 class AssistantMCPServerTools(BaseCrossReference):

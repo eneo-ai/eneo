@@ -60,7 +60,6 @@ dependencies = [
     "httpx~=0.28.0",
     "pandas>=2.2.3,<3",
     "rich>=14.2.0",
-    "fastmcp>=2.11",
 ]
 
 [project.scripts]
