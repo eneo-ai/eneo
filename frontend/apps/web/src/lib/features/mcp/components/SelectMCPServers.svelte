@@ -183,7 +183,7 @@
   {:else if availableServers.length === 0}
     <div class="text-muted text-sm">
       <p>{m.no_mcp_servers_available()}</p>
-      <p class="mt-1">Enable MCP servers in space settings first.</p>
+      <p class="mt-1">{m.enable_mcp_in_space_settings()}</p>
     </div>
   {:else}
     {#each availableServers as server (server.id)}

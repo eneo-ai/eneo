@@ -56,12 +56,11 @@
       <Settings.Group title={m.what_are_mcp_servers()}>
         <div class="text-muted text-sm space-y-2">
           <p>
-            MCP (Model Context Protocol) servers provide additional tools and capabilities to AI
-            assistants. Servers are connected via Streamable HTTP transport.
+            {m.mcp_servers_description_paragraph()}
           </p>
           <ul class="list-disc list-inside space-y-1 ml-4">
-            <li><strong>Authentication</strong> - Supports bearer tokens, API keys, and custom headers</li>
-            <li><strong>Tool Discovery</strong> - Tools are automatically discovered when adding a server</li>
+            <li><strong>{m.mcp_auth_feature()}</strong> - {m.mcp_auth_description()}</li>
+            <li><strong>{m.mcp_tool_discovery_feature()}</strong> - {m.mcp_tool_discovery_description()}</li>
           </ul>
         </div>
       </Settings.Group>

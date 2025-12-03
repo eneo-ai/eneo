@@ -71,7 +71,7 @@
     </Button>
     <Button is={item} padding="icon-leading" onclick={syncTools} disabled={syncing}>
       <RefreshCw class="h-4 w-4 {syncing ? 'animate-spin' : ''}" />
-      {syncing ? "Syncing..." : "Sync Tools"}
+      {syncing ? m.syncing() : m.sync_tools()}
     </Button>
     <Button
       is={item}

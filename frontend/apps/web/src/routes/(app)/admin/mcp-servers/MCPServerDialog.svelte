@@ -84,7 +84,7 @@
         try {
           data.http_auth_config_schema = JSON.parse(custom_headers);
         } catch (e) {
-          errorMessage = "Invalid JSON for custom headers";
+          errorMessage = m.invalid_json_custom_headers();
           submitting = false;
           return;
         }
@@ -107,13 +107,13 @@
 
       $openController = false;
     } catch (error: any) {
-      errorMessage = error?.message || error?.body?.message || `Failed to ${isEditMode ? 'update' : 'create'} MCP server. Please try again.`;
+      errorMessage = error?.message || error?.body?.message || (isEditMode ? m.failed_update_mcp_server() : m.failed_create_mcp_server());
     } finally {
       submitting = false;
     }
   }
 
-  const authPlaceholder = $derived(isEditMode ? "Leave empty to keep existing" : "");
+  const authPlaceholder = $derived(isEditMode ? m.leave_empty_keep_existing() : "");
 </script>
 
 <Dialog.Root {openController}>
@@ -150,7 +150,7 @@
         </div>
 
         <div>
-          <label for="mcp-http_url" class="text-default mb-1 block text-sm font-medium">Server URL *</label>
+          <label for="mcp-http_url" class="text-default mb-1 block text-sm font-medium">{m.server_url_required()} *</label>
           <input
             id="mcp-http_url"
             type="url"
@@ -159,11 +159,11 @@
             placeholder="https://example.com/mcp"
             class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
           />
-          <p class="text-muted mt-1 text-xs">Full URL to the MCP server endpoint (Streamable HTTP)</p>
+          <p class="text-muted mt-1 text-xs">{m.server_url_hint()}</p>
         </div>
 
         <div>
-          <label for="mcp-http_auth_type" class="text-default mb-1 block text-sm font-medium">Authentication Type</label>
+          <label for="mcp-http_auth_type" class="text-default mb-1 block text-sm font-medium">{m.authentication_type()}</label>
           <select
             id="mcp-http_auth_type"
             bind:value={http_auth_type}
@@ -179,7 +179,7 @@
 
         {#if http_auth_type === "bearer"}
           <div>
-            <label for="mcp-bearer_token" class="text-default mb-1 block text-sm font-medium">Bearer Token</label>
+            <label for="mcp-bearer_token" class="text-default mb-1 block text-sm font-medium">{m.bearer_token()}</label>
             <input
               id="mcp-bearer_token"
               type="password"
@@ -188,8 +188,8 @@
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
             />
             <p class="text-muted mt-1 text-xs">
-              {#if isEditMode}Leave empty to keep existing credentials.{/if}
-              Will be sent as: Authorization: Bearer &lt;token&gt;
+              {#if isEditMode}{m.leave_empty_keep_existing()}.{/if}
+              {m.will_be_sent_as_bearer()}
             </p>
           </div>
         {/if}
@@ -197,7 +197,7 @@
         {#if http_auth_type === "api_key"}
           <div class="space-y-3">
             <div>
-              <label for="mcp-api_key" class="text-default mb-1 block text-sm font-medium">API Key</label>
+              <label for="mcp-api_key" class="text-default mb-1 block text-sm font-medium">{m.api_key()}</label>
               <input
                 id="mcp-api_key"
                 type="password"
@@ -206,11 +206,11 @@
                 class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
               />
               {#if isEditMode}
-                <p class="text-muted mt-1 text-xs">Leave empty to keep existing credentials</p>
+                <p class="text-muted mt-1 text-xs">{m.leave_empty_keep_existing()}</p>
               {/if}
             </div>
             <div>
-              <label for="mcp-api_key_header" class="text-default mb-1 block text-sm font-medium">Header Name</label>
+              <label for="mcp-api_key_header" class="text-default mb-1 block text-sm font-medium">{m.header_name()}</label>
               <input
                 id="mcp-api_key_header"
                 type="text"
@@ -218,24 +218,24 @@
                 placeholder="X-API-Key"
                 class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
               />
-              <p class="text-muted mt-1 text-xs">Default: X-API-Key</p>
+              <p class="text-muted mt-1 text-xs">{m.default_header_x_api_key()}</p>
             </div>
           </div>
         {/if}
 
         {#if http_auth_type === "custom_headers"}
           <div>
-            <label for="mcp-custom_headers" class="text-default mb-1 block text-sm font-medium">Custom Headers (JSON)</label>
+            <label for="mcp-custom_headers" class="text-default mb-1 block text-sm font-medium">{m.custom_headers_json()}</label>
             <textarea
               id="mcp-custom_headers"
               bind:value={custom_headers}
               rows="4"
-              placeholder={isEditMode ? "Leave empty to keep existing headers" : '{"X-Custom-Header": "value"}'}
+              placeholder={isEditMode ? m.leave_empty_keep_existing() : '{"X-Custom-Header": "value"}'}
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
             ></textarea>
             <p class="text-muted mt-1 text-xs">
-              {#if isEditMode}Leave empty to keep existing credentials.{/if}
-              Provide headers as a JSON object
+              {#if isEditMode}{m.leave_empty_keep_existing()}.{/if}
+              {m.provide_headers_json()}
             </p>
           </div>
         {/if}
