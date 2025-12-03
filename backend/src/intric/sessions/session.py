@@ -116,6 +116,7 @@ class ToolCallInfo(BaseModel):
     """Info about a single tool being called."""
     server_name: str
     tool_name: str
+    arguments: Optional[dict] = None  # The input values provided to the tool
 
 
 class SSEToolCall(SSEBase):

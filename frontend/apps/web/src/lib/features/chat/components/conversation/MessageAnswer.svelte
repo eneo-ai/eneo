@@ -9,6 +9,7 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { ChevronRight } from "lucide-svelte";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
@@ -22,8 +23,21 @@
 
   // Get MCP tool calls from the message (runtime property added during streaming)
   const mcpToolCalls = $derived(
-    (message as any).mcp_tool_calls as Array<{ server_name: string; tool_name: string }> | undefined
+    (message as any).mcp_tool_calls as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown> }> | undefined
   );
+
+  // Track which tool calls have expanded arguments
+  let expandedToolCalls = $state(new Set<number>());
+
+  function toggleToolCallExpanded(index: number) {
+    const newExpanded = new Set(expandedToolCalls);
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index);
+    } else {
+      newExpanded.add(index);
+    }
+    expandedToolCalls = newExpanded;
+  }
 
   const showAnswerLabel = $derived.by(() => {
     let hasInfo = message.tools && message.tools.assistants.length > 0;
@@ -56,10 +70,27 @@
       {#each mcpToolCalls as toolCall, idx}
         {@const isLastToolCall = idx === mcpToolCalls.length - 1}
         {@const shouldPulse = isLastToolCall && toolsStillExecuting}
-        <span class="bg-accent-dimmer text-accent-stronger inline-flex w-fit items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium {shouldPulse ? 'animate-pulse' : ''}">
-          <span class="text-base">🔧</span>
-          {m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
-        </span>
+        {@const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
+        {@const isExpanded = expandedToolCalls.has(idx)}
+        <div class="flex flex-col">
+          <button
+            type="button"
+            class="bg-accent-dimmer text-accent-stronger inline-flex w-fit items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:bg-accent-default/20' : 'cursor-default'}"
+            onclick={() => hasArgs && toggleToolCallExpanded(idx)}
+            disabled={!hasArgs}
+          >
+            {#if hasArgs}
+              <ChevronRight class="h-3 w-3 transition-transform {isExpanded ? 'rotate-90' : ''}" />
+            {/if}
+            <span class="text-base">🔧</span>
+            {m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
+          </button>
+          {#if hasArgs && isExpanded}
+            <div class="ml-4 mt-1 rounded-md border border-dimmer bg-secondary p-3 text-xs">
+              <pre class="overflow-x-auto whitespace-pre-wrap break-words text-secondary">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
+            </div>
+          {/if}
+        </div>
       {/each}
     </div>
   {/if}

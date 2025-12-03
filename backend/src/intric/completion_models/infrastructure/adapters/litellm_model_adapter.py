@@ -785,17 +785,23 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                     # Emit structured tool call event for frontend i18n
                     tool_metadata = []
                     for tc in tool_calls:
+                        # Parse arguments for display
+                        try:
+                            args = json.loads(tc.function.arguments) if tc.function.arguments else None
+                        except json.JSONDecodeError:
+                            args = None
+
                         # Use proxy to get display-friendly names
                         tool_info = mcp_proxy.get_tool_info(tc.function.name) if mcp_proxy else None
                         if tool_info:
                             server_name, tool_name = tool_info
-                            tool_metadata.append(ToolCallMetadata(server_name=server_name, tool_name=tool_name))
+                            tool_metadata.append(ToolCallMetadata(server_name=server_name, tool_name=tool_name, arguments=args))
                         elif "__" in tc.function.name:
                             # Fallback to parsing if proxy lookup fails
                             server, tool = tc.function.name.split("__", 1)
-                            tool_metadata.append(ToolCallMetadata(server_name=server, tool_name=tool))
+                            tool_metadata.append(ToolCallMetadata(server_name=server, tool_name=tool, arguments=args))
                         else:
-                            tool_metadata.append(ToolCallMetadata(server_name="", tool_name=tc.function.name))
+                            tool_metadata.append(ToolCallMetadata(server_name="", tool_name=tc.function.name, arguments=args))
 
                     yield Completion(
                         response_type=ResponseType.TOOL_CALL,
