@@ -8,15 +8,19 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input, Tooltip } from "@intric/ui";
   import { invalidate } from "$app/navigation";
-  import { Plus } from "lucide-svelte";
+  import { Plus, Pencil, Trash2 } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import AddMCPDialog from "./AddMCPDialog.svelte";
+  import MCPServerDialog from "./MCPServerDialog.svelte";
+  import DeleteMCPDialog from "./DeleteMCPDialog.svelte";
   import ToolsList from "./ToolsList.svelte";
   import { writable } from "svelte/store";
 
   const { data } = $props();
 
   let showAddDialog = writable(false);
+  let showEditDialog = writable(false);
+  let showDeleteDialog = writable(false);
+  let selectedServer = $state<any>(null);
 
   async function toggleMCPEnabled(mcpServer: any) {
     const isCurrentlyEnabled = mcpServer.is_org_enabled;
@@ -43,14 +47,38 @@
     }
   }
 
-  async function handleAddMCP(mcpData: any) {
-    // Create MCP server - errors are thrown and handled by the dialog
-    await data.intric.mcpServers.create(mcpData);
+  async function handleSaveMCP(mcpData: any, id?: string) {
+    if (id) {
+      // Update existing MCP server
+      await data.intric.mcpServers.update({ id, ...mcpData });
+    } else {
+      // Create new MCP server
+      await data.intric.mcpServers.create(mcpData);
+    }
     // Refresh both admin layout and space data
     await Promise.all([
       invalidate('admin:layout'),
       invalidate('spaces:data')
     ]);
+  }
+
+  async function handleDeleteMCP(id: string) {
+    await data.intric.mcpServers.delete({ id });
+    // Refresh both admin layout and space data
+    await Promise.all([
+      invalidate('admin:layout'),
+      invalidate('spaces:data')
+    ]);
+  }
+
+  function openEditDialog(mcpServer: any) {
+    selectedServer = mcpServer;
+    $showEditDialog = true;
+  }
+
+  function openDeleteDialog(mcpServer: any) {
+    selectedServer = mcpServer;
+    $showDeleteDialog = true;
   }
 
   function getAuthTypeColor(type: string) {
@@ -122,7 +150,7 @@
                       </div>
                     {/if}
                   </div>
-                  <div class="flex items-center gap-4">
+                  <div class="flex items-center gap-2">
                     {#if mcpServer.documentation_url}
                       <a
                         href={mcpServer.documentation_url}
@@ -133,6 +161,16 @@
                         {m.docs()}
                       </a>
                     {/if}
+                    <Tooltip text={m.edit_mcp_server()}>
+                      <Button variant="ghost" size="sm" onclick={() => openEditDialog(mcpServer)}>
+                        <Pencil class="h-4 w-4" />
+                      </Button>
+                    </Tooltip>
+                    <Tooltip text={m.delete_mcp_server()}>
+                      <Button variant="ghost" size="sm" onclick={() => openDeleteDialog(mcpServer)}>
+                        <Trash2 class="h-4 w-4 text-negative-default" />
+                      </Button>
+                    </Tooltip>
                     <Tooltip text={mcpServer.is_org_enabled ? m.click_to_disable() : m.click_to_enable()}>
                       <Input.Switch
                         sideEffect={() => toggleMCPEnabled(mcpServer)}
@@ -171,4 +209,11 @@
   </Page.Main>
 </Page.Root>
 
-<AddMCPDialog openController={showAddDialog} onSubmit={handleAddMCP} />
+<!-- Add MCP Dialog -->
+<MCPServerDialog openController={showAddDialog} onSubmit={handleSaveMCP} />
+
+<!-- Edit MCP Dialog -->
+{#if selectedServer}
+  <MCPServerDialog openController={showEditDialog} mcpServer={selectedServer} onSubmit={handleSaveMCP} />
+  <DeleteMCPDialog openController={showDeleteDialog} mcpServer={selectedServer} onDelete={handleDeleteMCP} />
+{/if}
