@@ -58,15 +58,21 @@ def get_application():
         if "schemas" not in openapi_schema["components"]:
             openapi_schema["components"]["schemas"] = {}
 
-        # Import the actual IntricEventType enum
-        from intric.sessions.session import IntricEventType
+        # Import SSE models and enums
+        from intric.sessions.session import SSE_MODELS, IntricEventType
 
-        # Add the missing schema if it's not already there
+        # Add IntricEventType enum if not already there
         if "IntricEventType" not in openapi_schema["components"]["schemas"]:
             openapi_schema["components"]["schemas"]["IntricEventType"] = {
                 "type": "string",
                 "enum": [item.value for item in IntricEventType]
             }
+
+        # Add SSE model schemas
+        for model in SSE_MODELS:
+            model_name = model.__name__
+            if model_name not in openapi_schema["components"]["schemas"]:
+                openapi_schema["components"]["schemas"][model_name] = model.model_json_schema()
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

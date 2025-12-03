@@ -49,7 +49,6 @@ def upgrade() -> None:
         sa.Column('name', sa.String(), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('http_url', sa.String(), nullable=False),
-        sa.Column('transport_type', sa.String(), nullable=False, server_default='sse'),
         sa.Column('http_auth_type', sa.String(), nullable=False, server_default='none'),
         sa.Column('http_auth_config_schema', JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column('is_enabled', sa.Boolean(), server_default='True', nullable=False),

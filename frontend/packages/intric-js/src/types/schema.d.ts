@@ -3772,19 +3772,13 @@ export interface components {
     };
     /**
      * MCPServerCreate
-     * @description DTO for creating an MCP server (admin only, HTTP-only).
+     * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
      */
     MCPServerCreate: {
       /** Name */
       name: string;
       /** Http Url */
       http_url: string;
-      /**
-       * Transport Type
-       * @default sse
-       * @enum {string}
-       */
-      transport_type?: "sse" | "streamable_http";
       /**
        * Http Auth Type
        * @default none
@@ -3806,7 +3800,7 @@ export interface components {
     };
     /**
      * MCPServerPublic
-     * @description Public DTO for MCP server (HTTP-only).
+     * @description Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
      */
     MCPServerPublic: {
       /**
@@ -3820,8 +3814,6 @@ export interface components {
       description: string | null;
       /** Http Url */
       http_url: string;
-      /** Transport Type */
-      transport_type: string;
       /** Http Auth Type */
       http_auth_type: string;
       /** Http Auth Config Schema */
@@ -3861,8 +3853,6 @@ export interface components {
       description: string | null;
       /** Http Url */
       http_url: string;
-      /** Transport Type */
-      transport_type: string;
       /** Http Auth Type */
       http_auth_type: string;
       /** Http Auth Config Schema */
@@ -3945,15 +3935,13 @@ export interface components {
     };
     /**
      * MCPServerUpdate
-     * @description DTO for updating an MCP server (admin only, HTTP-only).
+     * @description DTO for updating an MCP server (admin only, uses Streamable HTTP transport).
      */
     MCPServerUpdate: {
       /** Name */
       name?: string | null;
       /** Http Url */
       http_url?: string | null;
-      /** Transport Type */
-      transport_type?: ("sse" | "streamable_http") | null;
       /** Http Auth Type */
       http_auth_type?: ("none" | "bearer" | "api_key" | "custom_headers") | null;
       /** Description */
@@ -7558,6 +7546,315 @@ export interface components {
     };
     /** @enum {string} */
     IntricEventType: "generating_image" | "tool_call";
+    /** SSEText */
+    SSEText: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Answer */
+      answer: string;
+      /** References */
+      references: $defs["InfoBlobAskAssistantPublic"][];
+      $defs: {
+        /** InfoBlobAskAssistantPublic */
+        InfoBlobAskAssistantPublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          metadata: $defs["InfoBlobMetadata"];
+          /**
+           * Group Id
+           * @default null
+           */
+          group_id?: string | null;
+          /**
+           * Website Id
+           * @default null
+           */
+          website_id?: string | null;
+          /** Score */
+          score: number;
+        };
+        /** InfoBlobMetadata */
+        InfoBlobMetadata: {
+          /**
+           * Url
+           * @default null
+           */
+          url?: string | null;
+          /**
+           * Title
+           * @default null
+           */
+          title?: string | null;
+          /**
+           * Embedding Model Id
+           * Format: uuid
+           */
+          embedding_model_id: string;
+          /** Size */
+          size: number;
+        };
+      };
+    };
+    /** SSEIntricEvent */
+    SSEIntricEvent: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      intric_event_type: $defs["IntricEventType"];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType: "generating_image" | "tool_call";
+      };
+    };
+    /**
+     * SSEToolCall
+     * @description Event emitted when MCP tools are being executed.
+     */
+    SSEToolCall: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_call */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType: "generating_image" | "tool_call";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+        };
+      };
+    };
+    /** SSEFiles */
+    SSEFiles: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Generated Files */
+      generated_files: $defs["FilePublic"][];
+      $defs: {
+        /** FilePublic */
+        FilePublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Name */
+          name: string;
+          /** Mimetype */
+          mimetype: string;
+          /** Size */
+          size: number;
+          /**
+           * Transcription
+           * @default null
+           */
+          transcription?: string | null;
+          /**
+           * Token Count
+           * @default null
+           */
+          token_count?: number | null;
+        };
+      };
+    };
+    /** SSEFirstChunk */
+    SSEFirstChunk: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Question */
+      question: string;
+      /** Answer */
+      answer: string;
+      /** Files */
+      files: $defs["FilePublic"][];
+      /** Generated Files */
+      generated_files: $defs["FilePublic"][];
+      /** References */
+      references: $defs["InfoBlobAskAssistantPublic"][];
+      tools: $defs["UseTools"];
+      /** Web Search References */
+      web_search_references: $defs["WebSearchResultPublic"][];
+      $defs: {
+        /** FilePublic */
+        FilePublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Name */
+          name: string;
+          /** Mimetype */
+          mimetype: string;
+          /** Size */
+          size: number;
+          /**
+           * Transcription
+           * @default null
+           */
+          transcription?: string | null;
+          /**
+           * Token Count
+           * @default null
+           */
+          token_count?: number | null;
+        };
+        /** InfoBlobAskAssistantPublic */
+        InfoBlobAskAssistantPublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          metadata: $defs["InfoBlobMetadata"];
+          /**
+           * Group Id
+           * @default null
+           */
+          group_id?: string | null;
+          /**
+           * Website Id
+           * @default null
+           */
+          website_id?: string | null;
+          /** Score */
+          score: number;
+        };
+        /** InfoBlobMetadata */
+        InfoBlobMetadata: {
+          /**
+           * Url
+           * @default null
+           */
+          url?: string | null;
+          /**
+           * Title
+           * @default null
+           */
+          title?: string | null;
+          /**
+           * Embedding Model Id
+           * Format: uuid
+           */
+          embedding_model_id: string;
+          /** Size */
+          size: number;
+        };
+        /** ToolAssistant */
+        ToolAssistant: {
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Handle */
+          handle: string;
+        };
+        /** UseTools */
+        UseTools: {
+          /** Assistants */
+          assistants: $defs["ToolAssistant"][];
+        };
+        /** WebSearchResultPublic */
+        WebSearchResultPublic: {
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Title */
+          title: string;
+          /** Url */
+          url: string;
+        };
+      };
+    };
+    /** SSEError */
+    SSEError: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Error */
+      error: string;
+      /**
+       * Error Code
+       * @default null
+       */
+      error_code?: number | null;
+    };
   };
   responses: never;
   parameters: never;

@@ -22,9 +22,8 @@ class MCPServers(BasePublic):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
 
-    # HTTP configuration
+    # HTTP configuration (uses Streamable HTTP transport - MCP 2025-03-26+ standard)
     http_url: Mapped[str] = mapped_column(String, nullable=False)
-    transport_type: Mapped[str] = mapped_column(String, nullable=False, server_default='sse')
     http_auth_type: Mapped[str] = mapped_column(String, nullable=False, server_default='none')
     http_auth_config_schema: Mapped[Optional[dict]] = mapped_column(JSONB)
 
