@@ -1,4 +1,6 @@
 import subprocess
+import uuid
+from datetime import datetime, timezone
 
 import bcrypt
 import psycopg2
@@ -28,8 +30,11 @@ settings = Settings()
 # Alembic command
 def run_alembic_migrations():
     try:
-        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
         print("Alembic migrations ran successfully.")
+    except FileNotFoundError:
+        print("Error: alembic not found on PATH. Ensure it's installed in /app/.venv and PATH includes /app/.venv/bin")
+        exit(1)
     except subprocess.CalledProcessError as e:
         print(f"Error running alembic migrations: {e}")
         exit(1)
@@ -174,6 +179,26 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
                 VALUES (%s, %s, %s, %s)"""
             )
             cur.execute(enable_model_query, (model_id, tenant_id, True, True))
+
+        # Create organization space for the tenant (if not already exists)
+        check_org_space_query = sql.SQL(
+            """SELECT id FROM spaces
+            WHERE tenant_id = %s AND user_id IS NULL AND tenant_space_id IS NULL"""
+        )
+        cur.execute(check_org_space_query, (tenant_id,))
+        org_space = cur.fetchone()
+
+        if org_space is None:
+            org_space_id = str(uuid.uuid4())
+            now = datetime.now(timezone.utc)
+            add_org_space_query = sql.SQL(
+                """INSERT INTO spaces (id, name, description, tenant_id, user_id, tenant_space_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s)"""
+            )
+            cur.execute(
+                add_org_space_query,
+                (org_space_id, "Organization space", "Delad knowledge för hela tenant", tenant_id, now, now),
+            )
 
         conn.commit()
         cur.close()

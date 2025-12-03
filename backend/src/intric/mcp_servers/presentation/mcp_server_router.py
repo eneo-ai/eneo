@@ -5,13 +5,16 @@ from fastapi import APIRouter, Depends, Query
 from intric.main.container.container import Container
 from intric.main.models import PaginatedResponse
 from intric.mcp_servers.presentation.models import (
+    MCPConnectionStatus,
     MCPServerCreate,
+    MCPServerCreateResponse,
     MCPServerPublic,
     MCPServerSettingsCreate,
     MCPServerSettingsPublic,
     MCPServerSettingsUpdate,
     MCPServerToolList,
     MCPServerToolPublic,
+    MCPServerToolSyncResponse,
     MCPServerToolUpdate,
     MCPServerUpdate,
 )
@@ -168,18 +171,22 @@ async def get_mcp_server(
 
 @router.post(
     "/",
-    response_model=MCPServerPublic,
+    response_model=MCPServerCreateResponse,
     responses=responses.get_responses([400, 403]),
 )
 async def create_mcp_server(
     data: MCPServerCreate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    """Create a new MCP server in global catalog (admin only)."""
+    """Create a new MCP server in global catalog (admin only).
+
+    Returns the created server along with connection status indicating
+    whether tool discovery succeeded.
+    """
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
-    mcp_server = await service.create_mcp_server(
+    result = await service.create_mcp_server(
         name=data.name,
         http_url=data.http_url,
         http_auth_type=data.http_auth_type,
@@ -189,7 +196,14 @@ async def create_mcp_server(
         icon_url=data.icon_url,
         documentation_url=data.documentation_url,
     )
-    return assembler.from_domain_to_model(mcp_server)
+    return MCPServerCreateResponse(
+        server=assembler.from_domain_to_model(result.server),
+        connection=MCPConnectionStatus(
+            success=result.connection.success,
+            tools_discovered=result.connection.tools_discovered,
+            error_message=result.connection.error_message,
+        ),
+    )
 
 
 @router.post(
@@ -259,20 +273,31 @@ async def get_mcp_server_tools(
 
 @router.post(
     "/{id}/tools/sync/",
-    response_model=MCPServerToolList,
+    response_model=MCPServerToolSyncResponse,
     responses=responses.get_responses([403, 404]),
 )
 async def sync_mcp_server_tools(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    """Manually refresh/sync tools for an MCP server (admin only)."""
+    """Manually refresh/sync tools for an MCP server (admin only).
+
+    Returns the synced tools along with connection status indicating
+    whether the sync succeeded.
+    """
     service = container.mcp_server_service()
     assembler = container.mcp_server_tool_assembler()
 
     # Refresh tools from MCP server
-    tools = await service.refresh_tools(id)
-    return assembler.to_paginated_response(tools)
+    tools, connection_result = await service.refresh_tools(id)
+    return MCPServerToolSyncResponse(
+        tools=[assembler.from_domain_to_model(t) for t in tools],
+        connection=MCPConnectionStatus(
+            success=connection_result.success,
+            tools_discovered=connection_result.tools_discovered,
+            error_message=connection_result.error_message,
+        ),
+    )
 
 
 @router.put(

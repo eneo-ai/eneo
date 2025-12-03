@@ -8,10 +8,14 @@ import { getRequestEvent } from "$app/server";
 import { env } from "$env/dynamic/private";
 
 /**
- * Try to login an user. If successful, the `auth` cookie will be set and the function returns `true`
- * Otherwise the function will return `false`
+ * Try to login a user. If successful, the `auth` cookie will be set.
+ *
+ * @returns Object with success status and correlation ID for error tracking
  */
-export async function loginWithIntric(username: string, password: string): Promise<boolean> {
+export async function loginWithIntric(
+  username: string,
+  password: string
+): Promise<{ success: boolean; correlationId: string | null }> {
   // Endpoint wants urlencoded data
   const body = new URLSearchParams();
 
@@ -28,18 +32,25 @@ export async function loginWithIntric(username: string, password: string): Promi
     }
   });
 
+  // Extract correlation ID from response headers (available on both success and failure)
+  const correlationId = response.headers.get("X-Correlation-ID") || null;
+
   if (!response.ok) {
-    console.error("Unable to call backend service. Error: %s", response.statusText);
-    return false;
+    console.error(
+      "Username/password login failed. Status: %s, Correlation ID: %s",
+      response.status,
+      correlationId || "none"
+    );
+    return { success: false, correlationId };
   }
 
   try {
     const { access_token } = await response.json();
     // Bit weird renaming going on here, but that is how it is, as the backend calls this "access token"
     await setFrontendAuthCookie({ id_token: access_token });
-    return true;
+    return { success: true, correlationId };
   } catch (e) {
-    console.error("Failed to decode login response");
-    return false;
+    console.error("Failed to decode login response. Correlation ID: %s", correlationId || "none");
+    return { success: false, correlationId };
   }
 }

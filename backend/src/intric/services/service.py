@@ -43,7 +43,7 @@ class OutputValidation(BaseModel):
 class ServiceBase(OutputValidation):
     name: str
     prompt: str
-    completion_model_kwargs: Optional[ModelKwargs] = ModelKwargs()
+    completion_model_kwargs: ModelKwargs = Field(default_factory=ModelKwargs)
 
 
 class ServiceCreatePublic(ServiceBase):

@@ -45,7 +45,7 @@ class AssistantFactory:
         space_id: UUID,
         prompt: "Prompt" | None = None,
         completion_model: CompletionModel | None = None,
-        completion_model_kwargs: ModelKwargs = ModelKwargs(),
+        completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool = False,
         attachments: list["FileInfo"] | None = None,
         collections: list["Collection"] | None = None,
@@ -55,7 +55,12 @@ class AssistantFactory:
         insight_enabled: bool = False,
         data_retention_days: int | None = None,
         metadata_json: dict | None = None,
+        description: str | None = None,
     ) -> Assistant:
+        # Avoid mutable default anti-pattern
+        if completion_model_kwargs is None:
+            completion_model_kwargs = ModelKwargs()
+
         return Assistant(
             id=None,
             user=user,
@@ -75,6 +80,7 @@ class AssistantFactory:
             insight_enabled=insight_enabled,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
+            description=description,
         )
 
     def create_assistant_from_db(

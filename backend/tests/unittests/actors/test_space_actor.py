@@ -16,14 +16,24 @@ class MockUser:
 
 
 class MockSpace:
-    def __init__(self, user_id, personal=False, members=None):
+    def __init__(self, user_id, personal=False, members=None, tenant_space_id=None, id=None):
         self.user_id = user_id
         self.personal = personal
         self.members = members or {}
+        self.tenant_space_id = tenant_space_id
+        self.id = id or "space-mock"
 
     def is_personal(self):
         return self.personal
-
+    
+    # Shared = saknar user_id men tenant_space_id är satt (pekar på org-space)
+    def is_shared(self):
+        return (self.user_id is None) and (self.tenant_space_id is not None)
+    
+    # Org = saknar både user_id och tenant_space_id
+    def is_organization(self):
+        return (self.user_id is None) and (self.tenant_space_id is None)
+    
 
 class MockSpaceRole:
     ADMIN = "admin"
@@ -58,18 +68,33 @@ def editor_user():
 def admin_user():
     return MockUser(id=4, role=MockSpaceRole.ADMIN)
 
+@pytest.fixture
+def organization_space():
+    return MockSpace(
+        user_id=None, 
+        personal=False, 
+        tenant_space_id=None,
+        id="org-1"
+    )
 
 @pytest.fixture
-def personal_space():
-    return MockSpace(user_id=1, personal=True)
+def personal_space(organization_space, owner_user):
+    return MockSpace(
+        user_id=owner_user.id, 
+        personal=True,
+        tenant_space_id=organization_space.id,
+        id="personal-1",
+    )
 
 
 @pytest.fixture
-def shared_space(viewer_user, editor_user, admin_user):
+def shared_space(organization_space, viewer_user, editor_user, admin_user):
     return MockSpace(
         user_id=None,
         personal=False,
+        tenant_space_id=organization_space.id,
         members={user.id: user for user in [viewer_user, editor_user, admin_user]},
+        id="shared-1",
     )
 
 

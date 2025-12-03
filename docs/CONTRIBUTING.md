@@ -40,7 +40,7 @@ cd backend && uv run python init_db.py
 
 # Start development servers (3 terminals)
 cd backend && uv run start              # Terminal 1
-cd frontend && pnpm run dev                 # Terminal 2  
+cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
 ```
 
@@ -55,7 +55,7 @@ git checkout -b feature/your-feature-name
 
 # Run tests
 cd backend && uv run pytest
-cd frontend && pnpm run test
+cd frontend && bun run test
 
 # Commit changes
 git add .
@@ -177,7 +177,7 @@ frontend/
 ├── packages/            # Shared packages
 │   ├── intric-js/       # Type-safe API client
 │   └── ui/              # Reusable UI components
-└── pnpm-workspace.yaml  # Monorepo configuration
+└── package.json         # Workspace configuration
 ```
 
 ---
@@ -364,16 +364,16 @@ test('displays assistant information', () => {
 cd frontend
 
 # Unit tests
-pnpm run test
+bun run test
 
 # E2E tests
-pnpm run test:integration
+bun run test:integration
 
 # Type checking
-pnpm run check
+bun run check
 
 # Linting
-pnpm run lint
+bun run lint
 ```
 
 ---
@@ -596,7 +596,7 @@ uv add package-name
 uv add --group dev package-name
 
 # Update pyproject.toml with specific version constraints
-# Commit both pyproject.toml and poetry.lock
+# Commit both pyproject.toml and uv.lock
 ```
 
 **Frontend Dependencies:**
@@ -604,13 +604,13 @@ uv add --group dev package-name
 cd frontend
 
 # Add dependency to specific package
-pnpm add package-name --filter=web
+bun add package-name --filter web
 
 # Add shared dependency to workspace root
-pnpm add package-name -w
+bun add package-name -w
 
 # Add development dependency
-pnpm add -D package-name
+bun add -d package-name
 ```
 
 **Dependency Guidelines:**
@@ -710,6 +710,19 @@ All API endpoints automatically generate OpenAPI documentation. Ensure:
 - Strengthen authentication mechanisms
 - Improve audit logging
 - Enhance GDPR compliance features
+- Multi-tenant security enhancements
+
+**5. Multi-Tenancy & Enterprise Features:**
+- Per-tenant resource quotas and limits
+- Federation provider integrations (new IdPs)
+- Credential management improvements
+- Observability and debugging tools
+
+**6. Knowledge Management:**
+- Website crawler enhancements (pagination, JavaScript rendering)
+- HTTP authentication for protected resources
+- Document processing improvements
+- Semantic search optimization
 
 ### Good First Issues
 

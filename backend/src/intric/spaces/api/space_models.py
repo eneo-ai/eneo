@@ -137,7 +137,9 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     name: str
     description: Optional[str]
     personal: bool
-
+    organization: bool 
+    applications: Optional[Applications] = None
+    default_assistant: Optional[DefaultAssistant] = None
 
 class SpaceDashboard(SpaceSparse):
     applications: Applications
@@ -160,7 +162,7 @@ class SpacePublic(SpaceDashboard):
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
 
-    default_assistant: DefaultAssistant
+    default_assistant: DefaultAssistant 
 
     available_roles: list[SpaceRole]
     security_classification: Optional[SecurityClassificationPublic]

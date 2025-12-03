@@ -99,6 +99,10 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
+        # Store the original model name for provider detection (before any transformation)
+        # This is critical for correct credential resolution with custom providers
+        self._original_model_name = model.litellm_model_name
+
         # Get provider configuration based on litellm_model_name
         provider_registry = LiteLLMProviderRegistry.get_provider_for_model(
             model.litellm_model_name
@@ -119,7 +123,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
         # Validate credentials early if credential_resolver is provided
         # This ensures errors are raised before streaming starts
         if credential_resolver is not None:
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             try:
                 # Pre-validate that credential exists
                 # Don't store it yet - will get it per-request for security
@@ -148,29 +152,15 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
     def _detect_provider(self, litellm_model_name: str) -> str:
         """
-        Detect provider from model name.
+        Detect provider from model name using shared registry logic.
 
         Args:
             litellm_model_name: The LiteLLM model name (e.g., 'azure/gpt-4', 'anthropic/claude-3')
 
         Returns:
-            Provider name (openai, azure, anthropic, berget, mistral, ovhcloud, vllm)
+            Provider name (openai, azure, anthropic, berget, gdm, mistral, ovhcloud, vllm)
         """
-        if litellm_model_name.startswith("azure/"):
-            return "azure"
-        elif litellm_model_name.startswith("anthropic/"):
-            return "anthropic"
-        elif litellm_model_name.startswith("berget/"):
-            return "berget"
-        elif litellm_model_name.startswith("mistral/"):
-            return "mistral"
-        elif litellm_model_name.startswith("ovhcloud/"):
-            return "ovhcloud"
-        elif litellm_model_name.startswith("vllm/"):
-            return "vllm"
-        else:
-            # Default to OpenAI for unprefixed models
-            return "openai"
+        return LiteLLMProviderRegistry.detect_provider_from_model_name(litellm_model_name)
 
     def _get_kwargs(self, kwargs: ModelKwargs | None):
         if kwargs is None:
@@ -390,7 +380,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         # Inject tenant-specific API key if credential_resolver is provided
         if self.credential_resolver:
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             try:
                 api_key = self.credential_resolver.get_api_key(provider)
                 kwargs["api_key"] = api_key
@@ -599,7 +589,7 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
 
         # Inject tenant-specific API key - raises APIKeyNotConfiguredException if missing
         if self.credential_resolver:
-            provider = self._detect_provider(self.litellm_model)
+            provider = self._detect_provider(self._original_model_name)
             try:
                 api_key = self.credential_resolver.get_api_key(provider)
                 kwargs["api_key"] = api_key

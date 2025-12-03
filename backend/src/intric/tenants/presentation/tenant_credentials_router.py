@@ -5,7 +5,7 @@ This module provides endpoints for system administrators to manage
 tenant-specific LLM provider API credentials.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -15,53 +15,9 @@ from pydantic import BaseModel, Field, field_validator
 from intric.authentication import auth
 from intric.main.config import Settings, get_settings
 from intric.main.container.container import Container
+from intric.main.exceptions import NotFoundException
 from intric.server.dependencies.container import get_container
-from intric.tenants.masking import mask_api_key
-
-
-# Provider-specific required fields for strict mode validation
-PROVIDER_REQUIRED_FIELDS = {
-    "openai": {"api_key"},
-    "anthropic": {"api_key"},
-    "azure": {"api_key", "endpoint", "api_version", "deployment_name"},
-    "berget": {"api_key"},
-    "mistral": {"api_key"},
-    "ovhcloud": {"api_key"},
-    "vllm": {"api_key", "endpoint"},
-}
-
-
-def validate_provider_credentials(
-    provider: str, request_data: "SetCredentialRequest", strict_mode: bool
-) -> list[str]:
-    """
-    Validate credentials against provider-specific requirements.
-
-    Args:
-        provider: LLM provider name
-        request_data: Credential request with fields
-        strict_mode: Whether tenant_credentials_enabled (strict mode)
-
-    Returns:
-        List of validation error messages (empty if valid)
-    """
-    errors = []
-    provider_lower = provider.lower()
-
-    # Get required fields for this provider
-    required_fields = PROVIDER_REQUIRED_FIELDS.get(provider_lower, {"api_key"})
-
-    # Check each required field
-    for field in required_fields:
-        value = getattr(request_data, field, None)
-        if not value or (isinstance(value, str) and not value.strip()):
-            errors.append(f"Field '{field}' is required for provider '{provider}'")
-
-    # Additional validation: api_key minimum length
-    if request_data.api_key and len(request_data.api_key.strip()) < 8:
-        errors.append("API key must be at least 8 characters long")
-
-    return errors
+from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
 def check_feature_enabled(
@@ -92,7 +48,7 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "berget", "mistral", "ovhcloud", "vllm"]
+Provider = Literal["openai", "anthropic", "azure", "berget", "gdm", "mistral", "ovhcloud", "vllm"]
 
 
 class SetCredentialRequest(BaseModel):
@@ -100,7 +56,7 @@ class SetCredentialRequest(BaseModel):
     Request model for setting tenant API credentials.
 
     Provider-specific field requirements:
-    - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
+    - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
     - vLLM: api_key + endpoint (required)
     - Azure: api_key + endpoint + api_version (required)
 
@@ -300,91 +256,52 @@ async def set_tenant_credential(
         HTTPException 404: Tenant not found
         HTTPException 422: Validation error with field-level error messages
     """
-    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
     settings = get_settings()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
+    try:
+        result = await tenant_service.set_credential(
+            tenant_id=tenant_id,
+            provider=provider,
+            api_key=request.api_key,
+            endpoint=request.endpoint,
+            api_version=request.api_version,
+            deployment_name=request.deployment_name,
+            strict_mode=settings.tenant_credentials_enabled,
+        )
+
+        return SetCredentialResponse(
+            tenant_id=result["tenant_id"],
+            provider=result["provider"],
+            masked_key=result["masked_key"],
+            message=f"API credential for {provider} set successfully",
+            set_at=result["set_at"],
+        )
+    except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
+            detail=str(e),
         )
-
-    # Provider-specific field validation
-    validation_errors = validate_provider_credentials(
-        provider, request, settings.tenant_credentials_enabled
-    )
-
-    if validation_errors:
+    except ValueError as e:
+        # Parse validation errors from service
+        error_message = str(e)
+        if "Credential validation failed" in error_message:
+            errors = error_message.split(": ", 1)[1].split("; ") if ": " in error_message else [error_message]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "credential_validation_failed",
+                    "message": f"Credential validation failed for provider '{provider}'",
+                    "errors": errors,
+                    "provider_requirements": {
+                        k: list(v) for k, v in PROVIDER_REQUIRED_FIELDS.items()
+                    },
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "error": "credential_validation_failed",
-                "message": f"Credential validation failed for provider '{provider}'",
-                "errors": validation_errors,
-                "provider_requirements": {
-                    "openai": ["api_key"],
-                    "anthropic": ["api_key"],
-                    "azure": ["api_key", "endpoint", "api_version"],
-                    "berget": ["api_key"],
-                    "mistral": ["api_key"],
-                    "ovhcloud": ["api_key"],
-                    "vllm": ["api_key", "endpoint"],
-                },
-            },
+            detail=str(e),
         )
-
-    # Build credential dict
-    credential: dict[str, Any] = {"api_key": request.api_key}
-
-    if request.endpoint:
-        credential["endpoint"] = request.endpoint
-    if request.api_version:
-        credential["api_version"] = request.api_version
-    if request.deployment_name:
-        credential["deployment_name"] = request.deployment_name
-
-    # Update credential and retrieve latest tenant snapshot
-    updated_tenant = await tenant_repo.update_api_credential(
-        tenant_id=tenant_id,
-        provider=provider,
-        credential=credential,
-    )
-
-    provider_key = provider.lower()
-    stored_credential = (
-        updated_tenant.api_credentials.get(provider_key, {})
-        if updated_tenant and updated_tenant.api_credentials
-        else {}
-    )
-
-    timestamp_raw = (
-        stored_credential.get("set_at")
-        if isinstance(stored_credential, dict)
-        else None
-    )
-
-    try:
-        set_at = (
-            datetime.fromisoformat(timestamp_raw)
-            if timestamp_raw
-            else datetime.now(timezone.utc)
-        )
-        if set_at.tzinfo is None:
-            set_at = set_at.replace(tzinfo=timezone.utc)
-    except ValueError:
-        set_at = datetime.now(timezone.utc)
-
-    masked_key = mask_api_key(request.api_key)
-
-    return SetCredentialResponse(
-        tenant_id=tenant_id,
-        provider=provider,
-        masked_key=masked_key,
-        message=f"API credential for {provider} set successfully",
-        set_at=set_at,
-    )
 
 
 @router.delete(
@@ -414,24 +331,24 @@ async def delete_tenant_credential(
     Raises:
         HTTPException 404: Tenant not found
     """
-    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
+    try:
+        result = await tenant_service.delete_credential(
+            tenant_id=tenant_id,
+            provider=provider,
         )
 
-    # Delete credential
-    await tenant_repo.delete_api_credential(tenant_id=tenant_id, provider=provider)
-
-    return DeleteCredentialResponse(
-        tenant_id=tenant_id,
-        provider=provider,
-        message=f"API credential for {provider} deleted successfully",
-    )
+        return DeleteCredentialResponse(
+            tenant_id=result["tenant_id"],
+            provider=result["provider"],
+            message=f"API credential for {provider} deleted successfully",
+        )
+    except NotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
 
 
 @router.get(
@@ -463,55 +380,25 @@ async def list_tenant_credentials(
     Raises:
         HTTPException 404: Tenant not found
     """
-    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
+    try:
+        credentials_data = await tenant_service.list_credentials(tenant_id)
+
+        credentials = [
+            CredentialInfo(
+                provider=cred["provider"],
+                masked_key=cred["masked_key"],
+                configured_at=cred["configured_at"],
+                encryption_status=cred["encryption_status"],
+                config=cred["config"],
+            )
+            for cred in credentials_data
+        ]
+
+        return ListCredentialsResponse(credentials=credentials)
+    except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
+            detail=str(e),
         )
-
-    # Get credentials with metadata (masked keys + encryption status)
-    credentials_metadata = await tenant_repo.get_api_credentials_with_metadata(
-        tenant_id
-    )
-
-    # Build credential info list
-    credentials: list[CredentialInfo] = []
-    tenant_credentials = tenant.api_credentials or {}
-
-    for provider, metadata in credentials_metadata.items():
-        credential_data = tenant_credentials.get(provider, {})
-        config: dict[str, Any] = {}
-        configured_at: datetime = tenant.updated_at
-
-        if isinstance(credential_data, dict):
-            config = {
-                k: v
-                for k, v in credential_data.items()
-                if k not in {"api_key", "encrypted_at", "set_at"}
-            }
-
-            timestamp_candidate = metadata.get("set_at") or credential_data.get("set_at")
-            if not timestamp_candidate:
-                timestamp_candidate = credential_data.get("encrypted_at")
-
-            if isinstance(timestamp_candidate, str):
-                try:
-                    configured_at = datetime.fromisoformat(timestamp_candidate)
-                except ValueError:
-                    configured_at = tenant.updated_at
-
-        credentials.append(
-            CredentialInfo(
-                provider=provider,
-                masked_key=metadata["masked_key"],
-                configured_at=configured_at,
-                encryption_status=metadata["encryption_status"],
-                config=config,
-            )
-        )
-
-    return ListCredentialsResponse(credentials=credentials)

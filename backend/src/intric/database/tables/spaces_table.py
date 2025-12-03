@@ -38,6 +38,17 @@ class Spaces(BasePublic):
         ForeignKey(SecurityClassification.id, ondelete="SET NULL"), nullable=True
     )
 
+    tenant_space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    tenant_space: Mapped[Optional["Spaces"]] = relationship(
+        "Spaces",
+        foreign_keys="Spaces.tenant_space_id",
+        remote_side="Spaces.id",
+        viewonly=True,
+    )
+
     # Relationships
     security_classification: Mapped[Optional["SecurityClassification"]] = relationship(
         back_populates="spaces"

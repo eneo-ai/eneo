@@ -125,3 +125,29 @@ class MCPServerToolUpdate(BaseModel):
     """DTO for updating tenant-level tool settings."""
 
     is_enabled: bool
+
+
+class MCPConnectionStatus(BaseModel):
+    """Status of MCP server connection attempt."""
+
+    success: bool
+    tools_discovered: int = 0
+    error_message: Optional[str] = None
+
+
+class MCPServerCreateResponse(BaseModel):
+    """Response for MCP server creation including connection status."""
+
+    server: MCPServerPublic
+    connection: MCPConnectionStatus
+
+
+class MCPServerToolSyncResponse(BaseModel):
+    """Response for tool sync operation including connection status."""
+
+    tools: list[MCPServerToolPublic]
+    connection: MCPConnectionStatus
+
+    @computed_field
+    def count(self) -> int:
+        return len(self.tools)

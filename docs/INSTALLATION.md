@@ -4,21 +4,21 @@ This guide covers setting up Eneo for development and testing using the DevConta
 
 > **Production Deployment?** See the [DEPLOYMENT.md](./DEPLOYMENT.md) guide for production setup.
 
-## 🎯 Quick Overview
+## Quick Overview
 
 - **Development Port**: `8123` (Backend API)
 - **Frontend Port**: `3000`
 - **Recommended Setup**: VS Code DevContainer
 - **Time to Setup**: ~10 minutes
 
-## 📋 Prerequisites
+## Prerequisites
 
 - **Docker Desktop** - [Download here](https://www.docker.com/products/docker-desktop/)
 - **VS Code** - [Download here](https://code.visualstudio.com/)
 - **Dev Containers Extension** - Install from VS Code marketplace
 - **At least one AI provider API key** (OpenAI, Anthropic, etc.)
 
-## 🚀 DevContainer Setup (5 Steps)
+## DevContainer Setup (5 Steps)
 
 ### Step 1: Clone and Open
 
@@ -34,6 +34,8 @@ When VS Code opens:
 1. You'll see a notification: "Folder contains a Dev Container configuration"
 2. Click **"Reopen in Container"**
 3. Wait 2-3 minutes for initial setup (only first time)
+
+> **Note:** If you don't see the notification, install the "Dev Containers" extension from the VS Code marketplace (`ms-vscode-remote.remote-containers`), then reload VS Code.
 
 ### Step 3: Configure Environment
 
@@ -72,7 +74,7 @@ uv run start
 **Terminal 2 - Frontend:**
 ```bash
 cd frontend
-pnpm run dev
+bun run dev
 ```
 
 **Terminal 3 - Worker (Optional, for document processing and for the crawler & apps to work):**
@@ -81,7 +83,7 @@ cd backend
 uv run arq src.intric.worker.arq.WorkerSettings
 ```
 
-## ✅ Verify Installation
+## Verify Installation
 
 1. **Access the Application**
    - Frontend: http://localhost:3000
@@ -95,7 +97,7 @@ uv run arq src.intric.worker.arq.WorkerSettings
    - Click user menu (top-right corner)
    - Select "Change Password"
 
-## ⚙️ Essential Configuration
+## Essential Configuration
 
 ### AI Provider Setup
 
@@ -138,7 +140,7 @@ INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
 UPLOAD_MAX_FILE_SIZE=10485760
 ```
 
-## 🔧 Common Issues & Solutions
+## Common Issues & Solutions
 
 ### Cannot Access "Users" in Admin Panel
 
@@ -163,15 +165,12 @@ UPLOAD_MAX_FILE_SIZE=10485760  # 10MB in bytes
 
 ### Login Issues During Development
 
-If running locally and experiencing login problems, edit `frontend/apps/web/vite.config.ts`:
+The frontend is configured to bind to `0.0.0.0` by default (see `vite.config.ts` line 36), which should work in most development environments including WSL.
 
-```javascript
-server: {
-  host: "0.0.0.0",  // Change from conditional to explicit
-  port: 3000,
-  strictPort: true
-},
-```
+If you still experience login issues:
+1. Verify the backend is running on port 8123: `curl http://localhost:8123/version`
+2. Check that the `JWT_SECRET` in `backend/.env` is set
+3. Clear your browser cookies and try again
 
 ### Database Issues After Code Updates
 
@@ -193,7 +192,7 @@ lsof -i :5432   # PostgreSQL
 lsof -i :6379   # Redis
 ```
 
-## 📝 Development Workflow
+## Development Workflow
 
 ### Daily Development
 
@@ -202,7 +201,7 @@ lsof -i :6379   # Redis
 3. **Update Dependencies** (if needed):
    ```bash
    cd backend && uv sync
-   cd frontend && pnpm install
+   cd frontend && bun install
    ```
 4. **Apply Migrations** - `cd backend && uv run python init_db.py`
 5. **Start Services** - Run the 3 terminal commands
@@ -219,9 +218,9 @@ uv run pytest tests/api/ -v   # Specific tests with verbose output
 **Frontend Tests:**
 ```bash
 cd frontend
-pnpm run test          # Run tests
-pnpm run lint          # Check code style
-pnpm run check         # Type checking
+bun run test          # Run tests
+bun run lint          # Check code style
+bun run check         # Type checking
 ```
 
 ### Creating Database Migrations
@@ -233,7 +232,7 @@ uv run alembic revision --autogenerate -m "describe your changes"
 uv run alembic upgrade head
 ```
 
-## 🎯 Next Steps
+## Next Steps
 
 1. **Explore the API** - Visit http://localhost:8123/docs
 2. **Create Your First Assistant** - Use the web interface
@@ -241,7 +240,7 @@ uv run alembic upgrade head
 4. **Configure Additional Models** - Through the admin panel
 5. **Review Architecture** - Check [ARCHITECTURE.md](./ARCHITECTURE.md)
 
-## 📚 Additional Resources
+## Additional Resources
 
 - **[Deployment Guide](./DEPLOYMENT.md)** - Production setup
 - **[API Documentation](http://localhost:8123/docs)** - Interactive API explorer

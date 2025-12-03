@@ -158,6 +158,7 @@ class CompletionService:
                 yield chunk
                 continue
 
+
             if chunk.tool_call:
                 if chunk.tool_call.name:
                     name = chunk.tool_call.name

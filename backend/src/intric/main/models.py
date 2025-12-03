@@ -66,6 +66,7 @@ def partial_model(model: Type[BaseModel]):
     def make_field_optional(field: FieldInfo, default: Any = None) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
+        new.default_factory = None  # Clear default_factory to avoid conflict with default
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 

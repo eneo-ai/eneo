@@ -1,7 +1,7 @@
 """consolidated MCP schema
 
 Revision ID: 20251103_consolidated_mcp
-Revises: 3914e3c83f18
+Revises: bdcbd045fbde
 Create Date: 2025-11-03 00:00:00.000000
 
 This migration consolidates 5 separate MCP migrations into a single clean migration:
@@ -31,7 +31,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = '20251103_consolidated_mcp'
-down_revision = '3914e3c83f18'
+down_revision = 'bdcbd045fbde'
 branch_labels = None
 depends_on = None
 

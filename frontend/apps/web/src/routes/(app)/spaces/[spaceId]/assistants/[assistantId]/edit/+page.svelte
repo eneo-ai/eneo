@@ -265,10 +265,31 @@
           }}
         >
           <SelectKnowledgeV2
+            originMode="personal"
             bind:selectedWebsites={$update.websites}
             bind:selectedCollections={$update.groups}
             bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-          ></SelectKnowledgeV2>
+          />
+        </Settings.Row>
+
+        <Settings.Row
+          title={m.organization_knowledge()}
+          description={m.organization_knowledge_description()}
+          hasChanges={$currentChanges.diff.groups !== undefined ||
+            $currentChanges.diff.websites !== undefined ||
+            $currentChanges.diff.integration_knowledge_list !== undefined}
+          revertFn={() => {
+            discardChanges("groups");
+            discardChanges("websites");
+            discardChanges("integration_knowledge_list");
+          }}
+        >
+          <SelectKnowledgeV2
+            originMode="organization"
+            bind:selectedWebsites={$update.websites}
+            bind:selectedCollections={$update.groups}
+            bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+          />
         </Settings.Row>
       </Settings.Group>
 

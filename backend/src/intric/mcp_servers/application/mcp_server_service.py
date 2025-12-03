@@ -1,9 +1,10 @@
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient
+from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPClientError
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -12,6 +13,23 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConnectionResult:
+    """Result of MCP server connection attempt."""
+
+    success: bool
+    tools_discovered: int = 0
+    error_message: str | None = None
+
+
+@dataclass
+class MCPServerCreateResult:
+    """Result of MCP server creation including connection status."""
+
+    server: MCPServer
+    connection: ConnectionResult
 
 
 class MCPServerService:
@@ -48,7 +66,7 @@ class MCPServerService:
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
-    ) -> MCPServer:
+    ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport)."""
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
@@ -66,9 +84,9 @@ class MCPServerService:
         # Auto-discover tools after creating server
         # Uses http_auth_config_schema as credentials if provided
         auth_credentials = http_auth_config_schema if http_auth_config_schema else None
-        await self.discover_and_sync_tools(mcp_server, auth_credentials)
+        tools, connection_result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
 
-        return mcp_server
+        return MCPServerCreateResult(server=mcp_server, connection=connection_result)
 
     @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
@@ -114,7 +132,7 @@ class MCPServerService:
         self,
         mcp_server: MCPServer,
         auth_credentials: dict[str, str] | None = None
-    ) -> list[MCPServerTool]:
+    ) -> tuple[list[MCPServerTool], ConnectionResult]:
         """
         Connect to MCP server, discover tools, and sync them to database.
 
@@ -123,7 +141,7 @@ class MCPServerService:
             auth_credentials: Optional authentication credentials
 
         Returns:
-            List of discovered and synced tools
+            Tuple of (list of discovered and synced tools, connection result)
         """
         try:
             logger.info(f"Discovering tools for MCP server: {mcp_server.name}")
@@ -150,19 +168,34 @@ class MCPServerService:
                 synced_tools.append(synced_tool)
 
             logger.info(f"Synced {len(synced_tools)} tools for {mcp_server.name}")
-            return synced_tools
+            return synced_tools, ConnectionResult(
+                success=True,
+                tools_discovered=len(synced_tools)
+            )
+
+        except MCPClientError as e:
+            # Connection/protocol error - provide user-friendly message
+            error_msg = str(e)
+            if "Connection refused" in error_msg:
+                error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
+            elif "timed out" in error_msg.lower():
+                error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
+            logger.warning(f"Failed to discover tools for {mcp_server.name}: {e}")
+            return [], ConnectionResult(success=False, error_message=error_msg)
 
         except Exception as e:
             logger.error(f"Failed to discover tools for {mcp_server.name}: {e}")
-            # Don't raise - allow server creation to succeed even if tool discovery fails
-            return []
+            return [], ConnectionResult(
+                success=False,
+                error_message=f"Failed to connect: {e}"
+            )
 
     @validate_permissions(Permission.ADMIN)
     async def refresh_tools(
         self,
         mcp_server_id: UUID,
         auth_credentials: dict[str, str] | None = None
-    ) -> list[MCPServerTool]:
+    ) -> tuple[list[MCPServerTool], ConnectionResult]:
         """
         Manually refresh tools for an MCP server (admin only).
 
@@ -171,7 +204,7 @@ class MCPServerService:
             auth_credentials: Optional authentication credentials
 
         Returns:
-            List of refreshed tools
+            Tuple of (list of refreshed tools, connection result)
         """
         mcp_server = await self.repo.one(id=mcp_server_id)
         return await self.discover_and_sync_tools(mcp_server, auth_credentials)

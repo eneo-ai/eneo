@@ -13,7 +13,7 @@ from intric.database.tables.tenant_table import Tenants
 
 
 class CompletionModels(BasePublic):
-    name: Mapped[str] = mapped_column(unique=True)
+    name: Mapped[str] = mapped_column()
     nickname: Mapped[str] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
     token_limit: Mapped[int] = mapped_column()
@@ -86,10 +86,11 @@ class TranscriptionModelSettings(BaseCrossReference):
 
 
 class EmbeddingModels(BasePublic):
-    name: Mapped[str] = mapped_column(unique=True)
+    name: Mapped[str] = mapped_column()
     open_source: Mapped[bool] = mapped_column()
     dimensions: Mapped[Optional[int]] = mapped_column()
     max_input: Mapped[Optional[int]] = mapped_column()
+    max_batch_size: Mapped[Optional[int]] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")
     hf_link: Mapped[Optional[str]] = mapped_column()
 

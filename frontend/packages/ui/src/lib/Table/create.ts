@@ -49,13 +49,19 @@ export function getTableContext<T>(): TableContext<T> {
   return getContext(contextKey);
 }
 
+export interface CreateTableOptions {
+  disableClientFilter?: boolean;
+  serverSideFilter?: boolean;  // Keep filter UI but make it trigger server-side search
+}
+
 export function createWithResource<Resource extends Record<string, unknown>>(
   data: Resource[],
-  pageSize = 999999
+  pageSize = 999999,
+  options: CreateTableOptions = {}
 ) {
   const resourceStore = writable(data);
 
-  const table = createWithStore(resourceStore, pageSize);
+  const table = createWithStore(resourceStore, pageSize, options);
 
   return {
     ...table,
@@ -67,18 +73,34 @@ export function createWithResource<Resource extends Record<string, unknown>>(
 
 export function createWithStore<Resource extends Record<string, unknown>>(
   data: Readable<Resource[]>,
-  pageSize = 999999
+  pageSize = 999999,
+  options: CreateTableOptions = {}
 ) {
-  const table: Table<Resource, Plugins<Resource>> = createTable(data, {
+  const plugins: any = {
     select: addSelectedRows(),
-    tableFilter: addTableFilter({
-      fn: ({ filterValue, value }) => {
-        return value.toLowerCase().includes(filterValue.toLowerCase());
-      }
-    }),
     sort: addSortBy({ disableMultiSort: true }),
     page: addPagination({ initialPageSize: pageSize })
-  });
+  };
+
+  // Handle filtering based on options
+  if (!options.disableClientFilter) {
+    if (options.serverSideFilter) {
+      // Keep filter UI but disable client-side filtering (always returns true)
+      // Component will watch filterValue and trigger server-side search
+      plugins.tableFilter = addTableFilter({
+        fn: () => true  // No-op: all rows pass filter (server does filtering)
+      });
+    } else {
+      // Standard client-side filtering
+      plugins.tableFilter = addTableFilter({
+        fn: ({ filterValue, value }) => {
+          return value.toLowerCase().includes(filterValue.toLowerCase());
+        }
+      });
+    }
+  }
+
+  const table: Table<Resource, Plugins<Resource>> = createTable(data, plugins);
 
   return {
     column: table.column,
@@ -169,7 +191,9 @@ export function createWithStore<Resource extends Record<string, unknown>>(
     },
     createViewModel(columns: Column<Resource, Plugins<Resource>>[]) {
       const dataCols = table.createColumns(columns);
-      return table.createViewModel(dataCols);
+      return table.createViewModel(dataCols, {
+        rowDataId: (item) => String((item as any).id)
+      });
     }
   };
 }

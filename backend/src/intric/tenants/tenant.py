@@ -57,6 +57,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
+    crawler_settings: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("slug")
     @classmethod
@@ -94,6 +95,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             "azure",
             "anthropic",
             "berget",
+            "gdm",
             "mistral",
             "ovhcloud",
             "vllm",
@@ -108,17 +110,10 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             if not isinstance(cred, dict):
                 raise ValueError(f"Provider {provider} credentials must be a dict")
 
+            # Basic validation: all providers must have api_key
+            # (Provider-specific field validation happens in routers when setting credentials)
             if "api_key" not in cred:
                 raise ValueError(f"Provider {provider} missing required field: api_key")
-
-            # Azure-specific validation - requires additional configuration fields
-            if provider == "azure":
-                required = {"api_key", "endpoint", "api_version", "deployment_name"}
-                missing = required - set(cred.keys())
-                if missing:
-                    raise ValueError(
-                        f"Azure provider missing required fields: {missing}"
-                    )
 
         return v
 
@@ -169,6 +164,29 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                 raise ValueError("allowed_domains must be a list")
             if not all(isinstance(d, str) for d in v["allowed_domains"]):
                 raise ValueError("allowed_domains must contain only strings")
+
+        return v
+
+    @field_validator("crawler_settings")
+    @classmethod
+    def validate_crawler_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate JSONB structure for crawler settings.
+
+        All fields are optional - only validates types and ranges for provided fields.
+        Missing fields will fall back to environment variable defaults at runtime.
+
+        Uses CRAWLER_SETTING_SPECS from crawler_settings_helper.py as single source of truth.
+        """
+        if not v:
+            return {}
+
+        # Import here to avoid circular dependency
+        from intric.tenants.crawler_settings_helper import validate_crawler_setting
+
+        for key, value in v.items():
+            errors = validate_crawler_setting(key, value)
+            if errors:
+                raise ValueError(errors[0])
 
         return v
 

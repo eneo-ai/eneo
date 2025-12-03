@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from functools import wraps
 from typing import Callable
@@ -74,6 +75,9 @@ class Worker:
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
+        # Job timeout is a safety net - uses global env default as upper bound.
+        # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
+        # which respects tenant-specific crawl_max_length settings.
         self.job_timeout = settings.crawl_max_length + 60 * 60  # crawl window + 1h buffer
         self.max_jobs = settings.worker_max_jobs
         self.expires_extra_ms = 604800000  # 1 week
@@ -107,7 +111,55 @@ class Worker:
         await lifespan.startup()
         crochet.setup()
 
+        # Start crawl feeder as background task if enabled
+        # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
+        # Uses leader election to ensure only ONE feeder runs across all workers
+        settings = get_settings()
+        if settings.crawl_feeder_enabled:
+            from intric.worker.crawl_feeder import CrawlFeeder
+
+            try:
+                # CrawlFeeder is now container-independent
+                # Why: It manages its own DB sessions and Redis client to avoid
+                # session lifecycle issues (session closing while feeder runs)
+                feeder = CrawlFeeder()
+
+                # Start feeder as background task
+                # Why: Runs concurrently with worker jobs in same event loop
+                task = asyncio.create_task(feeder.run_forever())
+
+                # Store references for cleanup on shutdown
+                # Why: Allows graceful cancellation and prevents GC
+                ctx["feeder_task"] = task
+                ctx["feeder"] = feeder  # Store feeder for proper stop() call
+
+                logger.info(
+                    "Started crawl feeder background task with leader election",
+                    extra={"feeder_enabled": True},
+                )
+            except Exception as exc:
+                logger.error(
+                    f"Failed to start crawl feeder: {exc}. Continuing without feeder.",
+                    extra={"feeder_enabled": False},
+                )
+
     async def shutdown(self, ctx):
+        # Stop feeder gracefully if running
+        # Why: Prevents orphaned background tasks and closes Redis connection
+        if "feeder" in ctx:
+            feeder = ctx["feeder"]
+            logger.info("Stopping crawl feeder background task")
+            await feeder.stop()  # Gracefully stop and close Redis
+
+        if "feeder_task" in ctx:
+            task = ctx["feeder_task"]
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass  # Expected on cancellation
+
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True):

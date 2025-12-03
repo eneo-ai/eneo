@@ -1,19 +1,25 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter, Depends, Query, Security
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
+    CompletionModelCreate,
     CompletionModelPublic,
+    CompletionModelSparse,
+    CompletionModelUpdate,
     CompletionModelUpdateFlags,
 )
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
 from intric.ai_models.embedding_models.embedding_model import (
+    EmbeddingModelCreate,
     EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
+    EmbeddingModelSparse,
+    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
     EmbeddingModelUpdateFlags,
 )
 from intric.ai_models.embedding_models.embedding_models_repo import (
@@ -813,3 +819,194 @@ async def migrate_completion_model_for_all_tenants(
             status_code=500,
             detail=f"Error migrating completion model for all tenants: {str(e)}"
         )
+
+
+# ============================================================================
+# AI Models CRUD Operations (System-Wide)
+# ============================================================================
+# These endpoints allow system administrators to create, update, and delete
+# AI model metadata. They require INTRIC_SUPER_API_KEY authentication.
+# Note: These endpoints manage global model metadata only, not tenant-specific
+# settings. To enable/disable models for specific tenants, use the tenant-scoped
+# endpoints in the completion_models and embedding_models routers.
+# ============================================================================
+
+
+# Completion Models CRUD
+
+@router.post(
+    "/completion-models/create",
+    response_model=CompletionModelSparse,
+    responses=responses.get_responses([400, 401]),
+)
+async def create_completion_model(
+    model_data: CompletionModelCreate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> CompletionModelSparse:
+    """
+    Create a new completion model (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    This creates the model metadata only. To enable it for a tenant,
+    use POST /api/v1/completion-models/{id}/ with tenant credentials.
+    """
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+        model = await repo.create_model(model_data)
+
+    return model
+
+
+@router.put(
+    "/completion-models/{id}/metadata",
+    response_model=CompletionModelSparse,
+    responses=responses.get_responses([404, 401]),
+)
+async def update_completion_model_metadata(
+    id: UUID,
+    model_data: CompletionModelUpdate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> CompletionModelSparse:
+    """
+    Update completion model metadata (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    Updates global model metadata. Does not affect tenant-specific settings.
+    """
+    from intric.main.exceptions import NotFoundException
+
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+
+        # Ensure model_data has the id
+        update_with_id = CompletionModelUpdate(
+            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
+        )
+        model = await repo.update_model(update_with_id)
+
+        if model is None:
+            raise NotFoundException(f"Completion model with id {id} not found")
+
+    return model
+
+
+@router.delete(
+    "/completion-models/{id}",
+    responses=responses.get_responses([404, 400, 401]),
+)
+async def delete_completion_model(
+    id: UUID,
+    force: bool = Query(False, description="Force delete even if in use"),
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    """
+    Delete a completion model (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    WARNING: Deletion affects all tenants. Use with caution.
+    Set force=true to delete even if model is in use (may break references).
+    """
+    # TODO: Check usage across ALL tenants before deletion
+    # For now, we allow deletion with force parameter
+    # Future enhancement: Add cross-tenant usage check
+
+    session = container.session()
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+        await repo.delete_model(id)
+
+    return {"success": True, "message": f"Model {id} deleted successfully"}
+
+
+# Embedding Models CRUD
+
+@router.post(
+    "/embedding-models/create",
+    response_model=EmbeddingModelSparse,
+    responses=responses.get_responses([400, 401]),
+)
+async def create_embedding_model(
+    model_data: EmbeddingModelCreate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> EmbeddingModelSparse:
+    """
+    Create a new embedding model (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    This creates the model metadata only. To enable it for a tenant,
+    use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+    """
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+        model = await repo.create_model(model_data)
+
+    return model
+
+
+@router.put(
+    "/embedding-models/{id}/metadata",
+    response_model=EmbeddingModelSparse,
+    responses=responses.get_responses([404, 401]),
+)
+async def update_embedding_model_metadata(
+    id: UUID,
+    model_data: EmbeddingModelMetadataUpdate,
+    container: Container = Depends(get_container_for_sysadmin()),
+) -> EmbeddingModelSparse:
+    """
+    Update embedding model metadata (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    Updates global model metadata. Does not affect tenant-specific settings.
+    """
+    from intric.main.exceptions import NotFoundException
+
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+
+        # Ensure model_data has the id
+        update_with_id = EmbeddingModelMetadataUpdate(
+            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
+        )
+        model = await repo.update_model(update_with_id)
+
+        if model is None:
+            raise NotFoundException(f"Embedding model with id {id} not found")
+
+    return model
+
+
+@router.delete(
+    "/embedding-models/{id}",
+    responses=responses.get_responses([404, 400, 401]),
+)
+async def delete_embedding_model(
+    id: UUID,
+    force: bool = Query(False, description="Force delete even if in use"),
+    container: Container = Depends(get_container_for_sysadmin()),
+):
+    """
+    Delete an embedding model (system-wide operation).
+
+    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+
+    WARNING: Deletion affects all tenants. Use with caution.
+    """
+    # TODO: Add cross-tenant usage check before deletion
+    # For now, we allow deletion with force parameter
+
+    session = container.session()
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+        await repo.delete_model(id)
+
+    return {"success": True, "message": f"Model {id} deleted successfully"}

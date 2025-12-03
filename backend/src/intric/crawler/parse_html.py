@@ -3,7 +3,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from html2text import html2text
-from scrapy.http import Response
+from scrapy.http import Response, TextResponse
 
 from intric.files.text import TextMimeTypes
 
@@ -16,6 +16,11 @@ class CrawledPage:
 
 
 def parse_response(response: Response):
+    # Guard: Skip non-text responses (images, PDFs, binary data)
+    # Scrapy callbacks that return None are silently ignored
+    if not isinstance(response, TextResponse):
+        return None
+
     # Handle JSON responses (e.g., API endpoints)
     content_type = response.headers.get(b"Content-Type", b"").decode("utf-8").lower()
     if "application/json" in content_type:

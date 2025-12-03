@@ -25,12 +25,28 @@ class EmbeddingModelBase(BaseModel):
     open_source: bool
     dimensions: Optional[int] = None
     max_input: Optional[int] = None
+    max_batch_size: Optional[int] = None
     hf_link: Optional[str] = None
     stability: ModelStability
     hosting: ModelHostingLocation
     description: Optional[str] = None
     org: Optional[Orgs] = None
     litellm_model_name: Optional[str] = None
+
+    @classmethod
+    def _validate_batch_size(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
+        if value < 1:
+            raise ValueError("max_batch_size must be greater than 0")
+        if value > 256:
+            raise ValueError("max_batch_size must not exceed 256")
+        return value
+
+    def model_post_init(self, __context):
+        super().model_post_init(__context)
+        # Pydantic v2 hook to validate custom constraints
+        self.max_batch_size = self._validate_batch_size(self.max_batch_size)
 
 
 class EmbeddingModelCreate(EmbeddingModelBase):
@@ -57,6 +73,7 @@ class EmbeddingModelPublicBase(EmbeddingModelBase, InDB):
 class EmbeddingModelPublicLegacy(EmbeddingModelLegacy):
     can_access: bool = False
     is_locked: bool = True
+    lock_reason: Optional[str] = None
 
 
 class EmbeddingModelSparse(EmbeddingModelBase, InDB):

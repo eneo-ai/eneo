@@ -48,7 +48,7 @@ export interface paths {
   "/api/v1/users/login/token/": {
     /**
      * Login
-     * @description OAuth2 Login
+     * @description OAuth2 Login with comprehensive error handling and logging
      */
     post: operations["Login_api_v1_users_login_token__post"];
   };
@@ -116,6 +116,10 @@ export interface paths {
      * @description Returns the deleted object.
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
+  };
+  "/api/v1/info-blobs/spaces/{space_id}/info-blobs/": {
+    /** Get Space Info Blobs */
+    get: operations["get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get"];
   };
   "/api/v1/groups/": {
     /**
@@ -188,6 +192,36 @@ export interface paths {
   "/api/v1/settings/formats/": {
     /** Get Formats */
     get: operations["get_formats_api_v1_settings_formats__get"];
+  };
+  "/api/v1/settings/templates": {
+    /**
+     * Toggle template feature
+     * @description Enable or disable the template management feature for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `using_templates` feature flag for your tenant
+     * - When disabled: Template gallery returns empty list (not error)
+     * - When enabled: Users can see and use tenant templates
+     * - Change takes effect immediately (no reload required)
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "enabled": true
+     * }
+     * ```
+     *
+     * **Example Response:**
+     * ```json
+     * {
+     *   "chatbot_widget": {},
+     *   "using_templates": true
+     * }
+     * ```
+     */
+    patch: operations["update_template_setting_api_v1_settings_templates_patch"];
   };
   "/api/v1/assistants/": {
     /**
@@ -547,8 +581,79 @@ export interface paths {
   };
   "/api/v1/admin/users/": {
     /**
-     * List all users in tenant
-     * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
+     * List users with pagination and search
+     * @description List tenant users with pagination, fuzzy search, and sorting capabilities.
+     *
+     * **Performance Optimization:**
+     * - Uses pg_trgm GIN indexes for efficient fuzzy text search (email and username)
+     * - Uses composite B-tree indexes for fast tenant-scoped sorting
+     * - Sub-second response time even with 10,000+ users per tenant
+     *
+     * **Pagination:**
+     * - Max depth: 100 pages (prevents deep pagination performance issues)
+     * - Default: 100 users per page, sorted by creation date (newest first)
+     * - Supports custom page sizes (1-100)
+     *
+     * **Search:**
+     * - Email search: Case-insensitive partial match (e.g., "john" matches john.doe@example.com)
+     * - Name search: Case-insensitive partial match on username (e.g., "emma" matches emma.andersson)
+     * - Combined search: Use both filters with AND logic
+     *
+     * **Sorting:**
+     * - Sort by: email, username, or created_at (default)
+     * - Sort order: asc or desc (default)
+     *
+     * **Example Requests:**
+     *
+     * Default (first 100 users, newest first):
+     * ```
+     * GET /api/v1/admin/users/
+     * ```
+     *
+     * Custom page size (50 users per page):
+     * ```
+     * GET /api/v1/admin/users/?page_size=50
+     * ```
+     *
+     * Email search (find users at municipality domain):
+     * ```
+     * GET /api/v1/admin/users/?search_email=@municipality.se
+     * ```
+     *
+     * Name search (find users named Emma):
+     * ```
+     * GET /api/v1/admin/users/?search_name=emma
+     * ```
+     *
+     * Combined search and pagination:
+     * ```
+     * GET /api/v1/admin/users/?search_email=@municipality.se&page=2&page_size=50
+     * ```
+     *
+     * Sort by email ascending:
+     * ```
+     * GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+     * ```
+     *
+     * **Response Format:**
+     * ```json
+     * {
+     *   "items": [...],
+     *   "metadata": {
+     *     "page": 1,
+     *     "page_size": 100,
+     *     "total_count": 543,
+     *     "total_pages": 6,
+     *     "has_next": true,
+     *     "has_previous": false
+     *   }
+     * }
+     * ```
+     *
+     * **Important Notes:**
+     * - Only active users (not soft-deleted) are returned
+     * - All results are isolated to your tenant (cross-tenant access is prevented)
+     * - Max depth limit (100 pages) ensures consistent performance
      */
     get: operations["get_users_api_v1_admin_users__get"];
     /**
@@ -614,6 +719,260 @@ export interface paths {
   "/api/v1/admin/privacy-policy/": {
     /** Update Privacy Policy */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
+  };
+  "/api/v1/admin/credentials/{provider}": {
+    /**
+     * Set API credential for current tenant
+     * @description Set or update API credentials for a specific LLM provider. Tenant admin only. Provider-specific fields are validated.
+     */
+    put: operations["set_credential_api_v1_admin_credentials__provider__put"];
+  };
+  "/api/v1/admin/credentials/": {
+    /**
+     * List API credentials for current tenant
+     * @description List all configured API credentials with masked keys and encryption status. Tenant admin only.
+     */
+    get: operations["list_credentials_api_v1_admin_credentials__get"];
+  };
+  "/api/v1/admin/templates/assistants/": {
+    /**
+     * List tenant's assistant templates
+     * @description List all active (non-deleted) assistant templates owned by your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Visibility:**
+     * - Only shows templates where `tenant_id` matches your tenant
+     * - Excludes global templates (tenant_id = NULL)
+     * - Excludes soft-deleted templates (deleted_at IS NOT NULL)
+     *
+     * Use this endpoint for the admin template management page.
+     */
+    get: operations["list_templates_api_v1_admin_templates_assistants__get"];
+    /**
+     * Create assistant template
+     * @description Create a new assistant template for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Prerequisites:**
+     * - Feature flag `using_templates` must be enabled for your tenant
+     * - Template name must be unique within your tenant
+     *
+     * **Business Logic:**
+     * - Template is automatically scoped to your tenant
+     * - Original state is saved in `original_snapshot` for rollback
+     * - Template immediately available in gallery for users in your tenant
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "name": "Customer Support Assistant",
+     *   "description": "Handles customer inquiries professionally and efficiently",
+     *   "category": "Support",
+     *   "prompt": "You are a helpful customer support agent. Always be polite and professional.",
+     *   "completion_model_kwargs": {"temperature": 0.7, "max_tokens": 500},
+     *   "wizard": {
+     *     "attachments": {"required": false, "title": "Add product docs", "description": "Optional documentation"},
+     *     "collections": {"required": true, "title": "Select knowledge base", "description": "Choose support knowledge base"}
+     *   }
+     * }
+     * ```
+     */
+    post: operations["create_template_api_v1_admin_templates_assistants__post"];
+  };
+  "/api/v1/admin/templates/assistants/{template_id}": {
+    /**
+     * Delete assistant template
+     * @description Soft-delete an assistant template (marks with deleted_at timestamp).
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Safety Checks:**
+     * - Validates template belongs to your tenant
+     * - Checks if template is currently in use by assistants
+     * - Returns 409 Conflict if template is in use with usage count
+     *
+     * **Behavior:**
+     * - Sets `deleted_at` to current timestamp
+     * - Template no longer appears in gallery or admin list
+     * - Template can be viewed in deleted list (audit trail)
+     * - Template remains in database (soft-delete only)
+     *
+     * **Error Response (In Use):**
+     * ```json
+     * {
+     *   "detail": "Cannot delete template 'My Template'. It is used by 3 assistant(s).",
+     *   "error_code": "BAD_REQUEST"
+     * }
+     * ```
+     */
+    delete: operations["delete_template_api_v1_admin_templates_assistants__template_id__delete"];
+    /**
+     * Update assistant template
+     * @description Updates an existing assistant template (admin only)
+     */
+    patch: operations["update_template_api_v1_admin_templates_assistants__template_id__patch"];
+  };
+  "/api/v1/admin/templates/assistants/{template_id}/default": {
+    /**
+     * Toggle assistant template as featured
+     * @description Toggle an assistant template as featured/default.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Validation:**
+     * - Template must belong to your tenant
+     * - Maximum 5 featured templates per tenant
+     * - Returns 400 if limit exceeded
+     *
+     * **Behavior:**
+     * - Featured templates appear first in the template gallery
+     * - Featured templates are sorted alphabetically by name
+     * - Non-featured templates appear below, sorted by creation date
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "is_default": true
+     * }
+     * ```
+     */
+    patch: operations["toggle_default_api_v1_admin_templates_assistants__template_id__default_patch"];
+  };
+  "/api/v1/admin/templates/assistants/{template_id}/rollback": {
+    /**
+     * Rollback assistant template
+     * @description Restores template to original snapshot (admin only)
+     */
+    post: operations["rollback_template_api_v1_admin_templates_assistants__template_id__rollback_post"];
+  };
+  "/api/v1/admin/templates/assistants/{template_id}/restore": {
+    /**
+     * Restore deleted assistant template
+     * @description Restores a soft-deleted template (admin only)
+     */
+    post: operations["restore_template_api_v1_admin_templates_assistants__template_id__restore_post"];
+  };
+  "/api/v1/admin/templates/assistants/{template_id}/permanent": {
+    /**
+     * Permanently delete assistant template
+     * @description Permanently removes a soft-deleted template from database (admin only)
+     */
+    delete: operations["permanent_delete_template_api_v1_admin_templates_assistants__template_id__permanent_delete"];
+  };
+  "/api/v1/admin/templates/assistants/deleted": {
+    /**
+     * List deleted assistant templates
+     * @description Returns soft-deleted templates for audit trail (admin only)
+     */
+    get: operations["list_deleted_templates_api_v1_admin_templates_assistants_deleted_get"];
+  };
+  "/api/v1/admin/templates/apps/": {
+    /**
+     * List tenant's app templates
+     * @description Returns all active app templates for your tenant (admin only)
+     */
+    get: operations["list_templates_api_v1_admin_templates_apps__get"];
+    /**
+     * Create app template
+     * @description Create a new app template for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Prerequisites:**
+     * - Feature flag `using_templates` must be enabled for your tenant
+     * - Template name must be unique within your tenant
+     *
+     * **Business Logic:**
+     * - Template is automatically scoped to your tenant
+     * - Original state is saved in `original_snapshot` for rollback
+     * - Template immediately available in gallery for users in your tenant
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "name": "Document Analyzer",
+     *   "description": "Analyzes uploaded documents and extracts key insights",
+     *   "category": "Analysis",
+     *   "prompt": "Analyze the following document and provide a summary with key insights.",
+     *   "completion_model_kwargs": {"temperature": 0.3, "max_tokens": 1000},
+     *   "wizard": {
+     *     "attachments": {"required": true, "title": "Upload document", "description": "Upload PDF or text file"},
+     *     "collections": null
+     *   },
+     *   "input_type": "file",
+     *   "input_description": "Upload a document (PDF, TXT, or DOCX)"
+     * }
+     * ```
+     */
+    post: operations["create_template_api_v1_admin_templates_apps__post"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}": {
+    /**
+     * Delete app template
+     * @description Soft-deletes an app template (admin only)
+     */
+    delete: operations["delete_template_api_v1_admin_templates_apps__template_id__delete"];
+    /**
+     * Update app template
+     * @description Updates an existing app template (admin only)
+     */
+    patch: operations["update_template_api_v1_admin_templates_apps__template_id__patch"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/default": {
+    /**
+     * Toggle app template as featured
+     * @description Toggle an app template as featured/default.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Validation:**
+     * - Template must belong to your tenant
+     * - Maximum 5 featured templates per tenant
+     * - Returns 400 if limit exceeded
+     *
+     * **Behavior:**
+     * - Featured templates appear first in the template gallery
+     * - Featured templates are sorted alphabetically by name
+     * - Non-featured templates appear below, sorted by creation date
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "is_default": true
+     * }
+     * ```
+     */
+    patch: operations["toggle_default_api_v1_admin_templates_apps__template_id__default_patch"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/rollback": {
+    /**
+     * Rollback app template
+     * @description Restores template to original snapshot (admin only)
+     */
+    post: operations["rollback_template_api_v1_admin_templates_apps__template_id__rollback_post"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/restore": {
+    /**
+     * Restore deleted app template
+     * @description Restores a soft-deleted template (admin only)
+     */
+    post: operations["restore_template_api_v1_admin_templates_apps__template_id__restore_post"];
+  };
+  "/api/v1/admin/templates/apps/{template_id}/permanent": {
+    /**
+     * Permanently delete app template
+     * @description Permanently removes a soft-deleted template from database (admin only)
+     */
+    delete: operations["permanent_delete_template_api_v1_admin_templates_apps__template_id__permanent_delete"];
+  };
+  "/api/v1/admin/templates/apps/deleted": {
+    /**
+     * List deleted app templates
+     * @description Returns soft-deleted templates for audit trail (admin only)
+     */
+    get: operations["list_deleted_templates_api_v1_admin_templates_apps_deleted_get"];
   };
   "/api/v1/jobs/": {
     /** Get Running Jobs */
@@ -856,6 +1215,10 @@ export interface paths {
     /** Get Personal Space */
     get: operations["get_personal_space_api_v1_spaces_type_personal__get"];
   };
+  "/api/v1/spaces/type/organization/": {
+    /** Get Organization Space */
+    get: operations["get_organization_space_api_v1_spaces_type_organization__get"];
+  };
   "/api/v1/dashboard/": {
     /** Get Dashboard */
     get: operations["get_dashboard_api_v1_dashboard__get"];
@@ -963,15 +1326,37 @@ export interface paths {
   };
   "/api/v1/templates/apps/": {
     /**
-     * Get Templates
-     * @description Get all app templates
+     * List available app templates
+     * @description Get app templates available for creating new apps.
+     *
+     * **Feature Flag Behavior:**
+     * - If `using_templates` feature is disabled: Returns empty list (not an error)
+     * - If `using_templates` feature is enabled: Returns all available templates
+     *
+     * **Template Scope:**
+     * - Global templates (tenant_id = NULL): Available to all tenants
+     * - Tenant-specific templates: Only available to that tenant
+     *
+     * **Response:**
+     * Returns paginated list of templates with basic information for gallery display.
      */
     get: operations["get_templates_api_v1_templates_apps__get"];
   };
   "/api/v1/templates/assistants/": {
     /**
-     * Get Templates
-     * @description Get all assistant templates
+     * List available assistant templates
+     * @description Get assistant templates available for creating new assistants.
+     *
+     * **Feature Flag Behavior:**
+     * - If `using_templates` feature is disabled: Returns empty list (not an error)
+     * - If `using_templates` feature is enabled: Returns all available templates
+     *
+     * **Template Scope:**
+     * - Global templates (tenant_id = NULL): Available to all tenants
+     * - Tenant-specific templates: Only available to that tenant
+     *
+     * **Response:**
+     * Returns paginated list of templates with basic information for gallery display.
      */
     get: operations["get_templates_api_v1_templates_assistants__get"];
   };
@@ -1393,6 +1778,75 @@ export interface paths {
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
+  "/api/v1/sysadmin/completion-models/create": {
+    /**
+     * Create Completion Model
+     * @description Create a new completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}/metadata": {
+    /**
+     * Update Completion Model Metadata
+     * @description Update completion model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}": {
+    /**
+     * Delete Completion Model
+     * @description Delete a completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     * Set force=true to delete even if model is in use (may break references).
+     */
+    delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
+  };
+  "/api/v1/sysadmin/embedding-models/create": {
+    /**
+     * Create Embedding Model
+     * @description Create a new embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}/metadata": {
+    /**
+     * Update Embedding Model Metadata
+     * @description Update embedding model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}": {
+    /**
+     * Delete Embedding Model
+     * @description Delete an embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     */
+    delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     /**
      * Set tenant API credential
@@ -1721,6 +2175,141 @@ export interface components {
        */
       user_id: string;
     };
+    /**
+     * AppTemplateAdminCreate
+     * @description Admin template creation request.
+     */
+    AppTemplateAdminCreate: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Category */
+      category: string;
+      /** Prompt */
+      prompt?: string | null;
+      /** Completion Model Kwargs */
+      completion_model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      wizard?: components["schemas"]["AppTemplateWizard"] | null;
+      /** Input Type */
+      input_type: string;
+      /** Input Description */
+      input_description?: string | null;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
+    /**
+     * AppTemplateAdminListPublic
+     * @description Admin list response.
+     */
+    AppTemplateAdminListPublic: {
+      /** Items */
+      items: components["schemas"]["AppTemplateAdminPublic"][];
+      /** Count */
+      count: number;
+    };
+    /**
+     * AppTemplateAdminPublic
+     * @description Admin view of template with tenant fields.
+     */
+    AppTemplateAdminPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
+      /** Category */
+      category: string;
+      /** Prompt Text */
+      prompt_text?: string | null;
+      /** Completion Model Kwargs */
+      completion_model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      /** Completion Model Name */
+      completion_model_name?: string | null;
+      wizard?: components["schemas"]["AppTemplateWizard"] | null;
+      /** Input Type */
+      input_type: string;
+      /** Input Description */
+      input_description?: string | null;
+      /** Organization */
+      organization: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Deleted At */
+      deleted_at?: string | null;
+      /** Deleted By User Id */
+      deleted_by_user_id?: string | null;
+      /** Restored At */
+      restored_at?: string | null;
+      /** Restored By User Id */
+      restored_by_user_id?: string | null;
+      /** Original Snapshot */
+      original_snapshot?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /**
+       * Usage Count
+       * @default 0
+       */
+      usage_count?: number;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
+    /**
+     * AppTemplateAdminUpdate
+     * @description Admin template update request (PATCH semantics).
+     */
+    AppTemplateAdminUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Category */
+      category?: string | null;
+      /** Prompt */
+      prompt?: string | null;
+      /** Completion Model Kwargs */
+      completion_model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      wizard?: components["schemas"]["AppTemplateWizard"] | null;
+      /** Input Type */
+      input_type?: string | null;
+      /** Input Description */
+      input_description?: string | null;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
     /** AppTemplateListPublic */
     AppTemplateListPublic: {
       /** Items */
@@ -1767,6 +2356,21 @@ export interface components {
       type: "app";
       wizard: components["schemas"]["AppTemplateWizard"];
       organization: components["schemas"]["AppTemplateOrganization"];
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
+    /**
+     * AppTemplateToggleDefaultRequest
+     * @description Request to toggle template as default/featured.
+     */
+    AppTemplateToggleDefaultRequest: {
+      /** Is Default */
+      is_default: boolean;
     };
     /** AppTemplateWizard */
     AppTemplateWizard: {
@@ -1939,10 +2543,7 @@ export interface components {
       /** Name */
       name: string;
       completion_model: components["schemas"]["CompletionModelPublicAssistantTemplate"] | null;
-      /**
-       * Completion Model Kwargs
-       * @default {}
-       */
+      /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
@@ -2050,7 +2651,6 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      /** @default {} */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Logging Enabled
@@ -2082,6 +2682,129 @@ export interface components {
         [key: string]: unknown;
       } | null;
       type: components["schemas"]["AssistantType"];
+    };
+    /**
+     * AssistantTemplateAdminCreate
+     * @description Admin template creation request.
+     */
+    AssistantTemplateAdminCreate: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Category */
+      category: string;
+      /** Prompt */
+      prompt?: string | null;
+      /** Completion Model Kwargs */
+      completion_model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
+    /**
+     * AssistantTemplateAdminListPublic
+     * @description Admin list response.
+     */
+    AssistantTemplateAdminListPublic: {
+      /** Items */
+      items: components["schemas"]["AssistantTemplateAdminPublic"][];
+      /** Count */
+      count: number;
+    };
+    /**
+     * AssistantTemplateAdminPublic
+     * @description Admin view of template with tenant fields.
+     */
+    AssistantTemplateAdminPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
+      /** Category */
+      category: string;
+      /** Prompt Text */
+      prompt_text?: string | null;
+      /** Completion Model Kwargs */
+      completion_model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      /** Completion Model Name */
+      completion_model_name?: string | null;
+      wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
+      /** Organization */
+      organization: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Deleted At */
+      deleted_at?: string | null;
+      /** Deleted By User Id */
+      deleted_by_user_id?: string | null;
+      /** Restored At */
+      restored_at?: string | null;
+      /** Restored By User Id */
+      restored_by_user_id?: string | null;
+      /** Original Snapshot */
+      original_snapshot?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /**
+       * Usage Count
+       * @default 0
+       */
+      usage_count?: number;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
+    /**
+     * AssistantTemplateAdminUpdate
+     * @description Admin template update request (PATCH semantics).
+     */
+    AssistantTemplateAdminUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Category */
+      category?: string | null;
+      /** Prompt */
+      prompt?: string | null;
+      /** Completion Model Kwargs */
+      completion_model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
+      /** Icon Name */
+      icon_name?: string | null;
     };
     /** AssistantTemplateListPublic */
     AssistantTemplateListPublic: {
@@ -2129,6 +2852,21 @@ export interface components {
       type: "assistant";
       wizard: components["schemas"]["AssistantTemplateWizard"];
       organization: components["schemas"]["AssistantTemplateOrganization"];
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+      /** Icon Name */
+      icon_name?: string | null;
+    };
+    /**
+     * AssistantTemplateToggleDefaultRequest
+     * @description Request to toggle template as default/featured.
+     */
+    AssistantTemplateToggleDefaultRequest: {
+      /** Is Default */
+      is_default: boolean;
     };
     /** AssistantTemplateWizard */
     AssistantTemplateWizard: {
@@ -2265,6 +3003,11 @@ export interface components {
       name: string;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["CollectionMetadata"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
     };
     /** CollectionUpdate */
     CollectionUpdate: {
@@ -2322,6 +3065,39 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+    };
+    /** CompletionModelCreate */
+    CompletionModelCreate: {
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      family: components["schemas"]["ModelFamily"];
+      /** Token Limit */
+      token_limit: number;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision: boolean;
+      /** Reasoning */
+      reasoning: boolean;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** CompletionModelPublic */
     CompletionModelPublic: {
@@ -2384,6 +3160,10 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** CompletionModelPublicAppTemplate */
@@ -2463,6 +3243,10 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -2666,52 +3450,6 @@ export interface components {
       published?: boolean;
       user: components["schemas"]["UserSparse"];
     };
-    /**
-     * CredentialInfo
-     * @description Information about a configured credential.
-     *
-     * Example:
-     *     {
-     *         "provider": "openai",
-     *         "masked_key": "...xyz9",
-     *         "configured_at": "2025-10-07T12:34:56.789Z",
-     *         "encryption_status": "encrypted",
-     *         "config": {
-     *             "endpoint": "https://my-resource.openai.azure.com",
-     *             "api_version": "2024-02-15-preview"
-     *         }
-     *     }
-     */
-    CredentialInfo: {
-      /**
-       * Provider
-       * @description LLM provider name
-       */
-      provider: string;
-      /**
-       * Masked Key
-       * @description Last 4 characters of API key for identification
-       */
-      masked_key: string;
-      /**
-       * Configured At
-       * @description Timestamp when credential was last updated
-       */
-      configured_at?: string | null;
-      /**
-       * Encryption Status
-       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
-       * @enum {string}
-       */
-      encryption_status: "encrypted" | "plaintext";
-      /**
-       * Config
-       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
-       */
-      config?: {
-        [key: string]: unknown;
-      };
-    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -2874,6 +3612,31 @@ export interface components {
       /** Success */
       success: boolean;
     };
+    /** EmbeddingModelCreate */
+    EmbeddingModelCreate: {
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
     /**
      * EmbeddingModelFamily
      * @enum {string}
@@ -2901,6 +3664,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       stability: components["schemas"]["ModelStability"];
@@ -2945,6 +3710,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Can Access
        * @default false
@@ -2955,11 +3722,15 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
        */
       is_org_enabled?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** EmbeddingModelPublicLegacy */
@@ -2984,6 +3755,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       stability: components["schemas"]["ModelStability"];
@@ -3008,6 +3781,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
     };
     /** EmbeddingModelSecurityStatus */
     EmbeddingModelSecurityStatus: {
@@ -3038,6 +3813,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Can Access
        * @default false
@@ -3048,14 +3825,52 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
        */
       is_org_enabled?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
+    };
+    /** EmbeddingModelSparse */
+    EmbeddingModelSparse: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -3419,6 +4234,11 @@ export interface components {
        */
       id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
       metadata: components["schemas"]["GroupMetadata"];
     };
     /** HTTPValidationError */
@@ -3726,38 +4546,6 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
-    };
-    /**
-     * ListCredentialsResponse
-     * @description Response model for listing tenant credentials.
-     *
-     * Example:
-     *     {
-     *         "credentials": [
-     *             {
-     *                 "provider": "openai",
-     *                 "masked_key": "...xyz9",
-     *                 "configured_at": "2025-10-07T12:34:56.789Z",
-     *                 "encryption_status": "encrypted",
-     *                 "config": {}
-     *             },
-     *             {
-     *                 "provider": "azure",
-     *                 "masked_key": "...abc3",
-     *                 "configured_at": "2025-10-07T12:45:00.123Z",
-     *                 "encryption_status": "plaintext",
-     *                 "config": {
-     *                     "endpoint": "https://my-resource.openai.azure.com",
-     *                     "api_version": "2024-02-15-preview",
-     *                     "deployment_name": "gpt-4"
-     *                 }
-     *             }
-     *         ]
-     *     }
-     */
-    ListCredentialsResponse: {
-      /** Credentials */
-      credentials: components["schemas"]["CredentialInfo"][];
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -4189,7 +4977,8 @@ export interface components {
       | "Mistral"
       | "KBLab"
       | "Google"
-      | "Berget";
+      | "Berget"
+      | "GDM";
     /**
      * ModelStability
      * @enum {string}
@@ -4928,19 +5717,6 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[UserAdminView] */
-    PaginatedResponse_UserAdminView_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["UserAdminView"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
     /** PaginatedResponse[UserGroupPublic] */
     PaginatedResponse_UserGroupPublic_: {
       /**
@@ -4992,6 +5768,62 @@ export interface components {
        * @description Number of items returned in the response
        */
       count: number;
+    };
+    /** PaginatedUsersResponse[UserAdminView] */
+    PaginatedUsersResponse_UserAdminView_: {
+      /**
+       * Items
+       * @description List of users for the current page
+       */
+      items: components["schemas"]["UserAdminView"][];
+      /** @description Pagination metadata for navigation */
+      metadata: components["schemas"]["PaginationMetadata"];
+    };
+    /**
+     * PaginationMetadata
+     * @description Pagination metadata for frontend navigation.
+     *
+     * Provides all information needed to build pagination UI (page numbers, next/previous buttons).
+     * Includes counts by state for tab display.
+     */
+    PaginationMetadata: {
+      /**
+       * Page
+       * @description Current page number (1-based)
+       */
+      page: number;
+      /**
+       * Page Size
+       * @description Number of items per page
+       */
+      page_size: number;
+      /**
+       * Total Count
+       * @description Total number of items across all pages
+       */
+      total_count: number;
+      /**
+       * Total Pages
+       * @description Total number of pages (calculated from total_count and page_size)
+       */
+      total_pages: number;
+      /**
+       * Has Next
+       * @description Whether there is a next page available
+       */
+      has_next: boolean;
+      /**
+       * Has Previous
+       * @description Whether there is a previous page available
+       */
+      has_previous: boolean;
+      /**
+       * Counts
+       * @description Optional counts by state (active, inactive) for tab display
+       */
+      counts?: {
+        [key: string]: number;
+      } | null;
     };
     /** PartialAssistantUpdatePublic */
     PartialAssistantUpdatePublic: {
@@ -5069,6 +5901,68 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+    };
+    /** PartialCompletionModelUpdate */
+    PartialCompletionModelUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Nickname */
+      nickname?: string | null;
+      family?: components["schemas"]["ModelFamily"] | null;
+      /** Token Limit */
+      token_limit?: number | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision?: boolean | null;
+      /** Reasoning */
+      reasoning?: boolean | null;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
+    /** PartialEmbeddingModelUpdate */
+    PartialEmbeddingModelUpdate: {
+      /** Name */
+      name?: string | null;
+      family?: components["schemas"]["EmbeddingModelFamily"] | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
     };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
@@ -5521,7 +6415,6 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      /** @default {} */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Groups
@@ -5621,7 +6514,6 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      /** @default {} */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Permissions
@@ -5693,90 +6585,6 @@ export interface components {
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
     /**
-     * SetCredentialRequest
-     * @description Request model for setting tenant API credentials.
-     *
-     * Provider-specific field requirements:
-     * - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key only
-     * - vLLM: api_key + endpoint (required)
-     * - Azure: api_key + endpoint + api_version (required)
-     *
-     * Example for OpenAI:
-     *     {
-     *         "api_key": "sk-proj-abc123..."
-     *     }
-     *
-     * Example for Azure:
-     *     {
-     *         "api_key": "abc123...",
-     *         "endpoint": "https://my-resource.openai.azure.com",
-     *         "api_version": "2024-02-15-preview"
-     *     }
-     *
-     * Example for vLLM:
-     *     {
-     *         "api_key": "vllm-secret-key",
-     *         "endpoint": "http://tenant-vllm:8000"
-     *     }
-     */
-    SetCredentialRequest: {
-      /**
-       * Api Key
-       * @description API key for the provider
-       */
-      api_key: string;
-      /**
-       * Endpoint
-       * @description Azure OpenAI endpoint (required for Azure provider)
-       */
-      endpoint?: string | null;
-      /**
-       * Api Version
-       * @description Azure OpenAI API version (required for Azure provider)
-       */
-      api_version?: string | null;
-      /**
-       * Deployment Name
-       * @description Azure OpenAI deployment name (required for Azure provider)
-       */
-      deployment_name?: string | null;
-    };
-    /**
-     * SetCredentialResponse
-     * @description Response model for setting tenant API credentials.
-     *
-     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
-     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
-     * not returned for security.
-     *
-     * Example:
-     *     {
-     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
-     *         "provider": "openai",
-     *         "masked_key": "...xyz9",
-     *         "message": "API credential for openai set successfully",
-     *         "set_at": "2025-10-22T10:00:00+00:00"
-     *     }
-     */
-    SetCredentialResponse: {
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Provider */
-      provider: string;
-      /** Masked Key */
-      masked_key: string;
-      /** Message */
-      message: string;
-      /**
-       * Set At
-       * Format: date-time
-       */
-      set_at: string;
-    };
-    /**
      * SetFederationRequest
      * @description Request model for setting tenant federation config.
      */
@@ -5843,6 +6651,16 @@ export interface components {
       chatbot_widget?: {
         [key: string]: unknown;
       };
+      /**
+       * Using Templates
+       * @default false
+       */
+      using_templates?: boolean;
+      /**
+       * Tenant Credentials Enabled
+       * @default false
+       */
+      tenant_credentials_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -5861,6 +6679,18 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
+    /**
+     * SortField
+     * @description Allowed fields for sorting user lists
+     * @enum {string}
+     */
+    SortField: "email" | "username" | "created_at";
+    /**
+     * SortOrder
+     * @description Sort direction for user lists
+     * @enum {string}
+     */
+    SortOrder: "asc" | "desc";
     /** SpaceDashboard */
     SpaceDashboard: {
       /**
@@ -5883,6 +6713,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
       applications: components["schemas"]["Applications"];
     };
     /** SpaceMember */
@@ -5927,6 +6759,8 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
       applications: components["schemas"]["Applications"];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
@@ -5978,7 +6812,15 @@ export interface components {
       description: string | null;
       /** Personal */
       personal: boolean;
+      /** Organization */
+      organization: boolean;
     };
+    /**
+     * StateFilter
+     * @description Filter for user state in admin users list
+     * @enum {string}
+     */
+    StateFilter: "active" | "inactive";
     /**
      * Status
      * @enum {string}
@@ -6081,6 +6923,11 @@ export interface components {
       )[];
       /** Count */
       count: number;
+    };
+    /** TemplateSettingUpdate */
+    TemplateSettingUpdate: {
+      /** Enabled */
+      enabled: boolean;
     };
     /** TemplateWizard */
     TemplateWizard: {
@@ -6497,6 +7344,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6507,6 +7356,8 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** TranscriptionModelSecurityStatus */
@@ -6542,6 +7393,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6552,6 +7405,8 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -7493,6 +8348,241 @@ export interface components {
      * @enum {string}
      */
     WizardType: "attachments" | "groups";
+    /**
+     * CredentialInfo
+     * @description Information about a configured credential.
+     *
+     * Example:
+     *     {
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "configured_at": "2025-10-07T12:34:56.789Z",
+     *         "encryption_status": "encrypted",
+     *         "config": {
+     *             "endpoint": "https://my-resource.openai.azure.com",
+     *             "api_version": "2024-02-15-preview"
+     *         }
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * ListCredentialsResponse
+     * @description Response model for listing tenant credentials.
+     *
+     * Example:
+     *     {
+     *         "credentials": [
+     *             {
+     *                 "provider": "openai",
+     *                 "masked_key": "...xyz9",
+     *                 "configured_at": "2025-10-07T12:34:56.789Z",
+     *                 "encryption_status": "encrypted",
+     *                 "config": {}
+     *             },
+     *             {
+     *                 "provider": "azure",
+     *                 "masked_key": "...abc3",
+     *                 "configured_at": "2025-10-07T12:45:00.123Z",
+     *                 "encryption_status": "plaintext",
+     *                 "config": {
+     *                     "endpoint": "https://my-resource.openai.azure.com",
+     *                     "api_version": "2024-02-15-preview",
+     *                     "deployment_name": "gpt-4"
+     *                 }
+     *             }
+     *         ]
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["intric__tenants__presentation__tenant_credentials_router__CredentialInfo"][];
+    };
+    /**
+     * SetCredentialRequest
+     * @description Request model for setting tenant API credentials.
+     *
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
+     *
+     * Example for OpenAI:
+     *     {
+     *         "api_key": "sk-proj-abc123..."
+     *     }
+     *
+     * Example for Azure:
+     *     {
+     *         "api_key": "abc123...",
+     *         "endpoint": "https://my-resource.openai.azure.com",
+     *         "api_version": "2024-02-15-preview"
+     *     }
+     *
+     * Example for vLLM:
+     *     {
+     *         "api_key": "vllm-secret-key",
+     *         "endpoint": "http://tenant-vllm:8000"
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /**
+     * SetCredentialResponse
+     * @description Response model for setting tenant API credentials.
+     *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
+    /** CredentialInfo */
+    intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    /** ListCredentialsResponse */
+    intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo"][];
+    };
+    /** SetCredentialRequest */
+    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /** SetCredentialResponse */
+    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse: {
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
     /** CrawlRunPublic */
     intric__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
       /** Created At */
@@ -8225,7 +9315,7 @@ export interface operations {
   };
   /**
    * Login
-   * @description OAuth2 Login
+   * @description OAuth2 Login with comprehensive error handling and logging
    */
   Login_api_v1_users_login_token__post: {
     requestBody: {
@@ -8566,6 +9656,28 @@ export interface operations {
       };
     };
   };
+  /** Get Space Info Blobs */
+  get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get: {
+    parameters: {
+      path: {
+        space_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_InfoBlobPublicNoText_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /**
    * Get Groups
    * @deprecated
@@ -8677,8 +9789,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -8927,6 +10041,54 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["PaginatedResponse_str_"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle template feature
+   * @description Enable or disable the template management feature for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `using_templates` feature flag for your tenant
+   * - When disabled: Template gallery returns empty list (not error)
+   * - When enabled: Users can see and use tenant templates
+   * - Change takes effect immediately (no reload required)
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": true
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "using_templates": true
+   * }
+   * ```
+   */
+  update_template_setting_api_v1_settings_templates_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -9240,6 +10402,10 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9321,7 +10487,8 @@ export interface operations {
                 | "Mistral"
                 | "KBLab"
                 | "Google"
-                | "Berget";
+                | "Berget"
+                | "GDM";
               /**
                * ModelStability
                * @enum {string}
@@ -9540,6 +10707,10 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9621,7 +10792,8 @@ export interface operations {
                 | "Mistral"
                 | "KBLab"
                 | "Google"
-                | "Berget";
+                | "Berget"
+                | "GDM";
               /**
                * ModelStability
                * @enum {string}
@@ -11237,15 +12409,110 @@ export interface operations {
     };
   };
   /**
-   * List all users in tenant
-   * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
+   * List users with pagination and search
+   * @description List tenant users with pagination, fuzzy search, and sorting capabilities.
+   *
+   * **Performance Optimization:**
+   * - Uses pg_trgm GIN indexes for efficient fuzzy text search (email and username)
+   * - Uses composite B-tree indexes for fast tenant-scoped sorting
+   * - Sub-second response time even with 10,000+ users per tenant
+   *
+   * **Pagination:**
+   * - Max depth: 100 pages (prevents deep pagination performance issues)
+   * - Default: 100 users per page, sorted by creation date (newest first)
+   * - Supports custom page sizes (1-100)
+   *
+   * **Search:**
+   * - Email search: Case-insensitive partial match (e.g., "john" matches john.doe@example.com)
+   * - Name search: Case-insensitive partial match on username (e.g., "emma" matches emma.andersson)
+   * - Combined search: Use both filters with AND logic
+   *
+   * **Sorting:**
+   * - Sort by: email, username, or created_at (default)
+   * - Sort order: asc or desc (default)
+   *
+   * **Example Requests:**
+   *
+   * Default (first 100 users, newest first):
+   * ```
+   * GET /api/v1/admin/users/
+   * ```
+   *
+   * Custom page size (50 users per page):
+   * ```
+   * GET /api/v1/admin/users/?page_size=50
+   * ```
+   *
+   * Email search (find users at municipality domain):
+   * ```
+   * GET /api/v1/admin/users/?search_email=@municipality.se
+   * ```
+   *
+   * Name search (find users named Emma):
+   * ```
+   * GET /api/v1/admin/users/?search_name=emma
+   * ```
+   *
+   * Combined search and pagination:
+   * ```
+   * GET /api/v1/admin/users/?search_email=@municipality.se&page=2&page_size=50
+   * ```
+   *
+   * Sort by email ascending:
+   * ```
+   * GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+   * ```
+   *
+   * **Response Format:**
+   * ```json
+   * {
+   *   "items": [...],
+   *   "metadata": {
+   *     "page": 1,
+   *     "page_size": 100,
+   *     "total_count": 543,
+   *     "total_pages": 6,
+   *     "has_next": true,
+   *     "has_previous": false
+   *   }
+   * }
+   * ```
+   *
+   * **Important Notes:**
+   * - Only active users (not soft-deleted) are returned
+   * - All results are isolated to your tenant (cross-tenant access is prevented)
+   * - Max depth limit (100 pages) ensures consistent performance
    */
   get_users_api_v1_admin_users__get: {
+    parameters: {
+      query?: {
+        /** @description Page number (1-100) */
+        page?: number;
+        /** @description Users per page (1-100) */
+        page_size?: number;
+        /** @description Search by email (case-insensitive, partial match) */
+        search_email?: string | null;
+        /** @description Search by username (case-insensitive, partial match) */
+        search_name?: string | null;
+        /** @description Sort field (default: alphabetical by email) */
+        sort_by?: components["schemas"]["SortField"];
+        /** @description Sort order (default: ascending A-Z) */
+        sort_order?: components["schemas"]["SortOrder"];
+        /** @description Filter by user state (active includes invited, inactive for temporary leave) */
+        state_filter?: components["schemas"]["StateFilter"] | null;
+      };
+    };
     responses: {
-      /** @description List of users successfully retrieved */
+      /** @description Paginated list of users successfully retrieved */
       200: {
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_UserAdminView_"];
+          "application/json": components["schemas"]["PaginatedUsersResponse_UserAdminView_"];
+        };
+      };
+      /** @description Invalid pagination parameters (page/page_size out of bounds) */
+      400: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Authentication required (invalid or missing API key) */
@@ -11255,6 +12522,12 @@ export interface operations {
       /** @description Admin permissions required */
       403: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };
@@ -11601,6 +12874,1006 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set API credential for current tenant
+   * @description Set or update API credentials for a specific LLM provider. Tenant admin only. Provider-specific fields are validated.
+   */
+  set_credential_api_v1_admin_credentials__provider__put: {
+    parameters: {
+      path: {
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List API credentials for current tenant
+   * @description List all configured API credentials with masked keys and encryption status. Tenant admin only.
+   */
+  list_credentials_api_v1_admin_credentials__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant's assistant templates
+   * @description List all active (non-deleted) assistant templates owned by your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Visibility:**
+   * - Only shows templates where `tenant_id` matches your tenant
+   * - Excludes global templates (tenant_id = NULL)
+   * - Excludes soft-deleted templates (deleted_at IS NOT NULL)
+   *
+   * Use this endpoint for the admin template management page.
+   */
+  list_templates_api_v1_admin_templates_assistants__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminListPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create assistant template
+   * @description Create a new assistant template for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Prerequisites:**
+   * - Feature flag `using_templates` must be enabled for your tenant
+   * - Template name must be unique within your tenant
+   *
+   * **Business Logic:**
+   * - Template is automatically scoped to your tenant
+   * - Original state is saved in `original_snapshot` for rollback
+   * - Template immediately available in gallery for users in your tenant
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "name": "Customer Support Assistant",
+   *   "description": "Handles customer inquiries professionally and efficiently",
+   *   "category": "Support",
+   *   "prompt": "You are a helpful customer support agent. Always be polite and professional.",
+   *   "completion_model_kwargs": {"temperature": 0.7, "max_tokens": 500},
+   *   "wizard": {
+   *     "attachments": {"required": false, "title": "Add product docs", "description": "Optional documentation"},
+   *     "collections": {"required": true, "title": "Select knowledge base", "description": "Choose support knowledge base"}
+   *   }
+   * }
+   * ```
+   */
+  create_template_api_v1_admin_templates_assistants__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantTemplateAdminCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Failed Dependency */
+      424: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete assistant template
+   * @description Soft-delete an assistant template (marks with deleted_at timestamp).
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Safety Checks:**
+   * - Validates template belongs to your tenant
+   * - Checks if template is currently in use by assistants
+   * - Returns 409 Conflict if template is in use with usage count
+   *
+   * **Behavior:**
+   * - Sets `deleted_at` to current timestamp
+   * - Template no longer appears in gallery or admin list
+   * - Template can be viewed in deleted list (audit trail)
+   * - Template remains in database (soft-delete only)
+   *
+   * **Error Response (In Use):**
+   * ```json
+   * {
+   *   "detail": "Cannot delete template 'My Template'. It is used by 3 assistant(s).",
+   *   "error_code": "BAD_REQUEST"
+   * }
+   * ```
+   */
+  delete_template_api_v1_admin_templates_assistants__template_id__delete: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update assistant template
+   * @description Updates an existing assistant template (admin only)
+   */
+  update_template_api_v1_admin_templates_assistants__template_id__patch: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantTemplateAdminUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle assistant template as featured
+   * @description Toggle an assistant template as featured/default.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Validation:**
+   * - Template must belong to your tenant
+   * - Maximum 5 featured templates per tenant
+   * - Returns 400 if limit exceeded
+   *
+   * **Behavior:**
+   * - Featured templates appear first in the template gallery
+   * - Featured templates are sorted alphabetically by name
+   * - Non-featured templates appear below, sorted by creation date
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "is_default": true
+   * }
+   * ```
+   */
+  toggle_default_api_v1_admin_templates_assistants__template_id__default_patch: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantTemplateToggleDefaultRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Rollback assistant template
+   * @description Restores template to original snapshot (admin only)
+   */
+  rollback_template_api_v1_admin_templates_assistants__template_id__rollback_post: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Restore deleted assistant template
+   * @description Restores a soft-deleted template (admin only)
+   */
+  restore_template_api_v1_admin_templates_assistants__template_id__restore_post: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Permanently delete assistant template
+   * @description Permanently removes a soft-deleted template from database (admin only)
+   */
+  permanent_delete_template_api_v1_admin_templates_assistants__template_id__permanent_delete: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List deleted assistant templates
+   * @description Returns soft-deleted templates for audit trail (admin only)
+   */
+  list_deleted_templates_api_v1_admin_templates_assistants_deleted_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantTemplateAdminListPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant's app templates
+   * @description Returns all active app templates for your tenant (admin only)
+   */
+  list_templates_api_v1_admin_templates_apps__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminListPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create app template
+   * @description Create a new app template for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Prerequisites:**
+   * - Feature flag `using_templates` must be enabled for your tenant
+   * - Template name must be unique within your tenant
+   *
+   * **Business Logic:**
+   * - Template is automatically scoped to your tenant
+   * - Original state is saved in `original_snapshot` for rollback
+   * - Template immediately available in gallery for users in your tenant
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "name": "Document Analyzer",
+   *   "description": "Analyzes uploaded documents and extracts key insights",
+   *   "category": "Analysis",
+   *   "prompt": "Analyze the following document and provide a summary with key insights.",
+   *   "completion_model_kwargs": {"temperature": 0.3, "max_tokens": 1000},
+   *   "wizard": {
+   *     "attachments": {"required": true, "title": "Upload document", "description": "Upload PDF or text file"},
+   *     "collections": null
+   *   },
+   *   "input_type": "file",
+   *   "input_description": "Upload a document (PDF, TXT, or DOCX)"
+   * }
+   * ```
+   */
+  create_template_api_v1_admin_templates_apps__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppTemplateAdminCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Failed Dependency */
+      424: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete app template
+   * @description Soft-deletes an app template (admin only)
+   */
+  delete_template_api_v1_admin_templates_apps__template_id__delete: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update app template
+   * @description Updates an existing app template (admin only)
+   */
+  update_template_api_v1_admin_templates_apps__template_id__patch: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppTemplateAdminUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle app template as featured
+   * @description Toggle an app template as featured/default.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Validation:**
+   * - Template must belong to your tenant
+   * - Maximum 5 featured templates per tenant
+   * - Returns 400 if limit exceeded
+   *
+   * **Behavior:**
+   * - Featured templates appear first in the template gallery
+   * - Featured templates are sorted alphabetically by name
+   * - Non-featured templates appear below, sorted by creation date
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "is_default": true
+   * }
+   * ```
+   */
+  toggle_default_api_v1_admin_templates_apps__template_id__default_patch: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppTemplateToggleDefaultRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Rollback app template
+   * @description Restores template to original snapshot (admin only)
+   */
+  rollback_template_api_v1_admin_templates_apps__template_id__rollback_post: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Restore deleted app template
+   * @description Restores a soft-deleted template (admin only)
+   */
+  restore_template_api_v1_admin_templates_apps__template_id__restore_post: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Permanently delete app template
+   * @description Permanently removes a soft-deleted template from database (admin only)
+   */
+  permanent_delete_template_api_v1_admin_templates_apps__template_id__permanent_delete: {
+    parameters: {
+      path: {
+        template_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List deleted app templates
+   * @description Returns soft-deleted templates for audit trail (admin only)
+   */
+  list_deleted_templates_api_v1_admin_templates_apps_deleted_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AppTemplateAdminListPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -13102,6 +15375,17 @@ export interface operations {
       };
     };
   };
+  /** Get Organization Space */
+  get_organization_space_api_v1_spaces_type_organization__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+    };
+  };
   /** Get Dashboard */
   get_dashboard_api_v1_dashboard__get: {
     parameters: {
@@ -13315,8 +15599,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -13581,8 +15867,19 @@ export interface operations {
     };
   };
   /**
-   * Get Templates
-   * @description Get all app templates
+   * List available app templates
+   * @description Get app templates available for creating new apps.
+   *
+   * **Feature Flag Behavior:**
+   * - If `using_templates` feature is disabled: Returns empty list (not an error)
+   * - If `using_templates` feature is enabled: Returns all available templates
+   *
+   * **Template Scope:**
+   * - Global templates (tenant_id = NULL): Available to all tenants
+   * - Tenant-specific templates: Only available to that tenant
+   *
+   * **Response:**
+   * Returns paginated list of templates with basic information for gallery display.
    */
   get_templates_api_v1_templates_apps__get: {
     responses: {
@@ -13592,14 +15889,8 @@ export interface operations {
           "application/json": components["schemas"]["AppTemplateListPublic"];
         };
       };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
+      /** @description Unauthorized */
+      401: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -13607,8 +15898,19 @@ export interface operations {
     };
   };
   /**
-   * Get Templates
-   * @description Get all assistant templates
+   * List available assistant templates
+   * @description Get assistant templates available for creating new assistants.
+   *
+   * **Feature Flag Behavior:**
+   * - If `using_templates` feature is disabled: Returns empty list (not an error)
+   * - If `using_templates` feature is enabled: Returns all available templates
+   *
+   * **Template Scope:**
+   * - Global templates (tenant_id = NULL): Available to all tenants
+   * - Tenant-specific templates: Only available to that tenant
+   *
+   * **Response:**
+   * Returns paginated list of templates with basic information for gallery display.
    */
   get_templates_api_v1_templates_assistants__get: {
     responses: {
@@ -13618,14 +15920,8 @@ export interface operations {
           "application/json": components["schemas"]["AssistantTemplateListPublic"];
         };
       };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
+      /** @description Unauthorized */
+      401: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -15491,6 +17787,285 @@ export interface operations {
     };
   };
   /**
+   * Create Completion Model
+   * @description Create a new completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+   */
+  create_completion_model_api_v1_sysadmin_completion_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Completion Model Metadata
+   * @description Update completion model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Completion Model
+   * @description Delete a completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   * Set force=true to delete even if model is in use (may break references).
+   */
+  delete_completion_model_api_v1_sysadmin_completion_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Embedding Model
+   * @description Create a new embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+   */
+  create_embedding_model_api_v1_sysadmin_embedding_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Embedding Model Metadata
+   * @description Update embedding model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Embedding Model
+   * @description Delete an embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   */
+  delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Set tenant API credential
    * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
    */
@@ -15498,19 +18073,27 @@ export interface operations {
     parameters: {
       path: {
         tenant_id: string;
-        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
       };
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SetCredentialRequest"];
+        "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["SetCredentialResponse"];
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
         };
       };
       /** @description Validation Error */
@@ -15529,7 +18112,15 @@ export interface operations {
     parameters: {
       path: {
         tenant_id: string;
-        provider: "openai" | "anthropic" | "azure" | "berget" | "mistral" | "ovhcloud" | "vllm";
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
       };
     };
     responses: {
@@ -15561,7 +18152,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["ListCredentialsResponse"];
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
         };
       };
       /** @description Validation Error */

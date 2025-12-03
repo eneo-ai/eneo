@@ -99,20 +99,42 @@ class MCPClient:
         """Internal connection logic."""
         headers = self._build_auth_headers()
 
-        # Use Streamable HTTP transport (MCP 2025-03-26+ standard)
-        self._streams_context = streamablehttp_client(
+        # Create the streamable HTTP context manager
+        streams_context = streamablehttp_client(
             url=self.mcp_server.http_url,
             headers=headers
         )
 
-        # Enter the streams context
-        streams = await self._streams_context.__aenter__()
+        # Enter the streams context - only save reference after successful entry
+        # This prevents cleanup attempts on partially-initialized contexts (anyio 4.x fix)
+        try:
+            streams = await streams_context.__aenter__()
+        except Exception:
+            # Failed during __aenter__ - don't save context, don't try to cleanup
+            # Let GC handle the partially initialized context
+            raise
+
+        # Successfully entered - now save the reference
+        self._streams_context = streams_context
         read, write, session_id = streams
         logger.debug(f"Streamable HTTP session ID: {session_id}")
 
-        # Create session
-        self._session_context = ClientSession(read, write)
-        self.session = await self._session_context.__aenter__()
+        # Create and enter session context
+        session_context = ClientSession(read, write)
+        try:
+            session = await session_context.__aenter__()
+        except Exception:
+            # Session entry failed - cleanup streams context only
+            try:
+                await streams_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._streams_context = None
+            raise
+
+        # Successfully entered - save references
+        self._session_context = session_context
+        self.session = session
 
         # Initialize the session
         await self.session.initialize()

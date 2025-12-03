@@ -74,22 +74,116 @@ class UserService:
         ):
             raise UniqueUserException("That username is already taken.")
 
-    async def login(self, email: str, password: str):
+    async def login(
+        self, 
+        email: str, 
+        password: str, 
+        correlation_id: str = None, 
+        source_ip: str = None
+    ):
+        """
+        Authenticate user with username/password.
+        
+        Implements timing attack mitigation by always performing password verification,
+        even when user is not found (using dummy hash).
+        
+        Args:
+            email: User email address
+            password: Plaintext password
+            correlation_id: Request correlation ID for logging
+            source_ip: Client IP address for security logging
+            
+        Returns:
+            AccessToken with JWT bearer token
+            
+        Raises:
+            AuthenticationException: On authentication failure (generic message)
+        """
+        correlation_id = correlation_id or "no-correlation-id"
+        
+        # Log user lookup
+        logger.debug(
+            "Looking up user for authentication",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "email": email,
+                "source_ip": source_ip,
+            }
+        )
+        
         user = await self.repo.get_user_by_email(email)
 
-        if user is None:
-            raise AuthenticationException("No such user")
+        # Timing attack mitigation: Always perform password verification
+        # If user not found or password not set, verify against dummy hash
+        # This ensures constant execution time regardless of user existence
+        password_hash = (
+            user.password 
+            if (user and user.password) 
+            else self.auth_service.DUMMY_HASH
+        )
+        
+        is_valid_password = self.auth_service.verify_password(password, password_hash)
 
-        if user.password is None:
-            raise AuthenticationException(
-                "User has not enabled username and password login"
+        # Check all failure conditions and log appropriately
+        if not user:
+            logger.warning(
+                "Login failed: user not found",
+                extra={
+                    "correlation_id": correlation_id,
+                    "auth_method": "password",
+                    "email": email,
+                    "source_ip": source_ip,
+                }
             )
+            raise AuthenticationException("Invalid credentials")  # Generic message for security
 
-        if not self.auth_service.verify_password(password, user.password):
-            raise AuthenticationException("Wrong password")
+        if not user.password:
+            logger.warning(
+                "Login failed: password authentication not enabled",
+                extra={
+                    "correlation_id": correlation_id,
+                    "auth_method": "password",
+                    "user_id": str(user.id),
+                    "tenant_id": str(user.tenant_id),
+                    "tenant_name": user.tenant.name,
+                    "email": email,
+                    "source_ip": source_ip,
+                }
+            )
+            raise AuthenticationException("Invalid credentials")  # Generic message for security
+
+        if not is_valid_password:
+            logger.warning(
+                "Login failed: invalid password",
+                extra={
+                    "correlation_id": correlation_id,
+                    "auth_method": "password",
+                    "user_id": str(user.id),
+                    "tenant_id": str(user.tenant_id),
+                    "tenant_name": user.tenant.name,
+                    "email": email,
+                    "source_ip": source_ip,
+                }
+            )
+            raise AuthenticationException("Invalid credentials")  # Generic message for security
 
         # Check if the user or tenant state prevents login
         await self._check_user_and_tenant_state(user)
+
+        # Log successful authentication
+        logger.info(
+            "User authenticated successfully",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "user_id": str(user.id),
+                "email": user.email,
+                "tenant_id": str(user.tenant_id),
+                "tenant_name": user.tenant.name,
+                "source_ip": source_ip,
+            }
+        )
 
         return AccessToken(
             access_token=self.auth_service.create_access_token_for_user(user=user),

@@ -45,6 +45,7 @@ class EmbeddingModel(AIModel):
         max_input: int,
         dimensions: Optional[int],
         security_classification: Optional[SecurityClassification],
+        max_batch_size: Optional[int] = None,
         litellm_model_name: Optional[str] = None,
     ):
         super().__init__(
@@ -68,7 +69,19 @@ class EmbeddingModel(AIModel):
 
         self.max_input = max_input
         self.dimensions = dimensions
+        self.max_batch_size = max_batch_size
         self.litellm_model_name = litellm_model_name
+
+    def get_credential_provider_name(self) -> str:
+        """Get the credential provider name for this model."""
+        from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
+
+        # If litellm_model_name is set, use it for provider detection
+        if self.litellm_model_name:
+            return LiteLLMProviderRegistry.detect_provider_from_model_name(self.litellm_model_name)
+
+        # Fall back to base implementation (checks family)
+        return super().get_credential_provider_name()
 
     @classmethod
     def to_domain(
@@ -105,6 +118,7 @@ class EmbeddingModel(AIModel):
             is_org_enabled=is_org_enabled,
             max_input=db_model.max_input,
             dimensions=db_model.dimensions,
+            max_batch_size=getattr(db_model, "max_batch_size", None),
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=security_classification
             ),

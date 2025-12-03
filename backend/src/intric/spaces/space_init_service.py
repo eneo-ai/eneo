@@ -28,11 +28,20 @@ class SpaceInitService:
         space.add_assistant(default_assistant)
         return await self.space_repo.update(space)
 
+
+    async def _ensure_tenant_space(self) -> "Space":
+        hub = await self.space_service.get_or_create_tenant_space()
+        if hub.default_assistant is None:
+            hub = await self._update_space_with_default_assistant(hub)
+        return hub
+    
     async def _create_personal_space(self):
+        await self._ensure_tenant_space()
         personal_space = await self.space_service.create_personal_space()
         return await self._update_space_with_default_assistant(personal_space)
 
     async def create_space(self, name: str):
+        await self._ensure_tenant_space()
         space = await self.space_service.create_space(name)
         return await self._update_space_with_default_assistant(space)
 
@@ -56,3 +65,6 @@ class SpaceInitService:
             space = await self._update_space_with_default_assistant(space)
 
         return space
+
+    async def get_or_create_tenant_space(self) -> "Space":
+        return await self._ensure_tenant_space()

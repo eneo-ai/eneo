@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from intric.apps.apps.api.app_models import InputFieldType
 
@@ -57,6 +57,8 @@ class AppTemplatePublic(BaseModel):
     type: Literal["app"]
     wizard: AppTemplateWizard
     organization: AppTemplateOrganization
+    is_default: bool = False
+    icon_name: Optional[str] = None
 
 
 class AppTemplateListPublic(BaseModel):
@@ -74,10 +76,11 @@ class AppTemplateCreate(BaseModel):
     category: str
     prompt: str
     organization: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = {}
+    completion_model_kwargs: dict = Field(default_factory=dict)
     wizard: AppTemplateWizard
     input_type: str
     input_description: Optional[str]
+    icon_name: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_input_type(self):
@@ -86,5 +89,94 @@ class AppTemplateCreate(BaseModel):
         return self
 
 
-class AppTemplateUpdate(AppTemplateCreate):
-    pass
+class AppTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    prompt: Optional[str] = None
+    organization: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    completion_model_id: Optional[UUID] = None
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: Optional[str] = None
+    input_description: Optional[str] = None
+    icon_name: Optional[str] = None
+
+
+# Admin-specific models for tenant-scoped templates
+
+class AppTemplateAdminPublic(BaseModel):
+    """Admin view of template with tenant fields."""
+    id: UUID
+    name: str
+    description: str
+    category: str
+    prompt_text: Optional[str] = None
+    completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_id: Optional[UUID] = None
+    completion_model_name: Optional[str] = None
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: str
+    input_description: Optional[str] = None
+    organization: str
+    tenant_id: UUID
+    deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[UUID] = None
+    restored_at: Optional[datetime] = None
+    restored_by_user_id: Optional[UUID] = None
+    original_snapshot: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+    usage_count: int = 0  # Number of apps created from this template
+    is_default: bool = False
+    icon_name: Optional[str] = None
+
+
+class AppTemplateAdminListPublic(BaseModel):
+    """Admin list response."""
+    items: list[AppTemplateAdminPublic]
+
+    @computed_field
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+class AppTemplateAdminCreate(BaseModel):
+    """Admin template creation request."""
+    name: str
+    description: Optional[str] = None
+    category: str
+    prompt: Optional[str] = None
+    completion_model_kwargs: dict = Field(default_factory=dict)
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: str
+    input_description: Optional[str] = None
+    icon_name: Optional[str] = None
+
+
+class AppTemplateAdminUpdate(BaseModel):
+    """Admin template update request (PATCH semantics)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    prompt: Optional[str] = None
+    completion_model_kwargs: Optional[dict] = None
+    completion_model_id: Optional[UUID] = None
+    wizard: Optional[AppTemplateWizard] = None
+    input_type: Optional[str] = None
+    input_description: Optional[str] = None
+    icon_name: Optional[str] = None
+
+    @field_validator("name", "description", "category", "icon_name", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        """Convert empty strings to None to allow clearing optional fields."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
+
+class AppTemplateToggleDefaultRequest(BaseModel):
+    """Request to toggle template as default/featured."""
+    is_default: bool

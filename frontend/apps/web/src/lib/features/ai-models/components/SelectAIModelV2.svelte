@@ -37,7 +37,12 @@
   $: unsupportedModelSelected = !availableModels.some((model) => model.id === selectedModel?.id);
 
   function watchChanges(incomingModel: T | null | undefined) {
-    if ($selected?.value !== incomingModel) {
+    // Use ID comparison instead of object reference comparison
+    // to avoid Svelte 5 proxy equality issues
+    const currentId = $selected?.value?.id;
+    const incomingId = incomingModel?.id;
+
+    if (currentId !== incomingId) {
       $selected = incomingModel ? { value: incomingModel } : undefined;
     }
   }

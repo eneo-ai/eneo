@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 from intric.apps.apps.api.app_models import AppPublic
 from intric.assistants.api.assistant_models import AssistantPublic
+from intric.authentication.auth_dependencies import require_permission
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.main.container.container import Container
@@ -29,11 +30,20 @@ from intric.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
-from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
+from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
+from intric.roles.permissions import Permission
 router = APIRouter()
 
-
+async def forbid_org_space(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    space = await container.space_service().get_space(id)
+    if space.user_id is None and space.tenant_space_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return True
+    
 @router.post("/", response_model=SpacePublic, status_code=201)
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -133,6 +143,7 @@ async def get_security_classification_impact_analysis(
     "/{id}/",
     status_code=204,
     responses=responses.get_responses([403, 404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def delete_space(
     id: UUID,
@@ -149,21 +160,23 @@ async def delete_space(
     status_code=200,
 )
 async def get_spaces(
+    include_applications: bool = Query(default=False, description="Includes published applications on each space"),
+    include_personal: bool = Query(default=False,  description="Includes your personal space"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces()
-    spaces = [assembler.from_space_to_sparse_model(space) for space in spaces]
+    spaces = await service.get_spaces(include_personal=include_personal)
+    spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)
-
 
 @router.get(
     "/{id}/applications/",
     response_model=Applications,
     responses=responses.get_responses([404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def get_space_applications(
     id: UUID, container: Container = Depends(get_container(with_user=True))
@@ -181,6 +194,7 @@ async def get_space_applications(
     response_model=AssistantPublic,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def create_space_assistant(
     id: UUID,
@@ -204,6 +218,7 @@ async def create_space_assistant(
     response_description="Successful Response.",
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def create_group_chat(
     id: UUID,
@@ -223,6 +238,7 @@ async def create_group_chat(
     response_model=AppPublic,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def create_app(
     id: UUID,
@@ -248,6 +264,7 @@ async def create_app(
     response_model=CreateSpaceServiceResponse,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def create_space_services(
     id: UUID,
@@ -270,13 +287,17 @@ async def create_space_services(
 async def get_space_knowledge(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
-    service = container.space_service()
+    space_service = container.space_service()
     assembler = container.space_assembler()
 
-    space = await service.get_space(id)
+    space = await space_service.get_space(id)
+    groups, websites, integrations = await space_service.get_knowledge_for_space(id)
+
+    space.collections = groups
+    space.websites = websites
+    space.integration_knowledge_list = integrations
 
     return assembler.from_space_to_model(space).knowledge
-
 
 @router.post(
     "/{id}/knowledge/groups/",
@@ -289,16 +310,16 @@ async def create_space_groups(
     group: CreateSpaceGroupsRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.collection_crud_service()
-
+    svc = container.collection_crud_service()
     embedding_model_id = group.embedding_model.id if group.embedding_model else None
 
-    group = await service.create_collection(
-        name=group.name, space_id=id, embedding_model_id=embedding_model_id
+    created_collection = await svc.create_collection(
+        name=group.name,
+        space_id=id,
+        embedding_model_id=embedding_model_id,
     )
-
-    return CollectionPublic.from_domain(group)
-
+    return CollectionPublic.from_domain(created_collection)
+  
 
 @router.post(
     "/{id}/knowledge/websites/",
@@ -392,6 +413,7 @@ async def delete_space_integration_knowledge(
     "/{id}/members/",
     response_model=SpaceMember,
     responses=responses.get_responses([403, 404]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def add_space_member(
     id: UUID,
@@ -409,12 +431,14 @@ async def add_space_member(
     "/{id}/members/{user_id}/",
     response_model=SpaceMember,
     responses=responses.get_responses([403, 404, 400]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def change_role_of_member(
     id: UUID,
     user_id: UUID,
     update_space_member_req: UpdateSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
+    
 ):
     service = container.space_service()
 
@@ -425,6 +449,7 @@ async def change_role_of_member(
     "/{id}/members/{user_id}/",
     status_code=204,
     responses=responses.get_responses([403, 404, 400]),
+    dependencies=[Depends(forbid_org_space)],
 )
 async def remove_space_member(
     id: UUID,
@@ -444,5 +469,16 @@ async def get_personal_space(
     assembler = container.space_assembler()
 
     space = await service.get_personal_space()
+
+    return assembler.from_space_to_model(space)
+
+@router.get("/type/organization/", response_model=SpacePublic, dependencies=[Depends(require_permission(Permission.ADMIN))])
+async def get_organization_space(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.space_init_service()
+    assembler = container.space_assembler()
+
+    space = await service.get_or_create_tenant_space()
 
     return assembler.from_space_to_model(space)
