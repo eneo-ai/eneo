@@ -62,7 +62,21 @@
         await updateSpace({ mcp_servers: newServers });
       } else {
         const newServers = [...$currentlySelectedServers, server.id].map((id) => ({ id }));
-        await updateSpace({ mcp_servers: newServers });
+
+        // When adding a server, enable all its tools for convenience
+        const existingTools =
+          $currentSpace.mcp_servers?.flatMap(
+            (s) => s.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
+          ) ?? [];
+
+        // Add all tools from the new server as enabled
+        const newServerTools =
+          server.tools?.map((t: any) => ({ tool_id: t.id, is_enabled: true })) ?? [];
+
+        await updateSpace({
+          mcp_servers: newServers,
+          mcp_tools: [...existingTools, ...newServerTools]
+        });
       }
     } catch (e) {
       console.error("Failed to toggle server:", e);

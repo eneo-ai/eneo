@@ -74,22 +74,29 @@
     }
   }
 
-  // Ensure all tools from a server are tracked in selectedMCPTools
+  // Ensure all tools from ALL selected servers are tracked in selectedMCPTools
   // This is called when user toggles any tool to ensure complete state is sent to backend
-  function ensureServerToolsTracked(server: MCPServer) {
-    const selectedServer = getSelectedServer(server.id);
-    if (!selectedServer?.tools) return;
+  function ensureAllSelectedServersToolsTracked() {
+    let newOverrides: Array<{ tool_id: string; is_enabled: boolean }> = [];
 
-    // Check if any tool from this server is already tracked
-    const serverToolIds = new Set(selectedServer.tools.map((t) => t.id));
-    const hasAnyTracked = selectedMCPTools.some((t) => serverToolIds.has(t.tool_id));
+    for (const selectedServer of selectedMCPServers) {
+      if (!selectedServer.tools) continue;
 
-    // If not tracking any tools from this server yet, add ALL of them
-    if (!hasAnyTracked) {
-      const newOverrides = selectedServer.tools.map((tool) => ({
-        tool_id: tool.id,
-        is_enabled: tool.is_enabled
-      }));
+      // Check if any tool from this server is already tracked
+      const serverToolIds = new Set(selectedServer.tools.map((t: MCPTool) => t.id));
+      const hasAnyTracked = selectedMCPTools.some((t) => serverToolIds.has(t.tool_id));
+
+      // If not tracking any tools from this server yet, add ALL of them
+      if (!hasAnyTracked) {
+        const serverOverrides = selectedServer.tools.map((tool: MCPTool) => ({
+          tool_id: tool.id,
+          is_enabled: tool.is_enabled
+        }));
+        newOverrides = [...newOverrides, ...serverOverrides];
+      }
+    }
+
+    if (newOverrides.length > 0) {
       selectedMCPTools = [...selectedMCPTools, ...newOverrides];
     }
   }
@@ -139,22 +146,31 @@
         );
       }
     } else {
-      // Add server with tools initialized to OFF (tools are off by default for assistants)
+      // Add server with all tools enabled for convenience
       const newServer = {
         ...server,
-        tools: server.tools?.map((tool) => ({ ...tool, is_enabled: false })) || []
+        tools: server.tools?.map((tool) => ({ ...tool, is_enabled: true })) || []
       };
       selectedMCPServers = [...selectedMCPServers, newServer];
+
+      // Also add tool overrides so they're sent to backend
+      if (server.tools && server.tools.length > 0) {
+        const toolOverrides = server.tools.map((tool) => ({
+          tool_id: tool.id,
+          is_enabled: true
+        }));
+        selectedMCPTools = [...selectedMCPTools, ...toolOverrides];
+      }
     }
   }
 
   function toggleTool(server: MCPServer, tool: MCPTool) {
-    // First ensure ALL tools from this server are tracked (so they're all sent to backend)
-    ensureServerToolsTracked(server);
+    // First ensure ALL tools from ALL selected servers are tracked (so they're all sent to backend)
+    ensureAllSelectedServersToolsTracked();
 
     const currentEnabled = isToolEnabled(server, tool.id);
 
-    // Update the tool override (it should exist now after ensureServerToolsTracked)
+    // Update the tool override (it should exist now after ensureAllSelectedServersToolsTracked)
     const existingIndex = selectedMCPTools.findIndex((t) => t.tool_id === tool.id);
     if (existingIndex !== -1) {
       selectedMCPTools[existingIndex].is_enabled = !currentEnabled;
