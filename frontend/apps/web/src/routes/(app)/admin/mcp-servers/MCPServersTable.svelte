@@ -65,6 +65,7 @@
         <tr>
           <th class="h-14 border-b border-default px-2 text-left font-medium w-10"></th>
           <th class="h-14 border-b border-default px-2 text-left font-medium">{m.name()}</th>
+          <th class="h-14 border-b border-default px-2 text-left font-medium w-24">{m.tools()}</th>
           <th class="h-14 border-b border-default px-2 text-left font-medium w-24">{m.enabled()}</th>
           <th class="h-14 border-b border-default px-2 text-left font-medium w-16"></th>
         </tr>
@@ -78,6 +79,7 @@
                 variant="ghost"
                 padding="icon"
                 onclick={() => toggleExpanded(server.mcp_server_id)}
+                disabled={server.tools_count === 0}
               >
                 <ChevronRight
                   class="h-4 w-4 transition-transform duration-200 {isExpanded(server.mcp_server_id)
@@ -88,6 +90,9 @@
             </td>
             <td class="border-b border-dimmer px-4 overflow-hidden">
               <MCPServerPrimaryCell mcpServer={server} />
+            </td>
+            <td class="border-b border-dimmer px-4">
+              <span class="text-sm text-muted">{server.tools_count ?? 0}</span>
             </td>
             <td class="border-b border-dimmer px-4">
               <MCPServerEnabledSwitch mcpServer={server} />
@@ -102,12 +107,12 @@
           <!-- Expanded tools panel row -->
           {#if isExpanded(server.mcp_server_id)}
             <tr>
-              <td colspan="4" class="p-0">
+              <td colspan="5" class="p-0">
                 <MCPToolsPanel
                   mcpServerId={server.mcp_server_id}
                   serverName={server.name}
+                  tools={server.tools || []}
                   intricClient={intric}
-                  onClose={() => toggleExpanded(server.mcp_server_id)}
                 />
               </td>
             </tr>

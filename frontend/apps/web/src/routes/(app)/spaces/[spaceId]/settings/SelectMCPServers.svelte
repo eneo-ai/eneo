@@ -10,12 +10,26 @@
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
+  import { ChevronRight } from "lucide-svelte";
 
   type Props = {
     selectableServers: any[];
   };
 
   const { selectableServers }: Props = $props();
+
+  // Track expanded servers
+  let expandedServers = $state(new Set<string>());
+
+  function toggleExpanded(serverId: string) {
+    const newExpanded = new Set(expandedServers);
+    if (newExpanded.has(serverId)) {
+      newExpanded.delete(serverId);
+    } else {
+      newExpanded.add(serverId);
+    }
+    expandedServers = newExpanded;
+  }
 
   const {
     state: { currentSpace },
@@ -95,43 +109,66 @@
   </svelte:fragment>
 
   {#each selectableServers as server (server.id)}
+    {@const serverTools = getServerTools(server.id)}
+    {@const hasTools = $currentlySelectedServers.includes(server.id) && serverTools.length > 0}
+    {@const isExpanded = expandedServers.has(server.id)}
     <div class="border-default border-b last:border-b-0">
-      <!-- Server Toggle -->
-      <div class="hover:bg-hover-dimmer cursor-pointer py-4 pr-4 pl-2">
-        <Input.Switch
-          value={$currentlySelectedServers.includes(server.id)}
-          sideEffect={() => toggleServer(server)}
+      <!-- Server Row -->
+      <div class="flex items-center hover:bg-hover-dimmer">
+        <!-- Expand Button -->
+        <button
+          type="button"
+          class="flex h-full w-10 shrink-0 items-center justify-center p-2 disabled:opacity-30"
+          disabled={!hasTools}
+          onclick={() => toggleExpanded(server.id)}
         >
-          <div class="flex flex-col gap-1">
-            <div class="font-medium">{server.name}</div>
-            {#if server.description}
-              <div class="text-sm text-muted">{server.description}</div>
-            {/if}
-            {#if server.tags && server.tags.length > 0}
-              <div class="text-xs text-muted flex gap-2">
-                {#each server.tags as tag}
-                  <span
-                    class="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"
-                    >{tag}</span
-                  >
-                {/each}
+          <ChevronRight
+            class="h-4 w-4 transition-transform {isExpanded ? 'rotate-90' : ''}"
+          />
+        </button>
+
+        <!-- Server Toggle -->
+        <div class="flex-1 py-4 pr-4">
+          <Input.Switch
+            value={$currentlySelectedServers.includes(server.id)}
+            sideEffect={() => toggleServer(server)}
+          >
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center gap-2">
+                <span class="font-medium">{server.name}</span>
+                {#if hasTools}
+                  <span class="text-xs text-muted">({serverTools.length} {m.tools()})</span>
+                {/if}
               </div>
-            {/if}
-          </div>
-        </Input.Switch>
+              {#if server.description}
+                <div class="text-sm text-muted">{server.description}</div>
+              {/if}
+              {#if server.tags && server.tags.length > 0}
+                <div class="text-xs text-muted flex gap-2">
+                  {#each server.tags as tag}
+                    <span
+                      class="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"
+                      >{tag}</span
+                    >
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </Input.Switch>
+        </div>
       </div>
 
-      <!-- Tools List (only show if server is enabled for space) -->
-      {#if $currentlySelectedServers.includes(server.id) && getServerTools(server.id).length > 0}
-        <div class="bg-hover-dimmer/30 px-8 py-2">
-          <div class="text-xs font-medium text-muted mb-2">Tools</div>
-          {#each getServerTools(server.id) as tool (tool.id)}
-            <div class="py-2">
+      <!-- Tools List (only show if expanded) -->
+      {#if hasTools && isExpanded}
+        <div class="pl-10 pr-4 pb-2">
+          <div class="text-xs font-medium text-muted mb-2">{m.tools()}</div>
+          {#each serverTools as tool (tool.id)}
+            <div class="py-2 border-b border-dimmer last:border-b-0 hover:bg-hover-dimmer">
               <Input.Switch value={tool.is_enabled} sideEffect={() => toggleTool(tool)}>
                 <div class="flex flex-col">
                   <div class="text-sm font-medium">{tool.name}</div>
                   {#if tool.description}
-                    <div class="text-xs text-muted">{tool.description}</div>
+                    <div class="text-xs text-muted line-clamp-2">{tool.description}</div>
                   {/if}
                 </div>
               </Input.Switch>

@@ -64,6 +64,12 @@ class MCPServerSettingsPublic(MCPServerPublic):
     mcp_server_id: UUID  # ID in global catalog
     is_org_enabled: bool
     has_credentials: bool  # Whether env_vars are configured
+    tools: list["MCPServerToolPublic"] = []
+
+    @computed_field
+    def tools_count(self) -> int:
+        """Number of tools available on this server."""
+        return len(self.tools)
 
     @computed_field
     def is_available(self) -> bool:

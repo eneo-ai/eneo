@@ -32,9 +32,11 @@ class MCPServerToolRepoImpl(
         return self.mapper.to_entities(result)
 
     async def by_server(self, mcp_server_id: UUID) -> list[MCPServerTool]:
-        """Get all tools for a specific MCP server."""
-        query = select(self._db_model).where(
-            self._db_model.mcp_server_id == mcp_server_id
+        """Get all tools for a specific MCP server, ordered by name."""
+        query = (
+            select(self._db_model)
+            .where(self._db_model.mcp_server_id == mcp_server_id)
+            .order_by(self._db_model.name)
         )
         result = await self.session.scalars(query)
         result = result.all()

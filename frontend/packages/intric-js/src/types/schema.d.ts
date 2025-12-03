@@ -1548,6 +1548,8 @@ export interface paths {
     /**
      * Create Mcp Server
      * @description Create a new MCP server in global catalog (admin only).
+     *
+     * Validates connection before saving. Returns 400 if connection fails.
      */
     post: operations["create_mcp_server_api_v1_mcp_servers__post"];
   };
@@ -1610,6 +1612,8 @@ export interface paths {
     /**
      * Sync Mcp Server Tools
      * @description Manually refresh/sync tools for an MCP server (admin only).
+     *
+     * Returns 400 if connection to the MCP server fails.
      */
     post: operations["sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post"];
   };
@@ -1866,6 +1870,23 @@ export interface paths {
      */
     get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings": {
+    /**
+     * Get tenant crawler settings
+     * @description Get current crawler settings for a tenant. Returns effective settings (tenant overrides merged with environment defaults). System admin only.
+     */
+    get: operations["get_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_get"];
+    /**
+     * Update tenant crawler settings
+     * @description Update crawler settings for a specific tenant. Only provided fields are updated; missing fields retain previous values. Settings persist across server restarts and override environment defaults. System admin only.
+     */
+    put: operations["update_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_put"];
+    /**
+     * Reset tenant crawler settings
+     * @description Delete all tenant-specific crawler settings, reverting to environment defaults. System admin only.
+     */
+    delete: operations["delete_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_delete"];
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/federation": {
     /**
      * Get tenant federation config
@@ -1902,6 +1923,13 @@ export interface paths {
      * @description Value is a list of module `id`'s to add to the `tenant_id`.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+  };
+  "/api/v1/auth/federation-status": {
+    /**
+     * Check federation configuration status
+     * @description Returns federation availability status for the system. Used by login page to determine which authentication method to show. No authentication required (public endpoint).
+     */
+    get: operations["get_federation_status_api_v1_auth_federation_status_get"];
   };
   "/api/v1/auth/tenants": {
     /**
@@ -2191,7 +2219,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -2231,7 +2259,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Completion Model Name */
@@ -2699,7 +2727,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -2735,7 +2763,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Completion Model Name */
@@ -3369,6 +3397,173 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlerSettingsResponse
+     * @description Response model for crawler settings operations.
+     *
+     * Returns current settings merged with environment defaults.
+     * Tenant overrides are highlighted.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "settings": {
+     *             "crawl_max_length": 14400,
+     *             "download_timeout": 90,
+     *             "download_max_size": 10485760,
+     *             "dns_timeout": 30,
+     *             "retry_times": 2,
+     *             "closespider_itemcount": 20000,
+     *             "obey_robots": true,
+     *             "autothrottle_enabled": true,
+     *             "tenant_worker_concurrency_limit": 4,
+     *             "crawl_stale_threshold_minutes": 30,
+     *             "crawl_heartbeat_interval_seconds": 300,
+     *             "crawl_feeder_enabled": false,
+     *             "crawl_feeder_interval_seconds": 10,
+     *             "crawl_feeder_batch_size": 10,
+     *             "crawl_job_max_age_seconds": 1800
+     *         },
+     *         "overrides": ["download_timeout", "dns_timeout"],
+     *         "updated_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    CrawlerSettingsResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant UUID
+       */
+      tenant_id: string;
+      /**
+       * Settings
+       * @description Current effective settings (tenant overrides + env defaults)
+       */
+      settings: {
+        [key: string]: unknown;
+      };
+      /**
+       * Overrides
+       * @description List of setting keys that have tenant-specific overrides
+       */
+      overrides: string[];
+      /**
+       * Updated At
+       * @description Timestamp of last settings update
+       */
+      updated_at?: string | null;
+    };
+    /**
+     * CrawlerSettingsUpdate
+     * @description Request model for updating tenant crawler settings.
+     *
+     * All fields are optional - only provided fields will be updated.
+     * Missing fields retain their previous values or fall back to environment defaults.
+     *
+     * Field constraints are derived from CRAWLER_SETTING_SPECS (single source of truth).
+     *
+     * Example - Full configuration:
+     *     {
+     *         "crawl_max_length": 14400,
+     *         "download_timeout": 90,
+     *         "download_max_size": 10485760,
+     *         "dns_timeout": 30,
+     *         "retry_times": 2,
+     *         "closespider_itemcount": 20000,
+     *         "obey_robots": true,
+     *         "autothrottle_enabled": true,
+     *         "tenant_worker_concurrency_limit": 4,
+     *         "crawl_stale_threshold_minutes": 30,
+     *         "crawl_heartbeat_interval_seconds": 300,
+     *         "crawl_feeder_enabled": false,
+     *         "crawl_feeder_interval_seconds": 10,
+     *         "crawl_feeder_batch_size": 10,
+     *         "crawl_job_max_age_seconds": 1800
+     *     }
+     *
+     * Example - Partial update (adjust timeouts only):
+     *     {
+     *         "download_timeout": 120,
+     *         "dns_timeout": 45
+     *     }
+     */
+    CrawlerSettingsUpdate: {
+      /**
+       * Crawl Max Length
+       * @description Maximum crawl duration in seconds (1 min to 24 hours)
+       */
+      crawl_max_length?: number | null;
+      /**
+       * Download Timeout
+       * @description Per-request download timeout in seconds (10s to 5 min)
+       */
+      download_timeout?: number | null;
+      /**
+       * Download Max Size
+       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
+       */
+      download_max_size?: number | null;
+      /**
+       * Dns Timeout
+       * @description DNS resolution timeout in seconds (5s to 2 min)
+       */
+      dns_timeout?: number | null;
+      /**
+       * Retry Times
+       * @description Number of retry attempts per request (0 to 10)
+       */
+      retry_times?: number | null;
+      /**
+       * Closespider Itemcount
+       * @description Maximum pages to crawl before stopping (100 to 100k)
+       */
+      closespider_itemcount?: number | null;
+      /**
+       * Obey Robots
+       * @description Whether to respect robots.txt rules
+       */
+      obey_robots?: boolean | null;
+      /**
+       * Autothrottle Enabled
+       * @description Enable automatic request throttling based on server response times
+       */
+      autothrottle_enabled?: boolean | null;
+      /**
+       * Tenant Worker Concurrency Limit
+       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
+       */
+      tenant_worker_concurrency_limit?: number | null;
+      /**
+       * Crawl Stale Threshold Minutes
+       * @description Minutes without activity before job is considered stale (5 min to 24 hours)
+       */
+      crawl_stale_threshold_minutes?: number | null;
+      /**
+       * Crawl Heartbeat Interval Seconds
+       * @description Heartbeat interval to signal job is alive (30s to 1 hour)
+       */
+      crawl_heartbeat_interval_seconds?: number | null;
+      /**
+       * Crawl Feeder Enabled
+       * @description Enable crawl feeder service for rate-limited job enqueueing
+       */
+      crawl_feeder_enabled?: boolean | null;
+      /**
+       * Crawl Feeder Interval Seconds
+       * @description Feeder check interval in seconds (5s to 5 min)
+       */
+      crawl_feeder_interval_seconds?: number | null;
+      /**
+       * Crawl Feeder Batch Size
+       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
+       */
+      crawl_feeder_batch_size?: number | null;
+      /**
+       * Crawl Job Max Age Seconds
+       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
+       */
+      crawl_job_max_age_seconds?: number | null;
+    };
     /** CreateGroupRequest */
     CreateGroupRequest: {
       /** Name */
@@ -3611,6 +3806,35 @@ export interface components {
     DeleteResponse: {
       /** Success */
       success: boolean;
+    };
+    /**
+     * DeleteSettingsResponse
+     * @description Response model for deleting tenant crawler settings.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "message": "Crawler settings reset to defaults",
+     *         "deleted_keys": ["download_timeout", "dns_timeout"]
+     *     }
+     */
+    DeleteSettingsResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant UUID
+       */
+      tenant_id: string;
+      /**
+       * Message
+       * @description Confirmation message
+       */
+      message: string;
+      /**
+       * Deleted Keys
+       * @description List of setting keys that were removed
+       */
+      deleted_keys: string[];
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -3950,6 +4174,26 @@ export interface components {
        * @enum {string}
        */
       encryption_status: "encrypted" | "plaintext";
+    };
+    /**
+     * FederationStatusResponse
+     * @description Federation configuration status for login page.
+     * @example {
+     *   "has_global_oidc_config": false,
+     *   "has_multi_tenant_federation": false,
+     *   "has_single_tenant_federation": true,
+     *   "tenant_count": 1
+     * }
+     */
+    FederationStatusResponse: {
+      /** Has Single Tenant Federation */
+      has_single_tenant_federation: boolean;
+      /** Has Multi Tenant Federation */
+      has_multi_tenant_federation: boolean;
+      /** Has Global Oidc Config */
+      has_global_oidc_config: boolean;
+      /** Tenant Count */
+      tenant_count: number;
     };
     /** FilePublic */
     FilePublic: {
@@ -4559,6 +4803,21 @@ export interface components {
       json_body: unknown;
     };
     /**
+     * MCPConnectionStatus
+     * @description Status of MCP server connection attempt.
+     */
+    MCPConnectionStatus: {
+      /** Success */
+      success: boolean;
+      /**
+       * Tools Discovered
+       * @default 0
+       */
+      tools_discovered?: number;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /**
      * MCPServerCreate
      * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
      */
@@ -4585,6 +4844,14 @@ export interface components {
       icon_url?: string | null;
       /** Documentation Url */
       documentation_url?: string | null;
+    };
+    /**
+     * MCPServerCreateResponse
+     * @description Response for MCP server creation including connection status.
+     */
+    MCPServerCreateResponse: {
+      server: components["schemas"]["MCPServerPublic"];
+      connection: components["schemas"]["MCPConnectionStatus"];
     };
     /**
      * MCPServerPublic
@@ -4663,6 +4930,16 @@ export interface components {
       /** Has Credentials */
       has_credentials: boolean;
       /**
+       * Tools
+       * @default []
+       */
+      tools?: components["schemas"]["MCPServerToolPublic"][];
+      /**
+       * Tools Count
+       * @description Number of tools available on this server.
+       */
+      tools_count: number;
+      /**
        * Is Available
        * @description Whether this MCP is enabled and available for use.
        */
@@ -4712,6 +4989,17 @@ export interface components {
       } | null;
       /** Is Enabled By Default */
       is_enabled_by_default: boolean;
+    };
+    /**
+     * MCPServerToolSyncResponse
+     * @description Response for tool sync operation including connection status.
+     */
+    MCPServerToolSyncResponse: {
+      /** Tools */
+      tools: components["schemas"]["MCPServerToolPublic"][];
+      connection: components["schemas"]["MCPConnectionStatus"];
+      /** Count */
+      count: number;
     };
     /**
      * MCPServerToolUpdate
@@ -6415,7 +6703,7 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Groups
        * @default []
@@ -6514,7 +6802,7 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Permissions
        * @default []
@@ -6716,6 +7004,7 @@ export interface components {
       /** Organization */
       organization: boolean;
       applications: components["schemas"]["Applications"];
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
     };
     /** SpaceMember */
     SpaceMember: {
@@ -6762,6 +7051,7 @@ export interface components {
       /** Organization */
       organization: boolean;
       applications: components["schemas"]["Applications"];
+      default_assistant: components["schemas"]["DefaultAssistant"];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Completion Models */
@@ -6774,7 +7064,6 @@ export interface components {
       }[];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
-      default_assistant: components["schemas"]["DefaultAssistant"];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
@@ -6814,6 +7103,8 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      applications?: components["schemas"]["Applications"] | null;
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
     };
     /**
      * StateFilter
@@ -7020,6 +7311,10 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
+      /** Crawler Settings */
+      crawler_settings?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TenantInfo
@@ -7200,6 +7495,10 @@ export interface components {
       };
       /** Federation Config */
       federation_config?: {
+        [key: string]: unknown;
+      };
+      /** Crawler Settings */
+      crawler_settings?: {
         [key: string]: unknown;
       };
     };
@@ -14678,11 +14977,25 @@ export interface operations {
   };
   /** Get Spaces */
   get_spaces_api_v1_spaces__get: {
+    parameters: {
+      query?: {
+        /** @description Includes published applications on each space */
+        include_applications?: boolean;
+        /** @description Includes your personal space */
+        include_personal?: boolean;
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["PaginatedResponse_SpaceSparse_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -16588,6 +16901,8 @@ export interface operations {
   /**
    * Create Mcp Server
    * @description Create a new MCP server in global catalog (admin only).
+   *
+   * Validates connection before saving. Returns 400 if connection fails.
    */
   create_mcp_server_api_v1_mcp_servers__post: {
     requestBody: {
@@ -16599,7 +16914,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["MCPServerPublic"];
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
         };
       };
       /** @description Bad Request */
@@ -16957,6 +17272,8 @@ export interface operations {
   /**
    * Sync Mcp Server Tools
    * @description Manually refresh/sync tools for an MCP server (admin only).
+   *
+   * Returns 400 if connection to the MCP server fails.
    */
   sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post: {
     parameters: {
@@ -16968,7 +17285,13 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["MCPServerToolList"];
+          "application/json": components["schemas"]["MCPServerToolSyncResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -18164,6 +18487,86 @@ export interface operations {
     };
   };
   /**
+   * Get tenant crawler settings
+   * @description Get current crawler settings for a tenant. Returns effective settings (tenant overrides merged with environment defaults). System admin only.
+   */
+  get_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update tenant crawler settings
+   * @description Update crawler settings for a specific tenant. Only provided fields are updated; missing fields retain previous values. Settings persist across server restarts and override environment defaults. System admin only.
+   */
+  update_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CrawlerSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reset tenant crawler settings
+   * @description Delete all tenant-specific crawler settings, reverting to environment defaults. System admin only.
+   */
+  delete_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get tenant federation config
    * @description View federation config with masked secrets. System admin only.
    */
@@ -18327,6 +18730,20 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check federation configuration status
+   * @description Returns federation availability status for the system. Used by login page to determine which authentication method to show. No authentication required (public endpoint).
+   */
+  get_federation_status_api_v1_auth_federation_status_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FederationStatusResponse"];
         };
       };
     };

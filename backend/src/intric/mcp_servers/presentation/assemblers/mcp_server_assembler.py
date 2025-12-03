@@ -4,6 +4,7 @@ from intric.mcp_servers.presentation.models import (
     MCPServerPublic,
     MCPServerSettingsList,
     MCPServerSettingsPublic,
+    MCPServerToolPublic,
 )
 
 
@@ -13,6 +14,8 @@ class MCPServerAssembler:
     @staticmethod
     def to_dict_with_tools(mcp_server: MCPServer) -> dict:
         """Convert MCPServer with tools to dict format (for assistant/space responses)."""
+        # Sort tools by name for consistent ordering
+        sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)
         return {
             "id": str(mcp_server.id),
             "name": mcp_server.name,
@@ -29,7 +32,7 @@ class MCPServerAssembler:
                     "input_schema": tool.input_schema,
                     "is_enabled": tool.is_enabled_by_default,
                 }
-                for tool in mcp_server.tools
+                for tool in sorted_tools
             ],
         }
 
@@ -63,6 +66,20 @@ class MCPServerSettingsAssembler:
     @staticmethod
     def from_domain_to_model(mcp_server: MCPServer) -> MCPServerSettingsPublic:
         """Convert MCPServer domain entity to settings DTO."""
+        # Sort tools by name for consistent ordering
+        sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)
+        tools = [
+            MCPServerToolPublic(
+                id=tool.id,
+                mcp_server_id=tool.mcp_server_id,
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.input_schema,
+                is_enabled_by_default=tool.is_enabled_by_default,
+            )
+            for tool in sorted_tools
+        ]
+
         return MCPServerSettingsPublic(
             id=mcp_server.id,
             mcp_server_id=mcp_server.id,
@@ -76,6 +93,7 @@ class MCPServerSettingsAssembler:
             documentation_url=mcp_server.documentation_url,
             is_org_enabled=mcp_server.is_enabled,
             has_credentials=mcp_server.env_vars is not None and len(mcp_server.env_vars) > 0,
+            tools=tools,
         )
 
     @staticmethod

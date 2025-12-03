@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
 from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
 from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
@@ -47,8 +48,12 @@ class MCPServerRepoImpl(
         return self.mapper.to_entities(result)
 
     async def query_by_tenant(self, tenant_id) -> list[MCPServer]:
-        """Get all MCP servers for a specific tenant."""
-        query = select(self._db_model).where(self._db_model.tenant_id == tenant_id)
+        """Get all MCP servers for a specific tenant with tools loaded."""
+        query = (
+            select(self._db_model)
+            .where(self._db_model.tenant_id == tenant_id)
+            .options(selectinload(self._db_model.tools))
+        )
         result = await self.session.scalars(query)
         result = result.all()
         if not result:

@@ -13,37 +13,20 @@
   type Props = {
     mcpServerId: string;
     serverName: string;
+    tools: any[];
     intricClient: any;
-    onClose: () => void;
   };
 
-  const { mcpServerId, serverName, intricClient, onClose }: Props = $props();
+  const { mcpServerId, serverName, tools: initialTools, intricClient }: Props = $props();
 
-  let tools = $state<any[]>([]);
-  let loading = $state(true);
+  let tools = $state(initialTools);
   let syncing = $state(false);
-
-  // Load tools on mount
-  $effect(() => {
-    loadTools();
-  });
-
-  async function loadTools() {
-    loading = true;
-    try {
-      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
-      tools = response.items || [];
-    } catch (error) {
-      console.error("Failed to load tools:", error);
-    } finally {
-      loading = false;
-    }
-  }
 
   async function syncTools() {
     syncing = true;
     try {
-      const response = await intricClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
+      await intricClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
+      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
       await invalidate("spaces:data");
     } catch (error) {
@@ -74,7 +57,7 @@
     <span class="text-xs font-medium text-muted">
       {m.tools()} ({tools.length})
     </span>
-    <Button variant="ghost" size="sm" onclick={syncTools} disabled={syncing || loading}>
+    <Button variant="ghost" size="sm" onclick={syncTools} disabled={syncing}>
       <RefreshCw class="mr-1.5 h-3 w-3 {syncing ? 'animate-spin' : ''}" />
       <span class="text-xs">{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
@@ -82,9 +65,7 @@
 
   <!-- Tools list -->
   <div>
-    {#if loading}
-      <div class="text-muted pl-14 pr-4 py-4 text-sm">{m.loading()}</div>
-    {:else if tools.length === 0}
+    {#if tools.length === 0}
       <div class="text-muted pl-14 pr-4 py-4 text-sm">
         <p>{m.no_tools_found()}</p>
         <p class="mt-1 text-xs">{m.click_sync_to_discover_tools()}</p>
