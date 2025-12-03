@@ -21,26 +21,25 @@
     id: string;
     name: string;
     description?: string;
-    transport_type?: string;
     tags?: string[];
     tools?: MCPTool[];
   }
 
-  /**
-   * Array of MCP server objects that are selected.
-   * Can be simple {id: string}[] or full server objects with tools.
-   */
-  export let selectedMCPServers: Array<any> = [];
+  type Props = {
+    /** Array of MCP server objects that are selected. */
+    selectedMCPServers: Array<any>;
+    /** Optional: MCP tool settings to track tool-level overrides */
+    selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
+  };
 
-  /** Optional: MCP tool settings to track tool-level overrides */
-  export let selectedMCPTools: Array<{ tool_id: string; is_enabled: boolean }> = [];
+  let { selectedMCPServers = $bindable([]), selectedMCPTools = $bindable([]) }: Props = $props();
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
 
-  let availableServers: MCPServer[] = [];
-  let loading = true;
+  let availableServers = $state<MCPServer[]>([]);
+  let loading = $state(true);
 
   // Load available MCP servers from space
   async function loadAvailableServers() {
@@ -48,10 +47,10 @@
     try {
       // Get servers enabled for this space, and filter to only show enabled tools
       const spaceServers = $currentSpace.mcp_servers || [];
-      availableServers = spaceServers.map(server => ({
+      availableServers = spaceServers.map((server) => ({
         ...server,
         // Only include tools that are enabled at the space level
-        tools: server.tools?.filter(tool => tool.is_enabled) || []
+        tools: server.tools?.filter((tool) => tool.is_enabled) || []
       }));
     } catch (error) {
       console.error("Failed to load MCP servers:", error);
@@ -147,7 +146,7 @@
     </div>
   {:else}
     {#each availableServers as server (server.id)}
-      <div class="border-default border-b">
+      <div class="border-default border-b last:border-b-0">
         <!-- Server Toggle -->
         <div class="hover:bg-hover-dimmer cursor-pointer py-3 pr-4 pl-2">
           <Input.Switch
@@ -159,18 +158,14 @@
               {#if server.description}
                 <div class="text-sm text-muted">{server.description}</div>
               {/if}
-              {#if server.transport_type || (server.tags && server.tags.length > 0)}
+              {#if server.tags && server.tags.length > 0}
                 <div class="text-xs text-muted flex gap-2">
-                  {#if server.transport_type}
-                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                      {server.transport_type}
-                    </span>
-                  {/if}
-                  {#if server.tags && server.tags.length > 0}
-                    {#each server.tags as tag}
-                      <span class="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">{tag}</span>
-                    {/each}
-                  {/if}
+                  {#each server.tags as tag}
+                    <span
+                      class="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"
+                      >{tag}</span
+                    >
+                  {/each}
                 </div>
               {/if}
             </div>
