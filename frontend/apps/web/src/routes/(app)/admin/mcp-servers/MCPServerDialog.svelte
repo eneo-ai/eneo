@@ -170,7 +170,7 @@
             required
             class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
           >
-            <option value="none">None</option>
+            <option value="none">Public (No Auth)</option>
             <option value="bearer">Bearer Token</option>
             <option value="api_key">API Key</option>
             <option value="custom_headers">Custom Headers</option>

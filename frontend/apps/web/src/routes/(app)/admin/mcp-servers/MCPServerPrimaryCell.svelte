@@ -34,7 +34,7 @@
   }
 
   function formatAuthType(type: string) {
-    if (type === "none") return "None";
+    if (type === "none") return "Public";
     if (type === "bearer") return "Bearer";
     if (type === "api_key") return "API Key";
     if (type === "custom_headers") return "Custom";
