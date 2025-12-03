@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
+    from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
 
 
@@ -46,10 +47,12 @@ class AssistantRepository:
         session: AsyncSession,
         factory: AssistantFactory,
         completion_model_repo: "CompletionModelRepository",
+        user: "UserInDB",
     ):
         self.session = session
         self.factory = factory
         self.completion_model_repo = completion_model_repo
+        self.user = user
 
     @staticmethod
     def _options():
@@ -277,134 +280,6 @@ class AssistantRepository:
             await self.session.execute(stmt)
 
         await self.session.refresh(assistant_in_db)
-
-    async def _load_mcp_server_tools_with_overrides(
-        self, space_id: UUID, assistant_id: UUID, mcp_servers: list
-    ) -> list:
-        """Load tools for MCP servers and apply space + assistant-level enablement overrides.
-
-        Hierarchy:
-        1. Tool default (is_enabled_by_default)
-        2. Tenant override (mcp_server_tool_settings.is_enabled) - if exists
-        3. Space override (spaces_mcp_server_tools.is_enabled) - if exists
-        4. Assistant override (assistant_mcp_server_tools.is_enabled) - if exists
-
-        Rules:
-        - If tenant disables a tool, it won't appear at all (filtered out)
-        - If space disables a tool, it won't appear in assistant (filtered out)
-        - Assistant can only override tools that are space-enabled
-        """
-        from intric.database.tables.assistant_table import AssistantMCPServerTools
-        from intric.database.tables.mcp_server_table import (
-            MCPServerToolSettings as MCPServerToolSettingsTable,
-        )
-        from intric.database.tables.mcp_server_table import (
-            MCPServerTools as MCPServerToolsTable,
-        )
-        from intric.database.tables.spaces_table import SpacesMCPServerTools
-
-        if not mcp_servers:
-            return mcp_servers
-
-        mcp_server_ids = [server.id for server in mcp_servers]
-
-        # Load all tools for these servers
-        tools_query = (
-            sa.select(MCPServerToolsTable)
-            .where(MCPServerToolsTable.mcp_server_id.in_(mcp_server_ids))
-            .order_by(MCPServerToolsTable.name)
-        )
-        tools_result = await self.session.execute(tools_query)
-        tools_db = tools_result.scalars().all()
-
-        # Load tenant-level tool settings
-        tenant_tool_settings_query = (
-            sa.select(MCPServerToolSettingsTable)
-            .where(MCPServerToolSettingsTable.tenant_id == self.user.tenant_id)
-        )
-        tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
-        tenant_settings_db = tenant_settings_result.scalars().all()
-
-        # Create map: tool_id -> is_enabled (tenant level)
-        tenant_tool_settings = {
-            setting.mcp_server_tool_id: setting.is_enabled for setting in tenant_settings_db
-        }
-
-        # Load space-level tool overrides
-        space_overrides_query = (
-            sa.select(SpacesMCPServerTools).where(SpacesMCPServerTools.space_id == space_id)
-        )
-        space_overrides_result = await self.session.execute(space_overrides_query)
-        space_overrides_db = space_overrides_result.scalars().all()
-
-        # Create map: tool_id -> is_enabled (space level)
-        space_tool_overrides = {
-            override.mcp_server_tool_id: override.is_enabled for override in space_overrides_db
-        }
-
-        # Load assistant-level tool overrides
-        assistant_overrides_query = (
-            sa.select(AssistantMCPServerTools).where(
-                AssistantMCPServerTools.assistant_id == assistant_id
-            )
-        )
-        assistant_overrides_result = await self.session.execute(assistant_overrides_query)
-        assistant_overrides_db = assistant_overrides_result.scalars().all()
-
-        # Create map: tool_id -> is_enabled (assistant level)
-        assistant_tool_overrides = {
-            override.mcp_server_tool_id: override.is_enabled
-            for override in assistant_overrides_db
-        }
-
-        # Group tools by server
-        from collections import defaultdict
-
-        from intric.mcp_servers.domain.entities.mcp_server import MCPServerTool
-
-        tools_by_server = defaultdict(list)
-        for tool_db in tools_db:
-            # Determine effective is_enabled status
-            # Priority: assistant override > space override > tenant override > tool default
-            tenant_enabled = tenant_tool_settings.get(tool_db.id, tool_db.is_enabled_by_default)
-
-            # If tenant disabled this tool, skip it entirely (don't show in space/assistant)
-            if tool_db.id in tenant_tool_settings and not tenant_tool_settings[tool_db.id]:
-                continue
-
-            # Apply space override if exists, otherwise use tenant/default
-            if tool_db.id in space_tool_overrides:
-                space_enabled = space_tool_overrides[tool_db.id]
-            else:
-                space_enabled = tenant_enabled
-
-            # If space disabled this tool, skip it (don't show in assistant)
-            if not space_enabled:
-                continue
-
-            # Apply assistant override if exists, otherwise use space/tenant/default
-            if tool_db.id in assistant_tool_overrides:
-                is_enabled = assistant_tool_overrides[tool_db.id]
-            else:
-                is_enabled = space_enabled
-
-            tool = MCPServerTool(
-                id=tool_db.id,
-                mcp_server_id=tool_db.mcp_server_id,
-                name=tool_db.name,
-                description=tool_db.description,
-                input_schema=tool_db.input_schema,
-                is_enabled_by_default=is_enabled,  # Effective status after all overrides
-                created_at=tool_db.created_at,
-                updated_at=tool_db.updated_at,
-            )
-            tools_by_server[tool_db.mcp_server_id].append(tool)
-
-        # Attach tools to servers
-        for server in mcp_servers:
-            server.tools = tools_by_server.get(server.id, [])
-
-        return mcp_servers
 
     async def _get_groups(self, assistant_id: UUID):
         query = (

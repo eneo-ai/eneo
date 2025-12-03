@@ -739,11 +739,12 @@ class SpaceRepository:
             if not space_enabled:
                 continue
 
-            # Apply assistant override if exists, otherwise use space/tenant/default
+            # Apply assistant override if exists, otherwise default to OFF for assistants
+            # (tools must be explicitly enabled at assistant level)
             if tool_db.id in assistant_tool_overrides:
                 is_enabled = assistant_tool_overrides[tool_db.id]
             else:
-                is_enabled = space_enabled
+                is_enabled = False  # Tools OFF by default for assistants
 
             tool = MCPServerTool(
                 id=tool_db.id,

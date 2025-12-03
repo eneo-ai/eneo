@@ -502,6 +502,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=assistant_factory,
         completion_model_repo=completion_model_repo2,
+        user=user,
     )
 
     info_blob_chunk_repo = providers.Factory(InfoBlobChunkRepo, session=session)
