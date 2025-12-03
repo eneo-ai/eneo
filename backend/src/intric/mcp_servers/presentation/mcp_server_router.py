@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
 from intric.main.models import PaginatedResponse
 from intric.mcp_servers.presentation.models import (
     MCPConnectionStatus,
@@ -180,8 +181,7 @@ async def create_mcp_server(
 ):
     """Create a new MCP server in global catalog (admin only).
 
-    Returns the created server along with connection status indicating
-    whether tool discovery succeeded.
+    Validates connection before saving. Returns 400 if connection fails.
     """
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
@@ -196,6 +196,13 @@ async def create_mcp_server(
         icon_url=data.icon_url,
         documentation_url=data.documentation_url,
     )
+
+    # If connection failed, return 400 error with message
+    if not result.connection.success:
+        raise BadRequestException(
+            result.connection.error_message or "Failed to connect to MCP server"
+        )
+
     return MCPServerCreateResponse(
         server=assembler.from_domain_to_model(result.server),
         connection=MCPConnectionStatus(
@@ -274,7 +281,7 @@ async def get_mcp_server_tools(
 @router.post(
     "/{id}/tools/sync/",
     response_model=MCPServerToolSyncResponse,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def sync_mcp_server_tools(
     id: UUID,
@@ -282,14 +289,20 @@ async def sync_mcp_server_tools(
 ):
     """Manually refresh/sync tools for an MCP server (admin only).
 
-    Returns the synced tools along with connection status indicating
-    whether the sync succeeded.
+    Returns 400 if connection to the MCP server fails.
     """
     service = container.mcp_server_service()
     assembler = container.mcp_server_tool_assembler()
 
     # Refresh tools from MCP server
     tools, connection_result = await service.refresh_tools(id)
+
+    # If connection failed, return 400 error with message
+    if not connection_result.success:
+        raise BadRequestException(
+            connection_result.error_message or "Failed to connect to MCP server"
+        )
+
     return MCPServerToolSyncResponse(
         tools=[assembler.from_domain_to_model(t) for t in tools],
         connection=MCPConnectionStatus(

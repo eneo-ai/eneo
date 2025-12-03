@@ -19,7 +19,6 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let transport_type = $state<"sse" | "streamable_http">("sse");
   let http_auth_type = $state<"none" | "bearer" | "api_key" | "custom_headers">("none");
   let documentation_url = $state("");
 
@@ -30,14 +29,16 @@
   let custom_headers = $state("");
 
   let submitting = $state(false);
+  let errorMessage = $state("");
 
   async function handleSubmit() {
     submitting = true;
+    errorMessage = "";
+
     try {
       const data: any = {
         name,
         http_url,
-        transport_type,
         http_auth_type,
       };
 
@@ -57,7 +58,7 @@
         try {
           data.http_auth_config_schema = JSON.parse(custom_headers);
         } catch (e) {
-          alert("Invalid JSON for custom headers");
+          errorMessage = "Invalid JSON for custom headers";
           submitting = false;
           return;
         }
@@ -69,7 +70,6 @@
       name = "";
       description = "";
       http_url = "";
-      transport_type = "sse";
       http_auth_type = "none";
       documentation_url = "";
       bearer_token = "";
@@ -78,6 +78,9 @@
       custom_headers = "";
 
       $openController = false;
+    } catch (error: any) {
+      // Extract error message from API response
+      errorMessage = error?.message || error?.body?.message || "Failed to create MCP server. Please check the URL and try again.";
     } finally {
       submitting = false;
     }
@@ -90,6 +93,12 @@
 
     <Dialog.Section scrollable={true}>
       <form on:submit|preventDefault={handleSubmit} class="space-y-4 px-4 py-4">
+        {#if errorMessage}
+          <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
+            {errorMessage}
+          </div>
+        {/if}
+
         <div>
           <label for="name" class="text-default mb-1 block text-sm font-medium">{m.name()}</label>
           <input
@@ -112,30 +121,16 @@
         </div>
 
         <div>
-          <label for="http_url" class="text-default mb-1 block text-sm font-medium">HTTP URL *</label>
+          <label for="http_url" class="text-default mb-1 block text-sm font-medium">Server URL *</label>
           <input
             id="http_url"
             type="url"
             bind:value={http_url}
             required
-            placeholder="https://example.com/sse or https://example.com/mcp"
+            placeholder="https://example.com/mcp"
             class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
           />
-          <p class="text-muted mt-1 text-xs">Full URL to the MCP server endpoint</p>
-        </div>
-
-        <div>
-          <label for="transport_type" class="text-default mb-1 block text-sm font-medium">Transport Type</label>
-          <select
-            id="transport_type"
-            bind:value={transport_type}
-            required
-            class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-          >
-            <option value="sse">SSE (Server-Sent Events)</option>
-            <option value="streamable_http">Streamable HTTP</option>
-          </select>
-          <p class="text-muted mt-1 text-xs">SSE is recommended for most use cases</p>
+          <p class="text-muted mt-1 text-xs">Full URL to the MCP server endpoint (Streamable HTTP)</p>
         </div>
 
         <div>

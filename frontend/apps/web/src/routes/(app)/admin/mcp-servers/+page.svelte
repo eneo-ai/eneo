@@ -44,25 +44,13 @@
   }
 
   async function handleAddMCP(mcpData: any) {
-    try {
-      await data.intric.mcpServers.create(mcpData);
-      // Refresh both admin layout and space data
-      await Promise.all([
-        invalidate('admin:layout'),
-        invalidate('spaces:data')
-      ]);
-    } catch (error) {
-      console.error('Failed to create MCP:', error);
-      throw error;
-    }
-  }
-
-  function getTransportTypeColor(type: string) {
-    switch (type) {
-      case 'sse': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
-      case 'streamable_http': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
-    }
+    // Create MCP server - errors are thrown and handled by the dialog
+    await data.intric.mcpServers.create(mcpData);
+    // Refresh both admin layout and space data
+    await Promise.all([
+      invalidate('admin:layout'),
+      invalidate('spaces:data')
+    ]);
   }
 
   function getAuthTypeColor(type: string) {
@@ -73,12 +61,6 @@
       case 'custom_headers': return 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
-  }
-
-  function formatTransportType(type: string) {
-    if (type === 'streamable_http') return 'Streamable HTTP';
-    if (type === 'sse') return 'SSE';
-    return type;
   }
 
   function formatAuthType(type: string) {
@@ -115,9 +97,6 @@
                   <div class="flex-1">
                     <div class="flex items-center gap-3">
                       <h3 class="text-default text-lg font-semibold">{mcpServer.name}</h3>
-                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {getTransportTypeColor(mcpServer.transport_type)}">
-                        {formatTransportType(mcpServer.transport_type)}
-                      </span>
                       <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {getAuthTypeColor(mcpServer.http_auth_type)}">
                         {formatAuthType(mcpServer.http_auth_type)}
                       </span>
@@ -179,12 +158,12 @@
       <Settings.Group title={m.what_are_mcp_servers()}>
         <div class="text-muted text-sm space-y-2">
           <p>
-            MCP (Model Context Protocol) servers provide additional tools and capabilities to AI assistants. All MCP servers are accessed via HTTP.
+            MCP (Model Context Protocol) servers provide additional tools and capabilities to AI assistants.
+            Servers are connected via Streamable HTTP transport.
           </p>
           <ul class="list-disc list-inside space-y-1 ml-4">
-            <li><strong>SSE (Server-Sent Events)</strong> - Recommended transport for real-time streaming</li>
-            <li><strong>Streamable HTTP</strong> - Alternative HTTP-based transport for production use</li>
             <li><strong>Authentication</strong> - Supports bearer tokens, API keys, and custom headers</li>
+            <li><strong>Tool Discovery</strong> - Tools are automatically discovered when adding a server</li>
           </ul>
         </div>
       </Settings.Group>

@@ -11,8 +11,8 @@ from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
 logger = get_logger(__name__)
 
-# Connection timeout in seconds
-MCP_CONNECTION_TIMEOUT = 30
+# Default connection timeout in seconds
+MCP_CONNECTION_TIMEOUT_DEFAULT = 30
 
 
 class MCPClientError(Exception):
@@ -24,16 +24,23 @@ class MCPClientError(Exception):
 class MCPClient:
     """Client for interacting with HTTP-based MCP servers."""
 
-    def __init__(self, mcp_server: MCPServer, auth_credentials: dict[str, str] | None = None):
+    def __init__(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ):
         """
         Initialize MCP client.
 
         Args:
             mcp_server: MCP server configuration
             auth_credentials: Authentication credentials from tenant settings
+            timeout: Connection timeout in seconds (defaults to 30s)
         """
         self.mcp_server = mcp_server
         self.auth_credentials = auth_credentials or {}
+        self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
@@ -64,13 +71,13 @@ class MCPClient:
         try:
             await asyncio.wait_for(
                 self._connect_internal(),
-                timeout=MCP_CONNECTION_TIMEOUT
+                timeout=self.timeout
             )
         except asyncio.TimeoutError:
-            logger.error(f"Connection to MCP server {self.mcp_server.name} timed out after {MCP_CONNECTION_TIMEOUT}s")
+            logger.error(f"Connection to MCP server {self.mcp_server.name} timed out after {self.timeout}s")
             # Clean up any partially initialized contexts
             await self._cleanup_contexts()
-            raise MCPClientError(f"Connection timed out after {MCP_CONNECTION_TIMEOUT}s")
+            raise MCPClientError(f"Connection timed out after {self.timeout}s")
         except Exception as e:
             logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {e}")
             await self._cleanup_contexts()

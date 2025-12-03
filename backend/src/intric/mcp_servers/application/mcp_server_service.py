@@ -67,7 +67,11 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
     ) -> MCPServerCreateResult:
-        """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport)."""
+        """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
+
+        Validates connection BEFORE saving to database to avoid orphaned entries.
+        """
+        # Create domain object (not saved yet)
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
@@ -79,13 +83,33 @@ class MCPServerService:
             icon_url=icon_url,
             documentation_url=documentation_url,
         )
+
+        # Test connection FIRST before saving to database
+        auth_credentials = http_auth_config_schema if http_auth_config_schema else None
+        tools, connection_result = await self._test_connection_and_discover_tools(
+            mcp_server, auth_credentials
+        )
+
+        # Only save to database if connection succeeded
+        if not connection_result.success:
+            # Return error without saving - let user fix the URL
+            return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+
+        # Connection succeeded - save to database
         mcp_server = await self.repo.add(mcp_server)
 
-        # Auto-discover tools after creating server
-        # Uses http_auth_config_schema as credentials if provided
-        auth_credentials = http_auth_config_schema if http_auth_config_schema else None
-        tools, connection_result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
+        # Save discovered tools
+        for tool_def in tools:
+            tool = MCPServerTool(
+                mcp_server_id=mcp_server.id,
+                name=tool_def["name"],
+                description=tool_def.get("description"),
+                input_schema=tool_def.get("input_schema"),
+                is_enabled_by_default=True,
+            )
+            await self.tool_repo.upsert_by_server_and_name(tool)
 
+        connection_result.tools_discovered = len(tools)
         return MCPServerCreateResult(server=mcp_server, connection=connection_result)
 
     @validate_permissions(Permission.ADMIN)
@@ -127,6 +151,54 @@ class MCPServerService:
     async def delete_mcp_server(self, mcp_server_id: UUID) -> None:
         """Delete an MCP server from global catalog (admin only)."""
         await self.repo.delete(id=mcp_server_id)
+
+    async def _test_connection_and_discover_tools(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        timeout: int = 10,
+    ) -> tuple[list[dict], ConnectionResult]:
+        """
+        Test connection to MCP server and discover tools WITHOUT saving to database.
+
+        Used during server creation to validate the URL before persisting.
+
+        Args:
+            mcp_server: MCP server to test (not yet saved to DB)
+            auth_credentials: Optional authentication credentials
+            timeout: Connection timeout in seconds (default 10s for fast feedback)
+
+        Returns:
+            Tuple of (list of tool definitions as dicts, connection result)
+        """
+        try:
+            logger.info(f"Testing connection to MCP server: {mcp_server.name} at {mcp_server.http_url}")
+
+            # Connect with shorter timeout for faster feedback during creation
+            async with MCPClient(mcp_server, auth_credentials, timeout=timeout) as client:
+                tool_defs = await client.list_tools()
+
+            logger.info(f"Connection successful - discovered {len(tool_defs)} tools from {mcp_server.name}")
+            return tool_defs, ConnectionResult(
+                success=True,
+                tools_discovered=len(tool_defs)
+            )
+
+        except MCPClientError as e:
+            error_msg = str(e)
+            if "Connection refused" in error_msg:
+                error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
+            elif "timed out" in error_msg.lower():
+                error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
+            logger.warning(f"Connection test failed for {mcp_server.name}: {e}")
+            return [], ConnectionResult(success=False, error_message=error_msg)
+
+        except Exception as e:
+            logger.error(f"Unexpected error testing connection to {mcp_server.name}: {e}")
+            return [], ConnectionResult(
+                success=False,
+                error_message=f"Connection failed: {e}"
+            )
 
     async def discover_and_sync_tools(
         self,
