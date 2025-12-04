@@ -63,7 +63,24 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
     });
   });
 
-export const handle = sequence(paraglideHandle, authHandle);
+const headerFilterHandle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event);
+
+  // Filter oversized Link header to prevent HAProxy 502 Bad Gateway
+  // HAProxy buffer limit: 16KB-64KB (effective header space = bufsize - maxrewrite)
+  const linkHeader = response.headers.get('link');
+  if (linkHeader && linkHeader.length > 12000) {
+    console.warn(
+      `[Headers] Link header too large (${linkHeader.length} bytes) - removing to prevent HAProxy 502. ` +
+      `Consider disabling modulePreload in vite.config.ts.`
+    );
+    response.headers.delete('link');
+  }
+
+  return response;
+};
+
+export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;
