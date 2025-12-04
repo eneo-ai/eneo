@@ -20,7 +20,7 @@ from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_service import PromptService
-from intric.questions.question import ToolAssistant, UseTools
+from intric.questions.question import ToolAssistant, ToolCallInfo, UseTools
 from intric.roles.permissions import (
     Permission,
     validate_permission,
@@ -451,6 +451,7 @@ class AssistantService:
                 reasoning_token_count = 0
                 response_string = ""
                 generated_files = []
+                tool_calls = []
 
                 async for chunk in response.completion:
                     reasoning_token_count = chunk.reasoning_token_count
@@ -475,6 +476,15 @@ class AssistantService:
                         yield chunk
 
                     if chunk.response_type == ResponseType.TOOL_CALL:
+                        if chunk.tool_calls_metadata:
+                            for tc in chunk.tool_calls_metadata:
+                                tool_calls.append(
+                                    ToolCallInfo(
+                                        server_name=tc.server_name,
+                                        tool_name=tc.tool_name,
+                                        arguments=tc.arguments,
+                                    )
+                                )
                         yield chunk
 
                 # Get the references for the whole response
@@ -498,6 +508,7 @@ class AssistantService:
                     logging_details=response.extended_logging,
                     assistant_id=assistant_id,
                     web_search_results=web_search_results,
+                    tool_calls=tool_calls if tool_calls else None,
                 )
 
             return response_stream()

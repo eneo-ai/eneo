@@ -21,9 +21,11 @@
     isLast() && chat.askQuestion.isLoading && message.answer.trim() === ""
   );
 
-  // Get MCP tool calls from the message (runtime property added during streaming)
+  // Get MCP tool calls from the message
+  // - mcp_tool_calls: runtime property added during streaming
+  // - tool_calls: persisted field from API response (chat history)
   const mcpToolCalls = $derived(
-    (message as any).mcp_tool_calls as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown> }> | undefined
+    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown> }> | undefined
   );
 
   // Track which tool calls have expanded arguments

@@ -8,7 +8,7 @@ from intric.ai_models.completion_models.completion_model import CompletionModelP
 from intric.files.file_models import FilePublic
 from intric.info_blobs.info_blob import InfoBlobAskAssistantPublic
 from intric.main.models import DateTimeModelMixin, InDB
-from intric.questions.question import Message, Question, UseTools, WebSearchResultPublic
+from intric.questions.question import Message, Question, ToolCallInfo, UseTools, WebSearchResultPublic
 
 if TYPE_CHECKING:
     from intric.assistants.api.assistant_models import AssistantSparse
@@ -110,13 +110,6 @@ class SSEFiles(SSEBase):
 
 class SSEIntricEvent(SSEBase):
     intric_event_type: IntricEventType
-
-
-class ToolCallInfo(BaseModel):
-    """Info about a single tool being called."""
-    server_name: str
-    tool_name: str
-    arguments: Optional[dict] = None  # The input values provided to the tool
 
 
 class SSEToolCall(SSEBase):

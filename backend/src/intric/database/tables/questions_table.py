@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +25,7 @@ class Questions(BasePublic):
     answer: Mapped[str] = mapped_column()
     num_tokens_question: Mapped[int] = mapped_column()
     num_tokens_answer: Mapped[int] = mapped_column()
+    tool_calls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
 
     # Foreign keys
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
