@@ -63,7 +63,14 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
     });
   });
 
-export const handle = sequence(paraglideHandle, authHandle);
+const headerFilterHandle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event, {
+    preload: () => false,
+  });
+  return response;
+};
+
+export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;
