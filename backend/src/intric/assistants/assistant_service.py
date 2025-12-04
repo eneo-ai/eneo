@@ -487,6 +487,9 @@ class AssistantService:
                                 )
                         yield chunk
 
+                    if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+                        yield chunk
+
                 # Get the references for the whole response
                 reference_chunks = get_references(
                     response_string=response_string,
@@ -573,6 +576,7 @@ class AssistantService:
         version: int = 1,
         use_web_search: bool = False,
         assistant_selector_tokens: int = 0,
+        require_tool_approval: bool = False,
     ):
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         active_assistant = space.get_assistant(assistant_id=assistant_id)
@@ -641,6 +645,7 @@ class AssistantService:
             stream=stream,
             version=version,
             web_search_results=web_search_results,
+            require_tool_approval=require_tool_approval,
         )
 
         # TODO: Separate the response based on stream true or false

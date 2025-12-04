@@ -17,7 +17,7 @@
 	import { getAppContext } from '$lib/core/AppContext';
 	import { m } from '$lib/paraglide/messages';
 	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
-	import { ChartPie } from 'lucide-svelte';
+	import { ChartPie, ShieldCheck } from 'lucide-svelte';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
@@ -44,12 +44,16 @@
 
 	let abortController: AbortController | undefined;
 	const TOKEN_USAGE_STORAGE_KEY = 'tokenUsageEnabled';
+	const TOOL_APPROVAL_STORAGE_KEY = 'toolApprovalEnabled';
 	let tokenUsageEnabled = $state(false);
+	let requireToolApproval = $state(false);
 	let hasHydratedTokenPreference = $state(false);
+	let hasHydratedToolApprovalPreference = $state(false);
 
 	onMount(() => {
 		if (!browser) {
 			hasHydratedTokenPreference = true;
+			hasHydratedToolApprovalPreference = true;
 			return;
 		}
 
@@ -69,6 +73,21 @@
 		} finally {
 			hasHydratedTokenPreference = true;
 		}
+
+		// Load tool approval preference
+		try {
+			const storedToolApproval = window.localStorage.getItem(TOOL_APPROVAL_STORAGE_KEY);
+			if (storedToolApproval === 'true') {
+				requireToolApproval = true;
+			} else {
+				requireToolApproval = false;
+				window.localStorage.setItem(TOOL_APPROVAL_STORAGE_KEY, 'false');
+			}
+		} catch (error) {
+			console.warn('Unable to read tool approval preference', error);
+		} finally {
+			hasHydratedToolApprovalPreference = true;
+		}
 	});
 
 	$effect(() => {
@@ -81,6 +100,19 @@
 			);
 		} catch (error) {
 			console.warn('Unable to persist token usage preference', error);
+		}
+	});
+
+	$effect(() => {
+		if (!browser || !hasHydratedToolApprovalPreference) return;
+
+		try {
+			window.localStorage.setItem(
+				TOOL_APPROVAL_STORAGE_KEY,
+				requireToolApproval ? 'true' : 'false'
+			);
+		} catch (error) {
+			console.warn('Unable to persist tool approval preference', error);
 		}
 	});
 
@@ -102,7 +134,9 @@
 						})
 					}
 				: undefined;
-		chat.askQuestion($question, files, tools, webSearchEnabled, abortController);
+		// Only enable tool approval if the toggle is on and the assistant has MCP tools
+		const toolApprovalEnabled = requireToolApproval && hasMcpTools;
+		chat.askQuestion($question, files, tools, webSearchEnabled, toolApprovalEnabled, abortController);
 		scrollToBottom();
 		resetMentionInput();
 		clearUploads();
@@ -127,6 +161,16 @@
 			chat.partner.type === 'default-assistant' ||
 			('allow_mentions' in chat.partner && chat.partner.allow_mentions);
 		return hasTools && isEnabled;
+	});
+
+	// Check if the assistant has MCP servers/tools
+	const hasMcpTools = $derived.by(() => {
+		if (!chat.partner) return false;
+		// Check for mcp_servers array on the partner
+		if ('mcp_servers' in chat.partner && Array.isArray(chat.partner.mcp_servers)) {
+			return chat.partner.mcp_servers.length > 0;
+		}
+		return false;
 	});
 
 	// --- Token Calculation and Coloring Logic ---
@@ -220,6 +264,18 @@
 						<span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
 					>
 				</div>
+			{/if}
+
+			{#if hasMcpTools}
+				<Tooltip text={requireToolApproval ? 'Tool approval enabled - you will be asked before tools run' : 'Enable to approve tool calls before execution'} placement="top">
+					<div
+						class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {requireToolApproval ? 'bg-accent-dimmer text-accent-stronger border-accent-default' : ''}"
+					>
+						<Input.Switch bind:value={requireToolApproval} class="*:!cursor-pointer">
+							<span class="-mr-2 flex gap-1"><ShieldCheck class="h-4 w-4" />Approve</span>
+						</Input.Switch>
+					</div>
+				</Tooltip>
 			{/if}
 		</div>
 

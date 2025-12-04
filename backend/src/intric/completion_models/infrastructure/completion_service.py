@@ -27,6 +27,7 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.logging import get_logger
 from intric.mcp_servers.infrastructure.proxy import MCPProxySession, MCPProxySessionFactory
+from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.settings.credential_resolver import CredentialResolver
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
@@ -158,6 +159,11 @@ class CompletionService:
                 yield chunk
                 continue
 
+            # Pass through tool approval required events directly
+            if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+                yield chunk
+                continue
+
 
             if chunk.tool_call:
                 if chunk.tool_call.name:
@@ -204,6 +210,7 @@ class CompletionService:
         version: int = 1,
         use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] = [],
+        require_tool_approval: bool = False,
     ):
         model_adapter = self._get_adapter(model)
 
@@ -272,10 +279,15 @@ class CompletionService:
                 Proxy cleanup happens after iteration completes.
                 """
                 try:
+                    # Get approval manager if tool approval is required
+                    approval_manager = get_approval_manager() if require_tool_approval else None
+
                     async for chunk in model_adapter.iterate_stream(
                         stream=stream_obj,
                         context=context,
                         model_kwargs=model_kwargs,
+                        require_tool_approval=require_tool_approval,
+                        approval_manager=approval_manager,
                     ):
                         yield chunk
                 finally:

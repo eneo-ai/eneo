@@ -404,6 +404,20 @@ export interface paths {
      */
     post: operations["set_title_of_conversation_api_v1_conversations__session_id__title__post"];
   };
+  "/api/v1/conversations/approve-tools/": {
+    /**
+     * Approve Tools
+     * @description Submit approval decisions for pending tool calls.
+     *
+     * When a chat request is made with require_tool_approval=true, the stream will emit
+     * a tool_approval_required event with an approval_id and list of pending tools.
+     * Use this endpoint to approve or reject each tool call.
+     *
+     * The decisions list should contain one entry per tool_call_id from the event.
+     * If a tool_call_id is omitted, it will be treated as rejected.
+     */
+    post: operations["approve_tools_api_v1_conversations_approve_tools__post"];
+  };
   "/api/v1/services/": {
     /** Get Services */
     get: operations["get_services_api_v1_services__get"];
@@ -3382,6 +3396,11 @@ export interface components {
        * @default false
        */
       use_web_search?: boolean;
+      /**
+       * Require Tool Approval
+       * @default false
+       */
+      require_tool_approval?: boolean;
     };
     /** Counts */
     Counts: {
@@ -5068,6 +5087,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
     };
     /** MessageLogging */
     MessageLogging: {
@@ -5091,6 +5115,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataStatistics */
@@ -7600,6 +7629,16 @@ export interface components {
        */
       total_token_usage: number;
     };
+    /**
+     * ToolApprovalDecision
+     * @description Decision for a single tool call.
+     */
+    ToolApprovalDecision: {
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Approved */
+      approved: boolean;
+    };
     /** ToolAssistant */
     ToolAssistant: {
       /**
@@ -7609,6 +7648,22 @@ export interface components {
       id: string;
       /** Handle */
       handle: string;
+    };
+    /**
+     * ToolCallInfo
+     * @description Info about a single tool being called.
+     */
+    ToolCallInfo: {
+      /** Server Name */
+      server_name: string;
+      /** Tool Name */
+      tool_name: string;
+      /** Arguments */
+      arguments?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tool Call Id */
+      tool_call_id?: string | null;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -8934,7 +8989,7 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    IntricEventType: "generating_image" | "tool_call";
+    IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
     /** SSEText */
     SSEText: {
       /**
@@ -9013,7 +9068,7 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call";
+        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
       };
     };
     /**
@@ -9035,7 +9090,7 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call";
+        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -9045,6 +9100,64 @@ export interface components {
           server_name: string;
           /** Tool Name */
           tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+        };
+      };
+    };
+    /**
+     * SSEToolApprovalRequired
+     * @description Event emitted when MCP tools require user approval before execution.
+     */
+    SSEToolApprovalRequired: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_approval_required */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Approval Id */
+      approval_id: string;
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
         };
       };
     };
@@ -11781,7 +11894,7 @@ export interface operations {
                    * IntricEventType
                    * @enum {string}
                    */
-                  IntricEventType: "generating_image" | "tool_call";
+                  IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
                 };
               },
               {
@@ -12088,6 +12201,56 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Approve Tools
+   * @description Submit approval decisions for pending tool calls.
+   *
+   * When a chat request is made with require_tool_approval=true, the stream will emit
+   * a tool_approval_required event with an approval_id and list of pending tools.
+   * Use this endpoint to approve or reject each tool call.
+   *
+   * The decisions list should contain one entry per tool_call_id from the event.
+   * If a tool_call_id is omitted, it will be treated as rejected.
+   */
+  approve_tools_api_v1_conversations_approve_tools__post: {
+    parameters: {
+      query: {
+        /** @description The approval ID from the tool_approval_required event */
+        approval_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ToolApprovalDecision"][];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Bad Request */

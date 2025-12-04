@@ -13,8 +13,14 @@ import {
   type UploadedFile,
   type ConversationMessage,
   IntricError,
-  type ConversationTools
+  type ConversationTools,
+  type SSE
 } from "@intric/intric-js";
+
+export type PendingToolApproval = {
+  approvalId: string;
+  tools: SSE.ToolApprovalRequired["tools"];
+};
 
 export type ChatPartner = GroupChat | Assistant;
 
@@ -58,6 +64,9 @@ export class ChatService {
 
   // Debounce timer for new prompt token calculations
   #newPromptTokenTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Tool approval state
+  pendingToolApproval = $state<PendingToolApproval | null>(null);
 
   constructor(data: Parameters<typeof this.init>[0]) {
     this.#intric = data.intric;
@@ -206,6 +215,7 @@ export class ChatService {
       attachments?: UploadedFile[],
       tools?: ConversationTools,
       useWebSearch?: boolean,
+      requireToolApproval?: boolean,
       abortController?: AbortController
     ) => {
       this.currentConversation.messages?.push(emptyMessage({ question }));
@@ -230,6 +240,7 @@ export class ChatService {
           tools,
           abortController,
           useWebSearch,
+          requireToolApproval,
           callbacks: {
             onFirstChunk: (chunk) => {
               Object.assign(ref, chunk);
@@ -296,6 +307,22 @@ export class ChatService {
               }
               // @ts-expect-error
               ref.mcp_tool_calls.push(...event.tools);
+            },
+            onToolApprovalRequired: (event) => {
+              ensureCurrentSession(event);
+              // Add tools to the message so they display in the UI
+              // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+              if (!ref.mcp_tool_calls) {
+                // @ts-expect-error
+                ref.mcp_tool_calls = [];
+              }
+              // @ts-expect-error
+              ref.mcp_tool_calls.push(...event.tools);
+              // Set pending approval state - UI will show inline approval buttons
+              this.pendingToolApproval = {
+                approvalId: event.approval_id,
+                tools: event.tools
+              };
             }
           }
         });
@@ -566,6 +593,105 @@ export class ChatService {
     if (this.#newPromptTokenTimer) {
       clearTimeout(this.#newPromptTokenTimer);
       this.#newPromptTokenTimer = null;
+    }
+  }
+
+  // Submit approval decisions for pending tool calls
+  async submitToolApproval(decisions: Array<{ tool_call_id: string; approved: boolean }>) {
+    if (!this.pendingToolApproval) {
+      console.warn('[ChatService] No pending tool approval to submit');
+      return;
+    }
+
+    try {
+      await this.#intric.conversations.approveTools({
+        approvalId: this.pendingToolApproval.approvalId,
+        decisions
+      });
+    } catch (error) {
+      console.error('[ChatService] Failed to submit tool approval:', error);
+      throw error;
+    } finally {
+      // Clear pending approval regardless of success/failure
+      this.pendingToolApproval = null;
+    }
+  }
+
+  // Helper to approve all pending tools
+  async approveAllTools() {
+    if (!this.pendingToolApproval) return;
+
+    const decisions = this.pendingToolApproval.tools.map(tool => ({
+      tool_call_id: tool.tool_call_id!,
+      approved: true
+    }));
+
+    await this.submitToolApproval(decisions);
+  }
+
+  // Helper to reject all pending tools
+  async rejectAllTools() {
+    if (!this.pendingToolApproval) return;
+
+    const decisions = this.pendingToolApproval.tools.map(tool => ({
+      tool_call_id: tool.tool_call_id!,
+      approved: false
+    }));
+
+    await this.submitToolApproval(decisions);
+  }
+
+  // Approve a single tool and keep others pending
+  async approveTool(toolCallId: string) {
+    if (!this.pendingToolApproval) return;
+
+    // Submit approval for this tool
+    await this.#intric.conversations.approveTools({
+      approvalId: this.pendingToolApproval.approvalId,
+      decisions: [{ tool_call_id: toolCallId, approved: true }]
+    });
+
+    // Remove the approved tool from pending list
+    const remainingTools = this.pendingToolApproval.tools.filter(
+      t => t.tool_call_id !== toolCallId
+    );
+
+    if (remainingTools.length === 0) {
+      // All tools processed, clear pending state
+      this.pendingToolApproval = null;
+    } else {
+      // Update pending tools
+      this.pendingToolApproval = {
+        ...this.pendingToolApproval,
+        tools: remainingTools
+      };
+    }
+  }
+
+  // Deny a single tool and keep others pending
+  async denyTool(toolCallId: string) {
+    if (!this.pendingToolApproval) return;
+
+    // Submit denial for this tool
+    await this.#intric.conversations.approveTools({
+      approvalId: this.pendingToolApproval.approvalId,
+      decisions: [{ tool_call_id: toolCallId, approved: false }]
+    });
+
+    // Remove the denied tool from pending list
+    const remainingTools = this.pendingToolApproval.tools.filter(
+      t => t.tool_call_id !== toolCallId
+    );
+
+    if (remainingTools.length === 0) {
+      // All tools processed, clear pending state
+      this.pendingToolApproval = null;
+    } else {
+      // Update pending tools
+      this.pendingToolApproval = {
+        ...this.pendingToolApproval,
+        tools: remainingTools
+      };
     }
   }
 }

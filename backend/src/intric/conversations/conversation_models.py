@@ -33,6 +33,7 @@ class ConversationRequest(BaseModel):
     stream: bool = False
     tools: Optional[UseTools] = None
     use_web_search: bool = False
+    require_tool_approval: bool = False
 
     @model_validator(mode="after")
     def validate_ids(self) -> "ConversationRequest":

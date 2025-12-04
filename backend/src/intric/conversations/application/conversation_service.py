@@ -53,6 +53,7 @@ class ConversationService:
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
         use_web_search: bool = False,
+        require_tool_approval: bool = False,
     ) -> "AskChatResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -103,6 +104,7 @@ class ConversationService:
                     tool_assistant_id=tool_assistant_id,
                     version=version,
                     use_web_search=use_web_search,
+                    require_tool_approval=require_tool_approval,
                 )
 
         # case 2: starting a new conversation
@@ -129,6 +131,7 @@ class ConversationService:
                     tool_assistant_id=tool_assistant_id,
                     version=version,
                     use_web_search=use_web_search,
+                    require_tool_approval=require_tool_approval,
                 )
             else:
                 # should never happen due to model validation, but just to be safe

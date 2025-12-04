@@ -28,6 +28,7 @@ class ResponseType(str, Enum):
     TEXT = "text"
     INTRIC_EVENT = "intric_event"
     TOOL_CALL = "tool_call"
+    TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     ERROR = "error"
@@ -52,6 +53,7 @@ class ToolCallMetadata:
     server_name: str
     tool_name: str
     arguments: Optional[dict] = None  # The input values provided to the tool
+    tool_call_id: Optional[str] = None  # The tool call ID for approval flow
 
 
 @dataclass
@@ -61,6 +63,7 @@ class Completion:
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None

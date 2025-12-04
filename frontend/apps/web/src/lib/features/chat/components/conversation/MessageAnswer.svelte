@@ -9,7 +9,8 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight } from "lucide-svelte";
+  import { ChevronRight, Check, X } from "lucide-svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
@@ -25,20 +26,77 @@
   // - mcp_tool_calls: runtime property added during streaming
   // - tool_calls: persisted field from API response (chat history)
   const mcpToolCalls = $derived(
-    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown> }> | undefined
+    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown>; tool_call_id?: string }> | undefined
   );
 
+  // Check if there's a pending tool approval for this message (only on last message)
+  const hasPendingApproval = $derived(
+    isLast() && chat.pendingToolApproval !== null
+  );
+
+  // Get pending tool IDs for matching
+  const pendingToolIds = $derived(
+    chat.pendingToolApproval?.tools.map(t => t.tool_call_id) ?? []
+  );
+
+  // Check if there are multiple pending tools (for showing bulk actions)
+  const hasMultiplePendingTools = $derived(pendingToolIds.length > 1);
+
   // Track which tool calls have expanded arguments
-  let expandedToolCalls = $state(new Set<number>());
+  const expandedToolCalls = new SvelteSet<number>();
+  const submittingToolIds = new SvelteSet<string>();
+  let isSubmittingBulk = $state(false);
 
   function toggleToolCallExpanded(index: number) {
-    const newExpanded = new Set(expandedToolCalls);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
+    if (expandedToolCalls.has(index)) {
+      expandedToolCalls.delete(index);
     } else {
-      newExpanded.add(index);
+      expandedToolCalls.add(index);
     }
-    expandedToolCalls = newExpanded;
+  }
+
+  async function handleApproveTool(toolCallId: string) {
+    submittingToolIds.add(toolCallId);
+    try {
+      await chat.approveTool(toolCallId);
+    } catch (error) {
+      console.error('Failed to approve tool:', error);
+    } finally {
+      submittingToolIds.delete(toolCallId);
+    }
+  }
+
+  async function handleDenyTool(toolCallId: string) {
+    submittingToolIds.add(toolCallId);
+    try {
+      await chat.denyTool(toolCallId);
+    } catch (error) {
+      console.error('Failed to deny tool:', error);
+    } finally {
+      submittingToolIds.delete(toolCallId);
+    }
+  }
+
+  async function handleApproveAll() {
+    isSubmittingBulk = true;
+    try {
+      await chat.approveAllTools();
+    } catch (error) {
+      console.error('Failed to approve all tools:', error);
+    } finally {
+      isSubmittingBulk = false;
+    }
+  }
+
+  async function handleDenyAll() {
+    isSubmittingBulk = true;
+    try {
+      await chat.rejectAllTools();
+    } catch (error) {
+      console.error('Failed to deny all tools:', error);
+    } finally {
+      isSubmittingBulk = false;
+    }
   }
 
   const showAnswerLabel = $derived.by(() => {
@@ -69,24 +127,48 @@
 
   {#if mcpToolCalls && mcpToolCalls.length > 0}
     <div class="mb-4 flex flex-col gap-1">
-      {#each mcpToolCalls as toolCall, idx}
+      {#each mcpToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === mcpToolCalls.length - 1}
-        {@const shouldPulse = isLastToolCall && toolsStillExecuting}
+        {@const isPendingTool = toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
+        {@const shouldPulse = isLastToolCall && toolsStillExecuting && !hasPendingApproval}
         {@const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
         {@const isExpanded = expandedToolCalls.has(idx)}
+        {@const isSubmitting = toolCall.tool_call_id ? submittingToolIds.has(toolCall.tool_call_id) : false}
         <div class="flex flex-col">
-          <button
-            type="button"
-            class="bg-accent-dimmer text-accent-stronger inline-flex w-fit items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:bg-accent-default/20' : 'cursor-default'}"
-            onclick={() => hasArgs && toggleToolCallExpanded(idx)}
-            disabled={!hasArgs}
-          >
-            {#if hasArgs}
-              <ChevronRight class="h-3 w-3 transition-transform {isExpanded ? 'rotate-90' : ''}" />
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="bg-accent-dimmer text-accent-stronger inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:bg-accent-default/20' : 'cursor-default'}"
+              onclick={() => hasArgs && toggleToolCallExpanded(idx)}
+              disabled={!hasArgs}
+            >
+              {#if hasArgs}
+                <ChevronRight class="h-3 w-3 transition-transform {isExpanded ? 'rotate-90' : ''}" />
+              {/if}
+              <span class="text-sm">🔧</span>
+              {isPendingTool ? m.tool_waiting_approval?.({ tool: toolCall.tool_name, server: toolCall.server_name }) ?? `${toolCall.server_name}: ${toolCall.tool_name}` : m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
+            </button>
+            {#if isPendingTool && toolCall.tool_call_id}
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded border border-positive-default bg-positive-default px-1.5 py-0.5 text-xs font-medium text-on-fill hover:bg-positive-stronger disabled:opacity-50"
+                onclick={() => handleApproveTool(toolCall.tool_call_id!)}
+                disabled={isSubmitting}
+              >
+                <Check class="h-3 w-3" />
+                Accept
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded border border-dimmer bg-secondary px-1.5 py-0.5 text-xs font-medium text-secondary hover:bg-hover-default disabled:opacity-50"
+                onclick={() => handleDenyTool(toolCall.tool_call_id!)}
+                disabled={isSubmitting}
+              >
+                <X class="h-3 w-3" />
+                Deny
+              </button>
             {/if}
-            <span class="text-base">🔧</span>
-            {m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
-          </button>
+          </div>
           {#if hasArgs && isExpanded}
             <div class="ml-4 mt-1 rounded-md border border-dimmer bg-secondary p-3 text-xs">
               <pre class="overflow-x-auto whitespace-pre-wrap break-words text-secondary">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
@@ -94,6 +176,28 @@
           {/if}
         </div>
       {/each}
+      {#if hasPendingApproval && hasMultiplePendingTools}
+        <div class="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded border border-positive-default bg-positive-default px-2 py-1 text-xs font-medium text-on-fill hover:bg-positive-stronger disabled:opacity-50"
+            onclick={handleApproveAll}
+            disabled={isSubmittingBulk}
+          >
+            <Check class="h-3 w-3" />
+            Accept All ({pendingToolIds.length})
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded border border-dimmer bg-secondary px-2 py-1 text-xs font-medium text-secondary hover:bg-hover-default disabled:opacity-50"
+            onclick={handleDenyAll}
+            disabled={isSubmittingBulk}
+          >
+            <X class="h-3 w-3" />
+            Deny All
+          </button>
+        </div>
+      {/if}
     </div>
   {/if}
 

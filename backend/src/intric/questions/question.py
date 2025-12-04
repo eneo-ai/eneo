@@ -65,6 +65,7 @@ class ToolCallInfo(BaseModel):
     server_name: str
     tool_name: str
     arguments: Optional[dict] = None
+    tool_call_id: Optional[str] = None  # For tool approval flow
 
 
 class QuestionAdd(QuestionBase):

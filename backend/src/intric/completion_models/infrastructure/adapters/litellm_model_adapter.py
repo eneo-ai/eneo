@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 import litellm
@@ -21,6 +22,7 @@ from intric.logging.logging import LoggingDetails
 from intric.main.config import get_settings
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
+from intric.mcp_servers.infrastructure.tool_approval import ToolApprovalManager
 from intric.settings.credential_resolver import CredentialResolver
 
 if TYPE_CHECKING:
@@ -705,10 +707,24 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unexpected error creating stream")
             raise OpenAIException("Unknown error occurred") from exc
 
-    async def iterate_stream(self, stream, context: Context = None, model_kwargs: ModelKwargs | None = None):
+    async def iterate_stream(
+        self,
+        stream,
+        context: Context = None,
+        model_kwargs: ModelKwargs | None = None,
+        require_tool_approval: bool = False,
+        approval_manager: ToolApprovalManager | None = None,
+    ):
         """
         Phase 2: Iterate pre-created stream inside EventSourceResponse.
         Yields error events for mid-stream failures.
+
+        Args:
+            stream: The pre-created LiteLLM stream
+            context: Conversation context
+            model_kwargs: Model-specific parameters
+            require_tool_approval: If True, pause before tool execution and wait for user approval
+            approval_manager: Manager for handling approval state (required if require_tool_approval is True)
         """
         try:
             logger.info(f"[LiteLLM] {self.litellm_model}: Starting stream iteration")
@@ -795,18 +811,48 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                         tool_info = mcp_proxy.get_tool_info(tc.function.name) if mcp_proxy else None
                         if tool_info:
                             server_name, tool_name = tool_info
-                            tool_metadata.append(ToolCallMetadata(server_name=server_name, tool_name=tool_name, arguments=args))
+                            tool_metadata.append(ToolCallMetadata(server_name=server_name, tool_name=tool_name, arguments=args, tool_call_id=tc.id))
                         elif "__" in tc.function.name:
                             # Fallback to parsing if proxy lookup fails
                             server, tool = tc.function.name.split("__", 1)
-                            tool_metadata.append(ToolCallMetadata(server_name=server, tool_name=tool, arguments=args))
+                            tool_metadata.append(ToolCallMetadata(server_name=server, tool_name=tool, arguments=args, tool_call_id=tc.id))
                         else:
-                            tool_metadata.append(ToolCallMetadata(server_name="", tool_name=tc.function.name, arguments=args))
+                            tool_metadata.append(ToolCallMetadata(server_name="", tool_name=tc.function.name, arguments=args, tool_call_id=tc.id))
 
-                    yield Completion(
-                        response_type=ResponseType.TOOL_CALL,
-                        tool_calls_metadata=tool_metadata,
-                    )
+                    # Handle tool approval if required
+                    if require_tool_approval and approval_manager:
+                        # Generate approval ID and emit approval required event
+                        approval_id = str(uuid.uuid4())
+                        tool_call_ids = [tc.id for tc in tool_calls]
+
+                        # Register the pending approval
+                        approval_manager.request_approval(approval_id, tool_call_ids)
+
+                        yield Completion(
+                            response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+                            tool_calls_metadata=tool_metadata,
+                            approval_id=approval_id,
+                        )
+
+                        # Wait for user approval (blocks until decision or timeout)
+                        logger.info(f"[MCP] Waiting for tool approval: {approval_id}")
+                        decisions = await approval_manager.wait_for_approval(approval_id)
+                        logger.info(f"[MCP] Received approval decisions for {approval_id}: {len(decisions)} decisions")
+
+                        # Build map of tool_call_id -> approved
+                        approval_map = {d.tool_call_id: d.approved for d in decisions}
+
+                        # Separate approved and denied tools
+                        approved_tool_calls = [tc for tc in tool_calls if approval_map.get(tc.id, False)]
+                        denied_tool_calls = [tc for tc in tool_calls if not approval_map.get(tc.id, False)]
+                    else:
+                        # No approval required - emit regular tool call event
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=tool_metadata,
+                        )
+                        approved_tool_calls = tool_calls
+                        denied_tool_calls = []
 
                     # Add assistant message with tool calls
                     messages.append({
@@ -824,27 +870,36 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                         ]
                     })
 
-                    # Execute tools via proxy (parallel, lazy connections)
-                    proxy_tool_calls = [
-                        (tc.function.name, json.loads(tc.function.arguments) if tc.function.arguments else {})
-                        for tc in tool_calls
-                    ]
-                    results = await mcp_proxy.call_tools_parallel(proxy_tool_calls)
+                    # Execute only approved tools via proxy (parallel, lazy connections)
+                    if approved_tool_calls:
+                        proxy_tool_calls = [
+                            (tc.function.name, json.loads(tc.function.arguments) if tc.function.arguments else {})
+                            for tc in approved_tool_calls
+                        ]
+                        results = await mcp_proxy.call_tools_parallel(proxy_tool_calls)
 
-                    # Add results to messages
-                    for tc, result in zip(tool_calls, results):
-                        result_text = ""
-                        if result.get("content"):
-                            for content_item in result["content"]:
-                                if content_item.get("type") == "text":
-                                    result_text += content_item.get("text", "")
-                        if result.get("is_error"):
-                            result_text = json.dumps({"error": result_text or "Tool execution failed"})
+                        # Add results to messages for approved tools
+                        for tc, result in zip(approved_tool_calls, results):
+                            result_text = ""
+                            if result.get("content"):
+                                for content_item in result["content"]:
+                                    if content_item.get("type") == "text":
+                                        result_text += content_item.get("text", "")
+                            if result.get("is_error"):
+                                result_text = json.dumps({"error": result_text or "Tool execution failed"})
 
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": result_text
+                            })
+
+                    # Add "denied" results for rejected tools
+                    for tc in denied_tool_calls:
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": result_text
+                            "content": "Tool execution was denied by user."
                         })
 
                     # Make follow-up streaming request (keep tools for potential next round)

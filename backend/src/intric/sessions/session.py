@@ -93,6 +93,7 @@ class SessionResponse(BaseModel):
 class IntricEventType(str, Enum):
     GENERATING_IMAGE = "generating_image"
     TOOL_CALL = "tool_call"
+    TOOL_APPROVAL_REQUIRED = "tool_approval_required"
 
 
 class SSEBase(BaseModel):
@@ -118,6 +119,13 @@ class SSEToolCall(SSEBase):
     tools: list[ToolCallInfo]
 
 
+class SSEToolApprovalRequired(SSEBase):
+    """Event emitted when MCP tools require user approval before execution."""
+    intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_REQUIRED
+    approval_id: str  # UUID to correlate approval response
+    tools: list[ToolCallInfo]  # Tools pending approval
+
+
 class SSEFirstChunk(AskChatResponse):
     pass
 
@@ -128,7 +136,7 @@ class SSEError(SSEBase):
 
 
 # Add the SSE models here in order to include them in the openapi schema
-SSE_MODELS = [SSEText, SSEIntricEvent, SSEToolCall, SSEFiles, SSEFirstChunk, SSEError]
+SSE_MODELS = [SSEText, SSEIntricEvent, SSEToolCall, SSEToolApprovalRequired, SSEFiles, SSEFirstChunk, SSEError]
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [IntricEventType]

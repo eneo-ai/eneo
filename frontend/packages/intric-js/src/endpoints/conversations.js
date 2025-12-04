@@ -84,6 +84,7 @@ export function initConversations(client) {
      * @param {string} params.question Question to ask
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.useWebSearch] Should the assistant search the web? Defaults to false
+     * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
@@ -91,6 +92,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
      * @param {(data: import("../types/resources").SSE.Intric) => void} [params.callbacks.onIntricEvent] Callback to run when an intric event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
+     * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {IntricError}
@@ -102,6 +104,7 @@ export function initConversations(client) {
       files,
       tools,
       useWebSearch,
+      requireToolApproval,
       abortController,
       callbacks
     }) => {
@@ -138,7 +141,8 @@ export function initConversations(client) {
               files,
               tools,
               stream: true,
-              use_web_search: useWebSearch
+              use_web_search: useWebSearch,
+              require_tool_approval: requireToolApproval
             }
           }
         },
@@ -175,6 +179,10 @@ export function initConversations(client) {
                 case "tool_call":
                   callbacks?.onToolCall?.(data);
                   break;
+
+                case "tool_approval_required":
+                  callbacks?.onToolApprovalRequired?.(data);
+                  break;
               }
             } catch (e) {
               return;
@@ -185,6 +193,25 @@ export function initConversations(client) {
       );
 
       return response;
+    },
+
+    /**
+     * Submit approval decisions for pending tool calls.
+     * @param {Object} params Approval parameters
+     * @param {string} params.approvalId The approval ID from the tool_approval_required event
+     * @param {Array<{tool_call_id: string, approved: boolean}>} params.decisions Approval decisions for each tool
+     * @returns {Promise<{status: string}>} Status response
+     * @throws {IntricError}
+     * */
+    approveTools: async ({ approvalId, decisions }) => {
+      const res = await client.fetch("/api/v1/conversations/approve-tools/", {
+        method: "post",
+        params: { query: { approval_id: approvalId } },
+        requestBody: {
+          "application/json": decisions
+        }
+      });
+      return res;
     }
   };
 }

@@ -312,6 +312,7 @@ class Assistant(Entity):
         stream: bool = False,
         version: int = 1,
         web_search_results: list["WebSearchResult"] = [],
+        require_tool_approval: bool = False,
     ):
         if any([file.file_type == FileType.IMAGE for file in files]):
             if not self.completion_model.vision:
@@ -347,6 +348,7 @@ class Assistant(Entity):
             use_image_generation=self.is_default,
             web_search_results=web_search_results,
             mcp_servers=self.mcp_servers,
+            require_tool_approval=require_tool_approval,
         )
 
         return response, datastore_result
