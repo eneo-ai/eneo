@@ -9,7 +9,7 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight, Check, X } from "lucide-svelte";
+  import { ChevronRight, Check, X, Wrench } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();
@@ -138,24 +138,29 @@
         {@const isDeniedLocally = toolCall.tool_call_id && deniedToolIds.has(toolCall.tool_call_id)}
         {@const isDeniedFromBackend = toolCall.approved === false}
         {@const isDenied = isDeniedLocally || isDeniedFromBackend}
+        {@const isApproved = toolCall.approved === true}
         {@const shouldPulse = isLastToolCall && toolsStillExecuting && !hasPendingApproval}
         {@const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
         {@const isExpanded = expandedToolCalls.has(idx)}
         {@const isSubmitting = toolCall.tool_call_id ? submittingToolIds.has(toolCall.tool_call_id) : false}
+        {@const pillColor = isDenied ? 'bg-negative-dimmer text-negative-stronger' : isApproved ? 'bg-positive-dimmer text-positive-stronger' : 'bg-accent-dimmer text-accent-stronger'}
         <div class="flex flex-col">
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium {isDenied ? 'bg-negative-dimmer text-negative-stronger' : 'bg-accent-dimmer text-accent-stronger'} {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}"
+              class="inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium {pillColor} {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}"
               onclick={() => hasArgs && toggleToolCallExpanded(idx)}
               disabled={!hasArgs}
             >
               {#if hasArgs}
                 <ChevronRight class="h-3 w-3 transition-transform {isExpanded ? 'rotate-90' : ''}" />
               {/if}
-              <span class="text-sm">🔧</span>
+              <Wrench class="h-3.5 w-3.5" />
               {isPendingTool ? m.tool_waiting_approval?.({ tool: toolCall.tool_name, server: toolCall.server_name }) ?? `${toolCall.server_name}: ${toolCall.tool_name}` : m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
             </button>
+            {#if isDenied}
+              <span class="text-xs text-tertiary italic">{m.tool_rejected_by_user()}</span>
+            {/if}
             {#if isPendingTool && toolCall.tool_call_id}
               <button
                 type="button"
@@ -164,7 +169,7 @@
                 disabled={isSubmitting}
               >
                 <Check class="h-3 w-3" />
-                Accept
+                {m.tool_accept()}
               </button>
               <button
                 type="button"
@@ -173,7 +178,7 @@
                 disabled={isSubmitting}
               >
                 <X class="h-3 w-3" />
-                Deny
+                {m.tool_deny()}
               </button>
             {/if}
           </div>
@@ -193,7 +198,7 @@
             disabled={isSubmittingBulk}
           >
             <Check class="h-3 w-3" />
-            Accept All ({pendingToolIds.length})
+            {m.tool_accept_all({ count: pendingToolIds.length })}
           </button>
           <button
             type="button"
@@ -202,7 +207,7 @@
             disabled={isSubmittingBulk}
           >
             <X class="h-3 w-3" />
-            Deny All
+            {m.tool_deny_all()}
           </button>
         </div>
       {/if}

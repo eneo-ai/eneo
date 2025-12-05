@@ -17,7 +17,7 @@
 	import { getAppContext } from '$lib/core/AppContext';
 	import { m } from '$lib/paraglide/messages';
 	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
-	import { ChartPie, ShieldCheck } from 'lucide-svelte';
+	import { ChartPie, Wrench } from 'lucide-svelte';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
@@ -44,9 +44,9 @@
 
 	let abortController: AbortController | undefined;
 	const TOKEN_USAGE_STORAGE_KEY = 'tokenUsageEnabled';
-	const TOOL_APPROVAL_STORAGE_KEY = 'toolApprovalEnabled';
+	const AUTO_ACCEPT_TOOLS_STORAGE_KEY = 'autoAcceptToolsEnabled';
 	let tokenUsageEnabled = $state(false);
-	let requireToolApproval = $state(false);
+	let autoAcceptTools = $state(true);
 	let hasHydratedTokenPreference = $state(false);
 	let hasHydratedToolApprovalPreference = $state(false);
 
@@ -74,17 +74,17 @@
 			hasHydratedTokenPreference = true;
 		}
 
-		// Load tool approval preference
+		// Load auto-accept tools preference (default to true = auto-accept)
 		try {
-			const storedToolApproval = window.localStorage.getItem(TOOL_APPROVAL_STORAGE_KEY);
-			if (storedToolApproval === 'true') {
-				requireToolApproval = true;
+			const storedAutoAccept = window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY);
+			if (storedAutoAccept === 'false') {
+				autoAcceptTools = false;
 			} else {
-				requireToolApproval = false;
-				window.localStorage.setItem(TOOL_APPROVAL_STORAGE_KEY, 'false');
+				autoAcceptTools = true;
+				window.localStorage.setItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY, 'true');
 			}
 		} catch (error) {
-			console.warn('Unable to read tool approval preference', error);
+			console.warn('Unable to read auto-accept tools preference', error);
 		} finally {
 			hasHydratedToolApprovalPreference = true;
 		}
@@ -108,11 +108,11 @@
 
 		try {
 			window.localStorage.setItem(
-				TOOL_APPROVAL_STORAGE_KEY,
-				requireToolApproval ? 'true' : 'false'
+				AUTO_ACCEPT_TOOLS_STORAGE_KEY,
+				autoAcceptTools ? 'true' : 'false'
 			);
 		} catch (error) {
-			console.warn('Unable to persist tool approval preference', error);
+			console.warn('Unable to persist auto-accept tools preference', error);
 		}
 	});
 
@@ -134,8 +134,8 @@
 						})
 					}
 				: undefined;
-		// Only enable tool approval if the toggle is on and the assistant has MCP tools
-		const toolApprovalEnabled = requireToolApproval && hasMcpTools;
+		// Require tool approval if auto-accept is OFF and the assistant has MCP tools
+		const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
 		chat.askQuestion($question, files, tools, webSearchEnabled, toolApprovalEnabled, abortController);
 		scrollToBottom();
 		resetMentionInput();
@@ -267,12 +267,12 @@
 			{/if}
 
 			{#if hasMcpTools}
-				<Tooltip text={requireToolApproval ? 'Tool approval enabled - you will be asked before tools run' : 'Enable to approve tool calls before execution'} placement="top">
+				<Tooltip text={autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()} placement="top">
 					<div
-						class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {requireToolApproval ? 'bg-accent-dimmer text-accent-stronger border-accent-default' : ''}"
+						class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {autoAcceptTools ? 'bg-accent-dimmer text-accent-stronger border-accent-default' : ''}"
 					>
-						<Input.Switch bind:value={requireToolApproval} class="*:!cursor-pointer">
-							<span class="-mr-2 flex gap-1"><ShieldCheck class="h-4 w-4" />Approve</span>
+						<Input.Switch bind:value={autoAcceptTools} class="*:!cursor-pointer">
+							<span class="-mr-2 flex items-center gap-1"><Wrench class="h-5 w-5" />{m.auto_accept_tools()}</span>
 						</Input.Switch>
 					</div>
 				</Tooltip>
