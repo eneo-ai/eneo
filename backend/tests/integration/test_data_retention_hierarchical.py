@@ -569,3 +569,138 @@ async def test_hard_delete_not_soft_delete(
 
     # Verify no deleted_at column exists (Questions table doesn't support soft delete)
     assert not hasattr(Questions, "deleted_at"), "Questions table should not have soft delete"
+
+
+@pytest.mark.asyncio
+async def test_tenant_level_retention_fallback_for_app_runs(
+    async_session: AsyncSession,
+    test_space: Spaces,
+    test_app: Apps,
+    test_tenant,
+    admin_user,
+    retention_service: DataRetentionService,
+):
+    """Test that tenant-level retention applies to app runs when space and app have no policy."""
+    # Create tenant retention policy
+    tenant_policy = AuditRetentionPolicy(
+        tenant_id=test_tenant.id,
+        retention_days=365,  # Audit logs
+        conversation_retention_enabled=True,
+        conversation_retention_days=180,  # Conversation retention
+    )
+    async_session.add(tenant_policy)
+    await async_session.flush()
+
+    # Extract IDs
+    app_id = test_app.id
+    tenant_id = test_tenant.id
+    user_id = admin_user.id
+    completion_model_id = test_app.completion_model_id
+
+    # Create app runs: one old (200 days), one recent (100 days)
+    old_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=200)
+    recent_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=100)
+
+    # Run cleanup
+    deleted_count = await retention_service.delete_old_app_runs()
+    await async_session.flush()
+
+    # Verify: old run deleted by tenant policy
+    assert deleted_count == 1
+
+    old_exists = await async_session.get(AppRuns, old_run.id)
+    recent_exists = await async_session.get(AppRuns, recent_run.id)
+
+    assert old_exists is None, "App run older than tenant retention should be deleted"
+    assert recent_exists is not None, "App run within tenant retention should be kept"
+
+
+@pytest.mark.asyncio
+async def test_boundary_condition_exact_retention_days(
+    async_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+    retention_service: DataRetentionService,
+):
+    """Test boundary condition: question exactly at retention boundary should NOT be deleted.
+
+    The logic uses created_at < cutoff_date, so a question exactly at the boundary
+    should be kept (not deleted). This tests the < vs <= boundary condition.
+    """
+    # Set assistant retention to 30 days
+    test_assistant.data_retention_days = 30
+    async_session.add(test_assistant)
+    await async_session.flush()
+
+    # Extract IDs
+    assistant_id = test_assistant.id
+    tenant_id = test_tenant.id
+    user_id = admin_user.id
+
+    # Create questions: one exactly at boundary (30 days), one just past (31 days)
+    boundary_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=30)
+    past_boundary_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=31)
+
+    # Run cleanup
+    deleted_count = await retention_service.delete_old_questions()
+    await async_session.flush()
+
+    # Verify: only question past boundary is deleted
+    assert deleted_count == 1
+
+    boundary_exists = await async_session.get(Questions, boundary_question.id)
+    past_exists = await async_session.get(Questions, past_boundary_question.id)
+
+    assert boundary_exists is not None, "Question exactly at 30 days should be kept (< not <=)"
+    assert past_exists is None, "Question at 31 days should be deleted"
+
+
+@pytest.mark.asyncio
+async def test_tenant_enabled_but_days_null_keeps_forever(
+    async_session: AsyncSession,
+    test_space: Spaces,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+    retention_service: DataRetentionService,
+):
+    """Test edge case: tenant retention enabled but days is NULL should keep forever.
+
+    The COALESCE hierarchy treats NULL as 'keep forever'. If conversation_retention_enabled
+    is True but conversation_retention_days is NULL, questions should be kept indefinitely
+    because the CASE expression returns NULL when days is NULL.
+    """
+    # Create tenant policy with enabled=True but days=None
+    tenant_policy = AuditRetentionPolicy(
+        tenant_id=test_tenant.id,
+        retention_days=365,  # Audit logs (not conversation)
+        conversation_retention_enabled=True,  # Enabled...
+        conversation_retention_days=None,  # ...but no days set
+    )
+    async_session.add(tenant_policy)
+    await async_session.flush()
+
+    # No space or assistant level retention
+    # The COALESCE should return NULL (keep forever) because:
+    # 1. Assistant retention = NULL
+    # 2. Space retention = NULL
+    # 3. Tenant: enabled=True but days=NULL → CASE returns NULL
+
+    # Extract IDs
+    assistant_id = test_assistant.id
+    tenant_id = test_tenant.id
+    user_id = admin_user.id
+
+    # Create very old question (1000 days)
+    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=1000)
+
+    # Run cleanup
+    deleted_count = await retention_service.delete_old_questions()
+    await async_session.flush()
+
+    # Verify: nothing deleted (enabled=True but days=NULL means keep forever)
+    assert deleted_count == 0
+
+    exists = await async_session.get(Questions, old_question.id)
+    assert exists is not None, "Question should be kept when tenant has enabled=True but days=NULL"

@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Type, Any
 from uuid import UUID
 
@@ -16,6 +15,9 @@ from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import Spaces
 
 logger = logging.getLogger(__name__)
+
+# Batch size for retention deletions to prevent transaction timeouts
+RETENTION_BATCH_SIZE = 5000
 
 
 class DataRetentionService:
@@ -67,6 +69,8 @@ class DataRetentionService:
         """
         Generic method to delete old records based on hierarchical retention policies.
 
+        Uses batch deletion to prevent transaction timeouts on large datasets.
+
         Args:
             record_table: Table to delete from (e.g., Questions, AppRuns)
             entity_table: Parent entity table (e.g., Assistants, Apps)
@@ -83,8 +87,8 @@ class DataRetentionService:
         # Build effective retention days using hierarchy
         effective_retention_days = self._build_effective_retention_days(entity_retention_col)
 
-        # Build subquery to identify records to delete
-        subquery = (
+        # Build base subquery to identify records to delete (will be limited per batch)
+        base_subquery = (
             sa.select(record_table.id)
             .join(entity_table, record_fk_col == entity_table.id)
             .join(Spaces, entity_fk_col == Spaces.id)
@@ -96,22 +100,33 @@ class DataRetentionService:
                 sa.and_(
                     effective_retention_days.isnot(None),
                     record_table.created_at
-                    < sa.func.now() - (effective_retention_days * sa.text("INTERVAL '1 day'")),
+                    # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+                    < sa.func.now() - sa.func.make_interval(0, 0, 0, effective_retention_days),
                 )
             )
         )
 
-        # Delete matching records
-        query = sa.delete(record_table).where(record_table.id.in_(subquery))
-        result = await self.session.execute(query)
-        deleted_count = result.rowcount
+        # Batch deletion to prevent transaction timeouts on large datasets
+        total_deleted = 0
+        while True:
+            # Delete batch of records (ORDER BY ensures deterministic batch selection)
+            batch_subquery = base_subquery.order_by(record_table.id).limit(RETENTION_BATCH_SIZE)
+            query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))
+            result = await self.session.execute(query)
+            batch_deleted = result.rowcount
 
-        if deleted_count > 0:
-            logger.info(f"Deleted {deleted_count} old {record_type} based on retention policies")
+            if batch_deleted == 0:
+                break
+
+            total_deleted += batch_deleted
+            logger.debug(f"Deleted batch of {batch_deleted} {record_type} (total: {total_deleted})")
+
+        if total_deleted > 0:
+            logger.info(f"Deleted {total_deleted} old {record_type} based on retention policies")
         else:
             logger.debug(f"No old {record_type} to delete based on retention policies")
 
-        return deleted_count
+        return total_deleted
 
     async def delete_old_questions(self) -> int:
         """
@@ -158,43 +173,60 @@ class DataRetentionService:
         Delete orphaned sessions that have no questions.
 
         Sessions without questions are deleted after ORPHANED_SESSION_CLEANUP_DAYS.
+        Uses batch deletion to prevent transaction timeouts on large datasets.
 
         Returns:
             Number of sessions deleted
         """
         logger.info(f"Starting deletion of orphaned sessions older than {ORPHANED_SESSION_CLEANUP_DAYS} day(s)")
 
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=ORPHANED_SESSION_CLEANUP_DAYS)
+        # Use DB time (sa.func.now()) for consistency with deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, ORPHANED_SESSION_CLEANUP_DAYS)
 
-        subquery = (
+        # Build base subquery to identify orphaned sessions (will be limited per batch)
+        base_subquery = (
             sa.select(Sessions.id)
             .outerjoin(Questions, Sessions.id == Questions.session_id)
-            .where(sa.and_(Sessions.created_at < cutoff_date, Questions.id.is_(None)))
+            .where(sa.and_(Sessions.created_at < cutoff_expr, Questions.id.is_(None)))
         )
 
-        query = sa.delete(Sessions).where(Sessions.id.in_(subquery))
-        result = await self.session.execute(query)
-        deleted_count = result.rowcount
+        # Batch deletion to prevent transaction timeouts on large datasets
+        total_deleted = 0
+        while True:
+            # ORDER BY ensures deterministic batch selection
+            batch_subquery = base_subquery.order_by(Sessions.id).limit(RETENTION_BATCH_SIZE)
+            query = sa.delete(Sessions).where(Sessions.id.in_(batch_subquery))
+            result = await self.session.execute(query)
+            batch_deleted = result.rowcount
 
-        if deleted_count > 0:
-            logger.info(f"Deleted {deleted_count} orphaned sessions")
+            if batch_deleted == 0:
+                break
+
+            total_deleted += batch_deleted
+            logger.debug(f"Deleted batch of {batch_deleted} orphaned sessions (total: {total_deleted})")
+
+        if total_deleted > 0:
+            logger.info(f"Deleted {total_deleted} orphaned sessions")
         else:
             logger.debug("No orphaned sessions to delete")
 
-        return deleted_count
+        return total_deleted
 
     async def get_affected_questions_count_for_assistant(
         self, assistant_id: UUID, retention_days: int
     ) -> int:
         """Get count of questions that would be deleted for a specific assistant."""
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        # Use DB time (sa.func.now()) for consistency with deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
 
         query = (
             sa.select(sa.func.count(Questions.id))
             .where(
                 sa.and_(
                     Questions.assistant_id == assistant_id,
-                    Questions.created_at < cutoff_date
+                    Questions.created_at < cutoff_expr
                 )
             )
         )
@@ -206,14 +238,16 @@ class DataRetentionService:
         self, app_id: UUID, retention_days: int
     ) -> int:
         """Get count of app runs that would be deleted for a specific app."""
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        # Use DB time (sa.func.now()) for consistency with deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
 
         query = (
             sa.select(sa.func.count(AppRuns.id))
             .where(
                 sa.and_(
                     AppRuns.app_id == app_id,
-                    AppRuns.created_at < cutoff_date
+                    AppRuns.created_at < cutoff_expr
                 )
             )
         )
@@ -225,7 +259,9 @@ class DataRetentionService:
         self, space_id: UUID, retention_days: int
     ) -> int:
         """Get count of questions that would be deleted across all assistants in a space."""
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        # Use DB time (sa.func.now()) for consistency with deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
 
         query = (
             sa.select(sa.func.count(Questions.id))
@@ -233,7 +269,7 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     Assistants.space_id == space_id,
-                    Questions.created_at < cutoff_date,
+                    Questions.created_at < cutoff_expr,
                     # Only count questions that don't have assistant-level retention
                     # (those would use their own retention policy)
                     Assistants.data_retention_days.is_(None)
@@ -248,7 +284,9 @@ class DataRetentionService:
         self, space_id: UUID, retention_days: int
     ) -> int:
         """Get count of app runs that would be deleted across all apps in a space."""
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        # Use DB time (sa.func.now()) for consistency with deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
 
         query = (
             sa.select(sa.func.count(AppRuns.id))
@@ -256,7 +294,7 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     Apps.space_id == space_id,
-                    AppRuns.created_at < cutoff_date,
+                    AppRuns.created_at < cutoff_expr,
                     # Only count app runs that don't have app-level retention
                     Apps.data_retention_days.is_(None)
                 )
@@ -270,7 +308,9 @@ class DataRetentionService:
         self, tenant_id: UUID, retention_days: int
     ) -> dict[str, int]:
         """Get count of questions and app runs that would be deleted tenant-wide."""
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        # Use DB time (sa.func.now()) for consistency with deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
 
         # Count questions without assistant or space level retention
         questions_query = (
@@ -280,7 +320,7 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     Spaces.tenant_id == tenant_id,
-                    Questions.created_at < cutoff_date,
+                    Questions.created_at < cutoff_expr,
                     Assistants.data_retention_days.is_(None),
                     Spaces.data_retention_days.is_(None)
                 )
@@ -295,7 +335,7 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     Spaces.tenant_id == tenant_id,
-                    AppRuns.created_at < cutoff_date,
+                    AppRuns.created_at < cutoff_expr,
                     Apps.data_retention_days.is_(None),
                     Spaces.data_retention_days.is_(None)
                 )

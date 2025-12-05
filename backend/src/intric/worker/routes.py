@@ -107,7 +107,8 @@ async def purge_old_audit_logs(container: Container):
     """
     Daily cron job to purge old audit logs based on retention policies.
 
-    Runs at 02:00 UTC (3:00 AM Swedish time) to minimize user impact.
+    Runs at 02:00 UTC (3:00 AM Swedish winter, 4:00 AM summer) to minimize user impact.
+    Scheduled 2 hours after website crawls to avoid worker overload.
 
     CRITICAL: Each tenant is processed in a SEPARATE database session/transaction.
     This ensures:
@@ -263,4 +264,68 @@ async def purge_old_audit_logs(container: Container):
         "total_tenants": total_tenants,
         "total_purged": total_purged,
         "success": len(errors) == 0,
+    }
+
+
+@worker.cron_job(hour=4, minute=0)  # Daily at 04:00 UTC
+async def purge_old_conversations(container: Container):
+    """
+    Daily cron job to purge old conversation data based on retention policies.
+
+    Runs at 04:00 UTC (5:00 AM Swedish winter, 6:00 AM summer) to minimize user impact.
+    Scheduled 2 hours after audit log purge to ensure no overlap (audit purge may take 1-2 hours).
+
+    Deletes:
+    - Old questions (based on assistant/space/tenant retention hierarchy)
+    - Old app runs (based on app/space/tenant retention hierarchy)
+    - Orphaned sessions (sessions with no questions, older than cleanup threshold)
+
+    Uses hierarchical retention policy resolution:
+    1. Entity-level (Assistant/App) - highest priority
+    2. Space-level
+    3. Tenant-level (if enabled)
+    4. NULL = keep forever (default)
+
+    Returns:
+        Dictionary with deletion statistics
+    """
+    from intric.data_retention.infrastructure.data_retention_service import (
+        DataRetentionService,
+    )
+    from intric.main.logging import get_logger
+
+    logger = get_logger(__name__)
+
+    logger.info("Starting conversation data retention purge")
+
+    session = container.session()
+    retention_service = DataRetentionService(session)
+
+    # Delete old questions based on hierarchical retention policies
+    questions_deleted = await retention_service.delete_old_questions()
+
+    # Delete old app runs based on hierarchical retention policies
+    app_runs_deleted = await retention_service.delete_old_app_runs()
+
+    # Delete orphaned sessions (no questions, past cleanup threshold)
+    sessions_deleted = await retention_service.delete_old_sessions()
+
+    total_deleted = questions_deleted + app_runs_deleted + sessions_deleted
+
+    logger.info(
+        "Conversation data retention purge completed",
+        extra={
+            "questions_deleted": questions_deleted,
+            "app_runs_deleted": app_runs_deleted,
+            "sessions_deleted": sessions_deleted,
+            "total_deleted": total_deleted,
+        },
+    )
+
+    return {
+        "questions_deleted": questions_deleted,
+        "app_runs_deleted": app_runs_deleted,
+        "sessions_deleted": sessions_deleted,
+        "total_deleted": total_deleted,
+        "success": True,
     }

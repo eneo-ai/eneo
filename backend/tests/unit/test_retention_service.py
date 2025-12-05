@@ -446,36 +446,6 @@ class TestPurgeOldLogs:
             assert purged_count == 0
 
 
-class TestPurgeAllTenants:
-    """Tests for purge_all_tenants() method."""
-
-    async def test_purge_all_queries_all_policies(self, retention_service, mock_session):
-        """Verify purge_all_tenants queries all policies."""
-        # Mock empty policy list to avoid complex purge mocking
-        mock_result_all = MagicMock()
-        mock_result_all.scalars.return_value.all.return_value = []
-
-        mock_session.execute.return_value = mock_result_all
-
-        stats = await retention_service.purge_all_tenants()
-
-        # Verify select query was executed
-        mock_session.execute.assert_called_once()
-        # With no policies, stats should be empty
-        assert stats == {}
-
-    async def test_purge_all_returns_stats_dict(self, retention_service, mock_session):
-        """Verify purge_all_tenants returns a dictionary."""
-        mock_result_all = MagicMock()
-        mock_result_all.scalars.return_value.all.return_value = []
-
-        mock_session.execute.return_value = mock_result_all
-
-        stats = await retention_service.purge_all_tenants()
-
-        assert isinstance(stats, dict)
-
-
 class TestValidationBoundaries:
     """Tests for validation boundary conditions."""
 

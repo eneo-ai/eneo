@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -18,6 +18,12 @@ from intric.audit.domain.repositories.audit_log_repository import AuditLogReposi
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 logger = logging.getLogger(__name__)
+
+# Batch size for retention deletions to prevent transaction timeouts
+RETENTION_BATCH_SIZE = 5000
+
+# Warning threshold for purge duration - signals need for COALESCE optimization
+PURGE_DURATION_WARNING_THRESHOLD_SECONDS = 300  # 5 minutes
 
 
 def escape_like(value: str) -> str:
@@ -304,15 +310,54 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         Note: This is a HARD delete - logs are permanently removed from the database
         and cannot be recovered. This ensures compliance with data retention regulations
         that require true deletion after the retention period expires.
-        """
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
-        query = sa.delete(AuditLogTable).where(
-            sa.and_(
-                AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.created_at < cutoff_date,
+        Uses batch deletion to prevent transaction timeouts on large datasets.
+        """
+        # Use DB time (sa.func.now()) for consistency with all deletion logic
+        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
+
+        # Build base subquery to identify logs to delete (will be limited per batch)
+        base_subquery = (
+            sa.select(AuditLogTable.id)
+            .where(
+                sa.and_(
+                    AuditLogTable.tenant_id == tenant_id,
+                    AuditLogTable.created_at < cutoff_expr,
+                )
             )
         )
 
-        result = await self.session.execute(query)
-        return result.rowcount
+        # Batch deletion to prevent transaction timeouts on large datasets
+        # Note: No ORDER BY needed for deletions - any matching rows are valid targets
+        # This avoids O(N²) sorting overhead when filtering by created_at
+        total_deleted = 0
+        start_time = time.time()
+        while True:
+            batch_subquery = base_subquery.limit(RETENTION_BATCH_SIZE)
+            query = sa.delete(AuditLogTable).where(AuditLogTable.id.in_(batch_subquery))
+            result = await self.session.execute(query)
+            batch_deleted = result.rowcount
+
+            if batch_deleted == 0:
+                break
+
+            total_deleted += batch_deleted
+            logger.debug(
+                f"Deleted batch of {batch_deleted} audit logs for tenant {tenant_id} "
+                f"(total: {total_deleted})"
+            )
+
+        duration_seconds = time.time() - start_time
+        if total_deleted > 0:
+            logger.info(
+                f"Purge completed: {total_deleted} rows in {duration_seconds:.2f}s "
+                f"(tenant={tenant_id}, retention={retention_days}d)"
+            )
+
+        if duration_seconds > PURGE_DURATION_WARNING_THRESHOLD_SECONDS:
+            logger.warning(
+                f"Purge took {duration_seconds:.2f}s - consider COALESCE optimization"
+            )
+
+        return total_deleted

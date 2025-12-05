@@ -187,25 +187,3 @@ class RetentionService:
             await self.session.execute(query)
 
         return purged_count
-
-    async def purge_all_tenants(self) -> dict:
-        """
-        Purge old logs for all tenants.
-
-        Returns:
-            Dictionary with purge statistics per tenant
-        """
-        # Get all retention policies
-        query = select(AuditRetentionPolicy)
-        result = await self.session.execute(query)
-        policies = result.scalars().all()
-
-        purge_stats = {}
-        for policy in policies:
-            purged_count = await self.purge_old_logs(policy.tenant_id)
-            purge_stats[str(policy.tenant_id)] = {
-                "retention_days": policy.retention_days,
-                "purged_count": purged_count,
-            }
-
-        return purge_stats
