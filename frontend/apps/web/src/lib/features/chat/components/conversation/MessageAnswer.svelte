@@ -26,7 +26,7 @@
   // - mcp_tool_calls: runtime property added during streaming
   // - tool_calls: persisted field from API response (chat history)
   const mcpToolCalls = $derived(
-    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown>; tool_call_id?: string }> | undefined
+    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown>; tool_call_id?: string; approved?: boolean }> | undefined
   );
 
   // Check if there's a pending tool approval for this message (only on last message)
@@ -45,6 +45,7 @@
   // Track which tool calls have expanded arguments
   const expandedToolCalls = new SvelteSet<number>();
   const submittingToolIds = new SvelteSet<string>();
+  const deniedToolIds = new SvelteSet<string>();
   let isSubmittingBulk = $state(false);
 
   function toggleToolCallExpanded(index: number) {
@@ -70,6 +71,7 @@
     submittingToolIds.add(toolCallId);
     try {
       await chat.denyTool(toolCallId);
+      deniedToolIds.add(toolCallId);
     } catch (error) {
       console.error('Failed to deny tool:', error);
     } finally {
@@ -91,7 +93,10 @@
   async function handleDenyAll() {
     isSubmittingBulk = true;
     try {
+      // Track all denied tools before clearing
+      const toolIds = chat.pendingToolApproval?.tools.map(t => t.tool_call_id).filter(Boolean) ?? [];
       await chat.rejectAllTools();
+      toolIds.forEach(id => deniedToolIds.add(id!));
     } catch (error) {
       console.error('Failed to deny all tools:', error);
     } finally {
@@ -130,6 +135,9 @@
       {#each mcpToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === mcpToolCalls.length - 1}
         {@const isPendingTool = toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
+        {@const isDeniedLocally = toolCall.tool_call_id && deniedToolIds.has(toolCall.tool_call_id)}
+        {@const isDeniedFromBackend = toolCall.approved === false}
+        {@const isDenied = isDeniedLocally || isDeniedFromBackend}
         {@const shouldPulse = isLastToolCall && toolsStillExecuting && !hasPendingApproval}
         {@const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
         {@const isExpanded = expandedToolCalls.has(idx)}
@@ -138,7 +146,7 @@
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="bg-accent-dimmer text-accent-stronger inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:bg-accent-default/20' : 'cursor-default'}"
+              class="inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium {isDenied ? 'bg-negative-dimmer text-negative-stronger' : 'bg-accent-dimmer text-accent-stronger'} {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}"
               onclick={() => hasArgs && toggleToolCallExpanded(idx)}
               disabled={!hasArgs}
             >

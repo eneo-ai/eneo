@@ -54,6 +54,7 @@ class ToolCallMetadata:
     tool_name: str
     arguments: Optional[dict] = None  # The input values provided to the tool
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
+    approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
 
 
 @dataclass

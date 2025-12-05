@@ -141,7 +141,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
         data = SSEToolCall(
             session_id=session_id,
             tools=[
-                ToolCallInfo(server_name=tc.server_name, tool_name=tc.tool_name, arguments=tc.arguments)
+                ToolCallInfo(
+                    server_name=tc.server_name,
+                    tool_name=tc.tool_name,
+                    arguments=tc.arguments,
+                    tool_call_id=tc.tool_call_id,
+                    approved=tc.approved,
+                )
                 for tc in (chunk.tool_calls_metadata or [])
             ],
         )
@@ -156,6 +162,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
+                    approved=tc.approved,
                 )
                 for tc in (chunk.tool_calls_metadata or [])
             ],

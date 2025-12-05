@@ -478,16 +478,40 @@ class AssistantService:
                     if chunk.response_type == ResponseType.TOOL_CALL:
                         if chunk.tool_calls_metadata:
                             for tc in chunk.tool_calls_metadata:
+                                # Check if this tool_call already exists (from TOOL_APPROVAL_REQUIRED)
+                                existing = next(
+                                    (t for t in tool_calls if t.tool_call_id and t.tool_call_id == tc.tool_call_id),
+                                    None
+                                )
+                                if existing:
+                                    # Update existing entry with approval status
+                                    existing.approved = tc.approved
+                                else:
+                                    # Add new tool call
+                                    tool_calls.append(
+                                        ToolCallInfo(
+                                            server_name=tc.server_name,
+                                            tool_name=tc.tool_name,
+                                            arguments=tc.arguments,
+                                            tool_call_id=tc.tool_call_id,
+                                            approved=tc.approved,
+                                        )
+                                    )
+                        yield chunk
+
+                    if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+                        # Collect tool calls for approval flow (approval status will be updated later)
+                        if chunk.tool_calls_metadata:
+                            for tc in chunk.tool_calls_metadata:
                                 tool_calls.append(
                                     ToolCallInfo(
                                         server_name=tc.server_name,
                                         tool_name=tc.tool_name,
                                         arguments=tc.arguments,
+                                        tool_call_id=tc.tool_call_id,
+                                        approved=None,  # Will be updated when TOOL_CALL with approval status arrives
                                     )
                                 )
-                        yield chunk
-
-                    if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
                         yield chunk
 
                 # Get the references for the whole response

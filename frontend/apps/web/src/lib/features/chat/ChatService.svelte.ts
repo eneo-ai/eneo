@@ -305,8 +305,21 @@ export class ChatService {
                 // @ts-expect-error
                 ref.mcp_tool_calls = [];
               }
-              // @ts-expect-error
-              ref.mcp_tool_calls.push(...event.tools);
+              // Update existing tool calls or add new ones (avoid duplicates from approval flow)
+              for (const tool of event.tools) {
+                // @ts-expect-error
+                const existingIndex = ref.mcp_tool_calls.findIndex(
+                  (t: { tool_call_id?: string }) => t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                );
+                if (existingIndex >= 0) {
+                  // Update existing entry with approval status
+                  // @ts-expect-error
+                  ref.mcp_tool_calls[existingIndex] = { ...ref.mcp_tool_calls[existingIndex], ...tool };
+                } else {
+                  // @ts-expect-error
+                  ref.mcp_tool_calls.push(tool);
+                }
+              }
             },
             onToolApprovalRequired: (event) => {
               ensureCurrentSession(event);

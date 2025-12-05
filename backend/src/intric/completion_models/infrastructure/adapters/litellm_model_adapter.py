@@ -842,6 +842,22 @@ class LiteLLMModelAdapter(CompletionModelAdapter):
                         # Build map of tool_call_id -> approved
                         approval_map = {d.tool_call_id: d.approved for d in decisions}
 
+                        # Emit TOOL_CALL event with approval status for persistence
+                        tool_metadata_with_approval = [
+                            ToolCallMetadata(
+                                server_name=tm.server_name,
+                                tool_name=tm.tool_name,
+                                arguments=tm.arguments,
+                                tool_call_id=tm.tool_call_id,
+                                approved=approval_map.get(tm.tool_call_id, False)
+                            )
+                            for tm in tool_metadata
+                        ]
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=tool_metadata_with_approval,
+                        )
+
                         # Separate approved and denied tools
                         approved_tool_calls = [tc for tc in tool_calls if approval_map.get(tc.id, False)]
                         denied_tool_calls = [tc for tc in tool_calls if not approval_map.get(tc.id, False)]
