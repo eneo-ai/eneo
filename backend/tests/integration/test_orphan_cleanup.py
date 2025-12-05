@@ -620,7 +620,7 @@ class TestOrphanCrawlRunCleanupExecution:
         self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
     ):
         """Cleanup should delete old CrawlRuns with NULL job_id."""
-        from sqlalchemy import select, func
+        from sqlalchemy import select
         from intric.database.tables.websites_table import CrawlRuns
         from intric.worker.crawl_feeder import CrawlFeeder
 

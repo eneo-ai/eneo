@@ -507,7 +507,7 @@ class TestJobRepoTouchJob:
         self, db_container, admin_user, test_settings
     ):
         """Regular touch_job() calls should keep job under stale threshold."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timezone
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
         from intric.main.models import Status
