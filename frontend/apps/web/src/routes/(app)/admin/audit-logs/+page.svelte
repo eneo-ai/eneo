@@ -93,8 +93,10 @@
   let userSearchResults = $state<UserSparse[]>([]);
   let isSearchingUsers = $state(false);
   let showUserDropdown = $state(false);
+  let entitySearchQuery = $state("");  // Entity search filter
   let debounceTimer: ReturnType<typeof setTimeout>;
   let userSearchTimer: ReturnType<typeof setTimeout>;
+  let entitySearchTimer: ReturnType<typeof setTimeout>;  // Debounce for entity search
   let isExporting = $state(false);
   let isInitializingFromUrl = false;  // Flag to prevent auto-apply during URL initialization
 
@@ -267,9 +269,13 @@
     const toDate = url.searchParams.get("to_date");
     const action = url.searchParams.get("action");
     const actorId = url.searchParams.get("actor_id");
+    const search = url.searchParams.get("search");
 
     // Set flag to prevent auto-apply effect from triggering during URL initialization
     isInitializingFromUrl = true;
+
+    // Set entity search from URL
+    entitySearchQuery = search || "";
 
     // Set date range from URL
     if (fromDate && toDate) {
@@ -444,6 +450,10 @@
       params.set("actor_id", selectedUser.id);
     }
 
+    if (entitySearchQuery.length >= 3) {
+      params.set("search", entitySearchQuery);
+    }
+
     if (activeTab === 'config') {
       params.set("tab", "config");
     }
@@ -457,6 +467,7 @@
     // This prevents reactive effects from triggering navigation while we manually navigate
     clearTimeout(debounceTimer);
     clearTimeout(userSearchTimer);
+    clearTimeout(entitySearchTimer);
 
     dateRange = { start: undefined, end: undefined };
     selectedAction = "all";
@@ -464,6 +475,7 @@
     selectedUser = null;
     userSearchQuery = "";
     userSearchResults = [];
+    entitySearchQuery = "";  // Clear entity search
     activePreset = null; // Clear active preset
 
     const params = new URLSearchParams();
@@ -522,6 +534,27 @@
     userSearchQuery = "";
     userSearchResults = [];
     showUserDropdown = false;
+    applyFilters();
+  }
+
+  // Entity search with debounce (300ms)
+  function handleEntitySearch(query: string) {
+    entitySearchQuery = query;
+
+    // Clear existing timer
+    clearTimeout(entitySearchTimer);
+
+    // Only trigger search for 3+ characters or when clearing
+    if (query.length >= 3 || query.length === 0) {
+      entitySearchTimer = setTimeout(() => {
+        applyFilters();
+      }, 300);
+    }
+  }
+
+  function clearEntitySearch() {
+    entitySearchQuery = "";
+    clearTimeout(entitySearchTimer);
     applyFilters();
   }
 
@@ -602,13 +635,15 @@
   onDestroy(() => {
     clearTimeout(debounceTimer);
     clearTimeout(userSearchTimer);
+    clearTimeout(entitySearchTimer);
   });
 
   // Count active filters
   let activeFilterCount = $derived(
     (dateRange?.start && dateRange?.end ? 1 : 0) +
     (selectedAction !== "all" ? 1 : 0) +
-    (selectedUser ? 1 : 0)
+    (selectedUser ? 1 : 0) +
+    (entitySearchQuery.length >= 3 ? 1 : 0)
   );
 
   // Retention policy functions
@@ -969,7 +1004,7 @@
             </div>
 
             <!-- Filter Grid - Stack vertically on small/medium screens to prevent overlap -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <!-- Date Range Filter -->
               <div>
                 <!-- svelte-ignore a11y_label_has_associated_control -->
@@ -991,6 +1026,29 @@
                     {/each}
                   </Select.Options>
                 </Select.Root>
+              </div>
+
+              <!-- Entity Search Filter -->
+              <div class="min-w-0">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
+                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_search_label()}</label>
+                <div class="relative h-10">
+                  <Input.Text
+                    bind:value={entitySearchQuery}
+                    oninput={(e) => handleEntitySearch(e.currentTarget.value)}
+                    placeholder={m.audit_search_placeholder()}
+                    class="w-full h-10"
+                  />
+                  {#if entitySearchQuery.length > 0}
+                    <button
+                      onclick={clearEntitySearch}
+                      class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                      aria-label={m.audit_search_clear()}
+                    >
+                      <IconXMark class="h-4 w-4 text-muted" />
+                    </button>
+                  {/if}
+                </div>
               </div>
 
               <!-- User Filter -->
@@ -1045,21 +1103,40 @@
               </div>
             </div>
 
-            <!-- Selected User Chip -->
-            {#if selectedUser}
-              <div class="flex items-center gap-2">
-                <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
-                  <span class="text-blue-900 dark:text-blue-300">
-                    {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
-                  </span>
-                  <button
-                    onclick={clearUserFilter}
-                    class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
-                    aria-label="Clear user filter"
-                  >
-                    <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
-                  </button>
-                </div>
+            <!-- Active Filter Chips -->
+            {#if selectedUser || entitySearchQuery.length >= 3}
+              <div class="flex flex-wrap items-center gap-2">
+                <!-- Selected User Chip -->
+                {#if selectedUser}
+                  <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
+                    <span class="text-blue-900 dark:text-blue-300">
+                      {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
+                    </span>
+                    <button
+                      onclick={clearUserFilter}
+                      class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
+                      aria-label="Clear user filter"
+                    >
+                      <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+                    </button>
+                  </div>
+                {/if}
+
+                <!-- Entity Search Chip -->
+                {#if entitySearchQuery.length >= 3}
+                  <div class="inline-flex items-center gap-2 rounded-full bg-green-50 dark:bg-green-950 px-3 py-1 text-sm">
+                    <span class="text-green-900 dark:text-green-300">
+                      {m.audit_filtering_by_entity()}: <strong>"{entitySearchQuery}"</strong>
+                    </span>
+                    <button
+                      onclick={clearEntitySearch}
+                      class="rounded-full hover:bg-green-100 dark:hover:bg-green-900 p-0.5 transition-colors"
+                      aria-label={m.audit_search_clear()}
+                    >
+                      <IconXMark class="h-3 w-3 text-green-700 dark:text-green-300" />
+                    </button>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>

@@ -297,6 +297,12 @@ async def list_audit_logs(
     action: Optional[ActionType] = Query(None, description="Filter by action type"),
     from_date: Optional[datetime] = Query(None, description="Filter from date"),
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
+    search: Optional[str] = Query(
+        None,
+        min_length=3,
+        max_length=100,
+        description="Search entity names in log descriptions (min 3 chars)"
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(100, ge=1, le=1000, description="Page size"),
     container: Container = Depends(get_container(with_user=True)),
@@ -378,6 +384,7 @@ async def list_audit_logs(
         action=action,
         from_date=from_date,
         to_date=to_date,
+        search=search,
         page=page,
         page_size=page_size,
     )
@@ -405,6 +412,8 @@ async def list_audit_logs(
         filters_applied["from_date"] = from_date.isoformat()
     if to_date:
         filters_applied["to_date"] = to_date.isoformat()
+    if search:
+        filters_applied["search"] = search
 
     if filters_applied:
         metadata["filters_applied"] = filters_applied

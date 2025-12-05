@@ -13,6 +13,7 @@ export const load = async (event) => {
     const to_date = event.url.searchParams.get("to_date") || undefined;
     const action = event.url.searchParams.get("action") || undefined;
     const actor_id = event.url.searchParams.get("actor_id") || undefined;
+    const search = event.url.searchParams.get("search") || undefined;
 
     // Fetch audit logs and retention policy in parallel
     // Session cookie (if present) is automatically sent with request
@@ -24,6 +25,7 @@ export const load = async (event) => {
         to_date,
         action: action !== "all" ? action : undefined,
         actor_id,
+        search,
       }),
       intric.audit.getRetentionPolicy(),
     ]);

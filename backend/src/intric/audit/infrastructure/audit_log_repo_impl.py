@@ -20,6 +20,23 @@ from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 logger = logging.getLogger(__name__)
 
 
+def escape_like(value: str) -> str:
+    """Escape SQL LIKE/ILIKE wildcard characters to treat them as literals.
+
+    Prevents wildcard injection where user input like "100% CPU" would have
+    the % treated as a wildcard instead of a literal character.
+
+    Order matters: escape backslashes first (the escape char), then wildcards.
+
+    Args:
+        value: User input string to escape
+
+    Returns:
+        Escaped string safe for use in LIKE/ILIKE patterns
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class AuditLogRepositoryImpl(AuditLogRepository):
     """SQLAlchemy implementation of audit log repository."""
 
@@ -98,6 +115,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         action: Optional[ActionType] = None,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
+        search: Optional[str] = None,
         include_deleted: bool = False,
         page: int = 1,
         page_size: int = 100,
@@ -121,6 +139,15 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         if to_date:
             query = query.where(AuditLogTable.timestamp <= to_date)
+
+        # Search entity names in description (uses pg_trgm GIN index)
+        # Escape wildcards to prevent injection (e.g., "100% CPU" -> "100\% CPU")
+        if search:
+            safe_search = escape_like(search)
+            search_pattern = f"%{safe_search}%"
+            query = query.where(
+                AuditLogTable.description.ilike(search_pattern, escape="\\")
+            )
 
         # Get total count
         count_query = sa.select(sa.func.count()).select_from(query.subquery())

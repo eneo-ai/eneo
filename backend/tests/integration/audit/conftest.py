@@ -259,3 +259,102 @@ async def sample_audit_logs(db_session, test_tenant, test_user):
             logs.append(created)
 
     return logs
+
+
+@pytest.fixture
+async def searchable_audit_logs(db_session, test_tenant, test_user):
+    """Create audit logs with specific entity names for search testing.
+
+    Creates logs with varied descriptions containing searchable entity names:
+    - "Sales Bot" (assistant) - 15 logs for pagination test
+    - "Documents" (collection) - 3 logs
+    - "Marketing App" (app) - 2 logs
+    - Generic logs without entity names - 5 logs
+
+    Total: 25 logs for comprehensive search testing.
+    """
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from intric.audit.domain.audit_log import AuditLog
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.outcome import Outcome
+
+    logs = []
+
+    async with db_session() as session:
+        repo = AuditLogRepositoryImpl(session)
+
+        # Create 15 logs with "Sales Bot" for pagination testing
+        for i in range(15):
+            log = AuditLog(
+                id=uuid4(),
+                tenant_id=test_tenant.id,
+                actor_id=test_user,
+                actor_type=ActorType.USER,
+                action=ActionType.ASSISTANT_CREATED if i % 2 == 0 else ActionType.ASSISTANT_UPDATED,
+                entity_type=EntityType.ASSISTANT,
+                entity_id=uuid4(),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=i),
+                description=f"{'Created' if i % 2 == 0 else 'Updated'} assistant 'Sales Bot' - action {i + 1}",
+                metadata={"entity_name": "Sales Bot", "test_batch": "searchable"},
+                outcome=Outcome.SUCCESS,
+            )
+            created = await repo.create(log)
+            logs.append(created)
+
+        # Create 3 logs with "Documents" collection
+        for i in range(3):
+            log = AuditLog(
+                id=uuid4(),
+                tenant_id=test_tenant.id,
+                actor_id=test_user,
+                actor_type=ActorType.USER,
+                action=ActionType.COLLECTION_CREATED,
+                entity_type=EntityType.COLLECTION,
+                entity_id=uuid4(),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=20 + i),
+                description=f"Created collection 'Documents' - item {i + 1}",
+                metadata={"entity_name": "Documents", "test_batch": "searchable"},
+                outcome=Outcome.SUCCESS,
+            )
+            created = await repo.create(log)
+            logs.append(created)
+
+        # Create 2 logs with "Marketing App"
+        for i in range(2):
+            log = AuditLog(
+                id=uuid4(),
+                tenant_id=test_tenant.id,
+                actor_id=test_user,
+                actor_type=ActorType.USER,
+                action=ActionType.APP_CREATED,
+                entity_type=EntityType.APP,
+                entity_id=uuid4(),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=25 + i),
+                description=f"Created app 'Marketing App' - version {i + 1}",
+                metadata={"entity_name": "Marketing App", "test_batch": "searchable"},
+                outcome=Outcome.SUCCESS,
+            )
+            created = await repo.create(log)
+            logs.append(created)
+
+        # Create 5 generic logs without specific entity names
+        for i in range(5):
+            log = AuditLog(
+                id=uuid4(),
+                tenant_id=test_tenant.id,
+                actor_id=test_user,
+                actor_type=ActorType.USER,
+                action=ActionType.SESSION_STARTED,
+                entity_type=EntityType.USER,
+                entity_id=uuid4(),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=30 + i),
+                description=f"User session started - session {i + 1}",
+                metadata={"test_batch": "searchable"},
+                outcome=Outcome.SUCCESS,
+            )
+            created = await repo.create(log)
+            logs.append(created)
+
+    return logs

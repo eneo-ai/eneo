@@ -163,6 +163,7 @@ class AuditService:
         action: Optional[ActionType] = None,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
+        search: Optional[str] = None,
         page: int = 1,
         page_size: int = 100,
     ) -> tuple[list[AuditLog], int]:
@@ -175,6 +176,7 @@ class AuditService:
             action: Filter by action type
             from_date: Filter from date
             to_date: Filter to date
+            search: Search entity names in description (min 3 chars, case-insensitive)
             page: Page number (1-indexed)
             page_size: Number of logs per page
 
@@ -187,6 +189,7 @@ class AuditService:
             action=action,
             from_date=from_date,
             to_date=to_date,
+            search=search,
             page=page,
             page_size=page_size,
         )
