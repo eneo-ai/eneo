@@ -76,7 +76,6 @@ class JobRepository:
             .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
             .values(
                 status=Status.FAILED,
-                result={"error": error_message},
                 updated_at=sa.func.now(),
             )
         )

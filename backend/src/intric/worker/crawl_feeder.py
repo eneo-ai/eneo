@@ -623,6 +623,49 @@ class CrawlFeeder:
                 extra={"error": str(exc)},
             )
 
+    async def _cleanup_orphaned_crawl_runs(self) -> None:
+        """Clean up CrawlRuns with NULL job_id older than timeout threshold.
+
+        Why: These orphaned records occur when:
+        - Jobs are deleted (CASCADE sets job_id to NULL)
+        - CrawlRun creation fails after insert but before job_id is set
+
+        CrawlRun.status is derived from Job.status. With NULL job_id, status
+        defaults to QUEUED but these are ghost records that accumulate.
+        Uses same timeout threshold as job cleanup for consistency.
+        """
+        from sqlalchemy import delete, and_
+
+        from intric.database.database import sessionmanager
+        from intric.database.tables.websites_table import CrawlRuns
+
+        timeout_hours = self.settings.orphan_crawl_run_timeout_hours
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
+
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                cleanup_stmt = (
+                    delete(CrawlRuns)
+                    .where(
+                        and_(
+                            CrawlRuns.job_id == None,
+                            CrawlRuns.updated_at < cutoff_time,
+                        )
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                result = await session.execute(cleanup_stmt)
+                if result.rowcount > 0:
+                    logger.info(
+                        "Cleaned up orphaned CrawlRuns with NULL job_id",
+                        extra={"cleaned_count": result.rowcount},
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Failed to cleanup orphaned CrawlRuns",
+                extra={"error": str(exc)},
+            )
+
     async def _process_tenant_queue(
         self, tenant_id: UUID, redis_client: aioredis.Redis
     ) -> None:
@@ -809,6 +852,7 @@ class CrawlFeeder:
                     # Run orphan cleanup every cycle (lightweight - only updates stuck jobs)
                     # Why: Prevents "Crawl already in progress" blocking from stale records
                     await self._cleanup_orphaned_crawl_jobs()
+                    await self._cleanup_orphaned_crawl_runs()
 
                     # Find all tenants with pending crawls
                     # Why: Use SCAN instead of KEYS for production safety

@@ -451,3 +451,315 @@ class TestStaleThresholdWithJobMaxAge:
             # Stale threshold is for lack of progress
             # Max age is for total retry duration
             # They serve complementary purposes
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestJobRepoTouchJob:
+    """Tests for JobRepository.touch_job() heartbeat method.
+
+    touch_job() updates a job's updated_at timestamp to signal "still alive".
+    This prevents safe preemption from marking the job as stale during long crawls.
+    """
+
+    async def test_touch_job_updates_timestamp(
+        self, db_container, admin_user
+    ):
+        """touch_job() should update the job's updated_at timestamp."""
+        from datetime import datetime, timezone, timedelta
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a job with old updated_at
+            old_time = datetime.now(timezone.utc) - timedelta(hours=1)
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.IN_PROGRESS,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            original_updated_at = job.updated_at
+
+            # Touch the job
+            job_repo = JobRepository(session)
+            await job_repo.touch_job(job_id)
+            await session.flush()
+
+            # Refresh to get updated value
+            await session.refresh(job)
+
+            # Verify timestamp was updated
+            assert job.updated_at > original_updated_at, "touch_job should update timestamp"
+            # Should be recent (within last minute)
+            time_diff = datetime.now(timezone.utc) - job.updated_at.replace(tzinfo=timezone.utc)
+            assert time_diff.total_seconds() < 60, "Timestamp should be recent"
+
+    async def test_touch_job_prevents_stale_detection(
+        self, db_container, admin_user, test_settings
+    ):
+        """Regular touch_job() calls should keep job under stale threshold."""
+        from datetime import datetime, timezone, timedelta
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.IN_PROGRESS,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            job_repo = JobRepository(session)
+
+            # Touch the job
+            await job_repo.touch_job(job_id)
+            await session.flush()
+            await session.refresh(job)
+
+            # Calculate age
+            job_updated = job.updated_at.replace(tzinfo=timezone.utc)
+            age_minutes = (datetime.now(timezone.utc) - job_updated).total_seconds() / 60
+            threshold_minutes = test_settings.crawl_stale_threshold_minutes
+
+            # Should be well under stale threshold
+            assert age_minutes < threshold_minutes, (
+                "Touched job should be under stale threshold"
+            )
+
+    async def test_touch_job_nonexistent_job_no_error(
+        self, db_container
+    ):
+        """touch_job() on non-existent job should not raise error."""
+        from uuid import uuid4
+        from intric.jobs.job_repo import JobRepository
+
+        async with db_container() as container:
+            session = container.session()
+            job_repo = JobRepository(session)
+
+            # Touch non-existent job - should not raise
+            await job_repo.touch_job(uuid4())
+            # No assertion needed - just verifying no exception
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestJobRepoMarkJobFailedIfRunning:
+    """Tests for JobRepository.mark_job_failed_if_running() atomic preemption.
+
+    This method uses Compare-and-Swap pattern to atomically mark a job as FAILED
+    only if it's currently IN_PROGRESS or QUEUED. This prevents race conditions
+    when multiple users try to preempt the same stale job.
+    """
+
+    async def test_marks_queued_job_as_failed(
+        self, db_container, admin_user
+    ):
+        """mark_job_failed_if_running() should fail QUEUED jobs."""
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a QUEUED job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.QUEUED,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            job_repo = JobRepository(session)
+
+            # Mark as failed
+            rows_affected = await job_repo.mark_job_failed_if_running(
+                job_id, "Preempted: stale job"
+            )
+            await session.flush()
+            await session.refresh(job)
+
+            assert rows_affected == 1, "Should affect 1 row"
+            assert job.status == Status.FAILED, "Job should be FAILED"
+
+    async def test_marks_in_progress_job_as_failed(
+        self, db_container, admin_user
+    ):
+        """mark_job_failed_if_running() should fail IN_PROGRESS jobs."""
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create an IN_PROGRESS job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.IN_PROGRESS,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            job_repo = JobRepository(session)
+
+            # Mark as failed
+            rows_affected = await job_repo.mark_job_failed_if_running(
+                job_id, "Worker crashed"
+            )
+            await session.flush()
+            await session.refresh(job)
+
+            assert rows_affected == 1, "Should affect 1 row"
+            assert job.status == Status.FAILED, "Job should be FAILED"
+
+    async def test_does_not_affect_completed_job(
+        self, db_container, admin_user
+    ):
+        """mark_job_failed_if_running() should not touch COMPLETE jobs."""
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a COMPLETE job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.COMPLETE,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            job_repo = JobRepository(session)
+
+            # Try to mark as failed
+            rows_affected = await job_repo.mark_job_failed_if_running(
+                job_id, "This should not apply"
+            )
+            await session.flush()
+            await session.refresh(job)
+
+            assert rows_affected == 0, "Should not affect completed job"
+            assert job.status == Status.COMPLETE, "Status should remain COMPLETE"
+
+    async def test_does_not_affect_already_failed_job(
+        self, db_container, admin_user
+    ):
+        """mark_job_failed_if_running() should not touch already FAILED jobs."""
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a FAILED job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.FAILED,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            job_repo = JobRepository(session)
+
+            # Try to mark as failed again
+            rows_affected = await job_repo.mark_job_failed_if_running(
+                job_id, "New error message"
+            )
+            await session.flush()
+            await session.refresh(job)
+
+            assert rows_affected == 0, "Should not affect already failed job"
+            assert job.status == Status.FAILED
+
+    async def test_compare_and_swap_race_condition_prevention(
+        self, db_container, admin_user
+    ):
+        """Only one concurrent preemption attempt should succeed.
+
+        This tests the Compare-and-Swap pattern: when multiple processes
+        try to preempt the same job, only one should win.
+        """
+        from intric.database.tables.job_table import Jobs
+        from intric.jobs.job_repo import JobRepository
+        from intric.main.models import Status
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a QUEUED job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.QUEUED,
+            )
+            session.add(job)
+            await session.flush()
+
+            job_id = job.id
+            job_repo = JobRepository(session)
+
+            # First preemption attempt (should succeed)
+            rows_1 = await job_repo.mark_job_failed_if_running(
+                job_id, "First preemption"
+            )
+            await session.flush()
+
+            # Second preemption attempt (should fail - job already failed)
+            rows_2 = await job_repo.mark_job_failed_if_running(
+                job_id, "Second preemption"
+            )
+            await session.flush()
+
+            await session.refresh(job)
+
+            # Only first attempt should succeed
+            assert rows_1 == 1, "First attempt should succeed"
+            assert rows_2 == 0, "Second attempt should fail (job already failed)"
+            assert job.status == Status.FAILED, "Job should be in FAILED status"
+
+    async def test_nonexistent_job_returns_zero(
+        self, db_container
+    ):
+        """mark_job_failed_if_running() on non-existent job returns 0."""
+        from uuid import uuid4
+        from intric.jobs.job_repo import JobRepository
+
+        async with db_container() as container:
+            session = container.session()
+            job_repo = JobRepository(session)
+
+            # Try to mark non-existent job
+            rows_affected = await job_repo.mark_job_failed_if_running(
+                uuid4(), "Non-existent job"
+            )
+
+            assert rows_affected == 0, "Should return 0 for non-existent job"

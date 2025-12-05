@@ -24,6 +24,48 @@ from uuid import UUID
 from intric.main.models import Status
 
 
+async def create_test_website(session, tenant_id, user_id, embedding_model_id) -> UUID:
+    """Create a minimal Website record for CrawlRun tests.
+
+    CrawlRuns.website_id is a foreign key to websites table,
+    so we need a valid Website record before creating CrawlRuns.
+    """
+    from intric.database.tables.websites_table import Websites
+    from intric.websites.domain.crawl_run import CrawlType
+
+    website = Websites(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        embedding_model_id=embedding_model_id,
+        url="https://test-orphan-cleanup.example.com",
+        name="Test Website for Orphan Cleanup",
+        download_files=False,
+        crawl_type=CrawlType.CRAWL,
+        update_interval="never",
+        size=0,
+    )
+    session.add(website)
+    await session.flush()
+    return website.id
+
+
+@pytest.fixture
+async def test_embedding_model_id(db_container):
+    """Get the fixture embedding model ID for tests.
+
+    The seed_default_models fixture creates 'fixture-text-embedding'.
+    """
+    from sqlalchemy import select
+    from intric.database.tables.ai_models_table import EmbeddingModels
+
+    async with db_container() as container:
+        session = container.session()
+        result = await session.execute(
+            select(EmbeddingModels.id).where(EmbeddingModels.name == "fixture-text-embedding")
+        )
+        return result.scalar_one()
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 class TestOrphanCleanupConfiguration:
@@ -429,3 +471,285 @@ class TestOrphanCleanupPreventsBlocking:
             assert orphan_job.status == Status.QUEUED
             age_hours = (datetime.now(timezone.utc) - orphan_job.updated_at).total_seconds() / 3600
             assert age_hours > timeout_hours, "Job should be orphaned and eligible for cleanup"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestOrphanCrawlRunCleanup:
+    """Tests for cleanup of CrawlRuns with NULL job_id (ghost records).
+
+    CrawlRun.status is derived from Job.status via relationship. When job_id is NULL:
+    - Status defaults to QUEUED (no job to reference)
+    - These are ghost records that accumulate from deleted jobs or failed creation
+    - The _cleanup_orphaned_crawl_runs() method deletes these old records
+    """
+
+    async def test_recent_crawl_run_with_null_job_id_not_cleaned(
+        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+    ):
+        """Recently created CrawlRuns with NULL job_id should NOT be cleaned up."""
+        from intric.database.tables.websites_table import CrawlRuns
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a valid Website first (CrawlRuns.website_id is FK to websites)
+            website_id = await create_test_website(
+                session, test_tenant.id, admin_user.id, test_embedding_model_id
+            )
+
+            # Create a recent CrawlRun with NULL job_id (only 30 minutes old)
+            recent_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+            crawl_run = CrawlRuns(
+                tenant_id=test_tenant.id,
+                website_id=website_id,
+                job_id=None,  # NULL job_id (ghost record)
+                pages_crawled=0,
+                files_downloaded=0,
+                pages_failed=0,
+                files_failed=0,
+                created_at=recent_time,
+                updated_at=recent_time,
+            )
+
+            session.add(crawl_run)
+            await session.flush()
+
+            # Recent CrawlRuns should not be cleaned up
+            assert crawl_run.job_id is None
+            age_hours = (datetime.now(timezone.utc) - crawl_run.updated_at).total_seconds() / 3600
+            timeout_hours = test_settings.orphan_crawl_run_timeout_hours
+            assert age_hours < timeout_hours, "Recent CrawlRun should not be eligible for cleanup"
+
+    async def test_old_crawl_run_with_null_job_id_eligible_for_cleanup(
+        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+    ):
+        """Old CrawlRuns with NULL job_id should be eligible for cleanup."""
+        from intric.database.tables.websites_table import CrawlRuns
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a valid Website first (CrawlRuns.website_id is FK to websites)
+            website_id = await create_test_website(
+                session, test_tenant.id, admin_user.id, test_embedding_model_id
+            )
+
+            # Create old CrawlRun with NULL job_id
+            timeout_hours = test_settings.orphan_crawl_run_timeout_hours
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 1)
+
+            crawl_run = CrawlRuns(
+                tenant_id=test_tenant.id,
+                website_id=website_id,
+                job_id=None,  # NULL job_id (ghost record)
+                pages_crawled=0,
+                files_downloaded=0,
+                pages_failed=0,
+                files_failed=0,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+
+            session.add(crawl_run)
+            await session.flush()
+
+            # Old CrawlRun with NULL job_id should be eligible for cleanup
+            assert crawl_run.job_id is None
+            age_hours = (datetime.now(timezone.utc) - crawl_run.updated_at).total_seconds() / 3600
+            assert age_hours > timeout_hours, "Old CrawlRun should be eligible for cleanup"
+
+    async def test_crawl_run_with_valid_job_id_not_affected(
+        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+    ):
+        """CrawlRuns WITH valid job_id should NOT be cleaned up, even if old."""
+        from intric.database.tables.websites_table import CrawlRuns
+        from intric.database.tables.job_table import Jobs
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a valid Website first (CrawlRuns.website_id is FK to websites)
+            website_id = await create_test_website(
+                session, test_tenant.id, admin_user.id, test_embedding_model_id
+            )
+
+            timeout_hours = test_settings.orphan_crawl_run_timeout_hours
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 10)
+
+            # Create a job first
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.COMPLETE,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+
+            session.add(job)
+            await session.flush()
+
+            # Create old CrawlRun WITH valid job_id
+            crawl_run = CrawlRuns(
+                tenant_id=test_tenant.id,
+                website_id=website_id,
+                job_id=job.id,  # Has valid job_id
+                pages_crawled=100,
+                files_downloaded=50,
+                pages_failed=0,
+                files_failed=0,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+
+            session.add(crawl_run)
+            await session.flush()
+
+            # CrawlRun with valid job_id should NOT be cleaned up
+            # (only NULL job_id records are targeted)
+            assert crawl_run.job_id is not None
+            assert crawl_run.job_id == job.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestOrphanCrawlRunCleanupExecution:
+    """Tests that actually execute the cleanup method."""
+
+    async def test_cleanup_deletes_old_null_job_id_crawl_runs(
+        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+    ):
+        """Cleanup should delete old CrawlRuns with NULL job_id."""
+        from sqlalchemy import select, func
+        from intric.database.tables.websites_table import CrawlRuns
+        from intric.worker.crawl_feeder import CrawlFeeder
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a valid Website first (CrawlRuns.website_id is FK to websites)
+            website_id = await create_test_website(
+                session, test_tenant.id, admin_user.id, test_embedding_model_id
+            )
+
+            timeout_hours = test_settings.orphan_crawl_run_timeout_hours
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 2)
+            recent_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+
+            # Create old orphan CrawlRun (should be deleted)
+            old_orphan = CrawlRuns(
+                tenant_id=test_tenant.id,
+                website_id=website_id,
+                job_id=None,
+                pages_crawled=0,
+                files_downloaded=0,
+                pages_failed=0,
+                files_failed=0,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+            session.add(old_orphan)
+
+            # Create recent orphan CrawlRun (should NOT be deleted)
+            recent_orphan = CrawlRuns(
+                tenant_id=test_tenant.id,
+                website_id=website_id,
+                job_id=None,
+                pages_crawled=0,
+                files_downloaded=0,
+                pages_failed=0,
+                files_failed=0,
+                created_at=recent_time,
+                updated_at=recent_time,
+            )
+            session.add(recent_orphan)
+            await session.flush()
+
+            old_orphan_id = old_orphan.id
+            recent_orphan_id = recent_orphan.id
+
+            # Commit so cleanup can see it
+            await session.commit()
+
+        # Run cleanup
+        feeder = CrawlFeeder()
+        await feeder._cleanup_orphaned_crawl_runs()
+
+        # Verify: old orphan deleted, recent orphan preserved
+        async with db_container() as container:
+            session = container.session()
+
+            # Old orphan should be deleted
+            old_result = await session.execute(
+                select(CrawlRuns).where(CrawlRuns.id == old_orphan_id)
+            )
+            assert old_result.scalar_one_or_none() is None, "Old orphan should be deleted"
+
+            # Recent orphan should still exist
+            recent_result = await session.execute(
+                select(CrawlRuns).where(CrawlRuns.id == recent_orphan_id)
+            )
+            assert recent_result.scalar_one_or_none() is not None, "Recent orphan should be preserved"
+
+    async def test_cleanup_preserves_crawl_runs_with_valid_job_id(
+        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+    ):
+        """Cleanup should NOT delete CrawlRuns with valid job_id, even if old."""
+        from sqlalchemy import select
+        from intric.database.tables.websites_table import CrawlRuns
+        from intric.database.tables.job_table import Jobs
+        from intric.worker.crawl_feeder import CrawlFeeder
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Create a valid Website first (CrawlRuns.website_id is FK to websites)
+            website_id = await create_test_website(
+                session, test_tenant.id, admin_user.id, test_embedding_model_id
+            )
+
+            timeout_hours = test_settings.orphan_crawl_run_timeout_hours
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 10)
+
+            # Create a job
+            job = Jobs(
+                user_id=admin_user.id,
+                task="CRAWL",
+                status=Status.COMPLETE,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+            session.add(job)
+            await session.flush()
+
+            # Create old CrawlRun WITH valid job_id
+            crawl_run_with_job = CrawlRuns(
+                tenant_id=test_tenant.id,
+                website_id=website_id,
+                job_id=job.id,
+                pages_crawled=100,
+                files_downloaded=50,
+                pages_failed=0,
+                files_failed=0,
+                created_at=old_time,
+                updated_at=old_time,
+            )
+            session.add(crawl_run_with_job)
+            await session.flush()
+
+            crawl_run_id = crawl_run_with_job.id
+            await session.commit()
+
+        # Run cleanup
+        feeder = CrawlFeeder()
+        await feeder._cleanup_orphaned_crawl_runs()
+
+        # Verify: CrawlRun with valid job_id should still exist
+        async with db_container() as container:
+            session = container.session()
+            result = await session.execute(
+                select(CrawlRuns).where(CrawlRuns.id == crawl_run_id)
+            )
+            preserved = result.scalar_one_or_none()
+            assert preserved is not None, "CrawlRun with valid job_id should be preserved"
+            assert preserved.job_id is not None
