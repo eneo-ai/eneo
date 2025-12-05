@@ -294,7 +294,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         result = await self.session.execute(query)
         return result.rowcount
 
-    async def soft_delete_old_logs(
+    async def hard_delete_old_logs(
         self,
         tenant_id: UUID,
         retention_days: int,

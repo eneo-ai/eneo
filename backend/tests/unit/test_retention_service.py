@@ -403,10 +403,10 @@ class TestPurgeOldLogs:
         mock_result_policy = MagicMock()
         mock_result_policy.scalar_one_or_none.return_value = policy
 
-        # Mock the repository's soft_delete_old_logs (imported inside the function)
+        # Mock the repository's hard_delete_old_logs (imported inside the function)
         with patch("intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
             mock_repo_instance = AsyncMock()
-            mock_repo_instance.soft_delete_old_logs.return_value = 10  # 10 logs purged
+            mock_repo_instance.hard_delete_old_logs.return_value = 10  # 10 logs purged
             MockRepo.return_value = mock_repo_instance
 
             mock_session.execute.return_value = mock_result_policy
@@ -436,7 +436,7 @@ class TestPurgeOldLogs:
 
         with patch("intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
             mock_repo_instance = AsyncMock()
-            mock_repo_instance.soft_delete_old_logs.return_value = 0  # No logs purged
+            mock_repo_instance.hard_delete_old_logs.return_value = 0  # No logs purged
             MockRepo.return_value = mock_repo_instance
 
             mock_session.execute.return_value = mock_result_policy

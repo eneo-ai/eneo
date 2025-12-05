@@ -167,9 +167,9 @@ class RetentionService:
         # Get retention policy
         policy = await self.get_policy(tenant_id)
 
-        # Purge old logs
+        # Purge old logs (HARD delete - permanent removal for compliance)
         repository = AuditLogRepositoryImpl(self.session)
-        purged_count = await repository.soft_delete_old_logs(
+        purged_count = await repository.hard_delete_old_logs(
             tenant_id=tenant_id,
             retention_days=policy.retention_days,
         )

@@ -109,68 +109,158 @@ async def purge_old_audit_logs(container: Container):
 
     Runs at 02:00 UTC (3:00 AM Swedish time) to minimize user impact.
 
-    For each tenant:
+    CRITICAL: Each tenant is processed in a SEPARATE database session/transaction.
+    This ensures:
+    - Tenant A's failure doesn't rollback Tenant B's successful deletion
+    - Each tenant's retention policy is applied independently
+    - True multi-tenant isolation with no cross-tenant interference
+
+    For each tenant (in isolated transactions):
     - Retrieves retention policy (default: 365 days)
     - PERMANENTLY DELETES logs older than retention period (hard delete)
     - Updates purge statistics
+    - Commits independently (failures don't affect other tenants)
 
     Note: Deleted logs cannot be recovered. This ensures compliance with
     data retention regulations that require true deletion.
 
     Returns:
-        Dictionary with purge statistics per tenant
+        Dictionary with purge statistics per tenant and any errors
     """
+    from uuid import UUID
+
+    from sqlalchemy import select
+
     from intric.audit.application.retention_service import RetentionService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
+    from intric.database.database import sessionmanager
+    from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
     from intric.main.logging import get_logger
 
     logger = get_logger(__name__)
+
+    # Step 1: Get all tenant IDs with retention policies
+    # Uses the container's session (provided by cron_job decorator) for read-only query
     session = container.session()
+    query = select(AuditRetentionPolicy.tenant_id)
+    result = await session.execute(query)
+    tenant_ids: list[UUID] = list(result.scalars().all())
 
-    # Worker sessions need explicit transaction
-    async with session.begin():
-        retention_service = RetentionService(session)
-        purge_stats = await retention_service.purge_all_tenants()
+    logger.info(f"Starting audit log retention purge for {len(tenant_ids)} tenants")
 
-        total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
+    # Step 2: Process each tenant in its own ISOLATED session/transaction
+    # CRITICAL: Using sessionmanager.session() creates a NEW session per tenant
+    # This ensures true transaction isolation - one tenant's failure won't affect others
+    purge_stats: dict[str, dict] = {}
+    errors: list[dict] = []
 
-        # Audit logging for retention policy application (one log per tenant)
-        audit_service = container.audit_service()
+    for tenant_id in tenant_ids:
+        tenant_id_str = str(tenant_id)
 
-        for tenant_id_str, stats in purge_stats.items():
-            from uuid import UUID
+        try:
+            # NEW session per tenant = true transaction isolation
+            # If this tenant fails, only this transaction rolls back
+            async with sessionmanager.session() as tenant_session, tenant_session.begin():
+                retention_service = RetentionService(tenant_session)
 
-            tenant_id = UUID(tenant_id_str)
+                # Get THIS tenant's retention policy and purge ONLY their old logs
+                # The DELETE query filters by tenant_id, ensuring no cross-tenant deletion
+                purged_count = await retention_service.purge_old_logs(tenant_id)
 
-            # Only log if logs were actually purged
-            if stats["purged_count"] > 0:
-                await audit_service.log_async(
-                    tenant_id=tenant_id,
-                    actor_id=tenant_id,  # System actor
-                    actor_type=ActorType.SYSTEM,
-                    action=ActionType.RETENTION_POLICY_APPLIED,
-                    entity_type=EntityType.TENANT_SETTINGS,
-                    entity_id=tenant_id,
-                    description=f"Retention policy purged {stats['purged_count']} audit logs",
-                    metadata={
-                        "actor": {"type": "system", "via": "cron_job"},
-                        "target": {
-                            "tenant_id": tenant_id_str,
-                            "purged_count": stats["purged_count"],
-                            "retention_days": stats.get("retention_days", 365),
+                # Get retention days for statistics
+                policy = await retention_service.get_policy(tenant_id)
+
+                purge_stats[tenant_id_str] = {
+                    "retention_days": policy.retention_days,
+                    "purged_count": purged_count,
+                }
+
+                # Create audit log entry for this tenant if logs were purged
+                # Note: Using log_async queues to ARQ, doesn't block this transaction
+                if purged_count > 0:
+                    # Import AuditService here to avoid circular imports
+                    from intric.audit.application.audit_service import AuditService
+                    from intric.audit.infrastructure.audit_log_repo_impl import (
+                        AuditLogRepositoryImpl,
+                    )
+
+                    audit_repo = AuditLogRepositoryImpl(tenant_session)
+                    audit_service = AuditService(
+                        repository=audit_repo,
+                        session=tenant_session,
+                        redis=container.redis(),
+                    )
+                    await audit_service.log_async(
+                        tenant_id=tenant_id,
+                        actor_id=tenant_id,  # System actor
+                        actor_type=ActorType.SYSTEM,
+                        action=ActionType.RETENTION_POLICY_APPLIED,
+                        entity_type=EntityType.TENANT_SETTINGS,
+                        entity_id=tenant_id,
+                        description=f"Retention policy purged {purged_count} audit logs",
+                        metadata={
+                            "actor": {"type": "system", "via": "cron_job"},
+                            "target": {
+                                "tenant_id": tenant_id_str,
+                                "purged_count": purged_count,
+                                "retention_days": policy.retention_days,
+                            },
                         },
-                    },
-                )
+                    )
 
-        logger.info(
-            "Audit log retention purge completed",
+                    logger.debug(
+                        f"Purged {purged_count} audit logs for tenant {tenant_id_str} "
+                        f"(retention: {policy.retention_days} days)"
+                    )
+
+            # Transaction committed successfully for this tenant
+
+        except Exception as e:
+            # This tenant's transaction rolled back, but others continue
+            error_info = {
+                "tenant_id": tenant_id_str,
+                "error": str(e),
+            }
+            errors.append(error_info)
+            logger.error(
+                f"Failed to purge audit logs for tenant {tenant_id_str}: {e}",
+                exc_info=True,
+            )
+            # Continue to next tenant - isolation ensures this failure doesn't affect others
+
+    # Step 3: Log summary
+    total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
+    total_tenants = len(purge_stats)
+    failed_tenants = len(errors)
+
+    if failed_tenants > 0:
+        logger.warning(
+            f"Audit log retention purge completed with errors: "
+            f"{total_tenants} tenants processed, {failed_tenants} failed, "
+            f"{total_purged} total logs purged",
             extra={
-                "total_tenants": len(purge_stats),
+                "total_tenants": total_tenants,
+                "failed_tenants": failed_tenants,
+                "total_purged": total_purged,
+                "errors": errors,
+            },
+        )
+    else:
+        logger.info(
+            "Audit log retention purge completed successfully",
+            extra={
+                "total_tenants": total_tenants,
                 "total_purged": total_purged,
                 "purge_stats": purge_stats,
             },
         )
 
-        return purge_stats
+    return {
+        "purge_stats": purge_stats,
+        "errors": errors,
+        "total_tenants": total_tenants,
+        "total_purged": total_purged,
+        "success": len(errors) == 0,
+    }

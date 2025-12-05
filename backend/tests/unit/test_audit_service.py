@@ -261,6 +261,7 @@ class TestGetLogs:
             action=ActionType.USER_CREATED,
             from_date=None,
             to_date=None,
+            search=None,
             page=2,
             page_size=50,
         )
