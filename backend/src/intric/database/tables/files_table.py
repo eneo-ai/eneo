@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,7 +13,7 @@ from intric.files.file_models import FileType
 
 class Files(BasePublic):
     name: Mapped[str] = mapped_column()
-    text: Mapped[Optional[str]] = mapped_column()
+    text: Mapped[Optional[str]] = mapped_column(Text)
     blob: Mapped[Optional[bytes]] = mapped_column(BYTEA)
     checksum: Mapped[str] = mapped_column(index=True)
     size: Mapped[int] = mapped_column()
