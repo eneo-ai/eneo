@@ -4,9 +4,6 @@ from intric.integration.domain.entities.oauth_token import OauthToken
 from intric.integration.domain.entities.user_integration import UserIntegration
 from intric.integration.presentation.models import IntegrationType
 from intric.main.exceptions import BadRequestException
-from intric.main.logging import get_logger
-
-logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -53,31 +50,19 @@ class Oauth2Service:
         tenant_integration_id: "UUID",
         state: str | None = None,
     ) -> dict:
-        logger.info(f"Starting OAuth flow for tenant_integration_id={tenant_integration_id}")
-
         tenant_integration = await self.tenant_integration_repo.one(
             id=tenant_integration_id
         )
         integration_type = tenant_integration.integration_type
-        logger.info(f"Integration type: {integration_type}, tenant_id: {tenant_integration.tenant_id}")
 
         if integration_type not in self._auth_mapper:
-            logger.error(f"Invalid integration type: {integration_type}")
             raise BadRequestException("Invalid integration type")
 
         auth_service = self._auth_mapper[integration_type]
-        # Pass tenant_id for SharePoint to use tenant-specific configuration
-        try:
-            if integration_type == IntegrationType.Sharepoint.value:
-                logger.info(f"Generating SharePoint auth URL for tenant {tenant_integration.tenant_id}")
-                result = await auth_service.gen_auth_url(state, tenant_id=tenant_integration.tenant_id)
-                logger.info("Generated auth URL successfully")
-                return result
-            else:
-                return getattr(auth_service, "gen_auth_url")(state)
-        except Exception as e:
-            logger.error(f"Failed to generate auth URL: {type(e).__name__}: {e}", exc_info=True)
-            raise
+        if integration_type == IntegrationType.Sharepoint.value:
+            return await auth_service.gen_auth_url(state, tenant_id=tenant_integration.tenant_id)
+        else:
+            return getattr(auth_service, "gen_auth_url")(state)
 
     async def auth_integration(
         self,

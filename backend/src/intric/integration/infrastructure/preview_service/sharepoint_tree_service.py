@@ -61,7 +61,6 @@ class SharePointTreeService:
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
         ) as content_client:
-            # Step 1: Get drive ID (skip if already provided, e.g., OneDrive)
             actual_drive_id = drive_id
             if not actual_drive_id and site_id:
                 logger.debug("Fetching drive ID for site", extra={"site_id": site_id})
@@ -94,7 +93,6 @@ class SharePointTreeService:
                 folder_id = "root"
                 logger.debug("Using root folder")
 
-            # Step 2: Get folder items
             logger.debug(
                 "Fetching folder items",
                 extra={
@@ -104,7 +102,6 @@ class SharePointTreeService:
                 }
             )
             try:
-                # Use drive-only endpoint for OneDrive (no site_id)
                 if site_id:
                     items = await content_client.get_folder_items(
                         site_id=site_id,
@@ -112,7 +109,6 @@ class SharePointTreeService:
                         folder_id=folder_id,
                     )
                 else:
-                    # OneDrive: use drive-only endpoint
                     if folder_id == "root":
                         response = await content_client.get_drive_root_children(actual_drive_id)
                         items = response.get("value", [])
@@ -142,7 +138,6 @@ class SharePointTreeService:
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
                 ) from e
 
-            # Step 3: Transform items to tree format
             tree_items = []
             for item in items:
                 item_name = item.get("name", "")
@@ -170,7 +165,6 @@ class SharePointTreeService:
                 extra={"tree_item_count": len(tree_items)}
             )
 
-            # Step 4: Get parent folder ID if not at root
             parent_id = None
             if folder_id != "root":
                 try:

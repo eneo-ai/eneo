@@ -1358,7 +1358,7 @@
   "personal_spaces_description": "Personliga utrymmen: Användare ansluter sina egna konton (t.ex. deras personliga SharePoint)",
   "shared_spaces_description": "Delade/Organisationsutrymmen: Använder organisationsövergripande konfiguration (ingen personlig inloggning krävs)",
   "no_person_dependency_description": "Ingen personberoende: Organisationsintegrationer fungerar automatiskt för alla användare",
-  "sharepoint_integration_description": "Denna integration möjliggör import av webbplatser från SharePoint till Eneo.",
+  "sharepoint_integration_description": "Importera dokument och filer från SharePoint-siter och OneDrive till Eneo.",
   "confluence_integration_description": "Denna integration möjliggör import av kunskap från Confluence-utrymmen till Eneo.",
   "configure_sharepoint_app_title": "Konfigurera SharePoint-app",
   "loading_configuration": "Laddar konfiguration...",

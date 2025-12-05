@@ -107,14 +107,11 @@ class IntegrationKnowledgeService:
 
         embedding_model = await self.embedding_model_repo.one(model_id=embedding_model_id)
 
-        # Determine site_id vs drive_id based on resource_type
         if user_integration.integration_type == "sharepoint":
             if resource_type == "onedrive":
-                # OneDrive: key is drive_id, no site_id
                 site_id_value = None
                 drive_id_value = key
             else:
-                # SharePoint: key is site_id, no drive_id
                 site_id_value = key
                 drive_id_value = None
         else:
@@ -184,69 +181,42 @@ class IntegrationKnowledgeService:
                 ),
             )
             # Register webhook subscription for change notifications
-            # For SharePoint: site-level subscription shared across all integrations on the site
-            # For OneDrive: drive-level subscription (same Graph API, different resource path)
-            if resource_type == "onedrive":
-                # OneDrive webhook support - use drive_id as the site identifier
-                # The subscription service uses /drives/{drive_id}/root for OneDrive
-                logger.info("Ensuring drive-level subscription for OneDrive knowledge %s (drive=%s)", knowledge.id, key[:30])
-                try:
-                    subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                        user_integration_id=user_integration_id,
-                        site_id=key,  # For OneDrive, we use drive_id as "site_id" in subscription
-                        token=token,
-                        is_onedrive=True,
-                    )
-                    if subscription:
-                        knowledge.sharepoint_subscription_id = subscription.id
-                        knowledge = await self.integration_knowledge_repo.update(knowledge)
-                        logger.info(
-                            "Successfully linked OneDrive knowledge %s to subscription %s",
-                            knowledge.id,
-                            subscription.subscription_id
-                        )
-                    else:
-                        logger.warning(
-                            "Could not create/reuse subscription for OneDrive drive %s (webhook URL may not be configured)",
-                            key[:30]
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to ensure OneDrive subscription for knowledge %s: %s",
+            is_onedrive = resource_type == "onedrive"
+            logger.info(
+                "Ensuring %s subscription for knowledge %s (%s=%s)",
+                "drive-level" if is_onedrive else "site-level",
+                knowledge.id,
+                "drive" if is_onedrive else "site",
+                key[:30]
+            )
+            try:
+                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                    user_integration_id=user_integration_id,
+                    site_id=key,
+                    token=token,
+                    is_onedrive=is_onedrive,
+                )
+                if subscription:
+                    knowledge.sharepoint_subscription_id = subscription.id
+                    knowledge = await self.integration_knowledge_repo.update(knowledge)
+                    logger.info(
+                        "Successfully linked knowledge %s to subscription %s",
                         knowledge.id,
-                        exc,
-                        exc_info=True
+                        subscription.subscription_id
                     )
-            else:
-                # SharePoint site-level subscription
-                logger.info("Ensuring site-level subscription for knowledge %s (site=%s)", knowledge.id, key[:30])
-                try:
-                    subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                        user_integration_id=user_integration_id,
-                        site_id=key,
-                        token=token
-                    )
-                    if subscription:
-                        # Link this knowledge to the shared subscription
-                        knowledge.sharepoint_subscription_id = subscription.id
-                        knowledge = await self.integration_knowledge_repo.update(knowledge)
-                        logger.info(
-                            "Successfully linked knowledge %s to subscription %s",
-                            knowledge.id,
-                            subscription.subscription_id
-                        )
-                    else:
-                        logger.warning(
-                            "Could not create/reuse subscription for site %s (webhook URL may not be configured)",
-                            key[:30]
-                        )
-                except Exception as exc:
+                else:
                     logger.warning(
-                        "Failed to ensure SharePoint subscription for knowledge %s: %s",
-                        knowledge.id,
-                        exc,
-                        exc_info=True
+                        "Could not create/reuse subscription for %s %s (webhook URL may not be configured)",
+                        "drive" if is_onedrive else "site",
+                        key[:30]
                     )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to ensure subscription for knowledge %s: %s",
+                    knowledge.id,
+                    exc,
+                    exc_info=True
+                )
         else:
             raise ValueError("Unknown integration type")
 

@@ -110,15 +110,12 @@ class SharePointContentService:
         started_at = datetime.now(timezone.utc)
 
         try:
-            # Get token based on auth type
             if tenant_app_id:
-                # Tenant app integration: get token from tenant app credentials
                 tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
                 access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
                 token = SimpleSharePointToken(access_token=access_token)
-                oauth_token_id = None  # No oauth token ID for tenant_app
+                oauth_token_id = None
             elif token_id:
-                # User OAuth integration: get token from oauth_tokens table
                 token = await self.oauth_token_repo.one(id=token_id)
                 oauth_token_id = token.id
             else:
@@ -126,14 +123,12 @@ class SharePointContentService:
 
             stats = self._initialize_stats()
 
-            # Load integration knowledge and set folder context BEFORE pulling content
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
             if site_id and not getattr(integration_knowledge, "site_id", None):
                 integration_knowledge.site_id = site_id
 
-            # Set drive_id and resource_type for OneDrive support
             if drive_id:
                 integration_knowledge.drive_id = drive_id
             if resource_type:
@@ -141,12 +136,10 @@ class SharePointContentService:
 
             if folder_id:
                 integration_knowledge.folder_id = folder_id
-                # Note: selected_item_type is set in _pull_content based on whether it's a file or folder
 
             if folder_path:
                 integration_knowledge.folder_path = folder_path
 
-            # Save the folder context so _pull_content can access it
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
             await self._pull_content(
@@ -160,12 +153,10 @@ class SharePointContentService:
             )
             summary_stats = self._build_summary_stats(stats)
 
-            # Reload to get any updates from _pull_content (like selected_item_type)
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
 
-            # Only update sync timestamp if files were actually processed or deleted
             files_processed = summary_stats.get("files_processed", 0)
             files_deleted = summary_stats.get("files_deleted", 0)
 
@@ -173,10 +164,8 @@ class SharePointContentService:
             if files_processed > 0 or files_deleted > 0:
                 integration_knowledge.last_synced_at = datetime.now(timezone.utc)
 
-            # Initialize delta token if this is the first sync
             if not integration_knowledge.delta_token:
                 try:
-                    # For SimpleSharePointToken, use default base_url and None for token_id
                     base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
                     async with SharePointContentClient(
                         base_url=base_url,
@@ -184,7 +173,6 @@ class SharePointContentService:
                         token_id=oauth_token_id,
                         token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
                     ) as content_client:
-                        # Use provided drive_id for OneDrive, otherwise get from site
                         actual_drive_id = drive_id
                         if not actual_drive_id and site_id:
                             actual_drive_id = await content_client.get_default_drive_id(site_id)
@@ -202,7 +190,6 @@ class SharePointContentService:
 
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
-            # Log successful sync only if files were processed or deleted
             if self.sync_log_repo:
                 files_processed = summary_stats.get("files_processed", 0)
                 files_deleted = summary_stats.get("files_deleted", 0)
@@ -253,15 +240,12 @@ class SharePointContentService:
         started_at = datetime.now(timezone.utc)
 
         try:
-            # Get token based on auth type
             if tenant_app_id:
-                # Tenant app integration: get token from tenant app credentials
                 tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
                 access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
             elif token_id:
-                # User OAuth integration: get token from oauth_tokens table
                 token = await self.oauth_token_repo.one(id=token_id)
                 oauth_token_id = token.id
             else:
@@ -287,7 +271,6 @@ class SharePointContentService:
 
             stats = self._initialize_stats()
 
-            # For SimpleSharePointToken, use default base_url
             base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
             async with SharePointContentClient(
                 base_url=base_url,
@@ -295,7 +278,6 @@ class SharePointContentService:
                 token_id=oauth_token_id,
                 token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
             ) as content_client:
-                # Get drive_id: use provided, from integration_knowledge, or from site
                 actual_drive_id = drive_id or integration_knowledge.drive_id
                 if not actual_drive_id and site_id:
                     actual_drive_id = await content_client.get_default_drive_id(site_id)
@@ -303,7 +285,6 @@ class SharePointContentService:
                     logger.error(f"Could not get drive ID for site {site_id}")
                     return "Error: Could not find drive"
 
-                # Get delta changes since last sync
                 logger.info(
                     f"Starting delta sync with token: {integration_knowledge.delta_token[:20]}..."
                     if integration_knowledge.delta_token else "No delta token"
@@ -316,20 +297,15 @@ class SharePointContentService:
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
 
-                # If we get 0 changes, it's normal - no changes in SharePoint since last sync
-                # Just update the delta token and return
                 if len(changes) == 0:
                     logger.info(
                         f"Delta query returned 0 changes for integration knowledge {integration_knowledge_id}. "
                         "No updates needed - SharePoint is in sync with database."
                     )
 
-                    # Update delta token for next sync (if we got a new one)
                     if new_delta_token:
                         integration_knowledge.delta_token = new_delta_token
 
-                    # Don't update last_synced_at or create sync log when nothing changed
-                    # (This is handled by the caller based on files_processed/files_deleted counts)
                     summary_stats = {
                         "files_processed": 0,
                         "files_deleted": 0,
@@ -350,7 +326,7 @@ class SharePointContentService:
                     item_id = item.get("id")
                     is_deleted = item.get("deleted", False)
                     is_folder = item.get("folder", False)
-                    change_key = item.get("cTag")  # cTag is Microsoft's ChangeKey
+                    change_key = item.get("cTag")
 
                     logger.debug(f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})")
 
@@ -392,14 +368,10 @@ class SharePointContentService:
                             stats["skipped_items"] += 1
                         continue
 
-                    # Check if it's a folder or file
                     if item.get("folder"):
                         stats["folders_processed"] += 1
-                        # For folders, we don't need to do anything - their contents
-                        # will be in the delta changes if they changed
                         continue
 
-                    # Check if this item's ChangeKey has already been processed (deduplication)
                     should_process = True
                     if self.change_key_service and item_id and change_key:
                         should_process = await self.change_key_service.should_process(
@@ -415,9 +387,6 @@ class SharePointContentService:
                         stats["skipped_items"] += 1
                         continue
 
-                    # Process changed/added file
-                    # The smart update logic in _process_info_blob will automatically
-                    # delete the old version with the same title before adding the new one
                     web_url = item.get("webUrl", "")
 
                     try:
@@ -450,11 +419,8 @@ class SharePointContentService:
                         logger.error(f"Error processing changed file {item_name}: {e}")
                         stats["skipped_items"] += 1
 
-                # Update integration knowledge with new delta token and sync info
                 integration_knowledge.delta_token = new_delta_token
 
-                # For delta sync, show the number of items actually processed, not total count
-                # This gives users insight into what changed, not the entire library
                 summary_stats = {
                     "files_processed": stats.get("files_processed", 0),
                     "files_deleted": stats.get("files_deleted", 0),
@@ -464,7 +430,6 @@ class SharePointContentService:
                 }
                 integration_knowledge.last_sync_summary = summary_stats
 
-                # Only update sync timestamp if files were actually processed or deleted
                 files_processed = summary_stats.get("files_processed", 0)
                 files_deleted = summary_stats.get("files_deleted", 0)
                 if files_processed > 0 or files_deleted > 0:
@@ -478,7 +443,6 @@ class SharePointContentService:
                     f"Processed {len(changes)} delta changes for integration knowledge {integration_knowledge_id}"
                 )
 
-                # Log successful delta sync only if files were processed or deleted
                 if self.sync_log_repo:
                     files_processed = summary_stats.get("files_processed", 0)
                     files_deleted = summary_stats.get("files_deleted", 0)
@@ -515,7 +479,6 @@ class SharePointContentService:
                 await self.sync_log_repo.add(sync_log)
 
             logger.error(f"Error processing delta changes: {e}")
-            # On error, don't update delta token - we'll retry from same position
             raise
 
     async def _pull_content(
@@ -544,7 +507,6 @@ class SharePointContentService:
         )
 
         try:
-            # For SimpleSharePointToken, use default base_url
             base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
             async with SharePointContentClient(
                 base_url=base_url,
@@ -552,7 +514,6 @@ class SharePointContentService:
                 token_id=oauth_token_id,
                 token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
             ) as content_client:
-                # Get drive_id: use provided for OneDrive, otherwise get from site
                 actual_drive_id = drive_id
                 if not actual_drive_id and site_id:
                     actual_drive_id = await content_client.get_default_drive_id(site_id)
@@ -560,9 +521,7 @@ class SharePointContentService:
                 if not actual_drive_id:
                     raise ValueError("Could not determine drive_id - need either drive_id or site_id")
 
-                # If a specific item was selected, process it based on its type
                 if integration_knowledge.folder_id:
-                    # Get the item details to determine if it's a file or folder
                     item_info = await content_client.get_file_metadata(
                         drive_id=actual_drive_id,
                         item_id=integration_knowledge.folder_id,
@@ -589,17 +548,14 @@ class SharePointContentService:
                             stats=stats,
                             is_root_call=True,
                         )
-                        # Return early - don't process site pages when we have a specific folder selected
                         return stats
                     else:
-                        # It's a file - just process that single file (no site pages)
                         logger.info(
                             f"Processing single file '{item_name}' (ID: {integration_knowledge.folder_id}) "
                             f"for integration knowledge {integration_knowledge_id}"
                         )
                         integration_knowledge.selected_item_type = "file"
 
-                        # Get and process the file
                         content, _ = await content_client.get_file_content_by_id(
                             drive_id=actual_drive_id,
                             item_id=integration_knowledge.folder_id,
@@ -617,14 +573,10 @@ class SharePointContentService:
                         else:
                             stats["skipped_items"] += 1
 
-                        # Return early - don't process site pages when we have a specific file selected
                         return stats
                 else:
-                    # Process all documents (and pages for SharePoint only) if no specific item selected
                     integration_knowledge.selected_item_type = "site_root"
 
-                    # Documents, include folders
-                    # For OneDrive, use drive-only endpoint; for SharePoint, use site-based endpoint
                     if resource_type == "onedrive":
                         documents = await content_client.get_drive_root_children(actual_drive_id)
                     else:
@@ -639,7 +591,6 @@ class SharePointContentService:
                             stats=stats,
                         )
 
-                    # Site pages (SharePoint only - OneDrive doesn't have pages)
                     if resource_type != "onedrive" and site_id:
                         pages = await content_client.get_site_pages(site_id=site_id)
                         if data := pages.get("value", []):
@@ -738,14 +689,10 @@ class SharePointContentService:
             sharepoint_item_id=sharepoint_item_id,
         )
 
-        # Use idempotent upsert to handle duplicate webhooks from Microsoft
-        # If blob exists, update it; otherwise create new
-        # InfoBlobService will calculate size via quota_service
         info_blob = await self.info_blob_service.upsert_info_blob_by_title_and_integration(
             info_blob_add
         )
 
-        # Delete old chunks if this was an update (to avoid duplicates)
         try:
             await self.info_blob_service.repo.session.execute(
                 sa.delete(InfoBlobChunks).where(
@@ -756,16 +703,13 @@ class SharePointContentService:
         except Exception as e:
             logger.warning(f"Could not delete old chunks for {title}: {e}")
 
-        # Add new embeddings (always, since text may have changed)
         try:
             await self.datastore.add(
                 info_blob=info_blob, embedding_model=integration_knowledge.embedding_model
             )
         except Exception as e:
-            # If embedding fails, log and continue
             logger.debug(f"Could not add embedding for {title}: {e}")
 
-        # Update integration knowledge size
         integration_knowledge_size = integration_knowledge.size + info_blob.size
         integration_knowledge.size = integration_knowledge_size
         await self.integration_knowledge_repo.update(obj=integration_knowledge)
@@ -1097,7 +1041,6 @@ class SharePointContentService:
             return None
 
         try:
-            # For SimpleSharePointToken, use default base_url and None for token_id
             base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
             token_id = getattr(token, 'id', None)
             async with SharePointContentClient(

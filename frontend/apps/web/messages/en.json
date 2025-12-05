@@ -1323,7 +1323,7 @@
   "personal_spaces_description": "Personal Spaces: Users connect their own accounts (e.g., their personal SharePoint)",
   "shared_spaces_description": "Shared/Organization Spaces: Uses organization-wide configuration (no personal login needed)",
   "no_person_dependency_description": "No Person-Dependency: Organization integrations work for all users automatically",
-  "sharepoint_integration_description": "This integration enables the import of sites from SharePoint into Eneo.",
+  "sharepoint_integration_description": "Import documents and files from SharePoint sites and OneDrive into Eneo.",
   "confluence_integration_description": "This integration enables the import of knowledge from Confluence spaces into Eneo.",
   "configure_sharepoint_app_title": "Configure SharePoint App",
   "loading_configuration": "Loading configuration...",
