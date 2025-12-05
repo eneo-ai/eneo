@@ -101,8 +101,10 @@ class SharePointContentService:
         tenant_app_id: Optional[UUID] = None,
         integration_knowledge_id: UUID = None,
         site_id: str = None,
+        drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: Optional[str] = None,
+        resource_type: str = "site",
     ) -> str:
         sync_log = None
         started_at = datetime.now(timezone.utc)
@@ -128,8 +130,14 @@ class SharePointContentService:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
-            if not getattr(integration_knowledge, "site_id", None):
+            if site_id and not getattr(integration_knowledge, "site_id", None):
                 integration_knowledge.site_id = site_id
+
+            # Set drive_id and resource_type for OneDrive support
+            if drive_id:
+                integration_knowledge.drive_id = drive_id
+            if resource_type:
+                integration_knowledge.resource_type = resource_type
 
             if folder_id:
                 integration_knowledge.folder_id = folder_id
@@ -146,6 +154,8 @@ class SharePointContentService:
                 oauth_token_id=oauth_token_id,
                 integration_knowledge_id=integration_knowledge_id,
                 site_id=site_id,
+                drive_id=drive_id,
+                resource_type=resource_type,
                 stats=stats,
             )
             summary_stats = self._build_summary_stats(stats)
@@ -174,9 +184,12 @@ class SharePointContentService:
                         token_id=oauth_token_id,
                         token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
                     ) as content_client:
-                        drive_id = await content_client.get_default_drive_id(site_id)
-                        if drive_id:
-                            delta_token = await content_client.initialize_delta_token(drive_id)
+                        # Use provided drive_id for OneDrive, otherwise get from site
+                        actual_drive_id = drive_id
+                        if not actual_drive_id and site_id:
+                            actual_drive_id = await content_client.get_default_drive_id(site_id)
+                        if actual_drive_id:
+                            delta_token = await content_client.initialize_delta_token(actual_drive_id)
                             if delta_token:
                                 integration_knowledge.delta_token = delta_token
                                 logger.info(
@@ -234,6 +247,8 @@ class SharePointContentService:
         tenant_app_id: Optional[UUID] = None,
         integration_knowledge_id: UUID = None,
         site_id: str = None,
+        drive_id: Optional[str] = None,
+        resource_type: str = "site",
     ) -> str:
         started_at = datetime.now(timezone.utc)
 
@@ -266,6 +281,8 @@ class SharePointContentService:
                     tenant_app_id=tenant_app_id,
                     integration_knowledge_id=integration_knowledge_id,
                     site_id=site_id,
+                    drive_id=drive_id or integration_knowledge.drive_id,
+                    resource_type=resource_type or integration_knowledge.resource_type or "site",
                 )
 
             stats = self._initialize_stats()
@@ -278,8 +295,11 @@ class SharePointContentService:
                 token_id=oauth_token_id,
                 token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
             ) as content_client:
-                drive_id = await content_client.get_default_drive_id(site_id)
-                if not drive_id:
+                # Get drive_id: use provided, from integration_knowledge, or from site
+                actual_drive_id = drive_id or integration_knowledge.drive_id
+                if not actual_drive_id and site_id:
+                    actual_drive_id = await content_client.get_default_drive_id(site_id)
+                if not actual_drive_id:
                     logger.error(f"Could not get drive ID for site {site_id}")
                     return "Error: Could not find drive"
 
@@ -289,7 +309,7 @@ class SharePointContentService:
                     if integration_knowledge.delta_token else "No delta token"
                 )
                 changes, new_delta_token = await content_client.get_delta_changes(
-                    drive_id=drive_id,
+                    drive_id=actual_drive_id,
                     delta_token=integration_knowledge.delta_token,
                 )
                 logger.info(
@@ -402,7 +422,7 @@ class SharePointContentService:
 
                     try:
                         content, _ = await content_client.get_file_content_by_id(
-                            drive_id=drive_id,
+                            drive_id=actual_drive_id,
                             item_id=item_id,
                         )
 
@@ -503,18 +523,21 @@ class SharePointContentService:
         token,
         oauth_token_id: Optional[UUID],
         integration_knowledge_id: UUID,
-        site_id: str,
+        site_id: Optional[str],
+        drive_id: Optional[str],
+        resource_type: str,
         stats: Dict[str, int],
     ) -> Dict[str, int]:
         """
-        Process a document by its ID. First checks if it's a file or folder,
-        then processes accordingly.
+        Process content from SharePoint site or OneDrive.
 
         Args:
             token: SharePoint token for authentication (SharePointToken or SimpleSharePointToken)
             oauth_token_id: OAuth token ID for user_oauth integrations, None for tenant_app
             integration_knowledge_id: ID of the integration knowledge object
-            site_id: The SharePoint site ID to process
+            site_id: The SharePoint site ID (required for SharePoint, None for OneDrive)
+            drive_id: Direct drive ID (required for OneDrive, optional for SharePoint)
+            resource_type: 'site' for SharePoint, 'onedrive' for OneDrive
         """
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
@@ -529,13 +552,19 @@ class SharePointContentService:
                 token_id=oauth_token_id,
                 token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
             ) as content_client:
-                drive_id = await content_client.get_default_drive_id(site_id)
+                # Get drive_id: use provided for OneDrive, otherwise get from site
+                actual_drive_id = drive_id
+                if not actual_drive_id and site_id:
+                    actual_drive_id = await content_client.get_default_drive_id(site_id)
+
+                if not actual_drive_id:
+                    raise ValueError("Could not determine drive_id - need either drive_id or site_id")
 
                 # If a specific item was selected, process it based on its type
                 if integration_knowledge.folder_id:
                     # Get the item details to determine if it's a file or folder
                     item_info = await content_client.get_file_metadata(
-                        drive_id=drive_id,
+                        drive_id=actual_drive_id,
                         item_id=integration_knowledge.folder_id,
                     )
 
@@ -551,7 +580,7 @@ class SharePointContentService:
                         processed_items = set()
                         await self._fetch_and_process_content(
                             site_id=site_id,
-                            drive_id=drive_id,
+                            drive_id=actual_drive_id,
                             client=content_client,
                             token=token,
                             integration_knowledge_id=integration_knowledge_id,
@@ -572,7 +601,7 @@ class SharePointContentService:
 
                         # Get and process the file
                         content, _ = await content_client.get_file_content_by_id(
-                            drive_id=drive_id,
+                            drive_id=actual_drive_id,
                             item_id=integration_knowledge.folder_id,
                         )
 
@@ -591,11 +620,16 @@ class SharePointContentService:
                         # Return early - don't process site pages when we have a specific file selected
                         return stats
                 else:
-                    # Process all documents and pages if no specific item selected
+                    # Process all documents (and pages for SharePoint only) if no specific item selected
                     integration_knowledge.selected_item_type = "site_root"
 
                     # Documents, include folders
-                    documents = await content_client.get_documents_in_drive(site_id=site_id)
+                    # For OneDrive, use drive-only endpoint; for SharePoint, use site-based endpoint
+                    if resource_type == "onedrive":
+                        documents = await content_client.get_drive_root_children(actual_drive_id)
+                    else:
+                        documents = await content_client.get_documents_in_drive(site_id=site_id)
+
                     if data := documents.get("value", []):
                         await self._process_documents(
                             documents=data,
@@ -605,15 +639,16 @@ class SharePointContentService:
                             stats=stats,
                         )
 
-                    # Site pages (only when doing full sync)
-                    pages = await content_client.get_site_pages(site_id=site_id)
-                    if data := pages.get("value", []):
-                        await self._process_pages(
-                            pages=data,
-                            client=content_client,
-                            integration_knowledge=integration_knowledge,
-                            stats=stats,
-                        )
+                    # Site pages (SharePoint only - OneDrive doesn't have pages)
+                    if resource_type != "onedrive" and site_id:
+                        pages = await content_client.get_site_pages(site_id=site_id)
+                        if data := pages.get("value", []):
+                            await self._process_pages(
+                                pages=data,
+                                client=content_client,
+                                integration_knowledge=integration_knowledge,
+                                stats=stats,
+                            )
 
         except Exception as e:
             logger.error(f"Error processing document {site_id}: {e}")

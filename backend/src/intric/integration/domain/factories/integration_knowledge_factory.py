@@ -41,6 +41,8 @@ class IntegrationKnowledgeFactory:
             folder_id=getattr(record, "folder_id", None),
             folder_path=getattr(record, "folder_path", None),
             selected_item_type=getattr(record, "selected_item_type", None),
+            resource_type=getattr(record, "resource_type", None),
+            drive_id=getattr(record, "drive_id", None),
         )
 
     @classmethod

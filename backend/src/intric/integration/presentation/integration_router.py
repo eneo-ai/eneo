@@ -213,23 +213,30 @@ async def get_integration_preview(
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
     space_id: UUID = Query(..., description="Space ID (for auth routing)"),
-    site_id: str = Query(..., description="SharePoint site ID"),
+    site_id: Optional[str] = Query(None, description="SharePoint site ID (required for SharePoint)"),
+    drive_id: Optional[str] = Query(None, description="Drive ID (required for OneDrive)"),
     folder_id: Optional[str] = Query(None, description="Folder ID (null for root)"),
     folder_path: str = Query("", description="Current folder path"),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    """Get SharePoint folder tree with hybrid authentication support.
+    """Get SharePoint/OneDrive folder tree with hybrid authentication support.
 
     Authentication is determined by space type:
     - Personal space: Uses user OAuth
     - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
     - Shared/Org space without tenant app: Falls back to user OAuth
+
+    Provide site_id for SharePoint sites, or drive_id for OneDrive.
     """
     from intric.main.exceptions import BadRequestException, NotFoundException
     from intric.main.logging import get_logger
 
     logger = get_logger(__name__)
     service = container.sharepoint_tree_service()
+
+    # Validate that at least one of site_id or drive_id is provided
+    if not site_id and not drive_id:
+        raise BadRequestException("Either site_id or drive_id must be provided")
 
     # Convert string "null" to actual None
     if folder_id == "null":
@@ -240,6 +247,7 @@ async def get_sharepoint_folder_tree(
             user_integration_id=user_integration_id,
             space_id=space_id,
             site_id=site_id,
+            drive_id=drive_id,
             folder_id=folder_id,
             folder_path=folder_path,
         )

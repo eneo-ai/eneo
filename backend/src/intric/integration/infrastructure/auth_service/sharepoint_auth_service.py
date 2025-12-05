@@ -28,46 +28,43 @@ class SharepointAuthService(BaseOauthService):
         self.default_scopes = self.DEFAULT_SCOPES
 
     async def get_credentials(self, tenant_id: Optional[UUID] = None):
-        """Get SharePoint OAuth credentials from tenant configuration.
+        """Get SharePoint OAuth credentials from admin panel configuration.
 
-        Requires tenant_id and active SharePoint app configured via admin panel.
+        SharePoint integration requires configuration via admin panel.
         """
-        if not tenant_id:
-            raise ValueError(
-                "SharePoint OAuth requires tenant_id. "
-                "SharePoint app must be configured via admin panel."
-            )
-
-        if not self.tenant_sharepoint_app_service:
-            raise ValueError(
-                "TenantSharePointAppService not available. "
-                "Cannot fetch SharePoint configuration."
-            )
-
-        tenant_app = await self.tenant_sharepoint_app_service.get_active_app_for_tenant(tenant_id)
-        if not tenant_app:
-            raise ValueError(
-                f"No active SharePoint app configured for tenant {tenant_id}. "
-                "Please configure SharePoint app via admin panel."
-            )
-
+        logger.info(f"Getting SharePoint credentials for tenant_id={tenant_id}")
         settings = get_settings()
+
+        # Get tenant-specific configuration from admin panel
+        tenant_app = None
+        if tenant_id and self.tenant_sharepoint_app_service:
+            logger.info(f"Checking for tenant-specific SharePoint app for tenant {tenant_id}")
+            tenant_app = await self.tenant_sharepoint_app_service.get_active_app_for_tenant(tenant_id)
+
+        if not tenant_app:
+            logger.error("SharePoint OAuth not configured. Configure a SharePoint app in admin panel.")
+            raise ValueError(
+                "SharePoint OAuth not configured. Please configure a SharePoint app in the admin panel."
+            )
+
+        logger.info(f"Using tenant SharePoint app: client_id={tenant_app.client_id[:8]}..., tenant_domain={tenant_app.tenant_domain}")
+        client_id = tenant_app.client_id
+        client_secret = tenant_app.client_secret
+        tenant_domain = tenant_app.tenant_domain
+
         redirect_uri = settings.oauth_callback_url
         if not redirect_uri:
             logger.warning(
-                f"OAUTH_CALLBACK_URL not set in .env, using default for tenant {tenant_id}"
+                "OAUTH_CALLBACK_URL not set in .env, using default"
             )
             redirect_uri = f"{settings.server_url}/api/v1/integrations/auth/callback/"
 
-        logger.info(
-            f"Using tenant-configured SharePoint app for tenant {tenant_id}: {tenant_app.client_id}"
-        )
         return {
-            "client_id": tenant_app.client_id,
-            "client_secret": tenant_app.client_secret,
-            "tenant_domain": tenant_app.tenant_domain,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "tenant_domain": tenant_domain,
             "redirect_uri": redirect_uri,
-            "authority": f"https://login.microsoftonline.com/{tenant_app.tenant_domain}",
+            "authority": f"https://login.microsoftonline.com/{tenant_domain}",
         }
 
     async def gen_auth_url(self, state: str, tenant_id: Optional[UUID] = None) -> dict:

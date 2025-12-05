@@ -31,22 +31,40 @@ class SharePointPreviewService(BasePreviewService):
         self,
         token: SharePointToken,
     ) -> List[IntegrationPreview]:
-        """Get preview information from SharePoint: listing all sites (user OAuth)"""
+        """Get preview information from SharePoint sites and OneDrive (user OAuth)"""
 
-        data = {}
+        results: List[IntegrationPreview] = []
         async with SharePointContentClient(
             base_url=token.base_url,
             api_token=token.access_token,
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
         ) as content_client:
+            # Get SharePoint sites
             try:
-                data = await content_client.get_sites()
+                sites_data = await content_client.get_sites()
+                results.extend(self._to_sharepoint_preview_data(data=sites_data))
             except Exception as e:
-                logger.error(f"Error fetching SharePoint preview data: {e}")
+                logger.error(f"Error fetching SharePoint sites: {e}")
                 raise
 
-        return self._to_sharepoint_preview_data(data=data)
+            # Get user's OneDrive (only available with user OAuth, not tenant app)
+            try:
+                drive_data = await content_client.get_my_drive()
+                if drive_data:
+                    owner = drive_data.get("owner", {}).get("user", {})
+                    display_name = owner.get("displayName", "Min enhet")
+                    results.append(IntegrationPreview(
+                        name=f"OneDrive - {display_name}",
+                        key=drive_data.get("id"),
+                        url=drive_data.get("webUrl"),
+                        type="onedrive",
+                    ))
+            except Exception as e:
+                # OneDrive may not be available (e.g., permissions not granted)
+                logger.warning(f"Could not fetch OneDrive: {e}")
+
+        return results
 
     async def get_preview_info_with_app(
         self,

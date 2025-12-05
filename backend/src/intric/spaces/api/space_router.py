@@ -395,6 +395,7 @@ async def create_space_integration_knowledge(
         folder_id=data.folder_id,
         folder_path=data.folder_path,
         selected_item_type=data.selected_item_type,
+        resource_type=data.resource_type or "site",
     )
     # Return job for frontend to track progress (like file upload does)
     # FastAPI automatically converts JobInDb -> JobPublic via response_model

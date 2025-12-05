@@ -125,6 +125,8 @@ class IntegrationKnowledge(BasePublic):
     folder_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
     folder_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     selected_item_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site_root")
+    resource_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site")
+    drive_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user_integration: Mapped[UserIntegration] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()

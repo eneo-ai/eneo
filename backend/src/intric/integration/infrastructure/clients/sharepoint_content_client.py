@@ -69,6 +69,54 @@ class SharePointContentClient(BaseClient):
             else:
                 raise
 
+    async def get_my_drive(self) -> Dict[str, Any]:
+        """Get current user's OneDrive drive info (requires delegated auth)."""
+        try:
+            return await self.client.get("v1.0/me/drive", headers=self.headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info(
+                    "Token expired while getting OneDrive, refreshing..."
+                )
+                await self.refresh_token()
+                return await self.client.get("v1.0/me/drive", headers=self.headers)
+            else:
+                raise
+
+    async def get_drive_root_children(self, drive_id: str) -> Dict[str, Any]:
+        """Get items in root of a drive (works for both OneDrive and SharePoint)."""
+        endpoint = f"v1.0/drives/{drive_id}/root/children"
+        try:
+            return await self.client.get(endpoint, headers=self.headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info(
+                    "Token expired while getting drive root, refreshing..."
+                )
+                await self.refresh_token()
+                return await self.client.get(endpoint, headers=self.headers)
+            else:
+                raise
+
+    async def get_drive_folder_items(
+        self, drive_id: str, folder_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get items in a folder by drive_id (no site_id needed)."""
+        endpoint = f"v1.0/drives/{drive_id}/items/{folder_id}/children"
+        try:
+            response = await self.client.get(endpoint, headers=self.headers)
+            return response.get("value", [])
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info(
+                    "Token expired while getting folder items, refreshing..."
+                )
+                await self.refresh_token()
+                response = await self.client.get(endpoint, headers=self.headers)
+                return response.get("value", [])
+            else:
+                raise
+
     async def get_site_pages(self, site_id: str) -> Dict[str, Any]:
         try:
             endpoint = f"v1.0/sites/{site_id}/pages"

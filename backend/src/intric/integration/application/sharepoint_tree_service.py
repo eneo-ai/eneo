@@ -33,16 +33,18 @@ class SharePointTreeService:
         self,
         user_integration_id: UUID,
         space_id: UUID,
-        site_id: str,
+        site_id: Optional[str] = None,
+        drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: str = "",
     ) -> dict:
-        """Get folder tree from SharePoint site using hybrid authentication.
+        """Get folder tree from SharePoint site or OneDrive using hybrid authentication.
 
         Args:
             user_integration_id: User's integration ID
             space_id: Space context (determines auth method)
-            site_id: SharePoint site ID
+            site_id: SharePoint site ID (required for SharePoint sites)
+            drive_id: Direct drive ID (required for OneDrive)
             folder_id: Folder ID to browse (None for root)
             folder_path: Current folder path
 
@@ -50,8 +52,11 @@ class SharePointTreeService:
             Dictionary with folder tree structure
 
         Raises:
-            ValueError: If integration not authenticated or space not found
+            ValueError: If integration not authenticated, space not found,
+                        or neither site_id nor drive_id provided
         """
+        if not site_id and not drive_id:
+            raise ValueError("Either site_id or drive_id must be provided")
         from intric.integration.infrastructure.preview_service.sharepoint_tree_service import (
             SharePointTreeService as InfraSharePointTreeService,
         )
@@ -62,6 +67,7 @@ class SharePointTreeService:
                 "user_integration_id": str(user_integration_id),
                 "space_id": str(space_id),
                 "site_id": site_id,
+                "drive_id": drive_id,
                 "folder_id": folder_id,
                 "folder_path": folder_path,
             }
@@ -180,6 +186,7 @@ class SharePointTreeService:
             tree_data = await service.get_folder_tree(
                 token=token,
                 site_id=site_id,
+                drive_id=drive_id,
                 folder_id=folder_id,
                 folder_path=folder_path,
             )

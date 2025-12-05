@@ -22,14 +22,32 @@ class SharePointTreeService:
     async def get_folder_tree(
         self,
         token: SharePointToken,
-        site_id: str,
+        site_id: Optional[str] = None,
+        drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: str = "",
     ) -> dict:
+        """
+        Get folder tree for SharePoint site or OneDrive.
+
+        Args:
+            token: SharePoint OAuth token
+            site_id: SharePoint site ID (required for SharePoint sites)
+            drive_id: Direct drive ID (required for OneDrive, optional for SharePoint)
+            folder_id: Folder ID to browse (defaults to root)
+            folder_path: Current folder path for display
+
+        Returns:
+            Tree structure with items, path info, and drive/site IDs
+        """
+        if not site_id and not drive_id:
+            raise ValueError("Either site_id or drive_id must be provided")
+
         logger.info(
             "Infrastructure SharePoint tree service called",
             extra={
                 "site_id": site_id,
+                "drive_id": drive_id,
                 "folder_id": folder_id,
                 "folder_path": folder_path,
                 "has_token": bool(token.access_token),
@@ -43,27 +61,34 @@ class SharePointTreeService:
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
         ) as content_client:
-            # Step 1: Get drive ID
-            logger.debug("Fetching drive ID for site", extra={"site_id": site_id})
-            try:
-                drive_id = await content_client.get_default_drive_id(site_id)
-                if not drive_id:
-                    logger.error(
-                        "No drive ID returned for site",
-                        extra={"site_id": site_id}
+            # Step 1: Get drive ID (skip if already provided, e.g., OneDrive)
+            actual_drive_id = drive_id
+            if not actual_drive_id and site_id:
+                logger.debug("Fetching drive ID for site", extra={"site_id": site_id})
+                try:
+                    actual_drive_id = await content_client.get_default_drive_id(site_id)
+                    if not actual_drive_id:
+                        logger.error(
+                            "No drive ID returned for site",
+                            extra={"site_id": site_id}
+                        )
+                        raise ValueError(f"Could not get drive ID for site {site_id}")
+                    logger.info(
+                        "Drive ID obtained",
+                        extra={"site_id": site_id, "drive_id": actual_drive_id}
                     )
-                    raise ValueError(f"Could not get drive ID for site {site_id}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to get drive ID: {type(e).__name__}: {str(e)}",
+                        extra={"site_id": site_id},
+                        exc_info=True
+                    )
+                    raise ValueError(f"Failed to get drive ID for site {site_id}: {str(e)}") from e
+            else:
                 logger.info(
-                    "Drive ID obtained",
-                    extra={"site_id": site_id, "drive_id": drive_id}
+                    "Using provided drive ID directly (OneDrive)",
+                    extra={"drive_id": actual_drive_id}
                 )
-            except Exception as e:
-                logger.error(
-                    f"Failed to get drive ID: {type(e).__name__}: {str(e)}",
-                    extra={"site_id": site_id},
-                    exc_info=True
-                )
-                raise ValueError(f"Failed to get drive ID for site {site_id}: {str(e)}") from e
 
             if folder_id is None:
                 folder_id = "root"
@@ -74,16 +99,28 @@ class SharePointTreeService:
                 "Fetching folder items",
                 extra={
                     "site_id": site_id,
-                    "drive_id": drive_id,
+                    "drive_id": actual_drive_id,
                     "folder_id": folder_id,
                 }
             )
             try:
-                items = await content_client.get_folder_items(
-                    site_id=site_id,
-                    drive_id=drive_id,
-                    folder_id=folder_id,
-                )
+                # Use drive-only endpoint for OneDrive (no site_id)
+                if site_id:
+                    items = await content_client.get_folder_items(
+                        site_id=site_id,
+                        drive_id=actual_drive_id,
+                        folder_id=folder_id,
+                    )
+                else:
+                    # OneDrive: use drive-only endpoint
+                    if folder_id == "root":
+                        response = await content_client.get_drive_root_children(actual_drive_id)
+                        items = response.get("value", [])
+                    else:
+                        items = await content_client.get_drive_folder_items(
+                            drive_id=actual_drive_id,
+                            folder_id=folder_id,
+                        )
                 logger.info(
                     "Folder items fetched",
                     extra={
@@ -96,7 +133,7 @@ class SharePointTreeService:
                     f"Failed to get folder items: {type(e).__name__}: {str(e)}",
                     extra={
                         "site_id": site_id,
-                        "drive_id": drive_id,
+                        "drive_id": actual_drive_id,
                         "folder_id": folder_id,
                     },
                     exc_info=True
@@ -142,7 +179,7 @@ class SharePointTreeService:
                         extra={"folder_id": folder_id}
                     )
                     metadata = await content_client.get_file_metadata(
-                        drive_id=drive_id,
+                        drive_id=actual_drive_id,
                         item_id=folder_id,
                     )
                     parent_ref = metadata.get("parentReference", {})
@@ -161,7 +198,7 @@ class SharePointTreeService:
                 "items": tree_items,
                 "current_path": folder_path or "/",
                 "parent_id": parent_id,
-                "drive_id": drive_id,
+                "drive_id": actual_drive_id,
                 "site_id": site_id,
             }
 

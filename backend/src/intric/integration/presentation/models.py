@@ -101,9 +101,11 @@ class SharepointContentTaskParam(ResourceTaskParams):
     token_id: Optional[UUID] = None  # For user_oauth integrations
     tenant_app_id: Optional[UUID] = None  # For tenant_app integrations
     integration_knowledge_id: UUID
-    site_id: str
+    site_id: Optional[str] = None  # Required for SharePoint, None for OneDrive
+    drive_id: Optional[str] = None  # Required for OneDrive, optional for SharePoint
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
+    resource_type: str = "site"  # "site" for SharePoint, "onedrive" for OneDrive
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):
@@ -137,7 +139,7 @@ class SharePointTreeResponse(BaseModel):
     current_path: str
     parent_id: Optional[str] = None
     drive_id: str
-    site_id: str
+    site_id: Optional[str] = None  # None for OneDrive
 
 
 class IntegrationKnowledgeMetaData(BaseModel):
@@ -195,6 +197,8 @@ class IntegrationKnowledgePublic(BaseModel):
     user_integration_id: UUID
     embedding_model: EmbeddingModelPublicLegacy
     site_id: Optional[str] = None
+    drive_id: Optional[str] = None  # For OneDrive direct access
+    resource_type: Optional[str] = None  # "site" for SharePoint, "onedrive" for OneDrive
     sharepoint_subscription_id: Optional[UUID] = None
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None

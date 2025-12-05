@@ -19,18 +19,19 @@
   interface Props {
     userIntegrationId: string;
     spaceId: string;
-    siteId: string;
+    siteId?: string;
+    driveId?: string;
     onSelect: (item: TreeItem) => void;
   }
 
-  let { userIntegrationId, spaceId, siteId, onSelect }: Props = $props();
+  let { userIntegrationId, spaceId, siteId, driveId, onSelect }: Props = $props();
 
   const intric = getIntric();
 
   let currentItems = $state<TreeItem[]>([]);
   let currentPath = $state<string>("/");
   let currentFolderId = $state<string | null>(null);
-  let driveId = $state<string>("");
+  let currentDriveId = $state<string>("");
   let expandedNodes = $state<Set<string>>(new Set());
   let loadingNodes = $state<Set<string>>(new Set());
   let navigationStack = $state<Array<{ folderId: string | null; path: string }>>(
@@ -41,9 +42,16 @@
     try {
       // Build query params, only including defined values
       const queryParams: Record<string, string> = {
-        space_id: spaceId,
-        site_id: siteId
+        space_id: spaceId
       };
+
+      // Pass either site_id or drive_id based on what's provided
+      if (siteId) {
+        queryParams.site_id = siteId;
+      }
+      if (driveId) {
+        queryParams.drive_id = driveId;
+      }
 
       if (folderId !== null) {
         queryParams.folder_id = folderId;
@@ -66,7 +74,7 @@
       currentItems = response.items || [];
       currentPath = response.current_path || "/";
       currentFolderId = folderId;
-      driveId = response.drive_id;
+      currentDriveId = response.drive_id;
 
       if (folderId) {
         loadingNodes.delete(folderId);
@@ -117,7 +125,8 @@
   };
 
   $effect(() => {
-    if (siteId) {
+    // Load folders when either siteId or driveId is provided
+    if (siteId || driveId) {
       loadFolders();
     }
   });

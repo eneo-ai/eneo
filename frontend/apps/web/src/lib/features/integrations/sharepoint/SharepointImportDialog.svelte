@@ -6,6 +6,8 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconSearch } from "@intric/icons/search";
+  import { IconUploadCloud } from "@intric/icons/upload-cloud";
+  import { IconWeb } from "@intric/icons/web";
   import { IntricError, type IntegrationKnowledgePreview } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { createCombobox } from "@melt-ui/svelte";
@@ -98,15 +100,20 @@
 
       if (selectedItem) {
         importData.preview = {
-          key: selectedSite?.key, // Use site ID, not file ID
+          key: selectedSite?.key, // Use site ID for SharePoint, drive ID for OneDrive
           name: selectedItem.name,
           type: selectedItem.type,
           url: selectedItem.web_url || selectedItem.path,
           folder_id: selectedItem.id,
-          folder_path: selectedItem.path
+          folder_path: selectedItem.path,
+          resource_type: selectedSite?.type === "onedrive" ? "onedrive" : "site"
         };
       } else if (selectedSite) {
-        importData.preview = selectedSite;
+        // Pass the full site/OneDrive object, including type as resource_type
+        importData.preview = {
+          ...selectedSite,
+          resource_type: selectedSite.type === "onedrive" ? "onedrive" : "site"
+        };
       }
 
       const job = await intric.integrations.knowledge.import(importData);
@@ -200,12 +207,18 @@
               {:else if filteredResources.length > 0}
                 {#each filteredResources as previewItem (previewItem.value.key)}
                   {@const item = $state.snapshot(previewItem)}
+                  {@const isOneDrive = item.value.type === "onedrive"}
                   <li
                     {...$option(item)}
                     use:option
-                    class="hover:bg-hover-default flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer"
+                    class="hover:bg-hover-default flex items-center gap-2 rounded-md px-2 py-1 hover:cursor-pointer"
                   >
-                    <span class=" text-primary truncate py-1">
+                    {#if isOneDrive}
+                      <IconUploadCloud class="w-4 h-4 text-secondary flex-shrink-0" />
+                    {:else}
+                      <IconWeb class="w-4 h-4 text-secondary flex-shrink-0" />
+                    {/if}
+                    <span class="text-primary truncate py-1">
                       {item.value.name}
                     </span>
                   </li>
@@ -225,7 +238,8 @@
             <SharePointFolderTree
               userIntegrationId={integration.id || ""}
               spaceId={$currentSpace.id}
-              siteId={selectedSite.key}
+              siteId={selectedSite.type === "onedrive" ? undefined : selectedSite.key}
+              driveId={selectedSite.type === "onedrive" ? selectedSite.key : undefined}
               onSelect={handleFolderSelect}
             />
           {:else}

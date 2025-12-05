@@ -48,8 +48,9 @@ class SharePointSubscriptionService:
         user_integration_id: UUID,
         site_id: str,
         token: SharePointToken,
+        is_onedrive: bool = False,
     ) -> Optional[SharePointSubscription]:
-        """Ensure a subscription exists for this user+site combination.
+        """Ensure a subscription exists for this user+site/drive combination.
 
         If a subscription already exists, returns it without creating a new one.
         If no subscription exists, creates one and returns it.
@@ -59,8 +60,9 @@ class SharePointSubscriptionService:
 
         Args:
             user_integration_id: User integration that owns this subscription
-            site_id: SharePoint site ID
+            site_id: SharePoint site ID, or OneDrive drive_id if is_onedrive=True
             token: OAuth token for Microsoft Graph API
+            is_onedrive: If True, site_id is actually a drive_id for OneDrive
 
         Returns:
             SharePointSubscription if successful, None if subscription creation failed
@@ -69,7 +71,7 @@ class SharePointSubscriptionService:
             logger.debug("SharePoint webhook notification URL not configured; skipping subscription")
             return None
 
-        # Check if subscription already exists for this user+site
+        # Check if subscription already exists for this user+site/drive
         existing = await self.subscription_repo.get_by_user_and_site(
             user_integration_id=user_integration_id,
             site_id=site_id
@@ -85,7 +87,8 @@ class SharePointSubscriptionService:
                 )
                 success = await self.recreate_expired_subscription(
                     subscription=existing,
-                    token=token
+                    token=token,
+                    is_onedrive=is_onedrive,
                 )
                 if success:
                     logger.info(
@@ -106,24 +109,30 @@ class SharePointSubscriptionService:
                 return existing
 
         # Create new subscription
+        resource_type = "OneDrive" if is_onedrive else "site"
         logger.info(
-            f"Creating new site-level subscription for user_integration={user_integration_id}, "
+            f"Creating new {resource_type}-level subscription for user_integration={user_integration_id}, "
             f"site={site_id[:30]}..."
         )
 
-        drive_id = await self._resolve_drive_id(token=token, site_id=site_id)
-        if not drive_id:
-            logger.warning(f"Could not resolve drive_id for site {site_id}; cannot create subscription")
-            return None
+        if is_onedrive:
+            # For OneDrive, site_id IS the drive_id
+            drive_id = site_id
+        else:
+            # For SharePoint sites, resolve drive_id from site
+            drive_id = await self._resolve_drive_id(token=token, site_id=site_id)
+            if not drive_id:
+                logger.warning(f"Could not resolve drive_id for site {site_id}; cannot create subscription")
+                return None
 
         subscription_id = await self._create_graph_subscription(
             token=token,
-            site_id=site_id,
-            drive_id=drive_id
+            site_id=site_id if not is_onedrive else None,
+            drive_id=drive_id,
         )
 
         if not subscription_id:
-            logger.warning(f"Failed to create Microsoft Graph subscription for site {site_id}")
+            logger.warning(f"Failed to create Microsoft Graph subscription for {resource_type} {site_id}")
             return None
 
         # Save to database
@@ -138,7 +147,7 @@ class SharePointSubscriptionService:
 
         saved = await self.subscription_repo.add(subscription)
         logger.info(
-            f"Created and saved subscription {subscription_id} for site {site_id[:30]}... "
+            f"Created and saved subscription {subscription_id} for {resource_type} {site_id[:30]}... "
             f"(expires {expiration.isoformat()})"
         )
 
@@ -148,6 +157,7 @@ class SharePointSubscriptionService:
         self,
         subscription: SharePointSubscription,
         token: SharePointToken,
+        is_onedrive: bool = False,
     ) -> bool:
         """Recreate an expired subscription in-place.
 
@@ -161,6 +171,7 @@ class SharePointSubscriptionService:
         Args:
             subscription: Expired subscription to recreate
             token: OAuth token for Microsoft Graph API
+            is_onedrive: If True, this is an OneDrive subscription (no site_id in Graph API)
 
         Returns:
             True if recreation successful, False otherwise
@@ -181,7 +192,7 @@ class SharePointSubscriptionService:
         # Step 2: Create new subscription in Microsoft Graph
         new_subscription_id = await self._create_graph_subscription(
             token=token,
-            site_id=subscription.site_id,
+            site_id=subscription.site_id if not is_onedrive else None,
             drive_id=subscription.drive_id,
         )
 
@@ -356,12 +367,18 @@ class SharePointSubscriptionService:
     async def _create_graph_subscription(
         self,
         token: SharePointToken,
-        site_id: str,
+        site_id: Optional[str],
         drive_id: str,
     ) -> Optional[str]:
         """Create subscription in Microsoft Graph.
 
-        Returns subscription_id from Microsoft Graph, or None on failure.
+        Args:
+            token: OAuth token for Microsoft Graph API
+            site_id: SharePoint site ID (None for OneDrive)
+            drive_id: Drive ID
+
+        Returns:
+            subscription_id from Microsoft Graph, or None on failure.
         """
         expiration = datetime.now(timezone.utc) + timedelta(minutes=self.subscription_lifetime_minutes)
 
@@ -373,7 +390,12 @@ class SharePointSubscriptionService:
         # Microsoft Graph subscriptions only support drive/root level resources
         # We always subscribe to the entire drive root
         # Webhook handler filters notifications based on folder_id in IntegrationKnowledge
-        resource = f"/sites/{site_id}/drives/{drive_id}/root"
+        if site_id:
+            # SharePoint: use full site/drive path
+            resource = f"/sites/{site_id}/drives/{drive_id}/root"
+        else:
+            # OneDrive: use just the drive path
+            resource = f"/drives/{drive_id}/root"
 
         payload = {
             "changeType": "updated",  # Covers create/delete/update events
