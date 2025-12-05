@@ -50,7 +50,7 @@ class JobRepository:
             .where(Jobs.id == id)
             .values(updated_at=sa.func.now())
         )
-        await self.delegate._session.execute(stmt)
+        await self.delegate.session.execute(stmt)
 
     async def mark_job_failed_if_running(
         self, id: UUID, error_message: str
@@ -76,11 +76,10 @@ class JobRepository:
             .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
             .values(
                 status=Status.FAILED,
-                result={"error": error_message},
                 updated_at=sa.func.now(),
             )
         )
-        result = await self.delegate._session.execute(stmt)
+        result = await self.delegate.session.execute(stmt)
         return result.rowcount
 
     async def get_running_jobs(self, user_id: UUID):
