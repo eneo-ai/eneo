@@ -827,10 +827,15 @@ async def request_async_export(
                    f"Please wait for existing exports to complete or cancel them.",
         )
 
-    # Normalize format
+    # Validate and normalize format
     export_format = request.format.lower().strip()
+    if export_format == "json":
+        export_format = "jsonl"  # Accept "json" as alias for "jsonl"
     if export_format not in ["csv", "jsonl"]:
-        export_format = "csv"
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid export format: '{request.format}'. Supported formats: csv, json, jsonl",
+        )
 
     # Generate job ID
     job_id = uuid4()
@@ -1052,11 +1057,11 @@ async def cancel_export(
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Cannot cancel job in '{job.status.value}' state. "
+                detail=f"Job in '{job.status.value}' state cannot be cancelled. "
                        f"Only 'pending' or 'processing' jobs can be cancelled.",
             )
 
-    return {"status": "cancelled", "message": "Export job cancellation requested"}
+    return {"status": "cancellation_requested", "message": "Export job cancellation requested"}
 
 
 @router.get("/retention-policy", response_model=RetentionPolicyResponse)
