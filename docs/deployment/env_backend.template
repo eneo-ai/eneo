@@ -192,6 +192,11 @@ INTRIC_SUPER_DUPER_API_KEY=
 # a background task processor instead of HTTP server. Both backend and worker
 # containers use the same image; run.sh detects RUN_AS_WORKER=true to launch
 # the ARQ worker instead of Gunicorn.
+#
+# VOLUMES: Ensure both backend and worker services have these volumes in docker-compose.yml:
+#   - eneo_backend_data:/app/data
+#   - eneo_exports_data:/app/exports   # Required for audit log exports
+#   - eneo_temp_files:/tmp
 # ----------------------------------------------------------------------------
 
 # [OPTIONAL] Max concurrent jobs across all tenants (default: 20)
@@ -266,6 +271,26 @@ CRAWL_STALE_THRESHOLD_MINUTES=30
 # TIME-BASED (not page-count-based) to handle slow-loading pages correctly
 # Should be significantly less than CRAWL_STALE_THRESHOLD_MINUTES
 CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
+
+# ----------------------------------------------------------------------------
+# Audit Log Export Configuration
+# ----------------------------------------------------------------------------
+# VOLUME REQUIRED: Ensure docker-compose.yml has:
+#   - eneo_exports_data:/app/exports
+#
+# [OPTIONAL] Directory for storing audit log export files
+# Default: ./exports (relative path, auto-created on startup)
+# Docker: Set to /app/exports to use the mounted volume
+# Check logs for "[EXPORT CONFIG]" messages if exports aren't working
+EXPORT_DIR=/app/exports
+
+# [OPTIONAL] Max concurrent exports per tenant (default: 2)
+# Prevents one tenant from overloading the system with many exports
+EXPORT_MAX_CONCURRENT_PER_TENANT=2
+
+# [OPTIONAL] Export file retention period in hours (default: 24)
+# Files older than this are automatically cleaned up by daily cron job (03:00 UTC)
+EXPORT_MAX_AGE_HOURS=24
 
 # ----------------------------------------------------------------------------
 # Feature Flags

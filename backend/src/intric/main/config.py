@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -155,6 +156,14 @@ class Settings(BaseSettings):
     orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
     crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
     crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
+
+    # Audit log export configuration
+    export_batch_size: int = 20000  # Records per DB fetch for streaming exports
+    export_buffer_size: int = 50000  # Records to buffer before disk write
+    export_dir: Path = Path("exports")  # Default: ./exports (dev), override: EXPORT_DIR=/app/exports (Docker)
+    export_max_age_hours: int = 24  # File retention period before cleanup
+    export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
+    export_progress_interval: int = 5000  # Update progress every N records
 
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
@@ -432,6 +441,67 @@ class Settings(BaseSettings):
             f"{self.postgres_password}@{self.postgres_host}:"
             f"{self.postgres_port}/{self.postgres_db}"
         )
+
+    @model_validator(mode="after")
+    def ensure_export_dir_exists(self):
+        """
+        Ensure export directory exists for audit log exports.
+        Creates the directory if it doesn't exist (great for local dev).
+
+        Logs detailed information about export directory configuration
+        to help with debugging when exports aren't working.
+        """
+        original_path = self.export_dir
+
+        try:
+            # Resolve relative paths to absolute based on CWD
+            self.export_dir = self.export_dir.resolve()
+
+            # Create if it doesn't exist
+            self.export_dir.mkdir(parents=True, exist_ok=True)
+
+            # Verify the directory is writable by creating a test file
+            test_file = self.export_dir / ".write_test"
+            try:
+                test_file.touch()
+                test_file.unlink()
+            except (PermissionError, OSError) as e:
+                logging.warning(
+                    f"[EXPORT CONFIG] Export directory exists but is NOT writable: "
+                    f"{self.export_dir}. Error: {e}. "
+                    f"Audit log exports will fail. "
+                    f"Set EXPORT_DIR env var to a writable path."
+                )
+                return self
+
+            # Success - log the configured path for debugging
+            logging.info(
+                f"[EXPORT CONFIG] Export directory configured: {self.export_dir} "
+                f"(from {'env EXPORT_DIR' if str(original_path) != 'exports' else 'default'})"
+            )
+
+        except PermissionError as e:
+            logging.warning(
+                f"[EXPORT CONFIG] Cannot create export directory {self.export_dir}: "
+                f"Permission denied. Error: {e}. "
+                f"Audit log exports will fail. "
+                f"Set EXPORT_DIR env var to a writable path (e.g., /tmp/exports)."
+            )
+        except OSError as e:
+            logging.warning(
+                f"[EXPORT CONFIG] Cannot create export directory {self.export_dir}: "
+                f"OS error: {e}. "
+                f"Audit log exports will fail. "
+                f"Set EXPORT_DIR env var to a valid, writable path."
+            )
+        except Exception as e:
+            logging.error(
+                f"[EXPORT CONFIG] Unexpected error setting up export directory "
+                f"{self.export_dir}: {type(e).__name__}: {e}. "
+                f"Audit log exports may not work correctly."
+            )
+
+        return self
 
 
 _settings: Optional[Settings] = None

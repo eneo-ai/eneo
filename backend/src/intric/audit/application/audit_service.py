@@ -1,11 +1,17 @@
 """Audit logging service."""
 
+import csv
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from io import StringIO
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 from uuid import UUID, uuid4
 
+import aiofiles
+import orjson
+
 from intric.audit.application.audit_config_service import AuditConfigService
+from intric.main.config import get_settings
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.audit_log import AuditLog
@@ -432,6 +438,238 @@ class AuditService:
             page += 1
 
         return output.getvalue()
+
+    def _audit_log_to_dict(self, log: AuditLog) -> dict:
+        """Convert AuditLog to dict for JSON serialization."""
+        return {
+            "id": str(log.id),
+            "tenant_id": str(log.tenant_id),
+            "timestamp": log.timestamp.isoformat(),
+            "actor_id": str(log.actor_id),
+            "actor_type": log.actor_type.value,
+            "action": log.action.value,
+            "entity_type": log.entity_type.value,
+            "entity_id": str(log.entity_id),
+            "description": log.description,
+            "outcome": log.outcome.value,
+            "metadata": log.metadata,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "request_id": str(log.request_id) if log.request_id else None,
+            "error_message": log.error_message,
+        }
+
+    def _audit_log_to_csv_row(self, log: AuditLog) -> list:
+        """Convert AuditLog to CSV row with sanitization."""
+        return [
+            log.timestamp.isoformat(),
+            str(log.actor_id),
+            log.actor_type.value,
+            log.action.value,
+            log.entity_type.value,
+            str(log.entity_id),
+            _sanitize_csv_cell(log.description),
+            log.outcome.value,
+            _sanitize_csv_cell(log.error_message or ""),
+            _sanitize_csv_cell(str(log.metadata)),
+        ]
+
+
+    def _raw_dict_to_csv_row(self, log_dict: dict) -> list:
+        """Convert raw audit log dict to CSV row with sanitization.
+
+        Used with stream_logs_raw() for optimized exports without ORM overhead.
+        """
+        return [
+            log_dict["timestamp"],
+            log_dict["actor_id"],
+            log_dict["actor_type"],
+            log_dict["action"],
+            log_dict["entity_type"],
+            log_dict["entity_id"],
+            _sanitize_csv_cell(log_dict["description"]),
+            log_dict["outcome"],
+            _sanitize_csv_cell(log_dict.get("error_message") or ""),
+            _sanitize_csv_cell(str(log_dict.get("metadata", {}))),
+        ]
+
+    async def stream_export_to_file(
+        self,
+        file_path: str,
+        tenant_id: UUID,
+        format: str,
+        progress_callback: Callable[[int, int], Awaitable[None]],
+        cancellation_check: Callable[[], Awaitable[bool]],
+        user_id: Optional[UUID] = None,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        max_records: Optional[int] = None,
+    ) -> int:
+        """
+        Stream export audit logs to file with progress tracking and cancellation.
+
+        Uses server-side cursors for constant memory usage (~50MB) regardless
+        of dataset size. Supports both CSV and JSONL formats.
+
+        Args:
+            file_path: Absolute path to output file
+            tenant_id: Tenant ID for multi-tenant isolation
+            format: Export format ('csv' or 'jsonl')
+            progress_callback: Async callback(processed, total) for progress updates
+            cancellation_check: Async callback() returning True if job should cancel
+            user_id: GDPR export filter (user as actor OR target)
+            actor_id: Filter by actor
+            action: Filter by action type
+            from_date: Filter from date
+            to_date: Filter to date
+            max_records: Maximum records to export (None for unlimited)
+
+        Returns:
+            Total number of records exported
+        """
+        settings = get_settings()
+        batch_size = settings.export_batch_size
+        buffer_size = settings.export_buffer_size
+        progress_interval = settings.export_progress_interval
+
+        # Get total count for progress calculation
+        if user_id:
+            total_records = await self.repository.count_user_logs(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                from_date=from_date,
+                to_date=to_date,
+            )
+        else:
+            total_records = await self.repository.count_logs(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action=action,
+                from_date=from_date,
+                to_date=to_date,
+            )
+
+        # Apply max_records limit to total
+        if max_records and total_records > max_records:
+            total_records = max_records
+
+        processed = 0
+        buffer: list = []
+
+        async with aiofiles.open(file_path, mode="wb") as file:
+            # Write CSV header if needed
+            if format == "csv":
+                header_output = StringIO()
+                writer = csv.writer(header_output)
+                writer.writerow([
+                    "Timestamp",
+                    "Actor ID",
+                    "Actor Type",
+                    "Action",
+                    "Entity Type",
+                    "Entity ID",
+                    "Description",
+                    "Outcome",
+                    "Error Message",
+                    "Metadata",
+                ])
+                await file.write(header_output.getvalue().encode("utf-8"))
+
+            # Stream logs from repository using raw dicts (SQLAlchemy Core)
+            # ~2-3x faster than ORM streaming by bypassing hydration + domain conversion
+            if user_id:
+                log_stream = self.repository.stream_user_logs_raw(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    batch_size=batch_size,
+                )
+            else:
+                log_stream = self.repository.stream_logs_raw(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=action,
+                    from_date=from_date,
+                    to_date=to_date,
+                    batch_size=batch_size,
+                )
+
+            async for log in log_stream:
+                # Check cancellation periodically
+                if processed % progress_interval == 0:
+                    if await cancellation_check():
+                        logger.info(
+                            "Export cancelled",
+                            extra={
+                                "tenant_id": str(tenant_id),
+                                "processed": processed,
+                            },
+                        )
+                        # Flush remaining buffer before exit
+                        if buffer:
+                            await self._flush_buffer(file, buffer, format)
+                        return processed
+
+                    # Report progress
+                    await progress_callback(processed, total_records)
+
+                # Add to buffer - log is already a dict from raw streaming
+                if format == "csv":
+                    buffer.append(self._raw_dict_to_csv_row(log))
+                else:  # jsonl
+                    buffer.append(log)  # Already a dict, no conversion needed
+
+                processed += 1
+
+                # Check max_records limit
+                if max_records and processed >= max_records:
+                    break
+
+                # Flush buffer when full
+                if len(buffer) >= buffer_size:
+                    await self._flush_buffer(file, buffer, format)
+                    buffer.clear()
+
+            # Flush remaining buffer
+            if buffer:
+                await self._flush_buffer(file, buffer, format)
+
+        # Final progress update
+        await progress_callback(processed, total_records)
+
+        logger.info(
+            "Export completed",
+            extra={
+                "tenant_id": str(tenant_id),
+                "format": format,
+                "total_records": processed,
+                "file_path": file_path,
+            },
+        )
+
+        return processed
+
+    async def _flush_buffer(
+        self,
+        file: aiofiles.threadpool.binary.AsyncBufferedIOBase,
+        buffer: list,
+        format: str,
+    ) -> None:
+        """Flush buffer to file with format-specific serialization."""
+        if format == "csv":
+            # Use StringIO + writerows for efficient CSV batch writing
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerows(buffer)  # writerows is faster than loop
+            await file.write(output.getvalue().encode("utf-8"))
+        else:  # jsonl
+            # Batch serialize with join - O(n) instead of O(n²) concatenation
+            # Memory: ~45-50MB temporary allocation for 50k records, acceptable trade-off
+            chunk = b"\n".join(orjson.dumps(item) for item in buffer) + b"\n"
+            await file.write(chunk)
 
     async def log_async(
         self,

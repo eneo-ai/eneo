@@ -10,6 +10,7 @@ from intric.worker.usage_stats_tasks import (
     recalculate_tenant_usage_stats,
 )
 from intric.audit.application.audit_worker_task import log_audit_event_task
+from intric.audit.application.export_worker_task import export_audit_logs_task
 
 worker = Worker()
 
@@ -100,6 +101,163 @@ async def log_audit_event(job_id: str, params: dict, container: Container):
     """
     session = container.session()
     return await log_audit_event_task(job_id=job_id, params=params, session=session)
+
+
+@worker.function(with_user=False)
+async def export_audit_logs(job_id: str, params: dict, container: Container):
+    """Worker function for async audit log export.
+
+    Exports audit logs to file with progress tracking and cancellation support.
+    Uses streaming for constant memory usage regardless of dataset size.
+
+    Args:
+        job_id: ARQ job ID (also used as export job ID)
+        params: Export parameters (dict) - validated as AuditExportTaskParams
+        container: Dependency injection container
+
+    Returns:
+        Dictionary with export result (job_id, status, file_path, etc.)
+    """
+    session = container.session()
+    redis = container.redis_client()
+    return await export_audit_logs_task(
+        job_id=job_id, params=params, session=session, redis=redis
+    )
+
+
+@worker.cron_job(hour=3, minute=0)  # Daily at 03:00 UTC
+async def cleanup_old_exports(container: Container):
+    """Daily cron job to clean up old export files.
+
+    Runs at 03:00 UTC (4:00 AM Swedish winter, 5:00 AM summer) to minimize user impact.
+    Scheduled after audit log purge to avoid worker overload.
+
+    Removes:
+    - Export files older than export_max_age_hours (default: 24 hours)
+    - Corresponding Redis job keys
+
+    Returns:
+        Dictionary with cleanup statistics
+    """
+    import os
+    from datetime import datetime, timezone
+
+    from intric.audit.infrastructure.export_job_manager import ExportJobManager
+    from intric.main.config import get_settings
+    from intric.main.logging import get_logger
+
+    logger = get_logger(__name__)
+    settings = get_settings()
+
+    logger.info("Starting export file cleanup")
+
+    redis = container.redis_client()
+    job_manager = ExportJobManager(redis)
+
+    # Get expired jobs from Redis
+    expired_jobs = await job_manager.get_expired_jobs()
+
+    files_deleted = 0
+    bytes_freed = 0
+    jobs_cleaned = 0
+    errors = []
+
+    for job in expired_jobs:
+        try:
+            # Delete file if it exists
+            if job.file_path and os.path.exists(job.file_path):
+                file_size = os.path.getsize(job.file_path)
+                os.remove(job.file_path)
+                files_deleted += 1
+                bytes_freed += file_size
+                logger.debug(
+                    f"Deleted export file: {job.file_path} ({file_size} bytes)"
+                )
+
+            # Delete Redis key
+            await job_manager.delete_job(job.tenant_id, job.job_id)
+            jobs_cleaned += 1
+
+        except Exception as e:
+            errors.append({
+                "job_id": str(job.job_id),
+                "tenant_id": str(job.tenant_id),
+                "error": str(e),
+            })
+            logger.warning(
+                f"Failed to clean up export job {job.job_id}: {e}"
+            )
+
+    # Also clean up any orphaned files (files without Redis entries)
+    # This handles edge cases where Redis key expired but file remained
+    export_dir = settings.export_dir
+    if export_dir.exists():
+        now = datetime.now(timezone.utc)
+        max_age_seconds = settings.export_max_age_hours * 3600
+
+        for tenant_dir in export_dir.iterdir():
+            if not tenant_dir.is_dir():
+                continue
+
+            for file_path in tenant_dir.iterdir():
+                if not file_path.is_file():
+                    continue
+
+                try:
+                    # Check file age
+                    file_mtime = datetime.fromtimestamp(
+                        file_path.stat().st_mtime, tz=timezone.utc
+                    )
+                    age_seconds = (now - file_mtime).total_seconds()
+
+                    if age_seconds > max_age_seconds:
+                        file_size = file_path.stat().st_size
+                        file_path.unlink()
+                        files_deleted += 1
+                        bytes_freed += file_size
+                        logger.debug(
+                            f"Deleted orphaned export file: {file_path} ({file_size} bytes)"
+                        )
+                except Exception as e:
+                    errors.append({
+                        "file_path": str(file_path),
+                        "error": str(e),
+                    })
+
+            # Remove empty tenant directories
+            try:
+                if tenant_dir.is_dir() and not any(tenant_dir.iterdir()):
+                    tenant_dir.rmdir()
+            except Exception:
+                pass  # Ignore errors removing empty directories
+
+    if errors:
+        logger.warning(
+            f"Export cleanup completed with {len(errors)} errors",
+            extra={
+                "files_deleted": files_deleted,
+                "bytes_freed": bytes_freed,
+                "jobs_cleaned": jobs_cleaned,
+                "errors": errors,
+            },
+        )
+    else:
+        logger.info(
+            "Export cleanup completed",
+            extra={
+                "files_deleted": files_deleted,
+                "bytes_freed": bytes_freed,
+                "jobs_cleaned": jobs_cleaned,
+            },
+        )
+
+    return {
+        "files_deleted": files_deleted,
+        "bytes_freed": bytes_freed,
+        "jobs_cleaned": jobs_cleaned,
+        "errors": errors,
+        "success": len(errors) == 0,
+    }
 
 
 @worker.cron_job(hour=2, minute=0)  # Daily at 02:00 UTC

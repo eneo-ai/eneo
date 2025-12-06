@@ -18,6 +18,9 @@ from intric.api.audit.schemas import (
     AccessJustificationResponse,
     AuditLogListResponse,
     AuditLogResponse,
+    ExportJobRequest,
+    ExportJobResponse,
+    ExportJobStatusResponse,
 )
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
@@ -768,6 +771,292 @@ async def export_audit_logs(
             headers=response_headers,
         )
 
+
+# ============================================================================
+# Async Export Endpoints (Background Job with Progress Tracking)
+# ============================================================================
+
+
+@router.post("/logs/export/async", response_model=ExportJobResponse)
+async def request_async_export(
+    request: ExportJobRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Request async export of audit logs.
+
+    Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+    Download via /logs/export/{job_id}/download when complete.
+
+    Advantages over sync export:
+    - Handles 1M-10M+ records without timeout
+    - Progress tracking for long exports
+    - Cancellation support
+    - Constant memory usage (~50MB)
+
+    Limitations:
+    - Max 2 concurrent exports per tenant
+    - Files auto-deleted after 24 hours
+
+    Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
+    """
+    from uuid import uuid4
+
+    from intric.audit.application.audit_task_params import AuditExportTaskParams, ExportFormat
+    from intric.audit.infrastructure.export_job_manager import ExportJobManager
+    from intric.jobs.job_manager import job_manager
+    from intric.roles.permissions import Permission, validate_permission
+
+    current_user = container.user()
+    settings = get_settings()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
+
+    # Get Redis client and create job manager
+    redis = container.redis_client()
+    export_job_manager = ExportJobManager(redis)
+
+    # Check concurrent export limit
+    active_jobs = await export_job_manager.count_active_jobs(current_user.tenant_id)
+    if active_jobs >= settings.export_max_concurrent_per_tenant:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Maximum {settings.export_max_concurrent_per_tenant} concurrent exports allowed. "
+                   f"Please wait for existing exports to complete or cancel them.",
+        )
+
+    # Normalize format
+    export_format = request.format.lower().strip()
+    if export_format not in ["csv", "jsonl"]:
+        export_format = "csv"
+
+    # Generate job ID
+    job_id = uuid4()
+
+    # Create job in Redis
+    await export_job_manager.create_job(
+        job_id=job_id,
+        tenant_id=current_user.tenant_id,
+        format=export_format,
+    )
+
+    # Build task params
+    task_params = AuditExportTaskParams(
+        tenant_id=current_user.tenant_id,
+        user_id=request.user_id,
+        actor_id=request.actor_id,
+        action=request.action.value if request.action else None,
+        from_date=request.from_date,
+        to_date=request.to_date,
+        format=ExportFormat(export_format),
+        max_records=request.max_records,
+    )
+
+    # Enqueue to ARQ
+    await job_manager.enqueue(
+        "export_audit_logs",
+        job_id=str(job_id),
+        params=task_params.to_dict(),
+    )
+
+    # Log the export request
+    audit_repo = AuditLogRepositoryImpl(container.session())
+    audit_service = AuditService(audit_repo)
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.AUDIT_LOG_EXPORTED,
+        entity_type=EntityType.AUDIT_LOG,
+        entity_id=job_id,
+        description=f"Async export requested ({export_format.upper()})",
+        metadata={
+            "export_format": export_format.upper(),
+            "export_type": "GDPR_EXPORT" if request.user_id else "AUDIT_EXPORT",
+            "job_id": str(job_id),
+            "async": True,
+        },
+    )
+
+    return ExportJobResponse(
+        job_id=job_id,
+        status="pending",
+        message="Export job created. Poll /logs/export/{job_id}/status for progress.",
+    )
+
+
+@router.get("/logs/export/{job_id}/status", response_model=ExportJobStatusResponse)
+async def get_export_status(
+    job_id: UUID = Path(..., description="Export job ID"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Get export job status with progress.
+
+    Poll this endpoint to track export progress.
+    When status is 'completed', use the download_url to get the file.
+
+    Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
+    """
+    from intric.audit.infrastructure.export_job_manager import ExportJobManager
+    from intric.roles.permissions import Permission, validate_permission
+
+    current_user = container.user()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
+
+    # Get job status from Redis
+    redis = container.redis_client()
+    export_job_manager = ExportJobManager(redis)
+
+    job = await export_job_manager.get_job(current_user.tenant_id, job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Export job not found or expired",
+        )
+
+    # Build download URL if completed
+    download_url = None
+    if job.status.value == "completed" and job.file_path:
+        download_url = f"/api/v1/audit/logs/export/{job_id}/download"
+
+    return ExportJobStatusResponse(
+        job_id=job.job_id,
+        status=job.status.value,
+        progress=job.progress,
+        total_records=job.total_records,
+        processed_records=job.processed_records,
+        format=job.format,
+        file_size_bytes=job.file_size_bytes,
+        error_message=job.error_message,
+        download_url=download_url,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        expires_at=job.expires_at,
+    )
+
+
+@router.get("/logs/export/{job_id}/download")
+async def download_export(
+    job_id: UUID = Path(..., description="Export job ID"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Download completed export file.
+
+    Only available when job status is 'completed'.
+    Files are auto-deleted after 24 hours.
+
+    Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
+    """
+    import os
+
+    from fastapi.responses import FileResponse
+
+    from intric.audit.infrastructure.export_job_manager import ExportJobManager
+    from intric.roles.permissions import Permission, validate_permission
+
+    current_user = container.user()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
+
+    # Get job from Redis
+    redis = container.redis_client()
+    export_job_manager = ExportJobManager(redis)
+
+    job = await export_job_manager.get_job(current_user.tenant_id, job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Export job not found or expired",
+        )
+
+    if job.status.value != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Export job is not completed. Current status: {job.status.value}",
+        )
+
+    if not job.file_path or not os.path.exists(job.file_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Export file not found. It may have been cleaned up.",
+        )
+
+    # Generate filename
+    timestamp = job.created_at.strftime("%Y-%m-%d")
+    extension = "csv" if job.format == "csv" else "jsonl"
+    filename = f"audit_logs_{timestamp}.{extension}"
+
+    # Determine media type
+    media_type = "text/csv" if job.format == "csv" else "application/x-ndjson"
+
+    return FileResponse(
+        path=job.file_path,
+        filename=filename,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "X-Total-Records": str(job.total_records),
+        },
+    )
+
+
+@router.post("/logs/export/{job_id}/cancel")
+async def cancel_export(
+    job_id: UUID = Path(..., description="Export job ID"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Cancel an in-progress export.
+
+    Only works for jobs in 'pending' or 'processing' state.
+    The worker will stop processing and clean up the partial file.
+
+    Requires: Authentication (JWT token or API key via X-API-Key header)
+    Requires: Admin permissions
+    """
+    from intric.audit.infrastructure.export_job_manager import ExportJobManager
+    from intric.roles.permissions import Permission, validate_permission
+
+    current_user = container.user()
+
+    # Validate admin permissions
+    validate_permission(current_user, Permission.ADMIN)
+
+    # Get job manager
+    redis = container.redis_client()
+    export_job_manager = ExportJobManager(redis)
+
+    # Try to cancel
+    success = await export_job_manager.set_cancelled(current_user.tenant_id, job_id)
+
+    if not success:
+        # Check if job exists
+        job = await export_job_manager.get_job(current_user.tenant_id, job_id)
+        if not job:
+            raise HTTPException(
+                status_code=404,
+                detail="Export job not found or expired",
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel job in '{job.status.value}' state. "
+                       f"Only 'pending' or 'processing' jobs can be cancelled.",
+            )
+
+    return {"status": "cancelled", "message": "Export job cancellation requested"}
 
 
 @router.get("/retention-policy", response_model=RetentionPolicyResponse)

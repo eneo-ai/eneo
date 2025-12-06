@@ -3,7 +3,7 @@
   import { page } from "$app/stores";
   import { writable } from "svelte/store";
   import { Page } from "$lib/components/layout";
-  import { Button, Input, Select, Dropdown } from "@intric/ui";
+  import { Button, Input, Select, Dropdown, ProgressBar } from "@intric/ui";
   import * as m from "$lib/paraglide/messages";
   import type { components } from "@intric/intric-js/types/schema";
   import type { UserSparse } from "@intric/intric-js";
@@ -98,6 +98,13 @@
   let userSearchTimer: ReturnType<typeof setTimeout>;
   let entitySearchTimer: ReturnType<typeof setTimeout>;  // Debounce for entity search
   let isExporting = $state(false);
+  let exportProgress = $state(0);
+  let exportJobId = $state<string | null>(null);
+  let exportStatus = $state<string | null>(null);
+  let exportError = $state<string | null>(null);
+  let exportProcessedRecords = $state(0);
+  let exportTotalRecords = $state(0);
+  let pollTimer: ReturnType<typeof setTimeout>;
   let isInitializingFromUrl = false;  // Flag to prevent auto-apply during URL initialization
 
   // Retention policy state - initialize from server data
@@ -573,44 +580,149 @@
   async function exportLogs(format: "csv" | "json") {
     try {
       isExporting = true;
-      const params = new URLSearchParams($page.url.search);
-      params.set("format", format);
+      exportProgress = 0;
+      exportStatus = "pending";
+      exportError = null;
+      exportProcessedRecords = 0;
+      exportTotalRecords = 0;
 
-      const response = await fetch(`/admin/audit-logs/export?${params.toString()}`, {
-        method: "GET",
+      // Build export request body with current filters
+      const params = $page.url.searchParams;
+      const requestBody: Record<string, any> = {
+        format: format === "json" ? "jsonl" : "csv",
+      };
+
+      // Add filter parameters
+      if (params.get("from_date")) {
+        requestBody.from_date = params.get("from_date");
+      }
+      if (params.get("to_date")) {
+        requestBody.to_date = params.get("to_date");
+      }
+      if (params.get("action") && params.get("action") !== "all") {
+        requestBody.action = params.get("action");
+      }
+      if (params.get("actor_id")) {
+        requestBody.actor_id = params.get("actor_id");
+      }
+
+      // 1. Request async export
+      const response = await fetch("/admin/audit-logs/export/async", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to export audit logs");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to start export");
       }
 
-      const blob = await response.blob();
-      const dateStr = (dateRange?.start && dateRange?.end)
-        ? `${dateRange.start.toString()}_to_${dateRange.end.toString()}`
-        : new Date().toISOString().split('T')[0];
-      const extension = format === "json" ? "jsonl" : "csv";
-      const filename = `audit_logs_${dateStr}.${extension}`;
+      const { job_id } = await response.json();
+      exportJobId = job_id;
+      exportStatus = "pending";
 
-      if (window.showSaveFilePicker) {
-        const handle = await window.showSaveFilePicker({ suggestedName: filename });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-      } else {
-        const a = document.createElement("a");
-        a.download = filename;
-        a.href = URL.createObjectURL(blob);
-        a.click();
-        setTimeout(() => {
-          URL.revokeObjectURL(a.href);
-        }, 1500);
-      }
+      // 2. Poll for status
+      await pollExportStatus(job_id, format);
     } catch (err) {
       console.error("Export failed:", err);
-      alert("Failed to export audit logs. Please try again.");
-    } finally {
-      isExporting = false;
+      exportError = err instanceof Error ? err.message : "Failed to export audit logs";
+      exportStatus = "failed";
     }
+  }
+
+  async function pollExportStatus(jobId: string, format: "csv" | "json") {
+    const poll = async () => {
+      try {
+        const statusResponse = await fetch(`/admin/audit-logs/export/${jobId}/status`);
+
+        if (!statusResponse.ok) {
+          throw new Error("Failed to get export status");
+        }
+
+        const status = await statusResponse.json();
+        exportStatus = status.status;
+        exportProgress = status.progress;
+        exportProcessedRecords = status.processed_records;
+        exportTotalRecords = status.total_records;
+
+        if (status.status === "completed") {
+          // 3. Trigger download
+          clearTimeout(pollTimer);
+          isExporting = false;
+
+          // Build filename
+          const dateStr = (dateRange?.start && dateRange?.end)
+            ? `${dateRange.start.toString()}_to_${dateRange.end.toString()}`
+            : new Date().toISOString().split('T')[0];
+          const extension = format === "json" ? "jsonl" : "csv";
+          const filename = `audit_logs_${dateStr}.${extension}`;
+
+          // Create a hidden link and click it to download
+          const a = document.createElement("a");
+          a.href = `/admin/audit-logs/export/${jobId}/download`;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+
+          // Reset state after a short delay
+          setTimeout(() => {
+            resetExportState();
+          }, 1000);
+        } else if (status.status === "failed") {
+          clearTimeout(pollTimer);
+          exportError = status.error_message || "Export failed";
+          isExporting = false;
+        } else if (status.status === "cancelled") {
+          clearTimeout(pollTimer);
+          exportError = "Export was cancelled";
+          isExporting = false;
+        } else {
+          // Continue polling (pending or processing)
+          pollTimer = setTimeout(poll, 2000);
+        }
+      } catch (err) {
+        console.error("Status poll failed:", err);
+        clearTimeout(pollTimer);
+        exportError = "Failed to check export status";
+        exportStatus = "failed";
+        isExporting = false;
+      }
+    };
+
+    // Start polling
+    poll();
+  }
+
+  async function cancelExport() {
+    if (!exportJobId) return;
+
+    try {
+      const response = await fetch(`/admin/audit-logs/export/${exportJobId}/cancel`, {
+        method: "POST",
+      });
+
+      if (response.ok) {
+        clearTimeout(pollTimer);
+        exportStatus = "cancelled";
+        exportError = "Export cancelled by user";
+        isExporting = false;
+      }
+    } catch (err) {
+      console.error("Cancel failed:", err);
+    }
+  }
+
+  function resetExportState() {
+    exportProgress = 0;
+    exportJobId = null;
+    exportStatus = null;
+    exportError = null;
+    exportProcessedRecords = 0;
+    exportTotalRecords = 0;
   }
 
   // Auto-apply filters on any filter change (consolidated for performance)
@@ -636,6 +748,7 @@
     clearTimeout(debounceTimer);
     clearTimeout(userSearchTimer);
     clearTimeout(entitySearchTimer);
+    clearTimeout(pollTimer);
   });
 
   // Count active filters
@@ -695,34 +808,65 @@
       <Page.Title title={m.audit_logs()}></Page.Title>
     </div>
     {#if activeTab === 'logs' && hasSession}
-      <div class="flex gap-[1px]">
-        <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
-          {#if isExporting}
-            <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-            {m.audit_exporting()}
-          {:else}
+      {#if isExporting}
+        <!-- Export Progress UI -->
+        <div class="flex items-center gap-3">
+          <div class="flex flex-col gap-1 min-w-[200px]">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-muted">
+                {exportStatus === "pending" ? m.audit_export_preparing() : m.audit_exporting()}
+              </span>
+              <span class="font-medium text-default">{exportProgress}%</span>
+            </div>
+            <ProgressBar progress={exportProgress} />
+            {#if exportTotalRecords > 0}
+              <span class="text-xs text-muted">
+                {exportProcessedRecords.toLocaleString()} / {exportTotalRecords.toLocaleString()} {m.audit_records()}
+              </span>
+            {/if}
+          </div>
+          <Button variant="ghost" onclick={cancelExport} class="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950">
+            <IconXMark class="h-4 w-4" />
+            {m.audit_cancel()}
+          </Button>
+        </div>
+      {:else if exportError}
+        <!-- Export Error UI -->
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2 rounded-md bg-red-50 dark:bg-red-950 px-3 py-2 text-sm text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+            <IconInfo class="h-4 w-4" />
+            <span>{exportError}</span>
+          </div>
+          <Button variant="ghost" onclick={resetExportState}>
+            <IconXMark class="h-4 w-4" />
+          </Button>
+        </div>
+      {:else}
+        <!-- Normal Export Buttons -->
+        <div class="flex gap-[1px]">
+          <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
             <IconDownload class="h-4 w-4" />
             Export ({data.total_count})
-          {/if}
-        </Button>
-        <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-          <Dropdown.Trigger asFragment let:trigger>
-            <Button padding="icon" variant="primary" is={trigger} disabled={isExporting} class="!rounded-l-none">
-              <IconChevronDown></IconChevronDown>
-            </Button>
-          </Dropdown.Trigger>
-          <Dropdown.Menu let:item>
-            <Button is={item} onclick={() => exportLogs("csv")}>
-              <IconDownload size="sm"></IconDownload>
-              Download as CSV
-            </Button>
-            <Button is={item} onclick={() => exportLogs("json")}>
-              <IconDownload size="sm"></IconDownload>
-              Download as JSON
-            </Button>
-          </Dropdown.Menu>
-        </Dropdown.Root>
-      </div>
+          </Button>
+          <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
+            <Dropdown.Trigger asFragment let:trigger>
+              <Button padding="icon" variant="primary" is={trigger} disabled={isExporting} class="!rounded-l-none">
+                <IconChevronDown></IconChevronDown>
+              </Button>
+            </Dropdown.Trigger>
+            <Dropdown.Menu let:item>
+              <Button is={item} onclick={() => exportLogs("csv")}>
+                <IconDownload size="sm"></IconDownload>
+                Download as CSV
+              </Button>
+              <Button is={item} onclick={() => exportLogs("json")}>
+                <IconDownload size="sm"></IconDownload>
+                Download as JSON
+              </Button>
+            </Dropdown.Menu>
+          </Dropdown.Root>
+        </div>
+      {/if}
     {/if}
   </Page.Header>
 

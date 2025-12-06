@@ -21,6 +21,10 @@
 # venv
 .venv/
 
+# audit log exports (auto-created on startup)
+exports/
+backend/exports/
+
 # claude
 .claude/*.local.json
 backend/openapi.json

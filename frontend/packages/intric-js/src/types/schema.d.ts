@@ -1636,6 +1636,68 @@ export interface paths {
      */
     get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
   };
+  "/api/v1/audit/logs/export/async": {
+    /**
+     * Request Async Export
+     * @description Request async export of audit logs.
+     *
+     * Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+     * Download via /logs/export/{job_id}/download when complete.
+     *
+     * Advantages over sync export:
+     * - Handles 1M-10M+ records without timeout
+     * - Progress tracking for long exports
+     * - Cancellation support
+     * - Constant memory usage (~50MB)
+     *
+     * Limitations:
+     * - Max 2 concurrent exports per tenant
+     * - Files auto-deleted after 24 hours
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    post: operations["request_async_export_api_v1_audit_logs_export_async_post"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/status": {
+    /**
+     * Get Export Status
+     * @description Get export job status with progress.
+     *
+     * Poll this endpoint to track export progress.
+     * When status is 'completed', use the download_url to get the file.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["get_export_status_api_v1_audit_logs_export__job_id__status_get"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/download": {
+    /**
+     * Download Export
+     * @description Download completed export file.
+     *
+     * Only available when job status is 'completed'.
+     * Files are auto-deleted after 24 hours.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["download_export_api_v1_audit_logs_export__job_id__download_get"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/cancel": {
+    /**
+     * Cancel Export
+     * @description Cancel an in-progress export.
+     *
+     * Only works for jobs in 'pending' or 'processing' state.
+     * The worker will stop processing and clean up the partial file.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    post: operations["cancel_export_api_v1_audit_logs_export__job_id__cancel_post"];
+  };
   "/api/v1/audit/retention-policy": {
     /**
      * Get Retention Policy
@@ -4440,6 +4502,131 @@ export interface components {
       | 9024
       | 9025
       | 9026;
+    /**
+     * ExportJobRequest
+     * @description Schema for requesting async audit log export.
+     */
+    ExportJobRequest: {
+      /**
+       * User Id
+       * @description User ID for GDPR export
+       */
+      user_id?: string | null;
+      /**
+       * Actor Id
+       * @description Filter by actor
+       */
+      actor_id?: string | null;
+      /** @description Filter by action type */
+      action?: components["schemas"]["ActionType"] | null;
+      /**
+       * From Date
+       * @description Filter from date
+       */
+      from_date?: string | null;
+      /**
+       * To Date
+       * @description Filter to date
+       */
+      to_date?: string | null;
+      /**
+       * Format
+       * @description Export format: csv or jsonl
+       * @default csv
+       */
+      format?: string;
+      /**
+       * Max Records
+       * @description Maximum records to export
+       */
+      max_records?: number | null;
+    };
+    /**
+     * ExportJobResponse
+     * @description Schema for export job creation response.
+     */
+    ExportJobResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /**
+       * Status
+       * @description Job status: pending, processing, completed, failed, cancelled
+       */
+      status: string;
+      /**
+       * Message
+       * @description Status message
+       */
+      message?: string | null;
+    };
+    /**
+     * ExportJobStatusResponse
+     * @description Schema for export job status response.
+     */
+    ExportJobStatusResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /**
+       * Status
+       * @description Job status: pending, processing, completed, failed, cancelled
+       */
+      status: string;
+      /**
+       * Progress
+       * @description Progress percentage
+       */
+      progress: number;
+      /**
+       * Total Records
+       * @description Total records to export
+       */
+      total_records: number;
+      /**
+       * Processed Records
+       * @description Records processed so far
+       */
+      processed_records: number;
+      /**
+       * Format
+       * @description Export format: csv or jsonl
+       */
+      format: string;
+      /**
+       * File Size Bytes
+       * @description File size in bytes (when completed)
+       */
+      file_size_bytes?: number | null;
+      /**
+       * Error Message
+       * @description Error message (when failed)
+       */
+      error_message?: string | null;
+      /**
+       * Download Url
+       * @description Download URL (when completed)
+       */
+      download_url?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+    };
     /**
      * FederationInfo
      * @description Information about configured federation.
@@ -16554,6 +16741,8 @@ export interface operations {
         from_date?: string | null;
         /** @description Filter to date */
         to_date?: string | null;
+        /** @description Search entity names in log descriptions (min 3 chars) */
+        search?: string | null;
         /** @description Page number */
         page?: number;
         /** @description Page size */
@@ -16653,6 +16842,143 @@ export interface operations {
         format?: string;
         /** @description Maximum records to export (default: 50000, max: 100000) */
         max_records?: number | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Request Async Export
+   * @description Request async export of audit logs.
+   *
+   * Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+   * Download via /logs/export/{job_id}/download when complete.
+   *
+   * Advantages over sync export:
+   * - Handles 1M-10M+ records without timeout
+   * - Progress tracking for long exports
+   * - Cancellation support
+   * - Constant memory usage (~50MB)
+   *
+   * Limitations:
+   * - Max 2 concurrent exports per tenant
+   * - Files auto-deleted after 24 hours
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  request_async_export_api_v1_audit_logs_export_async_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExportJobRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExportJobResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Export Status
+   * @description Get export job status with progress.
+   *
+   * Poll this endpoint to track export progress.
+   * When status is 'completed', use the download_url to get the file.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  get_export_status_api_v1_audit_logs_export__job_id__status_get: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExportJobStatusResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Download Export
+   * @description Download completed export file.
+   *
+   * Only available when job status is 'completed'.
+   * Files are auto-deleted after 24 hours.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  download_export_api_v1_audit_logs_export__job_id__download_get: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel Export
+   * @description Cancel an in-progress export.
+   *
+   * Only works for jobs in 'pending' or 'processing' state.
+   * The worker will stop processing and clean up the partial file.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  cancel_export_api_v1_audit_logs_export__job_id__cancel_post: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
       };
     };
     responses: {

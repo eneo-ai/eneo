@@ -87,6 +87,44 @@ class AuditLogExportRequest(BaseModel):
     to_date: Optional[datetime] = None
 
 
+class ExportJobRequest(BaseModel):
+    """Schema for requesting async audit log export."""
+
+    user_id: Optional[UUID] = Field(None, description="User ID for GDPR export")
+    actor_id: Optional[UUID] = Field(None, description="Filter by actor")
+    action: Optional[ActionType] = Field(None, description="Filter by action type")
+    from_date: Optional[datetime] = Field(None, description="Filter from date")
+    to_date: Optional[datetime] = Field(None, description="Filter to date")
+    format: str = Field("csv", description="Export format: csv or jsonl")
+    max_records: Optional[int] = Field(None, ge=1, description="Maximum records to export")
+
+
+class ExportJobResponse(BaseModel):
+    """Schema for export job creation response."""
+
+    job_id: UUID
+    status: str = Field(description="Job status: pending, processing, completed, failed, cancelled")
+    message: Optional[str] = Field(None, description="Status message")
+
+
+class ExportJobStatusResponse(BaseModel):
+    """Schema for export job status response."""
+
+    job_id: UUID
+    status: str = Field(description="Job status: pending, processing, completed, failed, cancelled")
+    progress: int = Field(ge=0, le=100, description="Progress percentage")
+    total_records: int = Field(ge=0, description="Total records to export")
+    processed_records: int = Field(ge=0, description="Records processed so far")
+    format: str = Field(description="Export format: csv or jsonl")
+    file_size_bytes: Optional[int] = Field(None, description="File size in bytes (when completed)")
+    error_message: Optional[str] = Field(None, description="Error message (when failed)")
+    download_url: Optional[str] = Field(None, description="Download URL (when completed)")
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    expires_at: datetime
+
+
 class AccessJustificationRequest(BaseModel):
     """Schema for creating audit access session with justification."""
 
