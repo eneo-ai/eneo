@@ -4,8 +4,6 @@ Revises: retention_perf_indexes, bdcbd045fbde
 Create Date: 2025-12-06 16:43:52.252994
 """
 
-from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic
