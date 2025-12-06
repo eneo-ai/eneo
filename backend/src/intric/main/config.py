@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 
-from pydantic import computed_field, model_validator
+from pydantic import computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version manifest lookup:
@@ -272,6 +272,20 @@ class Settings(BaseSettings):
 
     # Tenant credential management
     tenant_credentials_enabled: bool = False
+
+    @field_validator("export_dir", mode="before")
+    @classmethod
+    def validate_export_dir_not_empty(cls, v):
+        """
+        Handle empty EXPORT_DIR env var by falling back to default.
+
+        When EXPORT_DIR="" (empty string), Path("") becomes "." (current dir),
+        which resolves to /app in Docker. This causes permission errors.
+        Fall back to default "exports" path instead.
+        """
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return Path("exports")
+        return v
 
     @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
