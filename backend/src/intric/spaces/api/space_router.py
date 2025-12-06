@@ -165,13 +165,48 @@ async def update_space(
     changes = {}
     if update_space_req.name and update_space_req.name != old_space.name:
         changes["name"] = {"old": old_space.name, "new": update_space_req.name}
-    if update_space_req.description is not None:
+    if update_space_req.description is not None and update_space_req.description != old_space.description:
         changes["description"] = {"old": old_space.description, "new": update_space_req.description}
     if data_retention_days is not NOT_PROVIDED and data_retention_days != old_space.data_retention_days:
         changes["data_retention_days"] = {
             "old": old_space.data_retention_days,
             "new": data_retention_days
         }
+
+    # Track model changes using SET comparison (avoids false positives from ordering)
+    if update_space_req.completion_models is not None:
+        old_model_set = {(str(m.id), m.name) for m in (old_space.completion_models or [])}
+        new_model_set = {(str(m.id), m.name) for m in (space.completion_models or [])}
+        if old_model_set != new_model_set:
+            changes["completion_models"] = {
+                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.completion_models or [])],
+                "new": [{"id": str(m.id), "name": m.name} for m in (space.completion_models or [])]
+            }
+
+    if update_space_req.embedding_models is not None:
+        old_model_set = {(str(m.id), m.name) for m in (old_space.embedding_models or [])}
+        new_model_set = {(str(m.id), m.name) for m in (space.embedding_models or [])}
+        if old_model_set != new_model_set:
+            changes["embedding_models"] = {
+                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.embedding_models or [])],
+                "new": [{"id": str(m.id), "name": m.name} for m in (space.embedding_models or [])]
+            }
+
+    if update_space_req.transcription_models is not None:
+        old_model_set = {(str(m.id), m.name) for m in (old_space.transcription_models or [])}
+        new_model_set = {(str(m.id), m.name) for m in (space.transcription_models or [])}
+        if old_model_set != new_model_set:
+            changes["transcription_models"] = {
+                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.transcription_models or [])],
+                "new": [{"id": str(m.id), "name": m.name} for m in (space.transcription_models or [])]
+            }
+
+    # Track security classification changes
+    if security_classification is not NOT_PROVIDED:
+        old_sc = old_space.security_classification.name if old_space.security_classification else None
+        new_sc = space.security_classification.name if space.security_classification else None
+        if old_sc != new_sc:
+            changes["security_classification"] = {"old": old_sc, "new": new_sc}
 
     # Audit logging
     session = container.session()
@@ -892,15 +927,41 @@ async def change_role_of_member(
     user_id: UUID,
     update_space_member_req: UpdateSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
-
 ):
+    import logging
+
     from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    logger = logging.getLogger(__name__)
+
     service = container.space_service()
     current_user = container.user()
+
+    # Snapshot context for audit log (graceful degradation pattern)
+    member_snapshot = {"id": str(user_id), "name": None, "email": None}
+    space_snapshot = {"id": str(id), "name": None}
+
+    try:
+        space = await service.get_space(id)
+        if space:
+            space_snapshot = {"id": str(space.id), "name": space.name}
+    except Exception as e:
+        logger.warning(f"Failed to fetch space context for audit log: {e}")
+
+    try:
+        user_service = container.user_service()
+        member_user = await user_service.get_user(user_id)
+        if member_user:
+            member_snapshot = {
+                "id": str(member_user.id),
+                "name": member_user.username,
+                "email": member_user.email,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch member context for audit log: {e}")
 
     # Get current member to track old role
     current_member = await service.get_space_member(id, user_id)
@@ -909,10 +970,14 @@ async def change_role_of_member(
     # Change role
     updated_member = await service.change_role_of_member(id, user_id, update_space_member_req.role)
 
-    # Audit logging
+    # Audit logging with full context
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
+
+    member_display = member_snapshot["name"] or "member"
+    space_display = space_snapshot["name"] or "space"
+    description = f"Changed role of {member_display} in {space_display} from {old_role} to {update_space_member_req.role}"
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -920,7 +985,7 @@ async def change_role_of_member(
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=f"Changed role of member from {old_role} to {update_space_member_req.role}",
+        description=description,
         metadata={
             "actor": {
                 "id": str(current_user.id),
@@ -928,12 +993,17 @@ async def change_role_of_member(
                 "email": current_user.email,
             },
             "target": {
-                "space_id": str(id),
-                "member_id": str(user_id),
+                "space_id": space_snapshot["id"],
+                "space_name": space_snapshot["name"],
+                "member_id": member_snapshot["id"],
+                "member_name": member_snapshot["name"],
+                "member_email": member_snapshot["email"],
             },
             "changes": {
-                "old_role": old_role,
-                "new_role": update_space_member_req.role,
+                "role": {
+                    "old": old_role,
+                    "new": update_space_member_req.role,
+                },
             },
         },
     )
@@ -952,21 +1022,50 @@ async def remove_space_member(
     user_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    import logging
+
     from intric.audit.application.audit_service import AuditService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
+    logger = logging.getLogger(__name__)
+
     service = container.space_service()
     current_user = container.user()
 
-    # Remove member
+    # 1. Snapshot data BEFORE deletion (graceful degradation pattern)
+    member_snapshot = {"id": str(user_id), "name": None, "email": None}
+    space_snapshot = {"id": str(id), "name": None}
+
+    try:
+        space = await service.get_space(id)
+        if space:
+            space_snapshot = {"id": str(space.id), "name": space.name}
+    except Exception as e:
+        logger.warning(f"Failed to fetch space context for audit log: {e}")
+
+    try:
+        user_service = container.user_service()
+        member_user = await user_service.get_user(user_id)
+        if member_user:
+            member_snapshot = {
+                "id": str(member_user.id),
+                "name": member_user.username,
+                "email": member_user.email,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch member context for audit log: {e}")
+
+    # 2. Perform the actual deletion
     await service.remove_member(id, user_id)
 
-    # Audit logging
+    # 3. Audit logging with full context (snapshot pattern)
     session = container.session()
     audit_repo = AuditLogRepositoryImpl(session)
     audit_service = AuditService(audit_repo)
+
+    description = f"Removed {member_snapshot['name'] or 'member'} from {space_snapshot['name'] or 'space'}"
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -974,7 +1073,7 @@ async def remove_space_member(
         action=ActionType.SPACE_MEMBER_REMOVED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description="Removed member from space",
+        description=description,
         metadata={
             "actor": {
                 "id": str(current_user.id),
@@ -982,8 +1081,11 @@ async def remove_space_member(
                 "email": current_user.email,
             },
             "target": {
-                "space_id": str(id),
-                "member_id": str(user_id),
+                "space_id": space_snapshot["id"],
+                "space_name": space_snapshot["name"],
+                "member_id": member_snapshot["id"],
+                "member_name": member_snapshot["name"],
+                "member_email": member_snapshot["email"],
             },
         },
     )

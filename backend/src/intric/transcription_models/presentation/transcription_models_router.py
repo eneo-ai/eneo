@@ -65,41 +65,62 @@ async def update_transcription_model(
         security_classification=update_flags.security_classification,
     )
 
+    # Build consolidated changes dict (one API call = one audit log)
+    changes = {}
+
+    # Track is_org_enabled changes
+    if update_flags.is_org_enabled is not NOT_PROVIDED:
+        if old_model.is_org_enabled != transcription_model.is_org_enabled:
+            changes["is_org_enabled"] = {
+                "old": old_model.is_org_enabled,
+                "new": transcription_model.is_org_enabled,
+            }
+
+    # Track is_org_default changes
+    if update_flags.is_org_default is not NOT_PROVIDED:
+        if old_model.is_org_default != transcription_model.is_org_default:
+            changes["is_org_default"] = {
+                "old": old_model.is_org_default,
+                "new": transcription_model.is_org_default,
+            }
+
     # Track security classification changes
     if update_flags.security_classification is not NOT_PROVIDED:
         old_sc_name = old_model.security_classification.name if old_model.security_classification else None
         new_sc_name = transcription_model.security_classification.name if transcription_model.security_classification else None
-
         if old_sc_name != new_sc_name:
-            # Audit logging
-            session = container.session()
-            audit_repo = AuditLogRepositoryImpl(session)
-            audit_service = AuditService(audit_repo)
+            changes["security_classification"] = {
+                "old": old_sc_name,
+                "new": new_sc_name,
+            }
 
-            await audit_service.log_async(
-                tenant_id=user.tenant_id,
-                actor_id=user.id,
-                action=ActionType.TRANSCRIPTION_MODEL_UPDATED,
-                entity_type=EntityType.TRANSCRIPTION_MODEL,
-                entity_id=id,
-                description=f"Updated security classification for {transcription_model.name}",
-                metadata={
-                    "actor": {
-                        "id": str(user.id),
-                        "name": user.username,
-                        "email": user.email,
-                    },
-                    "target": {
-                        "model_id": str(id),
-                        "model_name": transcription_model.name,
-                    },
-                    "changes": {
-                        "security_classification": {
-                            "old": old_sc_name,
-                            "new": new_sc_name,
-                        }
-                    },
+    # Only log if there were actual changes (ONE entry with all changes)
+    if changes:
+        session = container.session()
+        audit_repo = AuditLogRepositoryImpl(session)
+        audit_service = AuditService(audit_repo)
+
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.TRANSCRIPTION_MODEL_UPDATED,
+            entity_type=EntityType.TRANSCRIPTION_MODEL,
+            entity_id=id,
+            description=f"Updated settings for {transcription_model.name}",
+            metadata={
+                "actor": {
+                    "id": str(user.id),
+                    "name": user.username,
+                    "email": user.email,
                 },
-            )
+                "target": {
+                    "id": str(id),
+                    "name": transcription_model.name,
+                    "tenant_id": str(user.tenant_id),
+                    "tenant_name": user.tenant.display_name or user.tenant.name,
+                },
+                "changes": changes,
+            },
+        )
 
     return TranscriptionModelPublic.from_domain(transcription_model)

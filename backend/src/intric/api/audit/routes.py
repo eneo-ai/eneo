@@ -69,6 +69,7 @@ async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
                 display_name = "Unknown"
 
             user_map[user_id] = {
+                "id": str(user_id),
                 "email": email,
                 "name": display_name,
             }

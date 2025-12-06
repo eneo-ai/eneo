@@ -612,6 +612,8 @@ async def invite_user(
         "email": new_user.email,
         "username": new_user.username,
         "state": user_invite.state.value if user_invite.state else "invited",
+        "tenant_id": str(current_user.tenant_id),
+        "tenant_name": current_user.tenant.display_name or current_user.tenant.name,
     }
 
     # Fetch predefined role details if role was assigned

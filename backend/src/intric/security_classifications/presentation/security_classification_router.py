@@ -192,9 +192,19 @@ async def update_security_classification_levels(
                 "email": user.email,
             },
             "target": {
+                "id": str(user.tenant_id),
                 "tenant_id": str(user.tenant_id),
+                "tenant_name": user.tenant.display_name or user.tenant.name,
                 "classifications_count": len(security_classifications),
-                "new_order": [str(sc_id) for sc_id in sc_ids],
+                "new_order": [
+                    {
+                        "position": idx + 1,
+                        "id": str(sc.id),
+                        "name": sc.name,
+                        "security_level": sc.security_level,
+                    }
+                    for idx, sc in enumerate(security_classifications)
+                ],
             },
         },
     )
@@ -404,7 +414,9 @@ async def toggle_security_classifications(
                 "email": user.email,
             },
             "target": {
+                "id": str(user.tenant_id),
                 "tenant_id": str(user.tenant_id),
+                "tenant_name": user.tenant.display_name or user.tenant.name,
                 "security_enabled": request.enabled,
             },
         },

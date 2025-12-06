@@ -73,41 +73,54 @@ async def update_embedding_model(
         security_classification=update.security_classification,
     )
 
+    # Build consolidated changes dict (one API call = one audit log)
+    changes = {}
+
+    # Track is_org_enabled changes
+    if update.is_org_enabled is not NOT_PROVIDED:
+        if old_model.is_org_enabled != model.is_org_enabled:
+            changes["is_org_enabled"] = {
+                "old": old_model.is_org_enabled,
+                "new": model.is_org_enabled,
+            }
+
     # Track security classification changes
     if update.security_classification is not NOT_PROVIDED:
         old_sc_name = old_model.security_classification.name if old_model.security_classification else None
         new_sc_name = model.security_classification.name if model.security_classification else None
-
         if old_sc_name != new_sc_name:
-            # Audit logging
-            session = container.session()
-            audit_repo = AuditLogRepositoryImpl(session)
-            audit_service = AuditService(audit_repo)
+            changes["security_classification"] = {
+                "old": old_sc_name,
+                "new": new_sc_name,
+            }
 
-            await audit_service.log_async(
-                tenant_id=user.tenant_id,
-                actor_id=user.id,
-                action=ActionType.EMBEDDING_MODEL_UPDATED,
-                entity_type=EntityType.EMBEDDING_MODEL,
-                entity_id=id,
-                description=f"Updated security classification for {model.name}",
-                metadata={
-                    "actor": {
-                        "id": str(user.id),
-                        "name": user.username,
-                        "email": user.email,
-                    },
-                    "target": {
-                        "model_id": str(id),
-                        "model_name": model.name,
-                    },
-                    "changes": {
-                        "security_classification": {
-                            "old": old_sc_name,
-                            "new": new_sc_name,
-                        }
-                    },
+    # Only log if there were actual changes (ONE entry with all changes)
+    if changes:
+        session = container.session()
+        audit_repo = AuditLogRepositoryImpl(session)
+        audit_service = AuditService(audit_repo)
+
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.EMBEDDING_MODEL_UPDATED,
+            entity_type=EntityType.EMBEDDING_MODEL,
+            entity_id=id,
+            description=f"Updated settings for {model.name}",
+            metadata={
+                "actor": {
+                    "id": str(user.id),
+                    "name": user.username,
+                    "email": user.email,
                 },
-            )
+                "target": {
+                    "id": str(id),
+                    "name": model.name,
+                    "tenant_id": str(user.tenant_id),
+                    "tenant_name": user.tenant.display_name or user.tenant.name,
+                },
+                "changes": changes,
+            },
+        )
 
     return EmbeddingModelPublic.from_domain(model)

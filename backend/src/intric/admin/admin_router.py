@@ -277,6 +277,8 @@ async def register_user(
         "email": user.email,
         "username": user.username,
         "state": user.state.value if hasattr(user, 'state') else "active",
+        "tenant_id": str(current_user.tenant_id),
+        "tenant_name": current_user.tenant.display_name or current_user.tenant.name,
     }
 
     # Add role information from the input request

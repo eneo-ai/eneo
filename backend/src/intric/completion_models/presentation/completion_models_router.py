@@ -58,6 +58,7 @@ async def update_completion_model(
     from intric.audit.domain.entity_types import EntityType
     from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
     from intric.main.models import NOT_PROVIDED
+
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
     user = container.user()
@@ -68,6 +69,7 @@ async def update_completion_model(
     # Get old state for change tracking (bypass access check since admin is already validated)
     completion_model_repo = container.completion_model_repo2()
     old_model = await completion_model_repo.one(model_id=id)
+
     # Update model
     completion_model = await service.update_completion_model(
         model_id=id,
@@ -76,42 +78,63 @@ async def update_completion_model(
         security_classification=update_flags.security_classification,
     )
 
+    # Build consolidated changes dict (one API call = one audit log)
+    changes = {}
+
+    # Track is_org_enabled changes
+    if update_flags.is_org_enabled is not NOT_PROVIDED:
+        if old_model.is_org_enabled != completion_model.is_org_enabled:
+            changes["is_org_enabled"] = {
+                "old": old_model.is_org_enabled,
+                "new": completion_model.is_org_enabled,
+            }
+
+    # Track is_org_default changes
+    if update_flags.is_org_default is not NOT_PROVIDED:
+        if old_model.is_org_default != completion_model.is_org_default:
+            changes["is_org_default"] = {
+                "old": old_model.is_org_default,
+                "new": completion_model.is_org_default,
+            }
+
     # Track security classification changes
     if update_flags.security_classification is not NOT_PROVIDED:
         old_sc_name = old_model.security_classification.name if old_model.security_classification else None
         new_sc_name = completion_model.security_classification.name if completion_model.security_classification else None
-
         if old_sc_name != new_sc_name:
-            # Audit logging
-            session = container.session()
-            audit_repo = AuditLogRepositoryImpl(session)
-            audit_service = AuditService(audit_repo)
+            changes["security_classification"] = {
+                "old": old_sc_name,
+                "new": new_sc_name,
+            }
 
-            await audit_service.log_async(
-                tenant_id=user.tenant_id,
-                actor_id=user.id,
-                action=ActionType.COMPLETION_MODEL_UPDATED,
-                entity_type=EntityType.COMPLETION_MODEL,
-                entity_id=id,
-                description=f"Updated security classification for {completion_model.name}",
-                metadata={
-                    "actor": {
-                        "id": str(user.id),
-                        "name": user.username,
-                        "email": user.email,
-                    },
-                    "target": {
-                        "model_id": str(id),
-                        "model_name": completion_model.name,
-                    },
-                    "changes": {
-                        "security_classification": {
-                            "old": old_sc_name,
-                            "new": new_sc_name,
-                        }
-                    },
+    # Only log if there were actual changes (ONE entry with all changes)
+    if changes:
+        session = container.session()
+        audit_repo = AuditLogRepositoryImpl(session)
+        audit_service = AuditService(audit_repo)
+
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.COMPLETION_MODEL_UPDATED,
+            entity_type=EntityType.COMPLETION_MODEL,
+            entity_id=id,
+            description=f"Updated settings for {completion_model.name}",
+            metadata={
+                "actor": {
+                    "id": str(user.id),
+                    "name": user.username,
+                    "email": user.email,
                 },
-            )
+                "target": {
+                    "id": str(id),
+                    "name": completion_model.name,
+                    "tenant_id": str(user.tenant_id),
+                    "tenant_name": user.tenant.display_name or user.tenant.name,
+                },
+                "changes": changes,
+            },
+        )
 
     return assembler.from_completion_model_to_model(completion_model=completion_model)
 
