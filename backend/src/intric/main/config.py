@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     # Audit log export configuration
     export_batch_size: int = 20000  # Records per DB fetch for streaming exports
     export_buffer_size: int = 50000  # Records to buffer before disk write
-    export_dir: Path = Path("exports")  # Default: ./exports (dev), override: EXPORT_DIR=/app/exports (Docker)
+    export_dir: Path = Path("/tmp/exports")  # Default: /tmp/exports (writable in Docker without special permissions)
     export_max_age_hours: int = 24  # File retention period before cleanup
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records

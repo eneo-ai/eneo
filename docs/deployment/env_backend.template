@@ -275,14 +275,12 @@ CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
 # ----------------------------------------------------------------------------
 # Audit Log Export Configuration
 # ----------------------------------------------------------------------------
-# VOLUME REQUIRED: Ensure docker-compose.yml has:
-#   - eneo_exports_data:/app/exports
-#
 # [OPTIONAL] Directory for storing audit log export files
-# Default: ./exports (relative path, auto-created on startup)
-# Docker: Set to /app/exports to use the mounted volume
+# Default: /tmp/exports (uses existing /tmp volume, no extra config needed)
+# The /tmp directory is world-writable and already mounted via eneo_temp_files volume
+# Override only if you need a custom location with appropriate permissions
 # Check logs for "[EXPORT CONFIG]" messages if exports aren't working
-EXPORT_DIR=/app/exports
+# EXPORT_DIR=/tmp/exports
 
 # [OPTIONAL] Max concurrent exports per tenant (default: 2)
 # Prevents one tenant from overloading the system with many exports
