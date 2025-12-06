@@ -142,9 +142,6 @@ OPENAI_API_KEY=
 # Get from: https://console.anthropic.com/
 ANTHROPIC_API_KEY=
 
-# Google Gemini
-GEMINI_API_KEY=
-
 # Azure OpenAI (Requires ALL 4 fields)
 AZURE_API_KEY=
 AZURE_ENDPOINT=
@@ -163,6 +160,7 @@ BERGET_API_BASE=
 # GDM.se (Swedish AI provider)
 # Get from: https://ai.gdm.se/
 GDM_API_KEY=
+# GDM_API_BASE=https://ai.gdm.se/api/v1  # Optional: Override default base URL
 
 # Flux (Image generation)
 FLUX_API_KEY=
@@ -195,8 +193,7 @@ INTRIC_SUPER_DUPER_API_KEY=
 #
 # VOLUMES: Ensure both backend and worker services have these volumes in docker-compose.yml:
 #   - eneo_backend_data:/app/data
-#   - eneo_exports_data:/app/exports   # Required for audit log exports
-#   - eneo_temp_files:/tmp
+#   - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
 # ----------------------------------------------------------------------------
 
 # [OPTIONAL] Max concurrent jobs across all tenants (default: 20)
@@ -317,6 +314,9 @@ MAX_IN_QUESTION=1
 CRAWL_MAX_LENGTH=14400
 # [OPTIONAL] Max items before stopping (default: 20000)
 CLOSESPIDER_ITEMCOUNT=20000
+# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
+# Separate from UPLOAD_MAX_FILE_SIZE - controls crawler's DOWNLOAD_MAXSIZE
+DOWNLOAD_MAX_SIZE=10485760
 # [OPTIONAL] Respect robots.txt (default: True)
 OBEY_ROBOTS=True
 # [OPTIONAL] Auto-throttle requests (default: True)
@@ -358,12 +358,6 @@ MIGRATION_AUTO_RECALC_THRESHOLD=30
 LOGLEVEL=INFO
 
 # ----------------------------------------------------------------------------
-# Legacy Authentication (DEPRECATED - Use OIDC_* variables instead)
+# DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
+# Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
 # ----------------------------------------------------------------------------
-# MobilityGuard & Zitadel Configuration
-# DEPRECATED: Auto-migrated to OIDC_* on startup (will be removed in v3.0)
-# ----------------------------------------------------------------------------
-MOBILITYGUARD_DISCOVERY_ENDPOINT=
-MOBILITYGUARD_CLIENT_ID=
-MOBILITYGUARD_CLIENT_SECRET=
-MOBILITYGUARD_TENANT_ID=
