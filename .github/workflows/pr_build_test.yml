@@ -16,7 +16,7 @@ env:
   POSTGRES_PASSWORD: placeholder
   POSTGRES_PORT: 5432
   POSTGRES_DB: placeholder
-  REDIS_HOST: placeholder
+  REDIS_HOST: localhost
   REDIS_PORT: 6379
   UPLOAD_FILE_TO_SESSION_MAX_SIZE: 10485760
   UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: 10485760
@@ -66,6 +66,16 @@ jobs:
   integration-tests:
     runs-on: ubuntu-latest
     name: Run integration tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

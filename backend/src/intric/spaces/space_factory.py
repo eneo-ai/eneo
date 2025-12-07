@@ -284,4 +284,5 @@ class SpaceFactory:
             websites=space_websites,
             members=members,
             security_classification=security_classification,
+            data_retention_days=space_in_db.data_retention_days,
         )

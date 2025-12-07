@@ -11,6 +11,7 @@
   import { IconLibrary } from "@intric/icons/library";
   import { IconCPU } from "@intric/icons/CPU";
   import { IconBulb } from "@intric/icons/bulb";
+  import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
   import { ChartPie, LayoutTemplate } from "lucide-svelte";
@@ -59,6 +60,12 @@
     isActive={isSelected("/admin/security-classifications", currentRoute)}
     icon={IconKey}
     label={m.security()}
+  />
+  <Navigation.Link
+    href="/admin/audit-logs"
+    isActive={isSelected("/admin/audit-logs", currentRoute)}
+    icon={IconHistory}
+    label={m.audit_logs()}
   />
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link

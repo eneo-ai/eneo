@@ -4,6 +4,12 @@ from uuid import UUID
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 from intric.templates.app_template.api.app_template_models import (
     AppTemplateAdminPublic,
     AppTemplateAdminListPublic,
@@ -129,6 +135,25 @@ async def create_template(
         tenant_id=user.tenant_id,
     )
 
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TEMPLATE_CREATED,
+        entity_type=EntityType.TEMPLATE,
+        entity_id=template.id,
+        description=f"Created app template '{template.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=template,
+            extra={
+                "template_type": "app",
+                "category": template.category,
+            },
+        ),
+    )
+
     return AppTemplateAdminPublic(
         id=template.id,
         name=template.name,
@@ -190,6 +215,22 @@ async def update_template(
         template_id=template_id,
         data=update_data,
         tenant_id=user.tenant_id,
+    )
+
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TEMPLATE_UPDATED,
+        entity_type=EntityType.TEMPLATE,
+        entity_id=template_id,
+        description=f"Updated app template '{template.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=template,
+            extra={"template_type": "app"},
+        ),
     )
 
     return AppTemplateAdminPublic(
@@ -302,10 +343,27 @@ async def delete_template(
     service = container.app_template_service()
     user = container.user()
 
-    await service.delete_template(
+    # Delete template (returns deleted template for audit logging)
+    template = await service.delete_template(
         template_id=template_id,
         tenant_id=user.tenant_id,
         user_id=user.id,
+    )
+
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TEMPLATE_DELETED,
+        entity_type=EntityType.TEMPLATE,
+        entity_id=template_id,
+        description=f"Deleted app template '{template.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=template,
+            extra={"template_type": "app"},
+        ),
     )
 
 

@@ -223,6 +223,38 @@ export interface paths {
      */
     patch: operations["update_template_setting_api_v1_settings_templates_patch"];
   };
+  "/api/v1/settings/audit-logging": {
+    /**
+     * Toggle global audit logging
+     * @description Enable or disable global audit logging for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `audit_logging_enabled` feature flag for your tenant
+     * - When disabled: No audit logs are created for any action (global kill switch)
+     * - When enabled: Audit logging resumes with category and action-level filtering
+     * - This is independent from category/action configuration
+     * - Change takes effect immediately for all workers
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "enabled": false
+     * }
+     * ```
+     *
+     * **Example Response:**
+     * ```json
+     * {
+     *   "chatbot_widget": {},
+     *   "audit_logging_enabled": false,
+     *   "using_templates": true
+     * }
+     * ```
+     */
+    patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
@@ -1488,6 +1520,217 @@ export interface paths {
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
   };
+  "/api/v1/audit/config": {
+    /**
+     * Get audit category configuration
+     * @description Retrieve all audit category configurations for the current tenant.
+     */
+    get: operations["get_audit_config_api_v1_audit_config_get"];
+    /**
+     * Update audit category configuration
+     * @description Update one or more audit category configurations for the current tenant.
+     */
+    patch: operations["update_audit_config_api_v1_audit_config_patch"];
+  };
+  "/api/v1/audit/config/actions": {
+    /**
+     * Get per-action audit configuration
+     * @description Retrieve all 65 actions with their enabled status for the modal UI.
+     */
+    get: operations["get_action_config_api_v1_audit_config_actions_get"];
+    /**
+     * Update per-action audit configuration
+     * @description Update one or more action-level audit configurations.
+     */
+    patch: operations["update_action_config_api_v1_audit_config_actions_patch"];
+  };
+  "/api/v1/audit/access-session/rate-limit": {
+    /**
+     * Reset Rate Limit
+     * @description Admin utility: Reset audit session rate limit for current user.
+     *
+     * This endpoint is only available in development/testing environments.
+     * Use when you get rate limited during testing.
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Development/testing environment
+     *
+     * Note: Permission check intentionally removed to allow clearing rate limit
+     * even when locked out. User is still authenticated via JWT.
+     */
+    delete: operations["reset_rate_limit_api_v1_audit_access_session_rate_limit_delete"];
+  };
+  "/api/v1/audit/access-session": {
+    /**
+     * Create Access Session
+     * @description Create an audit access session with justification.
+     *
+     * Stores the access justification securely in Redis (server-side) instead of
+     * exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+     *
+     * Security Features:
+     * - Justification never appears in URLs or browser history
+     * - Session ID stored in HTTP-only cookie (prevents XSS)
+     * - Automatic expiration after 1 hour
+     * - Tenant isolation validation
+     * - Instant revocation capability
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Admin permissions
+     *
+     * Returns: Session creation confirmation with HTTP-only cookie set
+     */
+    post: operations["create_access_session_api_v1_audit_access_session_post"];
+  };
+  "/api/v1/audit/logs": {
+    /**
+     * List Audit Logs
+     * @description List audit logs for the authenticated user's tenant.
+     *
+     * Security:
+     * - Requires active audit access session (via HTTP-only cookie)
+     * - Session must contain valid justification
+     * - Justification stored server-side (Redis) - never in URLs
+     *
+     * Access Control:
+     * - Admins only: View all actions in their tenant
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Admin permissions
+     * Requires: Active audit access session with justification
+     */
+    get: operations["list_audit_logs_api_v1_audit_logs_get"];
+  };
+  "/api/v1/audit/logs/user/{user_id}": {
+    /**
+     * Get User Logs
+     * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+     *
+     * Returns audit logs involving the user in any capacity.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     * Security: Only returns logs for the authenticated user's tenant
+     */
+    get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
+  };
+  "/api/v1/audit/logs/export": {
+    /**
+     * Export Audit Logs
+     * @description Export audit logs to CSV or JSON Lines format.
+     *
+     * Supported formats:
+     * - csv: Comma-separated values (default, Excel-compatible)
+     * - json: JSON Lines format (one JSON object per line, for large exports)
+     *
+     * Use user_id for GDPR Article 15 data subject access requests.
+     *
+     * Memory Protection:
+     * - Default limit: 50,000 records (configurable via max_records parameter)
+     * - Response includes X-Records-Truncated header if limit was hit
+     * - Response includes X-Total-Records header with total matching count
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     * Security: Only exports logs for the authenticated user's tenant
+     */
+    get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
+  };
+  "/api/v1/audit/logs/export/async": {
+    /**
+     * Request Async Export
+     * @description Request async export of audit logs.
+     *
+     * Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+     * Download via /logs/export/{job_id}/download when complete.
+     *
+     * Advantages over sync export:
+     * - Handles 1M-10M+ records without timeout
+     * - Progress tracking for long exports
+     * - Cancellation support
+     * - Constant memory usage (~50MB)
+     *
+     * Limitations:
+     * - Max 2 concurrent exports per tenant
+     * - Files auto-deleted after 24 hours
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    post: operations["request_async_export_api_v1_audit_logs_export_async_post"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/status": {
+    /**
+     * Get Export Status
+     * @description Get export job status with progress.
+     *
+     * Poll this endpoint to track export progress.
+     * When status is 'completed', use the download_url to get the file.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["get_export_status_api_v1_audit_logs_export__job_id__status_get"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/download": {
+    /**
+     * Download Export
+     * @description Download completed export file.
+     *
+     * Only available when job status is 'completed'.
+     * Files are auto-deleted after 24 hours.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["download_export_api_v1_audit_logs_export__job_id__download_get"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/cancel": {
+    /**
+     * Cancel Export
+     * @description Cancel an in-progress export.
+     *
+     * Only works for jobs in 'pending' or 'processing' state.
+     * The worker will stop processing and clean up the partial file.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    post: operations["cancel_export_api_v1_audit_logs_export__job_id__cancel_post"];
+  };
+  "/api/v1/audit/retention-policy": {
+    /**
+     * Get Retention Policy
+     * @description Get the current retention policy for your tenant.
+     *
+     * Returns audit log retention policy configuration.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["get_retention_policy_api_v1_audit_retention_policy_get"];
+    /**
+     * Update Retention Policy
+     * @description Update the audit log retention policy for your tenant.
+     *
+     * Configure audit log retention for compliance and security tracking.
+     *
+     * Audit Log Retention:
+     * - Minimum: 1 day (Recommended: 90+ days for compliance)
+     * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+     * - Default: 365 days (Swedish Arkivlagen)
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level.
+     * Tenant-level conversation retention has been removed to prevent accidental data loss.
+     *
+     * The system automatically runs a daily job to delete audit logs older than
+     * the retention period.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    put: operations["update_retention_policy_api_v1_audit_retention_policy_put"];
+  };
   "/api/v1/integrations/": {
     /** Get Integrations */
     get: operations["get_integrations_api_v1_integrations__get"];
@@ -1766,6 +2009,23 @@ export interface paths {
      */
     get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings": {
+    /**
+     * Get tenant crawler settings
+     * @description Get current crawler settings for a tenant. Returns effective settings (tenant overrides merged with environment defaults). System admin only.
+     */
+    get: operations["get_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_get"];
+    /**
+     * Update tenant crawler settings
+     * @description Update crawler settings for a specific tenant. Only provided fields are updated; missing fields retain previous values. Settings persist across server restarts and override environment defaults. System admin only.
+     */
+    put: operations["update_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_put"];
+    /**
+     * Reset tenant crawler settings
+     * @description Delete all tenant-specific crawler settings, reverting to environment defaults. System admin only.
+     */
+    delete: operations["delete_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_delete"];
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/federation": {
     /**
      * Get tenant federation config
@@ -1802,6 +2062,13 @@ export interface paths {
      * @description Value is a list of module `id`'s to add to the `tenant_id`.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+  };
+  "/api/v1/auth/federation-status": {
+    /**
+     * Check federation configuration status
+     * @description Returns federation availability status for the system. Used by login page to determine which authentication method to show. No authentication required (public endpoint).
+     */
+    get: operations["get_federation_status_api_v1_auth_federation_status_get"];
   };
   "/api/v1/auth/tenants": {
     /**
@@ -1870,6 +2137,39 @@ export interface components {
       /** Size Limit */
       size_limit: number;
     };
+    /**
+     * AccessJustificationRequest
+     * @description Schema for creating audit access session with justification.
+     */
+    AccessJustificationRequest: {
+      /**
+       * Category
+       * @description Justification category
+       */
+      category: string;
+      /**
+       * Description
+       * @description Detailed access reason
+       */
+      description: string;
+    };
+    /**
+     * AccessJustificationResponse
+     * @description Schema for access session creation response.
+     */
+    AccessJustificationResponse: {
+      /**
+       * Status
+       * @description Status of session creation
+       * @default session_created
+       */
+      status?: string;
+      /**
+       * Message
+       * @description Additional message if needed
+       */
+      message?: string | null;
+    };
     /** AccessToken */
     AccessToken: {
       /** Access Token */
@@ -1877,6 +2177,196 @@ export interface components {
       /** Token Type */
       token_type: string;
     };
+    /**
+     * ActionConfig
+     * @description Configuration for a single action type with metadata for UI display.
+     * @example {
+     *   "action": "user_created",
+     *   "category": "admin_actions",
+     *   "description_sv": "Loggar när en ny användare skapas",
+     *   "enabled": true,
+     *   "name_sv": "Användare skapad"
+     * }
+     */
+    ActionConfig: {
+      /**
+       * Action
+       * @description Action type value (e.g., 'user_created')
+       */
+      action: string;
+      /**
+       * Enabled
+       * @description Whether this action is currently enabled
+       */
+      enabled: boolean;
+      /**
+       * Category
+       * @description Category this action belongs to
+       */
+      category: string;
+      /**
+       * Name Sv
+       * @description Swedish display name
+       */
+      name_sv: string;
+      /**
+       * Description Sv
+       * @description Swedish description
+       */
+      description_sv: string;
+    };
+    /**
+     * ActionConfigResponse
+     * @description Response model for GET /api/v1/audit/config/actions.
+     * Contains all 65 actions with their configuration and metadata.
+     * @example {
+     *   "actions": [
+     *     {
+     *       "action": "user_created",
+     *       "category": "admin_actions",
+     *       "description_sv": "Loggar när en ny användare skapas",
+     *       "enabled": true,
+     *       "name_sv": "Användare skapad"
+     *     },
+     *     {
+     *       "action": "user_deleted",
+     *       "category": "admin_actions",
+     *       "description_sv": "Loggar när en användare tas bort",
+     *       "enabled": false,
+     *       "name_sv": "Användare raderad"
+     *     }
+     *   ]
+     * }
+     */
+    ActionConfigResponse: {
+      /**
+       * Actions
+       * @description List of all actions with configuration and Swedish metadata
+       */
+      actions: components["schemas"]["ActionConfig"][];
+    };
+    /**
+     * ActionConfigUpdateRequest
+     * @description Request model for PATCH /api/v1/audit/config/actions.
+     * Allows bulk updates of multiple action overrides.
+     * @example {
+     *   "updates": [
+     *     {
+     *       "action": "user_created",
+     *       "enabled": false
+     *     },
+     *     {
+     *       "action": "user_deleted",
+     *       "enabled": false
+     *     }
+     *   ]
+     * }
+     */
+    ActionConfigUpdateRequest: {
+      /**
+       * Updates
+       * @description List of action configuration updates
+       */
+      updates: components["schemas"]["ActionUpdate"][];
+    };
+    /**
+     * ActionType
+     * @description Standardized vocabulary of auditable actions
+     * @enum {string}
+     */
+    ActionType:
+      | "user_created"
+      | "user_deleted"
+      | "user_updated"
+      | "role_created"
+      | "role_modified"
+      | "role_deleted"
+      | "permission_changed"
+      | "tenant_settings_updated"
+      | "credentials_updated"
+      | "federation_updated"
+      | "api_key_generated"
+      | "module_added"
+      | "module_added_to_tenant"
+      | "assistant_created"
+      | "assistant_deleted"
+      | "assistant_updated"
+      | "assistant_transferred"
+      | "assistant_published"
+      | "space_created"
+      | "space_updated"
+      | "space_deleted"
+      | "space_member_added"
+      | "space_member_removed"
+      | "app_created"
+      | "app_deleted"
+      | "app_updated"
+      | "app_executed"
+      | "app_published"
+      | "app_run_deleted"
+      | "session_started"
+      | "session_ended"
+      | "file_uploaded"
+      | "file_deleted"
+      | "website_created"
+      | "website_updated"
+      | "website_deleted"
+      | "website_crawled"
+      | "website_transferred"
+      | "group_chat_created"
+      | "collection_created"
+      | "collection_updated"
+      | "collection_deleted"
+      | "integration_added"
+      | "integration_removed"
+      | "integration_connected"
+      | "integration_disconnected"
+      | "integration_knowledge_created"
+      | "integration_knowledge_deleted"
+      | "completion_model_updated"
+      | "embedding_model_updated"
+      | "transcription_model_updated"
+      | "template_created"
+      | "template_updated"
+      | "template_deleted"
+      | "security_classification_created"
+      | "security_classification_updated"
+      | "security_classification_deleted"
+      | "security_classification_levels_updated"
+      | "security_classification_enabled"
+      | "security_classification_disabled"
+      | "retention_policy_applied"
+      | "encryption_key_rotated"
+      | "system_maintenance"
+      | "audit_session_created"
+      | "audit_log_viewed"
+      | "audit_log_exported";
+    /**
+     * ActionUpdate
+     * @description Represents an action-level configuration change request.
+     * @example {
+     *   "action": "user_created",
+     *   "enabled": false
+     * }
+     */
+    ActionUpdate: {
+      /**
+       * Action
+       * @description Action name to update
+       */
+      action: string;
+      /**
+       * Enabled
+       * @description New enabled state
+       */
+      enabled: boolean;
+    };
+    /**
+     * ActorType
+     * @description Categorize who performed the action
+     * @enum {string}
+     */
+    ActorType: "user" | "system" | "api_key";
     /** AddSpaceMemberRequest */
     AddSpaceMemberRequest: {
       /**
@@ -2772,6 +3262,145 @@ export interface components {
       /** Max In Question */
       max_in_question: number;
     };
+    /**
+     * AuditConfigResponse
+     * @description Response model for GET /api/v1/audit/config.
+     * Contains all 7 categories with metadata.
+     * @example {
+     *   "categories": [
+     *     {
+     *       "action_count": 13,
+     *       "category": "admin_actions",
+     *       "description": "User management, role changes, API keys, tenant settings",
+     *       "enabled": true,
+     *       "example_actions": [
+     *         "USER_CREATED",
+     *         "ROLE_DELETED",
+     *         "API_KEY_GENERATED"
+     *       ]
+     *     },
+     *     {
+     *       "action_count": 28,
+     *       "category": "user_actions",
+     *       "description": "Assistant, space, app operations, templates, model configs",
+     *       "enabled": true,
+     *       "example_actions": [
+     *         "ASSISTANT_CREATED",
+     *         "SPACE_DELETED",
+     *         "APP_EXECUTED"
+     *       ]
+     *     }
+     *   ]
+     * }
+     */
+    AuditConfigResponse: {
+      /**
+       * Categories
+       * @description List of all audit categories with configuration and metadata
+       */
+      categories: components["schemas"]["CategoryConfig"][];
+    };
+    /**
+     * AuditConfigUpdateRequest
+     * @description Request model for PATCH /api/v1/audit/config.
+     * Allows bulk updates of multiple categories.
+     * @example {
+     *   "updates": [
+     *     {
+     *       "category": "admin_actions",
+     *       "enabled": false
+     *     },
+     *     {
+     *       "category": "file_operations",
+     *       "enabled": false
+     *     }
+     *   ]
+     * }
+     */
+    AuditConfigUpdateRequest: {
+      /**
+       * Updates
+       * @description List of category configuration updates
+       */
+      updates: components["schemas"]["CategoryUpdate"][];
+    };
+    /**
+     * AuditLogListResponse
+     * @description Schema for audit log list response.
+     */
+    AuditLogListResponse: {
+      /** Logs */
+      logs: components["schemas"]["AuditLogResponse"][];
+      /** Total Count */
+      total_count: number;
+      /** Page */
+      page: number;
+      /** Page Size */
+      page_size: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * AuditLogResponse
+     * @description Schema for audit log response.
+     */
+    AuditLogResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Actor Id
+       * Format: uuid
+       */
+      actor_id: string;
+      actor_type: components["schemas"]["ActorType"];
+      action: components["schemas"]["ActionType"];
+      entity_type: components["schemas"]["EntityType"];
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /**
+       * Timestamp
+       * Format: date-time
+       */
+      timestamp: string;
+      /** Description */
+      description: string;
+      /** Metadata */
+      metadata: {
+        [key: string]: unknown;
+      };
+      outcome: components["schemas"]["Outcome"];
+      /** Ip Address */
+      ip_address?: string | null;
+      /** User Agent */
+      user_agent?: string | null;
+      /** Request Id */
+      request_id?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Deleted At */
+      deleted_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
     /** AuthCallbackParams */
     AuthCallbackParams: {
       /** Auth Code */
@@ -2862,6 +3491,68 @@ export interface components {
       state: string;
       /** Code Verifier */
       code_verifier?: string | null;
+    };
+    /**
+     * CategoryConfig
+     * @description Enriched category configuration with metadata for API responses.
+     * @example {
+     *   "action_count": 13,
+     *   "category": "admin_actions",
+     *   "description": "User management, role changes, API keys, tenant settings",
+     *   "enabled": true,
+     *   "example_actions": [
+     *     "USER_CREATED",
+     *     "ROLE_DELETED",
+     *     "API_KEY_GENERATED"
+     *   ]
+     * }
+     */
+    CategoryConfig: {
+      /**
+       * Category
+       * @description Category name (e.g., 'admin_actions')
+       */
+      category: string;
+      /**
+       * Enabled
+       * @description Whether category is currently enabled
+       */
+      enabled: boolean;
+      /**
+       * Description
+       * @description Human-readable description of category
+       */
+      description: string;
+      /**
+       * Action Count
+       * @description Number of action types in this category
+       */
+      action_count: number;
+      /**
+       * Example Actions
+       * @description Sample action types (max 3) for UI display
+       */
+      example_actions: string[];
+    };
+    /**
+     * CategoryUpdate
+     * @description Represents a category configuration change request.
+     * @example {
+     *   "category": "admin_actions",
+     *   "enabled": false
+     * }
+     */
+    CategoryUpdate: {
+      /**
+       * Category
+       * @description Category name to update
+       */
+      category: string;
+      /**
+       * Enabled
+       * @description New enabled state
+       */
+      enabled: boolean;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -3256,6 +3947,173 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlerSettingsResponse
+     * @description Response model for crawler settings operations.
+     *
+     * Returns current settings merged with environment defaults.
+     * Tenant overrides are highlighted.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "settings": {
+     *             "crawl_max_length": 14400,
+     *             "download_timeout": 90,
+     *             "download_max_size": 10485760,
+     *             "dns_timeout": 30,
+     *             "retry_times": 2,
+     *             "closespider_itemcount": 20000,
+     *             "obey_robots": true,
+     *             "autothrottle_enabled": true,
+     *             "tenant_worker_concurrency_limit": 4,
+     *             "crawl_stale_threshold_minutes": 30,
+     *             "crawl_heartbeat_interval_seconds": 300,
+     *             "crawl_feeder_enabled": false,
+     *             "crawl_feeder_interval_seconds": 10,
+     *             "crawl_feeder_batch_size": 10,
+     *             "crawl_job_max_age_seconds": 1800
+     *         },
+     *         "overrides": ["download_timeout", "dns_timeout"],
+     *         "updated_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    CrawlerSettingsResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant UUID
+       */
+      tenant_id: string;
+      /**
+       * Settings
+       * @description Current effective settings (tenant overrides + env defaults)
+       */
+      settings: {
+        [key: string]: unknown;
+      };
+      /**
+       * Overrides
+       * @description List of setting keys that have tenant-specific overrides
+       */
+      overrides: string[];
+      /**
+       * Updated At
+       * @description Timestamp of last settings update
+       */
+      updated_at?: string | null;
+    };
+    /**
+     * CrawlerSettingsUpdate
+     * @description Request model for updating tenant crawler settings.
+     *
+     * All fields are optional - only provided fields will be updated.
+     * Missing fields retain their previous values or fall back to environment defaults.
+     *
+     * Field constraints are derived from CRAWLER_SETTING_SPECS (single source of truth).
+     *
+     * Example - Full configuration:
+     *     {
+     *         "crawl_max_length": 14400,
+     *         "download_timeout": 90,
+     *         "download_max_size": 10485760,
+     *         "dns_timeout": 30,
+     *         "retry_times": 2,
+     *         "closespider_itemcount": 20000,
+     *         "obey_robots": true,
+     *         "autothrottle_enabled": true,
+     *         "tenant_worker_concurrency_limit": 4,
+     *         "crawl_stale_threshold_minutes": 30,
+     *         "crawl_heartbeat_interval_seconds": 300,
+     *         "crawl_feeder_enabled": false,
+     *         "crawl_feeder_interval_seconds": 10,
+     *         "crawl_feeder_batch_size": 10,
+     *         "crawl_job_max_age_seconds": 1800
+     *     }
+     *
+     * Example - Partial update (adjust timeouts only):
+     *     {
+     *         "download_timeout": 120,
+     *         "dns_timeout": 45
+     *     }
+     */
+    CrawlerSettingsUpdate: {
+      /**
+       * Crawl Max Length
+       * @description Maximum crawl duration in seconds (1 min to 24 hours)
+       */
+      crawl_max_length?: number | null;
+      /**
+       * Download Timeout
+       * @description Per-request download timeout in seconds (10s to 5 min)
+       */
+      download_timeout?: number | null;
+      /**
+       * Download Max Size
+       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
+       */
+      download_max_size?: number | null;
+      /**
+       * Dns Timeout
+       * @description DNS resolution timeout in seconds (5s to 2 min)
+       */
+      dns_timeout?: number | null;
+      /**
+       * Retry Times
+       * @description Number of retry attempts per request (0 to 10)
+       */
+      retry_times?: number | null;
+      /**
+       * Closespider Itemcount
+       * @description Maximum pages to crawl before stopping (100 to 100k)
+       */
+      closespider_itemcount?: number | null;
+      /**
+       * Obey Robots
+       * @description Whether to respect robots.txt rules
+       */
+      obey_robots?: boolean | null;
+      /**
+       * Autothrottle Enabled
+       * @description Enable automatic request throttling based on server response times
+       */
+      autothrottle_enabled?: boolean | null;
+      /**
+       * Tenant Worker Concurrency Limit
+       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
+       */
+      tenant_worker_concurrency_limit?: number | null;
+      /**
+       * Crawl Stale Threshold Minutes
+       * @description Minutes without activity before job is considered stale (5 min to 24 hours)
+       */
+      crawl_stale_threshold_minutes?: number | null;
+      /**
+       * Crawl Heartbeat Interval Seconds
+       * @description Heartbeat interval to signal job is alive (30s to 1 hour)
+       */
+      crawl_heartbeat_interval_seconds?: number | null;
+      /**
+       * Crawl Feeder Enabled
+       * @description Enable crawl feeder service for rate-limited job enqueueing
+       */
+      crawl_feeder_enabled?: boolean | null;
+      /**
+       * Crawl Feeder Interval Seconds
+       * @description Feeder check interval in seconds (5s to 5 min)
+       */
+      crawl_feeder_interval_seconds?: number | null;
+      /**
+       * Crawl Feeder Batch Size
+       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
+       */
+      crawl_feeder_batch_size?: number | null;
+      /**
+       * Crawl Job Max Age Seconds
+       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
+       */
+      crawl_job_max_age_seconds?: number | null;
+    };
     /** CreateGroupRequest */
     CreateGroupRequest: {
       /** Name */
@@ -3492,6 +4350,35 @@ export interface components {
     DeleteResponse: {
       /** Success */
       success: boolean;
+    };
+    /**
+     * DeleteSettingsResponse
+     * @description Response model for deleting tenant crawler settings.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "message": "Crawler settings reset to defaults",
+     *         "deleted_keys": ["download_timeout", "dns_timeout"]
+     *     }
+     */
+    DeleteSettingsResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant UUID
+       */
+      tenant_id: string;
+      /**
+       * Message
+       * @description Confirmation message
+       */
+      message: string;
+      /**
+       * Deleted Keys
+       * @description List of setting keys that were removed
+       */
+      deleted_keys: string[];
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -3775,6 +4662,35 @@ export interface components {
       is_org_enabled?: boolean | null;
     };
     /**
+     * EntityType
+     * @description Categorize what type of entity was affected
+     * @enum {string}
+     */
+    EntityType:
+      | "user"
+      | "assistant"
+      | "space"
+      | "app"
+      | "file"
+      | "website"
+      | "tenant_settings"
+      | "credential"
+      | "federation_config"
+      | "api_key"
+      | "role"
+      | "module"
+      | "template"
+      | "group_chat"
+      | "collection"
+      | "app_run"
+      | "security_classification"
+      | "integration"
+      | "integration_knowledge"
+      | "completion_model"
+      | "embedding_model"
+      | "transcription_model"
+      | "audit_log";
+    /**
      * ErrorCodes
      * @enum {integer}
      */
@@ -3807,6 +4723,131 @@ export interface components {
       | 9025
       | 9026;
     /**
+     * ExportJobRequest
+     * @description Schema for requesting async audit log export.
+     */
+    ExportJobRequest: {
+      /**
+       * User Id
+       * @description User ID for GDPR export
+       */
+      user_id?: string | null;
+      /**
+       * Actor Id
+       * @description Filter by actor
+       */
+      actor_id?: string | null;
+      /** @description Filter by action type */
+      action?: components["schemas"]["ActionType"] | null;
+      /**
+       * From Date
+       * @description Filter from date
+       */
+      from_date?: string | null;
+      /**
+       * To Date
+       * @description Filter to date
+       */
+      to_date?: string | null;
+      /**
+       * Format
+       * @description Export format: csv or jsonl
+       * @default csv
+       */
+      format?: string;
+      /**
+       * Max Records
+       * @description Maximum records to export
+       */
+      max_records?: number | null;
+    };
+    /**
+     * ExportJobResponse
+     * @description Schema for export job creation response.
+     */
+    ExportJobResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /**
+       * Status
+       * @description Job status: pending, processing, completed, failed, cancelled
+       */
+      status: string;
+      /**
+       * Message
+       * @description Status message
+       */
+      message?: string | null;
+    };
+    /**
+     * ExportJobStatusResponse
+     * @description Schema for export job status response.
+     */
+    ExportJobStatusResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /**
+       * Status
+       * @description Job status: pending, processing, completed, failed, cancelled
+       */
+      status: string;
+      /**
+       * Progress
+       * @description Progress percentage
+       */
+      progress: number;
+      /**
+       * Total Records
+       * @description Total records to export
+       */
+      total_records: number;
+      /**
+       * Processed Records
+       * @description Records processed so far
+       */
+      processed_records: number;
+      /**
+       * Format
+       * @description Export format: csv or jsonl
+       */
+      format: string;
+      /**
+       * File Size Bytes
+       * @description File size in bytes (when completed)
+       */
+      file_size_bytes?: number | null;
+      /**
+       * Error Message
+       * @description Error message (when failed)
+       */
+      error_message?: string | null;
+      /**
+       * Download Url
+       * @description Download URL (when completed)
+       */
+      download_url?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+    };
+    /**
      * FederationInfo
      * @description Information about configured federation.
      */
@@ -3831,6 +4872,26 @@ export interface components {
        * @enum {string}
        */
       encryption_status: "encrypted" | "plaintext";
+    };
+    /**
+     * FederationStatusResponse
+     * @description Federation configuration status for login page.
+     * @example {
+     *   "has_global_oidc_config": false,
+     *   "has_multi_tenant_federation": false,
+     *   "has_single_tenant_federation": true,
+     *   "tenant_count": 1
+     * }
+     */
+    FederationStatusResponse: {
+      /** Has Single Tenant Federation */
+      has_single_tenant_federation: boolean;
+      /** Has Multi Tenant Federation */
+      has_multi_tenant_federation: boolean;
+      /** Has Global Oidc Config */
+      has_global_oidc_config: boolean;
+      /** Tenant Count */
+      tenant_count: number;
     };
     /** FilePublic */
     FilePublic: {
@@ -4887,6 +5948,12 @@ export interface components {
       /** Nonce */
       nonce?: string | null;
     };
+    /**
+     * Outcome
+     * @description Indicate success or failure of audited action
+     * @enum {string}
+     */
+    Outcome: "success" | "failure";
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -5650,6 +6717,11 @@ export interface components {
        * @description ID of the security classification to apply to this space. Set to null to remove the security classification. Omit to keep the current security classification unchanged.
        */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Data Retention Days
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       */
+      data_retention_days?: number | null;
     };
     /**
      * Permission
@@ -5822,6 +6894,53 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
+    /**
+     * RetentionPolicyResponse
+     * @description Schema for audit log retention policy response.
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level,
+     * not at the tenant level, to prevent accidental data loss.
+     */
+    RetentionPolicyResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Retention Days
+       * @description Days to retain audit logs (1-2555). Recommended: 90+
+       */
+      retention_days: number;
+      /** Last Purge At */
+      last_purge_at?: string | null;
+      /** Purge Count */
+      purge_count: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * RetentionPolicyUpdateRequest
+     * @description Schema for updating audit log retention policy.
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level,
+     * not at the tenant level, to prevent accidental data loss.
+     */
+    RetentionPolicyUpdateRequest: {
+      /**
+       * Retention Days
+       * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
+       */
+      retention_days: number;
+    };
     /** RoleCreateRequest */
     RoleCreateRequest: {
       /** Name */
@@ -6304,6 +7423,11 @@ export interface components {
        * @default false
        */
       tenant_credentials_enabled?: boolean;
+      /**
+       * Audit Logging Enabled
+       * @default true
+       */
+      audit_logging_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -6359,6 +7483,9 @@ export interface components {
       /** Organization */
       organization: boolean;
       applications: components["schemas"]["Applications"];
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
     };
     /** SpaceMember */
     SpaceMember: {
@@ -6405,6 +7532,9 @@ export interface components {
       /** Organization */
       organization: boolean;
       applications: components["schemas"]["Applications"];
+      default_assistant: components["schemas"]["DefaultAssistant"];
+      /** Data Retention Days */
+      data_retention_days?: number | null;
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Completion Models */
@@ -6413,7 +7543,6 @@ export interface components {
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
-      default_assistant: components["schemas"]["DefaultAssistant"];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
@@ -6453,6 +7582,10 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      applications?: components["schemas"]["Applications"] | null;
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
     };
     /**
      * StateFilter
@@ -6659,6 +7792,10 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
+      /** Crawler Settings */
+      crawler_settings?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TenantInfo
@@ -6839,6 +7976,10 @@ export interface components {
       };
       /** Federation Config */
       federation_config?: {
+        [key: string]: unknown;
+      };
+      /** Crawler Settings */
+      crawler_settings?: {
         [key: string]: unknown;
       };
     };
@@ -9403,6 +10544,56 @@ export interface operations {
    * ```
    */
   update_template_setting_api_v1_settings_templates_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle global audit logging
+   * @description Enable or disable global audit logging for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `audit_logging_enabled` feature flag for your tenant
+   * - When disabled: No audit logs are created for any action (global kill switch)
+   * - When enabled: Audit logging resumes with category and action-level filtering
+   * - This is independent from category/action configuration
+   * - Change takes effect immediately for all workers
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": false
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "audit_logging_enabled": false,
+   *   "using_templates": true
+   * }
+   * ```
+   */
+  update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TemplateSettingUpdate"];
@@ -13909,11 +15100,25 @@ export interface operations {
   };
   /** Get Spaces */
   get_spaces_api_v1_spaces__get: {
+    parameters: {
+      query?: {
+        /** @description Includes published applications on each space */
+        include_applications?: boolean;
+        /** @description Includes your personal space */
+        include_personal?: boolean;
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["PaginatedResponse_SpaceSparse_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -15635,6 +16840,487 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get audit category configuration
+   * @description Retrieve all audit category configurations for the current tenant.
+   */
+  get_audit_config_api_v1_audit_config_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update audit category configuration
+   * @description Update one or more audit category configurations for the current tenant.
+   */
+  update_audit_config_api_v1_audit_config_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AuditConfigUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get per-action audit configuration
+   * @description Retrieve all 65 actions with their enabled status for the modal UI.
+   */
+  get_action_config_api_v1_audit_config_actions_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update per-action audit configuration
+   * @description Update one or more action-level audit configurations.
+   */
+  update_action_config_api_v1_audit_config_actions_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActionConfigUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reset Rate Limit
+   * @description Admin utility: Reset audit session rate limit for current user.
+   *
+   * This endpoint is only available in development/testing environments.
+   * Use when you get rate limited during testing.
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Development/testing environment
+   *
+   * Note: Permission check intentionally removed to allow clearing rate limit
+   * even when locked out. User is still authenticated via JWT.
+   */
+  reset_rate_limit_api_v1_audit_access_session_rate_limit_delete: {
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Create Access Session
+   * @description Create an audit access session with justification.
+   *
+   * Stores the access justification securely in Redis (server-side) instead of
+   * exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+   *
+   * Security Features:
+   * - Justification never appears in URLs or browser history
+   * - Session ID stored in HTTP-only cookie (prevents XSS)
+   * - Automatic expiration after 1 hour
+   * - Tenant isolation validation
+   * - Instant revocation capability
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Admin permissions
+   *
+   * Returns: Session creation confirmation with HTTP-only cookie set
+   */
+  create_access_session_api_v1_audit_access_session_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccessJustificationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessJustificationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Audit Logs
+   * @description List audit logs for the authenticated user's tenant.
+   *
+   * Security:
+   * - Requires active audit access session (via HTTP-only cookie)
+   * - Session must contain valid justification
+   * - Justification stored server-side (Redis) - never in URLs
+   *
+   * Access Control:
+   * - Admins only: View all actions in their tenant
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Admin permissions
+   * Requires: Active audit access session with justification
+   */
+  list_audit_logs_api_v1_audit_logs_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Search entity names in log descriptions (min 3 chars) */
+        search?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Logs
+   * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+   *
+   * Returns audit logs involving the user in any capacity.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   * Security: Only returns logs for the authenticated user's tenant
+   */
+  get_user_logs_api_v1_audit_logs_user__user_id__get: {
+    parameters: {
+      query?: {
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+      path: {
+        /** @description User ID for GDPR export */
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Export Audit Logs
+   * @description Export audit logs to CSV or JSON Lines format.
+   *
+   * Supported formats:
+   * - csv: Comma-separated values (default, Excel-compatible)
+   * - json: JSON Lines format (one JSON object per line, for large exports)
+   *
+   * Use user_id for GDPR Article 15 data subject access requests.
+   *
+   * Memory Protection:
+   * - Default limit: 50,000 records (configurable via max_records parameter)
+   * - Response includes X-Records-Truncated header if limit was hit
+   * - Response includes X-Total-Records header with total matching count
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   * Security: Only exports logs for the authenticated user's tenant
+   */
+  export_audit_logs_api_v1_audit_logs_export_get: {
+    parameters: {
+      query?: {
+        /** @description User ID for GDPR export */
+        user_id?: string | null;
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Export format: csv or json */
+        format?: string;
+        /** @description Maximum records to export (default: 50000, max: 100000) */
+        max_records?: number | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Request Async Export
+   * @description Request async export of audit logs.
+   *
+   * Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+   * Download via /logs/export/{job_id}/download when complete.
+   *
+   * Advantages over sync export:
+   * - Handles 1M-10M+ records without timeout
+   * - Progress tracking for long exports
+   * - Cancellation support
+   * - Constant memory usage (~50MB)
+   *
+   * Limitations:
+   * - Max 2 concurrent exports per tenant
+   * - Files auto-deleted after 24 hours
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  request_async_export_api_v1_audit_logs_export_async_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExportJobRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExportJobResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Export Status
+   * @description Get export job status with progress.
+   *
+   * Poll this endpoint to track export progress.
+   * When status is 'completed', use the download_url to get the file.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  get_export_status_api_v1_audit_logs_export__job_id__status_get: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExportJobStatusResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Download Export
+   * @description Download completed export file.
+   *
+   * Only available when job status is 'completed'.
+   * Files are auto-deleted after 24 hours.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  download_export_api_v1_audit_logs_export__job_id__download_get: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel Export
+   * @description Cancel an in-progress export.
+   *
+   * Only works for jobs in 'pending' or 'processing' state.
+   * The worker will stop processing and clean up the partial file.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  cancel_export_api_v1_audit_logs_export__job_id__cancel_post: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Retention Policy
+   * @description Get the current retention policy for your tenant.
+   *
+   * Returns audit log retention policy configuration.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  get_retention_policy_api_v1_audit_retention_policy_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RetentionPolicyResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Retention Policy
+   * @description Update the audit log retention policy for your tenant.
+   *
+   * Configure audit log retention for compliance and security tracking.
+   *
+   * Audit Log Retention:
+   * - Minimum: 1 day (Recommended: 90+ days for compliance)
+   * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+   * - Default: 365 days (Swedish Arkivlagen)
+   *
+   * Note: Conversation retention is configured at the Assistant, App, or Space level.
+   * Tenant-level conversation retention has been removed to prevent accidental data loss.
+   *
+   * The system automatically runs a daily job to delete audit logs older than
+   * the retention period.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  update_retention_policy_api_v1_audit_retention_policy_put: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RetentionPolicyUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RetentionPolicyResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Integrations */
   get_integrations_api_v1_integrations__get: {
     responses: {
@@ -16915,6 +18601,86 @@ export interface operations {
     };
   };
   /**
+   * Get tenant crawler settings
+   * @description Get current crawler settings for a tenant. Returns effective settings (tenant overrides merged with environment defaults). System admin only.
+   */
+  get_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update tenant crawler settings
+   * @description Update crawler settings for a specific tenant. Only provided fields are updated; missing fields retain previous values. Settings persist across server restarts and override environment defaults. System admin only.
+   */
+  update_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CrawlerSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reset tenant crawler settings
+   * @description Delete all tenant-specific crawler settings, reverting to environment defaults. System admin only.
+   */
+  delete_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get tenant federation config
    * @description View federation config with masked secrets. System admin only.
    */
@@ -17078,6 +18844,20 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check federation configuration status
+   * @description Returns federation availability status for the system. Used by login page to determine which authentication method to show. No authentication required (public endpoint).
+   */
+  get_federation_status_api_v1_auth_federation_status_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FederationStatusResponse"];
         };
       };
     };

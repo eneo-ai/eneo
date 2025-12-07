@@ -1,0 +1,754 @@
+"""Audit logging service."""
+
+import csv
+import logging
+from datetime import datetime, timezone
+from io import StringIO
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from uuid import UUID, uuid4
+
+import aiofiles
+import orjson
+
+from intric.audit.application.audit_config_service import AuditConfigService
+from intric.main.config import get_settings
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.audit_log import AuditLog
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
+from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
+from intric.jobs.job_manager import job_manager
+
+if TYPE_CHECKING:
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_csv_cell(value: str) -> str:
+    """
+    Prevent CSV injection attacks.
+
+    Prefixes values starting with special characters (=, +, -, @, tab, carriage return)
+    with a single quote to prevent formula execution in Excel and other spreadsheet software.
+
+    Args:
+        value: Cell value to sanitize
+
+    Returns:
+        Sanitized cell value
+    """
+    if value and value[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + value
+    return value
+
+
+class AuditService:
+    """Service for audit logging operations."""
+
+    def __init__(
+        self,
+        repository: AuditLogRepository,
+        audit_config_service: Optional[AuditConfigService] = None,
+        feature_flag_service: Optional["FeatureFlagService"] = None,
+    ):
+        self.repository = repository
+        self.audit_config_service = audit_config_service
+        self.feature_flag_service = feature_flag_service
+
+    async def _should_log_action(self, tenant_id: UUID, action: ActionType) -> bool:
+        """
+        Check if an action should be logged based on audit configuration.
+
+        Implements 2-stage filtering:
+        1. Global audit_logging_enabled feature flag (kill switch)
+        2. Action-level configuration (3-level: global → category → action override)
+
+        Args:
+            tenant_id: Tenant ID
+            action: Action type to check
+
+        Returns:
+            True if action should be logged, False otherwise
+        """
+        # Stage 1: Check global feature flag
+        if self.feature_flag_service:
+            try:
+                audit_logging_enabled = await self.feature_flag_service.check_is_feature_enabled(
+                    feature_name="audit_logging_enabled",
+                    tenant_id=tenant_id
+                )
+                if not audit_logging_enabled:
+                    # Global audit logging disabled - skip logging entirely
+                    return False
+            except Exception as e:
+                # Graceful degradation: if flag service unavailable, continue logging
+                logger.warning(f"Failed to check audit_logging_enabled flag: {e}")
+
+        # Stage 2: Check action-level configuration
+        if self.audit_config_service:
+            enabled = await self.audit_config_service.is_action_enabled(
+                tenant_id, action.value
+            )
+            if not enabled:
+                # Action disabled (by category or by action override) - skip logging
+                return False
+
+        return True
+
+    async def log(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID,
+        action: ActionType,
+        entity_type: EntityType,
+        entity_id: UUID,
+        description: str,
+        metadata: dict,
+        outcome: Outcome = Outcome.SUCCESS,
+        actor_type: ActorType = ActorType.USER,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        request_id: Optional[UUID] = None,
+        error_message: Optional[str] = None,
+    ) -> AuditLog:
+        """
+        Create an audit log entry.
+
+        Args:
+            tenant_id: Tenant ID
+            actor_id: User who performed the action
+            action: Type of action performed
+            entity_type: Type of entity affected
+            entity_id: ID of affected entity
+            description: Human-readable description
+            metadata: Additional context (actor/target snapshots, changes)
+            outcome: Success or failure
+            actor_type: Type of actor (user, system, api_key)
+            ip_address: Client IP address
+            user_agent: Client user agent
+            request_id: Request correlation ID
+            error_message: Error details if outcome is failure
+
+        Returns:
+            Created audit log (or None if action is disabled)
+
+        Raises:
+            ValueError: If outcome is failure but no error_message provided
+        """
+        # Check if action should be logged based on configuration
+        should_log = await self._should_log_action(tenant_id, action)
+        if not should_log:
+            return None
+
+        audit_log = AuditLog(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            timestamp=datetime.now(timezone.utc),
+            description=description,
+            metadata=metadata,
+            outcome=outcome,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            request_id=request_id,
+            error_message=error_message,
+        )
+
+        return await self.repository.create(audit_log)
+
+    async def get_logs(
+        self,
+        tenant_id: UUID,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        search: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> tuple[list[AuditLog], int]:
+        """
+        Get audit logs for a tenant with optional filters.
+
+        Args:
+            tenant_id: Tenant ID
+            actor_id: Filter by actor
+            action: Filter by action type
+            from_date: Filter from date
+            to_date: Filter to date
+            search: Search entity names in description (min 3 chars, case-insensitive)
+            page: Page number (1-indexed)
+            page_size: Number of logs per page
+
+        Returns:
+            Tuple of (logs, total_count)
+        """
+        return await self.repository.get_logs(
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=action,
+            from_date=from_date,
+            to_date=to_date,
+            search=search,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def get_user_logs(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> tuple[list[AuditLog], int]:
+        """
+        Get all logs where user is actor OR target (GDPR Article 15 export).
+
+        Args:
+            tenant_id: Tenant ID
+            user_id: User ID to search for
+            from_date: Filter from date
+            to_date: Filter to date
+            page: Page number (1-indexed)
+            page_size: Number of logs per page
+
+        Returns:
+            Tuple of (logs, total_count)
+        """
+        return await self.repository.get_user_logs(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            from_date=from_date,
+            to_date=to_date,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def export_csv(
+        self,
+        tenant_id: UUID,
+        user_id: Optional[UUID] = None,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        max_records: Optional[int] = None,
+    ) -> str:
+        """
+        Export audit logs to CSV format with streaming support.
+
+        This method fetches logs in batches of 1000 records to prevent memory exhaustion,
+        allowing export of millions of audit logs. For very large exports (>100k records),
+        consider using date filters or the export_csv_stream method for HTTP streaming.
+
+        Args:
+            tenant_id: Tenant ID
+            user_id: Filter for GDPR export (user as actor OR target)
+            actor_id: Filter by actor
+            action: Filter by action type
+            from_date: Filter from date
+            to_date: Filter to date
+            max_records: Maximum number of records to export (None for unlimited)
+
+        Returns:
+            CSV string with audit logs
+        """
+        import csv
+        from io import StringIO
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Write header
+        writer.writerow([
+            "Timestamp",
+            "Actor ID",
+            "Actor Type",
+            "Action",
+            "Entity Type",
+            "Entity ID",
+            "Description",
+            "Outcome",
+            "Error Message",
+            "Metadata",
+        ])
+
+        # Stream logs in batches
+        page = 1
+        page_size = 1000
+        total_exported = 0
+
+        while True:
+            # Get batch
+            if user_id:
+                logs, total_count = await self.get_user_logs(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    page=page,
+                    page_size=page_size,
+                )
+            else:
+                logs, total_count = await self.get_logs(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=action,
+                    from_date=from_date,
+                    to_date=to_date,
+                    page=page,
+                    page_size=page_size,
+                )
+
+            # No more logs
+            if not logs:
+                break
+
+            # Write rows (with CSV injection protection)
+            for log in logs:
+                writer.writerow([
+                    log.timestamp.isoformat(),
+                    str(log.actor_id),
+                    log.actor_type.value,
+                    log.action.value,
+                    log.entity_type.value,
+                    str(log.entity_id),
+                    _sanitize_csv_cell(log.description),
+                    log.outcome.value,
+                    _sanitize_csv_cell(log.error_message or ""),
+                    _sanitize_csv_cell(str(log.metadata)),
+                ])
+                total_exported += 1
+
+                # Check max_records limit
+                if max_records and total_exported >= max_records:
+                    return output.getvalue()
+
+            # Check if we've reached the end
+            if page * page_size >= total_count:
+                break
+
+            page += 1
+
+        return output.getvalue()
+
+    async def export_jsonl(
+        self,
+        tenant_id: UUID,
+        user_id: Optional[UUID] = None,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        max_records: Optional[int] = None,
+    ) -> str:
+        """
+        Export audit logs to JSON Lines (JSONL) format.
+
+        JSONL is ideal for large exports as it:
+        - Maintains data types (no string conversion)
+        - Streams efficiently line-by-line
+        - Is machine-readable and easily parsable
+        - Works well with log analysis tools (jq, grep, etc.)
+
+        Args:
+            tenant_id: Tenant ID
+            user_id: Filter for GDPR export (user as actor OR target)
+            actor_id: Filter by actor
+            action: Filter by action type
+            from_date: Filter from date
+            to_date: Filter to date
+            max_records: Maximum number of records to export (None for unlimited)
+
+        Returns:
+            JSONL string with one JSON object per line
+        """
+        import json
+        from io import StringIO
+
+        output = StringIO()
+        page = 1
+        page_size = 1000
+        total_exported = 0
+
+        while True:
+            # Get batch
+            if user_id:
+                logs, total_count = await self.get_user_logs(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    page=page,
+                    page_size=page_size,
+                )
+            else:
+                logs, total_count = await self.get_logs(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=action,
+                    from_date=from_date,
+                    to_date=to_date,
+                    page=page,
+                    page_size=page_size,
+                )
+
+            # No more logs
+            if not logs:
+                break
+
+            # Write JSON lines
+            for log in logs:
+                log_dict = {
+                    "id": str(log.id),
+                    "tenant_id": str(log.tenant_id),
+                    "timestamp": log.timestamp.isoformat(),
+                    "actor_id": str(log.actor_id),
+                    "actor_type": log.actor_type.value,
+                    "action": log.action.value,
+                    "entity_type": log.entity_type.value,
+                    "entity_id": str(log.entity_id),
+                    "description": log.description,
+                    "outcome": log.outcome.value,
+                    "metadata": log.metadata,
+                    "ip_address": log.ip_address,
+                    "user_agent": log.user_agent,
+                    "request_id": str(log.request_id) if log.request_id else None,
+                    "error_message": log.error_message,
+                }
+                output.write(json.dumps(log_dict) + "\n")
+                total_exported += 1
+
+                # Check max_records limit
+                if max_records and total_exported >= max_records:
+                    return output.getvalue()
+
+            # Check if we've reached the end
+            if page * page_size >= total_count:
+                break
+
+            page += 1
+
+        return output.getvalue()
+
+    def _audit_log_to_dict(self, log: AuditLog) -> dict:
+        """Convert AuditLog to dict for JSON serialization."""
+        return {
+            "id": str(log.id),
+            "tenant_id": str(log.tenant_id),
+            "timestamp": log.timestamp.isoformat(),
+            "actor_id": str(log.actor_id),
+            "actor_type": log.actor_type.value,
+            "action": log.action.value,
+            "entity_type": log.entity_type.value,
+            "entity_id": str(log.entity_id),
+            "description": log.description,
+            "outcome": log.outcome.value,
+            "metadata": log.metadata,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "request_id": str(log.request_id) if log.request_id else None,
+            "error_message": log.error_message,
+        }
+
+    def _audit_log_to_csv_row(self, log: AuditLog) -> list:
+        """Convert AuditLog to CSV row with sanitization."""
+        return [
+            log.timestamp.isoformat(),
+            str(log.actor_id),
+            log.actor_type.value,
+            log.action.value,
+            log.entity_type.value,
+            str(log.entity_id),
+            _sanitize_csv_cell(log.description),
+            log.outcome.value,
+            _sanitize_csv_cell(log.error_message or ""),
+            _sanitize_csv_cell(str(log.metadata)),
+        ]
+
+
+    def _raw_dict_to_csv_row(self, log_dict: dict) -> list:
+        """Convert raw audit log dict to CSV row with sanitization.
+
+        Used with stream_logs_raw() for optimized exports without ORM overhead.
+        """
+        return [
+            log_dict["timestamp"],
+            log_dict["actor_id"],
+            log_dict["actor_type"],
+            log_dict["action"],
+            log_dict["entity_type"],
+            log_dict["entity_id"],
+            _sanitize_csv_cell(log_dict["description"]),
+            log_dict["outcome"],
+            _sanitize_csv_cell(log_dict.get("error_message") or ""),
+            _sanitize_csv_cell(str(log_dict.get("metadata", {}))),
+        ]
+
+    async def stream_export_to_file(
+        self,
+        file_path: str,
+        tenant_id: UUID,
+        format: str,
+        progress_callback: Callable[[int, int], Awaitable[None]],
+        cancellation_check: Callable[[], Awaitable[bool]],
+        user_id: Optional[UUID] = None,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        max_records: Optional[int] = None,
+    ) -> int:
+        """
+        Stream export audit logs to file with progress tracking and cancellation.
+
+        Uses server-side cursors for constant memory usage (~50MB) regardless
+        of dataset size. Supports both CSV and JSONL formats.
+
+        Args:
+            file_path: Absolute path to output file
+            tenant_id: Tenant ID for multi-tenant isolation
+            format: Export format ('csv' or 'jsonl')
+            progress_callback: Async callback(processed, total) for progress updates
+            cancellation_check: Async callback() returning True if job should cancel
+            user_id: GDPR export filter (user as actor OR target)
+            actor_id: Filter by actor
+            action: Filter by action type
+            from_date: Filter from date
+            to_date: Filter to date
+            max_records: Maximum records to export (None for unlimited)
+
+        Returns:
+            Total number of records exported
+        """
+        settings = get_settings()
+        batch_size = settings.export_batch_size
+        buffer_size = settings.export_buffer_size
+        progress_interval = settings.export_progress_interval
+
+        # Get total count for progress calculation
+        if user_id:
+            total_records = await self.repository.count_user_logs(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                from_date=from_date,
+                to_date=to_date,
+            )
+        else:
+            total_records = await self.repository.count_logs(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action=action,
+                from_date=from_date,
+                to_date=to_date,
+            )
+
+        # Apply max_records limit to total
+        if max_records and total_records > max_records:
+            total_records = max_records
+
+        processed = 0
+        buffer: list = []
+
+        async with aiofiles.open(file_path, mode="wb") as file:
+            # Write CSV header if needed
+            if format == "csv":
+                header_output = StringIO()
+                writer = csv.writer(header_output)
+                writer.writerow([
+                    "Timestamp",
+                    "Actor ID",
+                    "Actor Type",
+                    "Action",
+                    "Entity Type",
+                    "Entity ID",
+                    "Description",
+                    "Outcome",
+                    "Error Message",
+                    "Metadata",
+                ])
+                await file.write(header_output.getvalue().encode("utf-8"))
+
+            # Stream logs from repository using raw dicts (SQLAlchemy Core)
+            # ~2-3x faster than ORM streaming by bypassing hydration + domain conversion
+            if user_id:
+                log_stream = self.repository.stream_user_logs_raw(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    batch_size=batch_size,
+                )
+            else:
+                log_stream = self.repository.stream_logs_raw(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=action,
+                    from_date=from_date,
+                    to_date=to_date,
+                    batch_size=batch_size,
+                )
+
+            async for log in log_stream:
+                # Check cancellation periodically
+                if processed % progress_interval == 0:
+                    if await cancellation_check():
+                        logger.info(
+                            "Export cancelled",
+                            extra={
+                                "tenant_id": str(tenant_id),
+                                "processed": processed,
+                            },
+                        )
+                        # Flush remaining buffer before exit
+                        if buffer:
+                            await self._flush_buffer(file, buffer, format)
+                        return processed
+
+                    # Report progress
+                    await progress_callback(processed, total_records)
+
+                # Add to buffer - log is already a dict from raw streaming
+                if format == "csv":
+                    buffer.append(self._raw_dict_to_csv_row(log))
+                else:  # jsonl
+                    buffer.append(log)  # Already a dict, no conversion needed
+
+                processed += 1
+
+                # Check max_records limit
+                if max_records and processed >= max_records:
+                    break
+
+                # Flush buffer when full
+                if len(buffer) >= buffer_size:
+                    await self._flush_buffer(file, buffer, format)
+                    buffer.clear()
+
+            # Flush remaining buffer
+            if buffer:
+                await self._flush_buffer(file, buffer, format)
+
+        # Final progress update
+        await progress_callback(processed, total_records)
+
+        logger.info(
+            "Export completed",
+            extra={
+                "tenant_id": str(tenant_id),
+                "format": format,
+                "total_records": processed,
+                "file_path": file_path,
+            },
+        )
+
+        return processed
+
+    async def _flush_buffer(
+        self,
+        file: aiofiles.threadpool.binary.AsyncBufferedIOBase,
+        buffer: list,
+        format: str,
+    ) -> None:
+        """Flush buffer to file with format-specific serialization."""
+        if format == "csv":
+            # Use StringIO + writerows for efficient CSV batch writing
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerows(buffer)  # writerows is faster than loop
+            await file.write(output.getvalue().encode("utf-8"))
+        else:  # jsonl
+            # Batch serialize with join - O(n) instead of O(n²) concatenation
+            # Memory: ~45-50MB temporary allocation for 50k records, acceptable trade-off
+            chunk = b"\n".join(orjson.dumps(item) for item in buffer) + b"\n"
+            await file.write(chunk)
+
+    async def log_async(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID,
+        action: ActionType,
+        entity_type: EntityType,
+        entity_id: UUID,
+        description: str,
+        metadata: dict,
+        outcome: Outcome = Outcome.SUCCESS,
+        actor_type: ActorType = ActorType.USER,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        request_id: Optional[UUID] = None,
+        error_message: Optional[str] = None,
+    ) -> Optional[UUID]:
+        """
+        Asynchronously create an audit log entry via ARQ worker.
+
+        This method enqueues the audit log to Redis for async processing,
+        returning immediately (<10ms latency). The ARQ worker will persist
+        the log to PostgreSQL in the background.
+
+        NOTE: If audit logging is globally disabled or the action is disabled
+        (by category or action override), returns None and skips logging.
+
+        Args:
+            tenant_id: Tenant ID
+            actor_id: User who performed the action
+            action: Type of action performed
+            entity_type: Type of entity affected
+            entity_id: ID of affected entity
+            description: Human-readable description
+            metadata: Additional context (actor/target snapshots, changes)
+            outcome: Success or failure
+            actor_type: Type of actor (user, system, api_key)
+            ip_address: Client IP address
+            user_agent: Client user agent
+            request_id: Request correlation ID
+            error_message: Error details if outcome is failure
+
+        Returns:
+            Job ID for tracking the async operation, or None if action disabled
+
+        Raises:
+            ValueError: If outcome is failure but no error_message provided
+        """
+        # Check if action should be logged based on configuration
+        should_log = await self._should_log_action(tenant_id, action)
+        if not should_log:
+            return None
+
+        # Validate
+        if outcome == Outcome.FAILURE and not error_message:
+            raise ValueError("error_message required when outcome is failure")
+
+        # Create job ID
+        job_id = uuid4()
+
+        # Prepare params for ARQ worker
+        params = {
+            "tenant_id": str(tenant_id),
+            "actor_id": str(actor_id),
+            "actor_type": actor_type.value,
+            "action": action.value,
+            "entity_type": entity_type.value,
+            "entity_id": str(entity_id),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "description": description,
+            "metadata": metadata,
+            "outcome": outcome.value,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "request_id": str(request_id) if request_id else None,
+            "error_message": error_message,
+        }
+
+        # Enqueue to ARQ
+        await job_manager.enqueue("log_audit_event", job_id, params)
+
+        return job_id

@@ -75,7 +75,7 @@ services:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
-      - eneo_temp_files:/tmp
+      - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
     networks:
       - proxy_tier
     labels:
@@ -108,7 +108,7 @@ services:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
-      - eneo_temp_files:/tmp
+      - eneo_temp_files:/tmp  # Shared with backend for audit log exports (/tmp/exports)
     networks:
       - proxy_tier
     depends_on:
@@ -154,4 +154,4 @@ volumes:
   eneo_redis_data:
   eneo_backend_data:
   traefik_letsencrypt:
-  eneo_temp_files:
+  eneo_temp_files:  # Also stores audit log exports (/tmp/exports, auto-cleaned after 24h)

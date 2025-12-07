@@ -142,9 +142,6 @@ OPENAI_API_KEY=
 # Get from: https://console.anthropic.com/
 ANTHROPIC_API_KEY=
 
-# Google Gemini
-GEMINI_API_KEY=
-
 # Azure OpenAI (Requires ALL 4 fields)
 AZURE_API_KEY=
 AZURE_ENDPOINT=
@@ -163,6 +160,7 @@ BERGET_API_BASE=
 # GDM.se (Swedish AI provider)
 # Get from: https://ai.gdm.se/
 GDM_API_KEY=
+# GDM_API_BASE=https://ai.gdm.se/api/v1  # Optional: Override default base URL
 
 # Flux (Image generation)
 FLUX_API_KEY=
@@ -192,6 +190,10 @@ INTRIC_SUPER_DUPER_API_KEY=
 # a background task processor instead of HTTP server. Both backend and worker
 # containers use the same image; run.sh detects RUN_AS_WORKER=true to launch
 # the ARQ worker instead of Gunicorn.
+#
+# VOLUMES: Ensure both backend and worker services have these volumes in docker-compose.yml:
+#   - eneo_backend_data:/app/data
+#   - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
 # ----------------------------------------------------------------------------
 
 # [OPTIONAL] Max concurrent jobs across all tenants (default: 20)
@@ -268,6 +270,24 @@ CRAWL_STALE_THRESHOLD_MINUTES=30
 CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
 
 # ----------------------------------------------------------------------------
+# Audit Log Export Configuration
+# ----------------------------------------------------------------------------
+# [OPTIONAL] Directory for storing audit log export files
+# Default: /tmp/exports (uses existing /tmp volume, no extra config needed)
+# The /tmp directory is world-writable and already mounted via eneo_temp_files volume
+# Override only if you need a custom location with appropriate permissions
+# Check logs for "[EXPORT CONFIG]" messages if exports aren't working
+# EXPORT_DIR=/tmp/exports
+
+# [OPTIONAL] Max concurrent exports per tenant (default: 2)
+# Prevents one tenant from overloading the system with many exports
+EXPORT_MAX_CONCURRENT_PER_TENANT=2
+
+# [OPTIONAL] Export file retention period in hours (default: 24)
+# Files older than this are automatically cleaned up by daily cron job (03:00 UTC)
+EXPORT_MAX_AGE_HOURS=24
+
+# ----------------------------------------------------------------------------
 # Feature Flags
 # ----------------------------------------------------------------------------
 USING_ACCESS_MANAGEMENT=True
@@ -294,6 +314,9 @@ MAX_IN_QUESTION=1
 CRAWL_MAX_LENGTH=14400
 # [OPTIONAL] Max items before stopping (default: 20000)
 CLOSESPIDER_ITEMCOUNT=20000
+# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
+# Separate from UPLOAD_MAX_FILE_SIZE - controls crawler's DOWNLOAD_MAXSIZE
+DOWNLOAD_MAX_SIZE=10485760
 # [OPTIONAL] Respect robots.txt (default: True)
 OBEY_ROBOTS=True
 # [OPTIONAL] Auto-throttle requests (default: True)
@@ -335,12 +358,6 @@ MIGRATION_AUTO_RECALC_THRESHOLD=30
 LOGLEVEL=INFO
 
 # ----------------------------------------------------------------------------
-# Legacy Authentication (DEPRECATED - Use OIDC_* variables instead)
+# DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
+# Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
 # ----------------------------------------------------------------------------
-# MobilityGuard & Zitadel Configuration
-# DEPRECATED: Auto-migrated to OIDC_* on startup (will be removed in v3.0)
-# ----------------------------------------------------------------------------
-MOBILITYGUARD_DISCOVERY_ENDPOINT=
-MOBILITYGUARD_CLIENT_ID=
-MOBILITYGUARD_CLIENT_SECRET=
-MOBILITYGUARD_TENANT_ID=
