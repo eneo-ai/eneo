@@ -26,6 +26,12 @@ from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from intric.audit.infrastructure.rate_limiting import (
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    build_rate_limit_key,
+    enforce_rate_limit,
+)
 from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -122,7 +128,7 @@ async def reset_rate_limit(
         raise HTTPException(status_code=404, detail="Not found")
 
     redis_client = get_redis()
-    rate_limit_key = f"rate_limit:audit_session:{current_user.id}:{current_user.tenant_id}"
+    rate_limit_key = build_rate_limit_key(current_user.id, current_user.tenant_id)
 
     try:
         deleted = await redis_client.delete(rate_limit_key)
@@ -189,35 +195,21 @@ async def create_access_session(
         )
 
     # Rate limiting: 5 sessions per hour per user (atomic operation to prevent race conditions)
-    redis_client = get_redis()  # Renamed to avoid shadowing redis module
-    rate_limit_key = f"rate_limit:audit_session:{current_user.id}:{current_user.tenant_id}"
-
-    # Lua script for atomic INCR + EXPIRE to prevent zombie keys
-    rate_limit_script = """
-    local count = redis.call('INCR', KEYS[1])
-    if count == 1 then
-        redis.call('EXPIRE', KEYS[1], ARGV[1])
-    end
-    return count
-    """
+    redis_client = get_redis()
 
     try:
-        # Execute Lua script atomically - prevents zombie keys if EXPIRE fails
-        count = await redis_client.eval(
-            rate_limit_script,
-            1,  # number of keys
-            rate_limit_key,  # KEYS[1]
-            3600  # ARGV[1] - TTL in seconds
+        rate_limit_result = await enforce_rate_limit(
+            redis_client=redis_client,
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
         )
-
-        # Check limit after increment
-        if count > 5:
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed."
-            )
-    except redis.exceptions.RedisError as e:
-        logger.error(f"Rate limit Redis error: {e}", exc_info=True)
+        count = rate_limit_result.current_count
+    except RateLimitExceededError:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed."
+        )
+    except RateLimitServiceUnavailableError:
         raise HTTPException(
             status_code=503,
             detail="Rate limiting service temporarily unavailable. Please try again."
