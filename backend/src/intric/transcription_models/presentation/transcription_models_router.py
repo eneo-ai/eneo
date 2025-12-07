@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from intric.main.container.container import Container
-from intric.main.models import PaginatedResponse
+from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -11,6 +11,11 @@ from intric.transcription_models.presentation.transcription_model_models import 
     TranscriptionModelPublic,
     TranscriptionModelUpdate,
 )
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -41,12 +46,6 @@ async def update_transcription_model(
     update_flags: TranscriptionModelUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-    from intric.main.models import NOT_PROVIDED
-
     service = container.transcription_model_crud_service()
     user = container.user()
 
@@ -96,10 +95,7 @@ async def update_transcription_model(
 
     # Only log if there were actual changes (ONE entry with all changes)
     if changes:
-        session = container.session()
-        audit_repo = AuditLogRepositoryImpl(session)
-        audit_service = AuditService(audit_repo)
-
+        audit_service = container.audit_service()
         await audit_service.log_async(
             tenant_id=user.tenant_id,
             actor_id=user.id,
@@ -107,20 +103,11 @@ async def update_transcription_model(
             entity_type=EntityType.TRANSCRIPTION_MODEL,
             entity_id=id,
             description=f"Updated settings for {transcription_model.name}",
-            metadata={
-                "actor": {
-                    "id": str(user.id),
-                    "name": user.username,
-                    "email": user.email,
-                },
-                "target": {
-                    "id": str(id),
-                    "name": transcription_model.name,
-                    "tenant_id": str(user.tenant_id),
-                    "tenant_name": user.tenant.display_name or user.tenant.name,
-                },
-                "changes": changes,
-            },
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=transcription_model,
+                changes=changes,
+            ),
         )
 
     return TranscriptionModelPublic.from_domain(transcription_model)

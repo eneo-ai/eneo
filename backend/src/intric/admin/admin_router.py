@@ -25,6 +25,11 @@ from intric.users.user import (
     UserUpdatePublic,
 )
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 logger = get_logger(__name__)
 router = APIRouter()
 
@@ -255,27 +260,14 @@ async def register_user(
       "quota_limit": 50000000
     }
     """
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     admin_service = container.admin_service()
     current_user = container.user()
 
     # Create user
     user, _, api_key = await admin_service.register_tenant_user(new_user)
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
-    # Build comprehensive metadata for user creation
-    target_metadata = {
-        "id": str(user.id),
-        "email": user.email,
-        "username": user.username,
+    # Build extra context for user creation
+    extra = {
         "state": user.state.value if hasattr(user, 'state') else "active",
         "tenant_id": str(current_user.tenant_id),
         "tenant_name": current_user.tenant.display_name or current_user.tenant.name,
@@ -286,10 +278,8 @@ async def register_user(
         from intric.database.tables.roles_table import PredefinedRoles
         import sqlalchemy as sa
 
-        # Extract UUIDs from ModelId objects
+        session = container.session()
         role_ids = [role.id for role in new_user.predefined_roles]
-
-        # Query for all predefined roles at once (more efficient)
         role_query = sa.select(PredefinedRoles).where(PredefinedRoles.id.in_(role_ids))
         role_result = await session.execute(role_query)
         predefined_roles = role_result.scalars().all()
@@ -300,54 +290,51 @@ async def register_user(
             all_permissions.update(role.permissions)
 
         if role_names:
-            target_metadata["predefined_roles"] = role_names
-            target_metadata["permissions"] = sorted(list(all_permissions))
+            extra["predefined_roles"] = role_names
+            extra["permissions"] = sorted(list(all_permissions))
 
     # Add custom roles if any
     if new_user.roles:
         from intric.database.tables.roles_table import Roles
         import sqlalchemy as sa
 
-        # Extract UUIDs from ModelId objects
+        session = container.session()
         custom_role_ids = [role.id for role in new_user.roles]
-
-        # Query for all custom roles at once
         role_query = sa.select(Roles).where(Roles.id.in_(custom_role_ids))
         role_result = await session.execute(role_query)
         custom_roles = role_result.scalars().all()
 
         if custom_roles:
-            target_metadata["roles"] = [role.name for role in custom_roles]
+            extra["roles"] = [role.name for role in custom_roles]
 
     # Check if user object has roles loaded (in case service returns them)
-    if hasattr(user, 'predefined_roles') and user.predefined_roles and 'predefined_roles' not in target_metadata:
-        target_metadata["predefined_roles"] = [role.name for role in user.predefined_roles]
+    if hasattr(user, 'predefined_roles') and user.predefined_roles and 'predefined_roles' not in extra:
+        extra["predefined_roles"] = [role.name for role in user.predefined_roles]
 
-    if hasattr(user, 'roles') and user.roles and 'roles' not in target_metadata:
-        target_metadata["roles"] = [role.name for role in user.roles]
+    if hasattr(user, 'roles') and user.roles and 'roles' not in extra:
+        extra["roles"] = [role.name for role in user.roles]
 
     if hasattr(user, 'user_groups') and user.user_groups:
-        target_metadata["user_groups"] = [group.name for group in user.user_groups]
+        extra["user_groups"] = [group.name for group in user.user_groups]
 
     # Add quota limit if set
     if new_user.quota_limit:
-        target_metadata["quota_limit"] = new_user.quota_limit
+        extra["quota_limit"] = new_user.quota_limit
 
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.USER_CREATED,
         entity_type=EntityType.USER,
         entity_id=user.id,
-        description=f"Admin created user {user.email}",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": target_metadata,
-        },
+        description=f"Admin created user '{user.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=user,
+            extra=extra,
+        ),
     )
 
     user_admin_view = UserCreatedAdminView(**user.model_dump(exclude={"api_key"}), api_key=api_key)
@@ -450,11 +437,6 @@ async def update_user(
       "state": "active"
     }
     """
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.admin_service()
     current_user = container.user()
 
@@ -506,48 +488,38 @@ async def update_user(
             if removed_perms:
                 changes["permissions"]["removed"] = sorted(removed_perms)
 
-    # Build comprehensive target metadata
-    target_metadata = {
-        "id": str(user_updated.id),
-        "email": user_updated.email,
-        "username": user_updated.username,
+    # Build extra context for current state
+    extra = {
         "state": user_updated.state.value if hasattr(user_updated, 'state') else None,
     }
 
-    # Add current role and group information
     if hasattr(user_updated, 'predefined_roles') and user_updated.predefined_roles:
-        target_metadata["predefined_roles"] = [role.name for role in user_updated.predefined_roles]
+        extra["predefined_roles"] = [role.name for role in user_updated.predefined_roles]
 
     if hasattr(user_updated, 'roles') and user_updated.roles:
-        target_metadata["roles"] = [role.name for role in user_updated.roles]
+        extra["roles"] = [role.name for role in user_updated.roles]
 
     if hasattr(user_updated, 'user_groups') and user_updated.user_groups:
-        target_metadata["user_groups"] = [group.name for group in user_updated.user_groups]
+        extra["user_groups"] = [group.name for group in user_updated.user_groups]
 
     if hasattr(user_updated, 'quota_limit') and user_updated.quota_limit:
-        target_metadata["quota_limit"] = user_updated.quota_limit
+        extra["quota_limit"] = user_updated.quota_limit
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
         entity_id=user_updated.id,
-        description=f"Admin updated user {user_updated.email}",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": target_metadata,
-            "changes": changes if changes else None,  # Only include if there are changes
-        },
+        description=f"Admin updated user '{user_updated.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=user_updated,
+            changes=changes if changes else None,
+            extra=extra,
+        ),
     )
 
     user_admin_view = UserAdminView(**user_updated.model_dump())
@@ -587,64 +559,49 @@ async def delete_user(username: str, container: Container = Depends(get_containe
     - User must exist in your tenant
     - User must not already be soft-deleted
     """
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.admin_service()
     current_user = container.user()
 
-    # Get user details BEFORE deletion
+    # Get user details BEFORE deletion (snapshot pattern)
     user_to_delete = await service.get_tenant_user(username)
 
     # Delete user
     success = await service.delete_tenant_user(username)
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
-    # Build comprehensive target metadata for deleted user
-    target_metadata = {
-        "id": str(user_to_delete.id),
-        "email": user_to_delete.email,
-        "username": user_to_delete.username,
+    # Build extra context capturing what was deleted
+    extra = {
         "state": user_to_delete.state.value if hasattr(user_to_delete, 'state') else None,
     }
 
-    # Include full context of what was deleted
     if hasattr(user_to_delete, 'predefined_roles') and user_to_delete.predefined_roles:
-        target_metadata["predefined_roles"] = [role.name for role in user_to_delete.predefined_roles]
+        extra["predefined_roles"] = [role.name for role in user_to_delete.predefined_roles]
 
     if hasattr(user_to_delete, 'roles') and user_to_delete.roles:
-        target_metadata["roles"] = [role.name for role in user_to_delete.roles]
+        extra["roles"] = [role.name for role in user_to_delete.roles]
 
     if hasattr(user_to_delete, 'permissions'):
-        target_metadata["permissions"] = sorted([p.value for p in user_to_delete.permissions])
+        extra["permissions"] = sorted([p.value for p in user_to_delete.permissions])
 
     if hasattr(user_to_delete, 'user_groups') and user_to_delete.user_groups:
-        target_metadata["user_groups"] = [group.name for group in user_to_delete.user_groups]
+        extra["user_groups"] = [group.name for group in user_to_delete.user_groups]
 
     if hasattr(user_to_delete, 'quota_limit') and user_to_delete.quota_limit:
-        target_metadata["quota_limit"] = user_to_delete.quota_limit
+        extra["quota_limit"] = user_to_delete.quota_limit
 
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.USER_DELETED,
         entity_type=EntityType.USER,
         entity_id=user_to_delete.id,
-        description=f"Admin deleted user {user_to_delete.email}",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": target_metadata,
-        },
+        description=f"Admin deleted user '{user_to_delete.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=user_to_delete,
+            extra=extra,
+        ),
     )
 
     return DeleteResponse(success=success)
@@ -692,44 +649,28 @@ async def deactivate_user(
     - User must exist in your tenant
     - User must not be from another tenant
     """
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.admin_service()
     current_user = container.user()
 
     # Deactivate user
     user = await service.deactivate_tenant_user(username)
-    
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
 
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.USER_UPDATED,  # Deactivation is a state update
         entity_type=EntityType.USER,
         entity_id=user.id,
-        description=f"Deactivated user {user.email}",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(user.id),
-                "email": user.email,
-                "username": user.username,
-            },
-            "changes": {"state": {"old": "active", "new": "inactive"}},
-        },
+        description=f"Deactivated user '{user.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=user,
+            changes={"state": {"old": "active", "new": "inactive"}},
+        ),
     )
-    
+
     return UserAdminView(**user.model_dump())
 
 
@@ -774,47 +715,31 @@ async def reactivate_user(
     - User must exist in your tenant
     - User must not be from another tenant
     """
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.admin_service()
     current_user = container.user()
 
     # Get old state
     old_user = await service.get_tenant_user(username)
-    
+
     # Reactivate user
     user = await service.reactivate_tenant_user(username)
-    
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
 
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.USER_UPDATED,  # Reactivation is a state update
         entity_type=EntityType.USER,
         entity_id=user.id,
-        description=f"Reactivated user {user.email}",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(user.id),
-                "email": user.email,
-                "username": user.username,
-            },
-            "changes": {"state": {"old": str(old_user.state), "new": "active"}},
-        },
+        description=f"Reactivated user '{user.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=user,
+            changes={"state": {"old": str(old_user.state), "new": "active"}},
+        ),
     )
-    
+
     return UserAdminView(**user.model_dump())
 
 
@@ -991,11 +916,6 @@ async def get_predefined_roles(container: Container = Depends(get_container(with
 async def update_privacy_policy(
     url: PrivacyPolicy, container: Container = Depends(get_container(with_user=True))
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.admin_service()
     user = container.user()
 
@@ -1003,10 +923,7 @@ async def update_privacy_policy(
     updated_tenant = await service.update_privacy_policy(url)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -1014,17 +931,11 @@ async def update_privacy_policy(
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,
         description="Updated privacy policy URL",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "tenant_id": str(user.tenant_id),
-                "privacy_policy_url": url.url,
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated_tenant,
+            extra={"privacy_policy_url": url.url},
+        ),
     )
 
     return updated_tenant

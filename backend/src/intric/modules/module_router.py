@@ -10,6 +10,11 @@ from intric.server.dependencies.container import get_container
 from intric.tenants.tenant import TenantInDB
 from intric.authentication import auth
 
+# Audit logging - module level imports for consistency
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
 router = APIRouter(dependencies=[Depends(auth.authenticate_super_duper_api_key)])
 
 
@@ -37,12 +42,6 @@ async def add_module_to_tenant(
     container: Container = Depends(get_container()),
 ):
     """Value is a list of module `id`'s to add to the `tenant_id`."""
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.actor_types import ActorType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     tenant_service = container.tenant_service()
 
     # Add modules to tenant
@@ -50,11 +49,8 @@ async def add_module_to_tenant(
         tenant_id=tenant_id, list_of_module_ids=module_ids
     )
 
-    # Audit logging (sysadmin operation)
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    # Audit logging (sysadmin operation - system actor)
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=tenant_id,
         actor_id=tenant_id,  # System actor

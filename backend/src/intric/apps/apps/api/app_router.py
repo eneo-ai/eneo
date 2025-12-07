@@ -15,6 +15,11 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 router = APIRouter()
 
 
@@ -45,11 +50,6 @@ async def update_app(
     update_service_req: AppUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.app_service()
     assembler = container.app_assembler()
     current_user = container.user()
@@ -236,11 +236,12 @@ async def update_app(
         }
         change_summary.append("transcription model")
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    # Build extra context
+    extra = {
+        "summary": f"Modified {', '.join(change_summary)}" if change_summary else "No changes detected",
+    }
 
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -248,21 +249,13 @@ async def update_app(
         entity_type=EntityType.APP,
         entity_id=id,
         description=f"Updated app '{app.name}'",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username or current_user.email.split('@')[0],
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(app.id),
-                "name": app.name,
-                "space_id": str(app.space_id) if app.space_id else None,
-                "space_name": space.name if space else None,
-            },
-            "changes": changes,
-            "summary": f"Modified {', '.join(change_summary)}" if change_summary else "No changes detected",
-        },
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=app,
+            space=space,
+            changes=changes,
+            extra=extra,
+        ),
     )
 
     return assembler.from_app_to_model(app, permissions=permissions)
@@ -277,16 +270,11 @@ async def delete_app(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.app_service()
     current_user = container.user()
     space_service = container.space_service()
 
-    # Get app details BEFORE deletion
+    # Get app details BEFORE deletion (snapshot pattern)
     app, _ = await service.get_app(id)
 
     # Get space for context
@@ -298,14 +286,16 @@ async def delete_app(
             # If space retrieval fails, continue without it
             space = None
 
+    # Build extra context capturing what was deleted
+    extra = {
+        "model": app.completion_model.nickname if app.completion_model else None,
+        "created_at": app.created_at.isoformat() if hasattr(app, 'created_at') and app.created_at else None,
+    }
+
     # Delete app
     await service.delete_app(id)
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -313,19 +303,12 @@ async def delete_app(
         entity_type=EntityType.APP,
         entity_id=id,
         description=f"Deleted app '{app.name}'",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username or current_user.email.split('@')[0],
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(app.id),
-                "name": app.name,
-                "space_id": str(app.space_id) if app.space_id else None,
-                "space_name": space.name if space else None,
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=app,
+            space=space,
+            extra=extra,
+        ),
     )
 
 
@@ -340,11 +323,6 @@ async def run_app(
     run_app_req: RunAppRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.app_run_service()
     assembler = container.app_run_assembler()
     current_user = container.user()
@@ -353,44 +331,38 @@ async def run_app(
     app_run = await service.queue_app_run(id, file_ids=file_ids, text=run_app_req.text)
 
     # Get app for context
-    app = None
+    app_info = None
     space = None
     try:
         app_service = container.app_service()
-        app = await app_service.get_app(id)
-        if app.space_id:
+        app_info, _ = await app_service.get_app(id)
+        if app_info.space_id:
             space_service = container.space_service()
-            space = await space_service.get_space(app.space_id)
+            space = await space_service.get_space(app_info.space_id)
     except Exception:
         pass
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    # Build extra context for app execution
+    extra = {
+        "run_id": str(app_run.id),
+        "file_count": len(file_ids),
+        "has_text_input": bool(run_app_req.text),
+    }
 
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.APP_EXECUTED,
         entity_type=EntityType.APP,
         entity_id=id,
-        description=f"Executed app (run_id: {app_run.id})",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "app_id": str(id),
-                "app_name": app.name if app else None,
-                "space_id": str(app.space_id) if app and app.space_id else None,
-                "space_name": space.name if space else None,
-                "run_id": str(app_run.id),
-                "file_count": len(file_ids),
-            },
-        },
+        description=f"Executed app '{app_info.name if app_info else 'unknown'}' (run_id: {app_run.id})",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=app_info if app_info else type("FallbackTarget", (), {"id": id, "name": None})(),
+            space=space,
+            extra=extra,
+        ),
     )
 
     return assembler.from_app_run_to_model(app_run)
@@ -442,11 +414,6 @@ async def publish_app(
     published: bool,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.app_service()
     assembler = container.app_assembler()
     user = container.user()
@@ -464,32 +431,26 @@ async def publish_app(
             # If space retrieval fails, continue without it
             space = None
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    # Build extra context
+    extra = {
+        "published": published,
+        "action": "published" if published else "unpublished",
+    }
 
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.APP_PUBLISHED,
         entity_type=EntityType.APP,
         entity_id=id,
-        description=f"{'Published' if published else 'Unpublished'} app",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username or user.email.split('@')[0],
-                "email": user.email,
-            },
-            "target": {
-                "app_id": str(id),
-                "app_name": app.name,
-                "space_id": str(app.space_id) if app.space_id else None,
-                "space_name": space.name if space else None,
-                "published": published,
-            },
-        },
+        description=f"{'Published' if published else 'Unpublished'} app '{app.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=app,
+            space=space,
+            extra=extra,
+        ),
     )
 
     return assembler.from_app_to_model(app=app, permissions=permissions)

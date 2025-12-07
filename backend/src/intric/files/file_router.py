@@ -26,6 +26,11 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 router = APIRouter()
 
 
@@ -36,41 +41,33 @@ async def upload_file(
     upload_file: UploadFile,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.file_service()
     current_user = container.user()
 
     # Upload file
     file = await service.save_file(upload_file)
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    # Build extra context with file details
+    extra = {
+        "size_bytes": file.size,
+        "mimetype": getattr(file, "mimetype", None),
+        "file_type": file.file_type.value if hasattr(file, "file_type") and file.file_type else None,
+    }
 
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,
-        description=f"Uploaded file '{file.name}'",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(file.id),
-                "filename": file.name,
-                "size": file.size,
-            },
-        },
+        description=f"Uploaded file '{file.name}' ({file.size} bytes)",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=file,
+            extra=extra,
+        ),
     )
 
     return file
@@ -110,25 +107,25 @@ async def delete_file(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.file_service()
     current_user = container.user()
 
-    # Get file details BEFORE deletion
+    # Get file details BEFORE deletion (snapshot pattern)
     file = await service.get_file(id)
+
+    # Build extra context capturing what was deleted
+    extra = {
+        "size_bytes": getattr(file, "size", None),
+        "mimetype": getattr(file, "mimetype", None),
+        "file_type": file.file_type.value if hasattr(file, "file_type") and file.file_type else None,
+        "created_at": file.created_at.isoformat() if hasattr(file, "created_at") and file.created_at else None,
+    }
 
     # Delete file
     await service.delete_file(id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -136,17 +133,11 @@ async def delete_file(
         entity_type=EntityType.FILE,
         entity_id=id,
         description=f"Deleted file '{file.name}'",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(file.id),
-                "filename": file.name,
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=file,
+            extra=extra,
+        ),
     )
 
 

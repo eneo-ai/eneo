@@ -13,6 +13,11 @@ from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
 
+# Audit logging - module level imports for consistency
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
 logger = get_logger(__name__)
 
 
@@ -348,16 +353,7 @@ async def set_tenant_federation(
     )
 
     # Audit logging (sysadmin operation - system actor)
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.actor_types import ActorType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=tenant_id,
         actor_id=tenant.id,  # Use tenant as actor for sysadmin
@@ -399,12 +395,6 @@ async def delete_tenant_federation(
     container: Container = Depends(get_container()),
 ) -> DeleteFederationResponse:
     """Delete federation config for tenant (revert to global IdP)."""
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.actor_types import ActorType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     tenant_repo = container.tenant_repo()
 
     # Validate tenant exists
@@ -418,11 +408,8 @@ async def delete_tenant_federation(
     # Delete federation config
     await tenant_repo.delete_federation_config(tenant_id=tenant_id)
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    # Audit logging (sysadmin operation - system actor)
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=tenant_id,
         actor_id=tenant.id,

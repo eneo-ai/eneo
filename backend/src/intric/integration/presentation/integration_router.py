@@ -15,6 +15,11 @@ from intric.integration.presentation.models import (
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 router = APIRouter()
 
 
@@ -63,11 +68,6 @@ async def add_tenant_integration(
     integration_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.tenant_integration_service()
     user = container.user()
 
@@ -75,10 +75,7 @@ async def add_tenant_integration(
     tenant_integration = await service.create_tenant_integration(integration_id=integration_id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -86,18 +83,11 @@ async def add_tenant_integration(
         entity_type=EntityType.INTEGRATION,
         entity_id=tenant_integration.id,
         description=f"Added {tenant_integration.integration.name} integration to tenant",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "tenant_integration_id": str(tenant_integration.id),
-                "integration_name": tenant_integration.integration.name,
-                "integration_type": tenant_integration.integration_type,
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tenant_integration,
+            extra={"integration_type": tenant_integration.integration_type},
+        ),
     )
 
     assembler = container.tenant_integration_assembler()
@@ -112,15 +102,10 @@ async def remove_tenant_integration(
     tenant_integration_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.tenant_integration_service()
     user = container.user()
 
-    # Get tenant integration info BEFORE deletion
+    # Get tenant integration info BEFORE deletion (snapshot pattern)
     tenant_integration_repo = container.tenant_integration_repo()
     tenant_integration = await tenant_integration_repo.one(id=tenant_integration_id)
 
@@ -128,10 +113,7 @@ async def remove_tenant_integration(
     await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -139,18 +121,11 @@ async def remove_tenant_integration(
         entity_type=EntityType.INTEGRATION,
         entity_id=tenant_integration_id,
         description=f"Removed {tenant_integration.integration.name} integration from tenant",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "tenant_integration_id": str(tenant_integration_id),
-                "integration_name": tenant_integration.integration.name,
-                "integration_type": tenant_integration.integration_type,
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tenant_integration,
+            extra={"integration_type": tenant_integration.integration_type},
+        ),
     )
 
 
@@ -179,15 +154,10 @@ async def disconnect_user_integration(
     user_integration_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.user_integration_service()
     user = container.user()
 
-    # Get user integration info BEFORE deletion
+    # Get user integration info BEFORE deletion (snapshot pattern)
     user_integration_repo = container.user_integration_repo()
     user_integration = await user_integration_repo.one(id=user_integration_id)
 
@@ -195,10 +165,7 @@ async def disconnect_user_integration(
     await service.disconnect_integration(user_integration_id=user_integration_id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -206,18 +173,14 @@ async def disconnect_user_integration(
         entity_type=EntityType.INTEGRATION,
         entity_id=user_integration_id,
         description=f"Disconnected {user_integration.tenant_integration.integration.name} integration",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "user_integration_id": str(user_integration_id),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=user_integration,
+            extra={
                 "integration_name": user_integration.tenant_integration.integration.name,
                 "integration_type": user_integration.integration_type,
             },
-        },
+        ),
     )
 
 

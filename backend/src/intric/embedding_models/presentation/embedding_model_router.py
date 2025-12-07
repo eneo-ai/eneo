@@ -7,10 +7,15 @@ from intric.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelUpdate,
 )
 from intric.main.container.container import Container
-from intric.main.models import PaginatedResponse
+from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -50,12 +55,6 @@ async def update_embedding_model(
     update: EmbeddingModelUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-    from intric.main.models import NOT_PROVIDED
-
     service = container.embedding_model_crud_service()
     user = container.user()
 
@@ -96,10 +95,7 @@ async def update_embedding_model(
 
     # Only log if there were actual changes (ONE entry with all changes)
     if changes:
-        session = container.session()
-        audit_repo = AuditLogRepositoryImpl(session)
-        audit_service = AuditService(audit_repo)
-
+        audit_service = container.audit_service()
         await audit_service.log_async(
             tenant_id=user.tenant_id,
             actor_id=user.id,
@@ -107,20 +103,11 @@ async def update_embedding_model(
             entity_type=EntityType.EMBEDDING_MODEL,
             entity_id=id,
             description=f"Updated settings for {model.name}",
-            metadata={
-                "actor": {
-                    "id": str(user.id),
-                    "name": user.username,
-                    "email": user.email,
-                },
-                "target": {
-                    "id": str(id),
-                    "name": model.name,
-                    "tenant_id": str(user.tenant_id),
-                    "tenant_name": user.tenant.display_name or user.tenant.name,
-                },
-                "changes": changes,
-            },
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=model,
+                changes=changes,
+            ),
         )
 
     return EmbeddingModelPublic.from_domain(model)

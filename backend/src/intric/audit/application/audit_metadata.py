@@ -45,13 +45,16 @@ class AuditMetadata:
         target: Any,
         changes: Optional[dict] = None,
         extra: Optional[dict] = None,
+        space: Optional[Any] = None,
+        tenant: Optional[Any] = None,
     ) -> dict:
         """
         Create standard audit metadata with actor and target snapshots.
 
         This is the most common metadata pattern for audit logs. It captures:
-        - WHO performed the action (actor snapshot)
-        - WHAT was affected (target snapshot)
+        - WHO performed the action (actor snapshot with id, name, email)
+        - WHAT was affected (target snapshot with id, name)
+        - WHERE it happened (space and tenant context if available)
         - HOW it changed (optional changes dictionary)
         - Additional context (optional extra data)
 
@@ -60,29 +63,59 @@ class AuditMetadata:
             target: Entity being acted upon (must have id attribute, optional name)
             changes: Dictionary of field changes for update operations, e.g.:
                      {"name": {"old": "OldName", "new": "NewName"}}
-            extra: Additional context-specific metadata
+            extra: Additional context-specific metadata (use for domain-specific fields
+                   like member_id, member_email, model names, URLs, etc.)
+            space: Optional space object to include space context (id and name)
+            tenant: Optional tenant object to include tenant context (id and name)
 
         Returns:
-            Standardized metadata dictionary
+            Standardized metadata dictionary with human-readable names
 
         Example:
             metadata = AuditMetadata.standard(
                 actor=current_user,
                 target=assistant,
                 changes={"name": {"old": "Assistant v1", "new": "Assistant v2"}},
-                extra={"model_id": str(model.id)}
+                space=space,  # Includes space_id and space_name automatically
+                tenant=tenant,  # Includes tenant_id and tenant_name automatically
             )
         """
+        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
+        actor_name = (
+            getattr(actor, "username", None)
+            or getattr(actor, "name", None)
+            or (getattr(actor, "email", "") or "").split("@")[0]
+            or "unknown"
+        )
+
+        # Build target snapshot with all available context
+        target_snapshot = {
+            "id": str(target.id),
+            "name": getattr(target, "name", getattr(target, "title", None)),
+        }
+
+        # Auto-include space_id from target if it exists
+        target_space_id = getattr(target, "space_id", None)
+        if target_space_id:
+            target_snapshot["space_id"] = str(target_space_id)
+
+        # Include space name if space object is provided
+        if space:
+            target_snapshot["space_id"] = str(space.id)
+            target_snapshot["space_name"] = getattr(space, "name", None)
+
+        # Include tenant context if provided
+        if tenant:
+            target_snapshot["tenant_id"] = str(tenant.id)
+            target_snapshot["tenant_name"] = getattr(tenant, "name", None)
+
         metadata = {
             "actor": {
                 "id": str(actor.id),
-                "name": getattr(actor, "username", getattr(actor, "name", None)),
+                "name": actor_name,
                 "email": getattr(actor, "email", None),
             },
-            "target": {
-                "id": str(target.id),
-                "name": getattr(target, "name", getattr(target, "title", None)),
-            },
+            "target": target_snapshot,
         }
 
         if changes:
@@ -126,10 +159,18 @@ class AuditMetadata:
                 extra={"space_id": str(space.id), "space_name": space.name}
             )
         """
+        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
+        actor_name = (
+            getattr(actor, "username", None)
+            or getattr(actor, "name", None)
+            or (getattr(actor, "email", "") or "").split("@")[0]
+            or "unknown"
+        )
+
         metadata = {
             "actor": {
                 "id": str(actor.id),
-                "name": getattr(actor, "username", getattr(actor, "name", None)),
+                "name": actor_name,
                 "email": getattr(actor, "email", None),
             },
             "operation": operation,
@@ -236,10 +277,18 @@ class AuditMetadata:
                 extra={"ip_address": request.client.host, "attempts": 3}
             )
         """
+        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
+        actor_name = (
+            getattr(actor, "username", None)
+            or getattr(actor, "name", None)
+            or (getattr(actor, "email", "") or "").split("@")[0]
+            or "unknown"
+        )
+
         metadata = {
             "actor": {
                 "id": str(actor.id),
-                "name": getattr(actor, "username", getattr(actor, "name", None)),
+                "name": actor_name,
                 "email": getattr(actor, "email", None),
             },
             "authentication_method": method,

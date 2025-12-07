@@ -2,6 +2,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 from intric.apps.apps.api.app_models import AppPublic
 from intric.assistants.api.assistant_models import AssistantPublic
 from intric.authentication.auth_dependencies import require_permission
@@ -49,11 +54,6 @@ async def create_space(
     create_space_req: CreateSpaceRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
     current_user = container.user()
@@ -62,10 +62,7 @@ async def create_space(
     space = await space_creation_service.create_space(name=create_space_req.name)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -73,17 +70,7 @@ async def create_space(
         entity_type=EntityType.SPACE,
         entity_id=space.id,
         description=f"Created space '{space.name}'",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(space.id),
-                "name": space.name,
-            },
-        },
+        metadata=AuditMetadata.standard(actor=current_user, target=space),
     )
 
     return space_assembler.from_space_to_model(space)
@@ -118,11 +105,6 @@ async def update_space(
     update_space_req: UpdateSpaceRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.space_service()
     assembler = container.space_assembler()
     current_user = container.user()
@@ -209,10 +191,7 @@ async def update_space(
             changes["security_classification"] = {"old": old_sc, "new": new_sc}
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
@@ -220,18 +199,7 @@ async def update_space(
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Updated space '{space.name}'",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(space.id),
-                "name": space.name,
-            },
-            "changes": changes,
-        },
+        metadata=AuditMetadata.standard(actor=current_user, target=space, changes=changes),
     )
 
     return assembler.from_space_to_model(space)
@@ -269,25 +237,17 @@ async def delete_space(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.space_service()
     user = container.user()
 
-    # Get space info before deletion
+    # Get space info before deletion (for audit log context)
     space = await service.get_space(id)
 
     # Delete space
     await service.delete_space(id=id)
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -295,17 +255,7 @@ async def delete_space(
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Deleted space '{space.name}'",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "space_id": str(id),
-                "space_name": space.name,
-            },
-        },
+        metadata=AuditMetadata.standard(actor=user, target=space),
     )
 
 
@@ -356,11 +306,6 @@ async def create_space_assistant(
     assistant_in: CreateSpaceAssistantRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.assistant_service()
     assembler = container.assistant_assembler()
     current_user = container.user()
@@ -370,39 +315,24 @@ async def create_space_assistant(
         name=assistant_in.name, space_id=id, template_data=assistant_in.from_template
     )
 
-    # Get space for context
+    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space_service = container.space_service()
         space = await space_service.get_space(id)
     except Exception:
-        space = None
+        pass
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.ASSISTANT_CREATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=assistant.id,
-        description=f"Created assistant '{assistant.name}' in space",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(assistant.id),
-                "name": assistant.name,
-                "space_id": str(id),
-                "space_name": space.name if space else None,
-            },
-        },
+        description=f"Created assistant '{assistant.name}' in space '{space.name if space else 'unknown'}'",
+        metadata=AuditMetadata.standard(actor=current_user, target=assistant, space=space),
     )
 
     return assembler.from_assistant_to_model(assistant, permissions=permissions)
@@ -422,11 +352,6 @@ async def create_group_chat(
     group_chat_in: GroupChatCreate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()
     user = container.user()
@@ -434,39 +359,24 @@ async def create_group_chat(
     # Create group chat
     group_chat = await service.create_group_chat(space_id=id, name=group_chat_in.name)
 
-    # Get space for context
+    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space_service = container.space_service()
         space = await space_service.get_space(id)
     except Exception:
-        space = None
+        pass
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.GROUP_CHAT_CREATED,
         entity_type=EntityType.GROUP_CHAT,
         entity_id=group_chat.id,
-        description=f"Created group chat '{group_chat.name}' in space",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "group_chat_id": str(group_chat.id),
-                "group_chat_name": group_chat.name,
-                "space_id": str(id),
-                "space_name": space.name if space else None,
-            },
-        },
+        description=f"Created group chat '{group_chat.name}' in space '{space.name if space else 'unknown'}'",
+        metadata=AuditMetadata.standard(actor=user, target=group_chat, space=space),
     )
 
     return assembler.from_domain_to_model(group_chat=group_chat)
@@ -484,17 +394,12 @@ async def create_app(
     create_service_req: CreateSpaceAppRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     space_service = container.space_service()
     app_service = container.app_service()
     assembler = container.app_assembler()
     current_user = container.user()
 
-    # Create app
+    # Create app (space is fetched first for the creation process)
     space = await space_service.get_space(id)
     app, permissions = await app_service.create_app(
         name=create_service_req.name,
@@ -503,30 +408,15 @@ async def create_app(
     )
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.APP_CREATED,
         entity_type=EntityType.APP,
         entity_id=app.id,
-        description=f"Created app '{app.name}' in space",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username or current_user.email.split('@')[0],
-                "email": current_user.email,
-            },
-            "target": {
-                "id": str(app.id),
-                "name": app.name,
-                "space_id": str(id),
-                "space_name": space.name if space else None,
-            },
-        },
+        description=f"Created app '{app.name}' in space '{space.name}'",
+        metadata=AuditMetadata.standard(actor=current_user, target=app, space=space),
     )
 
     return assembler.from_app_to_model(app, permissions=permissions)
@@ -583,11 +473,6 @@ async def create_space_groups(
     group: CreateSpaceGroupsRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     svc = container.collection_crud_service()
     user = container.user()
     embedding_model_id = group.embedding_model.id if group.embedding_model else None
@@ -599,30 +484,34 @@ async def create_space_groups(
         embedding_model_id=embedding_model_id,
     )
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        pass
 
+    # Build extra context for embedding model if provided
+    extra = None
+    if group.embedding_model:
+        extra = {
+            "embedding_model": {
+                "id": str(group.embedding_model.id),
+                "name": getattr(group.embedding_model, "name", None),
+            }
+        }
+
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.COLLECTION_CREATED,
         entity_type=EntityType.COLLECTION,
         entity_id=created_collection.id,
-        description=f"Created collection '{created_collection.name}' in space",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "collection_id": str(created_collection.id),
-                "collection_name": created_collection.name,
-                "space_id": str(id),
-            },
-        },
+        description=f"Created collection '{created_collection.name}' in space '{space.name if space else 'unknown'}'",
+        metadata=AuditMetadata.standard(actor=user, target=created_collection, space=space, extra=extra),
     )
 
     return CollectionPublic.from_domain(created_collection)
@@ -662,11 +551,6 @@ async def create_space_websites(
     website: WebsiteCreate,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.website_crud_service()
     user = container.user()
 
@@ -683,40 +567,36 @@ async def create_space_websites(
         http_auth_password=website.http_auth_password,
     )
 
-    # Get space for context
+    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space_service = container.space_service()
         space = await space_service.get_space(id)
     except Exception:
-        space = None
+        pass
+
+    # Build extra context with URL, crawl settings, and optional embedding model
+    extra = {
+        "url": created_website.url,
+        "crawl_type": str(website.crawl_type) if website.crawl_type else None,
+        "update_interval": str(website.update_interval) if website.update_interval else None,
+    }
+    if website.embedding_model:
+        extra["embedding_model"] = {
+            "id": str(website.embedding_model.id),
+            "name": getattr(website.embedding_model, "name", None),
+        }
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.WEBSITE_CREATED,
         entity_type=EntityType.WEBSITE,
         entity_id=created_website.id,
-        description=f"Created website crawler '{created_website.url}' in space",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "website_id": str(created_website.id),
-                "url": created_website.url,
-                "name": created_website.name,
-                "space_id": str(id),
-                "space_name": space.name if space else None,
-            },
-        },
+        description=f"Created website crawler '{created_website.name}' ({created_website.url}) in space '{space.name if space else 'unknown'}'",
+        metadata=AuditMetadata.standard(actor=user, target=created_website, space=space, extra=extra),
     )
 
     return WebsitePublic.from_domain(created_website)
@@ -734,7 +614,6 @@ async def create_space_integration_knowledge(
 ):
     service = container.integration_knowledge_service()
     assembler = container.integration_knowledge_assembler()
-
     user = container.user()
 
     # Create integration knowledge
@@ -747,46 +626,34 @@ async def create_space_integration_knowledge(
         key=data.key,
     )
 
-    # Get space for context
+    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space_service = container.space_service()
         space = await space_service.get_space(id)
     except Exception:
-        space = None
+        pass
+
+    # Build extra context with integration-specific information
+    extra = {
+        "integration_type": knowledge.integration_type,
+        "url": knowledge.url,
+        "embedding_model": {
+            "id": str(data.embedding_model.id),
+            "name": getattr(data.embedding_model, "name", None),
+        },
+    }
 
     # Audit logging
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=knowledge.id,
-        description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "knowledge_id": str(knowledge.id),
-                "knowledge_name": knowledge.name,
-                "integration_type": knowledge.integration_type,
-                "space_id": str(id),
-                "space_name": space.name if space else None,
-                "url": knowledge.url,
-            },
-        },
+        description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}'",
+        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
     )
 
     return assembler.to_space_knowledge_model(item=knowledge)
@@ -801,15 +668,10 @@ async def delete_space_integration_knowledge(
     integration_knowledge_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.integration_knowledge_service()
     user = container.user()
 
-    # Get integration knowledge info BEFORE deletion
+    # Get integration knowledge info BEFORE deletion (for audit log context)
     space_repo = container.space_repo()
     space = await space_repo.one(id=id)
     knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
@@ -817,31 +679,21 @@ async def delete_space_integration_knowledge(
     # Delete integration knowledge
     await service.remove_knowledge(space_id=id, integration_knowledge_id=integration_knowledge_id)
 
-    # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    # Build extra context with integration-specific information
+    extra = {
+        "integration_type": knowledge.integration_type,
+    }
 
+    # Audit logging
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.INTEGRATION_KNOWLEDGE_DELETED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
-        description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "knowledge_id": str(integration_knowledge_id),
-                "knowledge_name": knowledge.name,
-                "integration_type": knowledge.integration_type,
-                "space_id": str(id),
-            },
-        },
+        description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space '{space.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
     )
 
 
@@ -856,11 +708,6 @@ async def add_space_member(
     add_space_member_req: AddSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.space_service()
     current_user = container.user()
 
@@ -869,48 +716,42 @@ async def add_space_member(
         id, member_id=add_space_member_req.id, role=add_space_member_req.role
     )
 
-    # Get space for context
+    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space = await service.get_space(id)
     except Exception:
-        space = None
+        pass
 
-    # Get member info for context
+    # Get member info for context (graceful degradation if member fetch fails)
     member_user = None
     try:
         user_service = container.user_service()
         member_user = await user_service.get_user(add_space_member_req.id)
     except Exception:
-        member_user = None
+        pass
+
+    # Build extra context with member-specific information
+    extra = {
+        "member": {
+            "id": str(add_space_member_req.id),
+            "name": member_user.username if member_user else None,
+            "email": member_user.email if member_user else None,
+        },
+        "role": add_space_member_req.role,
+    }
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    member_display = member_user.username or member_user.email if member_user else "member"
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=f"Added member to space (role: {add_space_member_req.role})",
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "space_id": str(id),
-                "space_name": space.name if space else None,
-                "member_id": str(add_space_member_req.id),
-                "member_name": member_user.username if member_user else None,
-                "member_email": member_user.email if member_user else None,
-                "role": add_space_member_req.role,
-            },
-        },
+        description=f"Added {member_display} to space '{space.name if space else 'unknown'}' with role '{add_space_member_req.role}'",
+        metadata=AuditMetadata.standard(actor=current_user, target=space if space else member, space=space, extra=extra),
     )
 
     return member
@@ -929,37 +770,23 @@ async def change_role_of_member(
     container: Container = Depends(get_container(with_user=True)),
 ):
     import logging
-
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     logger = logging.getLogger(__name__)
 
     service = container.space_service()
     current_user = container.user()
 
     # Snapshot context for audit log (graceful degradation pattern)
-    member_snapshot = {"id": str(user_id), "name": None, "email": None}
-    space_snapshot = {"id": str(id), "name": None}
+    space = None
+    member_user = None
 
     try:
         space = await service.get_space(id)
-        if space:
-            space_snapshot = {"id": str(space.id), "name": space.name}
     except Exception as e:
         logger.warning(f"Failed to fetch space context for audit log: {e}")
 
     try:
         user_service = container.user_service()
         member_user = await user_service.get_user(user_id)
-        if member_user:
-            member_snapshot = {
-                "id": str(member_user.id),
-                "name": member_user.username,
-                "email": member_user.email,
-            }
     except Exception as e:
         logger.warning(f"Failed to fetch member context for audit log: {e}")
 
@@ -970,42 +797,42 @@ async def change_role_of_member(
     # Change role
     updated_member = await service.change_role_of_member(id, user_id, update_space_member_req.role)
 
+    # Build extra context with member-specific information
+    extra = {
+        "member": {
+            "id": str(user_id),
+            "name": member_user.username if member_user else None,
+            "email": member_user.email if member_user else None,
+        },
+    }
+
+    # Build changes dict for role change
+    changes = {
+        "role": {
+            "old": old_role,
+            "new": update_space_member_req.role,
+        },
+    }
+
     # Audit logging with full context
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    member_display = member_user.username if member_user else "member"
+    space_display = space.name if space else "space"
 
-    member_display = member_snapshot["name"] or "member"
-    space_display = space_snapshot["name"] or "space"
-    description = f"Changed role of {member_display} in {space_display} from {old_role} to {update_space_member_req.role}"
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=description,
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "space_id": space_snapshot["id"],
-                "space_name": space_snapshot["name"],
-                "member_id": member_snapshot["id"],
-                "member_name": member_snapshot["name"],
-                "member_email": member_snapshot["email"],
-            },
-            "changes": {
-                "role": {
-                    "old": old_role,
-                    "new": update_space_member_req.role,
-                },
-            },
-        },
+        description=f"Changed role of {member_display} in {space_display} from {old_role} to {update_space_member_req.role}",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else updated_member,
+            space=space,
+            changes=changes,
+            extra=extra,
+        ),
     )
 
     return updated_member
@@ -1024,11 +851,6 @@ async def remove_space_member(
 ):
     import logging
 
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     logger = logging.getLogger(__name__)
 
     service = container.space_service()
@@ -1036,12 +858,10 @@ async def remove_space_member(
 
     # 1. Snapshot data BEFORE deletion (graceful degradation pattern)
     member_snapshot = {"id": str(user_id), "name": None, "email": None}
-    space_snapshot = {"id": str(id), "name": None}
+    space = None
 
     try:
         space = await service.get_space(id)
-        if space:
-            space_snapshot = {"id": str(space.id), "name": space.name}
     except Exception as e:
         logger.warning(f"Failed to fetch space context for audit log: {e}")
 
@@ -1061,33 +881,28 @@ async def remove_space_member(
     await service.remove_member(id, user_id)
 
     # 3. Audit logging with full context (snapshot pattern)
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
+    space_name = space.name if space else "space"
+    member_name = member_snapshot["name"] or "member"
 
-    description = f"Removed {member_snapshot['name'] or 'member'} from {space_snapshot['name'] or 'space'}"
+    # Build extra context for member being removed
+    extra = {
+        "member": member_snapshot,
+    }
 
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.SPACE_MEMBER_REMOVED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=description,
-        metadata={
-            "actor": {
-                "id": str(current_user.id),
-                "name": current_user.username,
-                "email": current_user.email,
-            },
-            "target": {
-                "space_id": space_snapshot["id"],
-                "space_name": space_snapshot["name"],
-                "member_id": member_snapshot["id"],
-                "member_name": member_snapshot["name"],
-                "member_email": member_snapshot["email"],
-            },
-        },
+        description=f"Removed {member_name} from {space_name}",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            space=space,
+            extra=extra,
+        ),
     )
 
 

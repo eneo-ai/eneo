@@ -4,6 +4,11 @@ from uuid import UUID
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateAdminPublic,
     AssistantTemplateAdminListPublic,
@@ -139,15 +144,7 @@ async def create_template(
     )
 
     # Audit logging
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -155,19 +152,14 @@ async def create_template(
         entity_type=EntityType.TEMPLATE,
         entity_id=template.id,
         description=f"Created assistant template '{template.name}'",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "template_id": str(template.id),
-                "template_name": template.name,
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=template,
+            extra={
                 "template_type": "assistant",
                 "category": template.category,
             },
-        },
+        ),
     )
 
     return AssistantTemplateAdminPublic(
@@ -233,15 +225,7 @@ async def update_template(
     )
 
     # Audit logging
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -249,18 +233,11 @@ async def update_template(
         entity_type=EntityType.TEMPLATE,
         entity_id=template_id,
         description=f"Updated assistant template '{template.name}'",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "template_id": str(template_id),
-                "template_name": template.name,
-                "template_type": "assistant",
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=template,
+            extra={"template_type": "assistant"},
+        ),
     )
 
     return AssistantTemplateAdminPublic(
@@ -389,11 +366,6 @@ async def delete_template(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Soft-delete an assistant template."""
-    from intric.audit.application.audit_service import AuditService
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-
     service = container.assistant_template_service()
     user = container.user()
 
@@ -405,10 +377,7 @@ async def delete_template(
     )
 
     # Audit logging
-    session = container.session()
-    audit_repo = AuditLogRepositoryImpl(session)
-    audit_service = AuditService(audit_repo)
-
+    audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -416,18 +385,11 @@ async def delete_template(
         entity_type=EntityType.TEMPLATE,
         entity_id=template_id,
         description=f"Deleted assistant template '{template.name}'",
-        metadata={
-            "actor": {
-                "id": str(user.id),
-                "name": user.username,
-                "email": user.email,
-            },
-            "target": {
-                "template_id": str(template_id),
-                "template_name": template.name,
-                "template_type": "assistant",
-            },
-        },
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=template,
+            extra={"template_type": "assistant"},
+        ),
     )
 
 
