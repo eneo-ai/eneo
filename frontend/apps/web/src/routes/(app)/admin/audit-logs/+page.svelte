@@ -16,8 +16,8 @@
   import { IconInfo } from "@intric/icons/info";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
-  import { Clock, CircleCheck, CircleX, Calendar, Shield, FileText, Settings } from "lucide-svelte";
-  import { slide, fade } from "svelte/transition";
+  import { CircleCheck, CircleX, Calendar, Shield, FileText, Settings, Trash2 } from "lucide-svelte";
+  import { fade } from "svelte/transition";
   import { onDestroy } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -89,11 +89,14 @@
   });
   let selectedAction = $state<ActionType | "all">("all");
   let selectedUser = $state<UserSparse | null>(null);
-  let userSearchQuery = $state("");
   let userSearchResults = $state<UserSparse[]>([]);
   let isSearchingUsers = $state(false);
   let showUserDropdown = $state(false);
-  let entitySearchQuery = $state("");  // Entity search filter
+
+  // Unified scoped search state
+  let searchScope = $state<'entity' | 'user'>('entity');
+  let searchQuery = $state("");
+  let showScopeDropdown = $state(false);
   let debounceTimer: ReturnType<typeof setTimeout>;
   let userSearchTimer: ReturnType<typeof setTimeout>;
   let entitySearchTimer: ReturnType<typeof setTimeout>;  // Debounce for entity search
@@ -264,9 +267,15 @@
     label: m.audit_all_actions()
   });
 
-  // Watch store changes
+  // Watch store changes and apply filters
   $effect(() => {
-    selectedAction = $actionStore.value;
+    const newAction = $actionStore.value;
+    if (selectedAction !== newAction) {
+      selectedAction = newAction;
+      if (!isInitializingFromUrl) {
+        applyFilters();
+      }
+    }
   });
 
   // Initialize filters from URL on mount
@@ -282,7 +291,10 @@
     isInitializingFromUrl = true;
 
     // Set entity search from URL
-    entitySearchQuery = search || "";
+    if (search) {
+      searchScope = 'entity';
+      searchQuery = search;
+    }
 
     // Set date range from URL
     if (fromDate && toDate) {
@@ -320,9 +332,9 @@
 
     // Set user from URL (if actor_id is present, we keep the selected user)
     // Note: We rely on user selecting from search, not parsing from URL
+    // Only reset on actual page load to prevent race conditions when switching scopes
     if (!actorId) {
       selectedUser = null;
-      userSearchQuery = "";
     }
 
     // Reset flag after the effect cycle completes
@@ -457,8 +469,8 @@
       params.set("actor_id", selectedUser.id);
     }
 
-    if (entitySearchQuery.length >= 3) {
-      params.set("search", entitySearchQuery);
+    if (searchScope === 'entity' && searchQuery.length >= 3) {
+      params.set("search", searchQuery);
     }
 
     if (activeTab === 'config') {
@@ -480,9 +492,10 @@
     selectedAction = "all";
     actionStore.set({ value: "all", label: m.audit_all_actions() });
     selectedUser = null;
-    userSearchQuery = "";
+    searchQuery = "";
+    searchScope = 'entity';
     userSearchResults = [];
-    entitySearchQuery = "";  // Clear entity search
+    showScopeDropdown = false;
     activePreset = null; // Clear active preset
 
     const params = new URLSearchParams();
@@ -497,40 +510,51 @@
     goto(url, { noScroll: true, replaceState: true });
   }
 
-  // User search with debounce
-  async function searchUsers(query: string) {
-    userSearchQuery = query;
+  // Unified scoped search handler
+  function handleScopedSearch(query: string) {
+    searchQuery = query;
 
-    if (query.length < 3) {
-      userSearchResults = [];
-      showUserDropdown = false;
-      return;
-    }
-
-    clearTimeout(userSearchTimer);
-    userSearchTimer = setTimeout(async () => {
-      try {
-        isSearchingUsers = true;
-        const response = await intric.users.list({
-          includeDetails: true,
-          search_email: query,
-          page: 1,
-          page_size: 10,
-        });
-        userSearchResults = response.items || [];
-        showUserDropdown = true;
-      } catch (err) {
-        console.error("User search failed:", err);
-        userSearchResults = [];
-      } finally {
-        isSearchingUsers = false;
+    if (searchScope === 'entity') {
+      // Entity search logic
+      clearTimeout(entitySearchTimer);
+      if (query.length >= 3 || query.length === 0) {
+        entitySearchTimer = setTimeout(() => {
+          applyFilters();
+        }, 300);
       }
-    }, 300);
+    } else {
+      // User search logic
+      if (query.length < 3) {
+        userSearchResults = [];
+        showUserDropdown = false;
+        return;
+      }
+
+      clearTimeout(userSearchTimer);
+      userSearchTimer = setTimeout(async () => {
+        try {
+          isSearchingUsers = true;
+          const response = await intric.users.list({
+            includeDetails: true,
+            search_email: query,
+            page: 1,
+            page_size: 10,
+          });
+          userSearchResults = response?.items || [];
+          showUserDropdown = true;
+        } catch (err) {
+          console.error("User search failed:", err);
+          userSearchResults = [];
+        } finally {
+          isSearchingUsers = false;
+        }
+      }, 300);
+    }
   }
 
   function selectUser(user: UserSparse) {
     selectedUser = user;
-    userSearchQuery = user.email;
+    searchQuery = user.email;
     userSearchResults = [];
     showUserDropdown = false;
     applyFilters();
@@ -538,31 +562,56 @@
 
   function clearUserFilter() {
     selectedUser = null;
-    userSearchQuery = "";
+    if (searchScope === 'user') {
+      searchQuery = "";
+    }
     userSearchResults = [];
     showUserDropdown = false;
     applyFilters();
   }
 
-  // Entity search with debounce (300ms)
-  function handleEntitySearch(query: string) {
-    entitySearchQuery = query;
-
-    // Clear existing timer
+  function clearSearch() {
+    searchQuery = "";
     clearTimeout(entitySearchTimer);
-
-    // Only trigger search for 3+ characters or when clearing
-    if (query.length >= 3 || query.length === 0) {
-      entitySearchTimer = setTimeout(() => {
-        applyFilters();
-      }, 300);
+    clearTimeout(userSearchTimer);
+    userSearchResults = [];
+    showUserDropdown = false;
+    if (searchScope === 'entity') {
+      applyFilters();
     }
   }
 
-  function clearEntitySearch() {
-    entitySearchQuery = "";
+  // Handle scope change - preserve query and re-trigger search in new scope
+  function handleScopeChange(newScope: 'entity' | 'user') {
+    // Clear ALL pending search timers to prevent race conditions
     clearTimeout(entitySearchTimer);
-    applyFilters();
+    clearTimeout(userSearchTimer);
+
+    searchScope = newScope;
+    showScopeDropdown = false;
+
+    // Reset user-specific state when switching away from user scope
+    if (newScope === 'entity') {
+      selectedUser = null;
+      userSearchResults = [];
+      showUserDropdown = false;
+    }
+
+    // Preserve searchQuery and immediately trigger search in new scope
+    if (searchQuery.length > 0) {
+      handleScopedSearch(searchQuery);
+    }
+  }
+
+  // Click outside handler for scope dropdown
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (showScopeDropdown && !target.closest('.scope-dropdown-container')) {
+      showScopeDropdown = false;
+    }
+    if (showUserDropdown && !target.closest('.user-dropdown-container')) {
+      showUserDropdown = false;
+    }
   }
 
   function nextPage() {
@@ -756,7 +805,7 @@
     (dateRange?.start && dateRange?.end ? 1 : 0) +
     (selectedAction !== "all" ? 1 : 0) +
     (selectedUser ? 1 : 0) +
-    (entitySearchQuery.length >= 3 ? 1 : 0)
+    (searchScope === 'entity' && searchQuery.length >= 3 ? 1 : 0)
   );
 
   // Retention policy functions
@@ -801,6 +850,8 @@
 <svelte:head>
   <title>Eneo.ai – Admin – Audit Logs</title>
 </svelte:head>
+
+<svelte:window onclick={handleClickOutside} />
 
 <Page.Root>
   <Page.Header>
@@ -1092,199 +1143,218 @@
           </div>
         {/if}
 
-        <!-- Filters Section -->
-        <div class="mb-6 rounded-lg border border-default bg-subtle p-4 sm:p-6">
-          <div class="space-y-4">
-            <!-- Header Row -->
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-semibold text-default">{m.audit_filters()}</h3>
-              {#if activeFilterCount > 0}
+        <!-- Filter Toolbar -->
+        <div class="mb-4 rounded-lg border border-default bg-subtle px-4 py-2">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+            <!-- Scoped Search -->
+            <div class="scope-dropdown-container user-dropdown-container relative flex-1 w-full">
+              <!-- Scope trigger (inside input, left side) -->
+              <div class="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex items-center">
                 <button
-                  onclick={clearFilters}
-                  class="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+                  onclick={() => showScopeDropdown = !showScopeDropdown}
+                  class="flex items-center gap-1 h-7 px-2.5 text-xs font-medium text-muted bg-muted/50 hover:bg-muted/80 hover:text-default rounded-md transition-colors"
                 >
-                  <IconXMark class="h-3.5 w-3.5" />
-                  {m.audit_clear_filter({ count: activeFilterCount })}
+                  {searchScope === 'entity' ? m.audit_search_scope_entity() : m.audit_search_scope_user()}
+                  <IconChevronDown class="h-3 w-3" />
                 </button>
+
+                <!-- Scope Dropdown menu -->
+                {#if showScopeDropdown}
+                  <div
+                    class="absolute top-full left-0 mt-1 bg-primary border border-default rounded-md shadow-lg z-30 min-w-[120px]"
+                    transition:fade={{ duration: 100 }}
+                  >
+                    <button
+                      onclick={() => handleScopeChange('entity')}
+                      class="w-full px-3 py-2 text-left text-sm hover:bg-subtle transition-colors {searchScope === 'entity' ? 'font-medium text-accent-default' : 'text-default'}"
+                    >
+                      {m.audit_search_scope_entity()}
+                    </button>
+                    <button
+                      onclick={() => handleScopeChange('user')}
+                      class="w-full px-3 py-2 text-left text-sm hover:bg-subtle transition-colors {searchScope === 'user' ? 'font-medium text-accent-default' : 'text-default'}"
+                    >
+                      {m.audit_search_scope_user()}
+                    </button>
+                  </div>
+                {/if}
+
+                <!-- Visual divider -->
+                <div class="ml-2 h-6 w-px bg-default/30"></div>
+              </div>
+
+              <!-- Search input -->
+              <input
+                type="text"
+                bind:value={searchQuery}
+                oninput={(e) => handleScopedSearch(e.currentTarget.value)}
+                onfocus={() => searchScope === 'user' && searchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
+                placeholder={searchScope === 'entity' ? m.audit_search_placeholder_entity() : m.audit_search_placeholder_user()}
+                class="w-full h-10 pl-32 pr-10 rounded-md border border-default bg-primary text-sm text-default placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent-default/20 focus:border-accent-default transition-colors"
+              />
+
+              <!-- Clear button (right side) -->
+              {#if searchQuery.length > 0}
+                <button
+                  onclick={clearSearch}
+                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                  aria-label={m.audit_search_clear()}
+                >
+                  <IconXMark class="h-4 w-4 text-muted" />
+                </button>
+              {/if}
+
+              <!-- Loading spinner for user search -->
+              {#if isSearchingUsers && searchScope === 'user'}
+                <div class="absolute right-8 top-1/2 -translate-y-1/2">
+                  <div class="h-4 w-4 animate-spin rounded-full border-2 border-accent-default border-t-transparent"></div>
+                </div>
+              {/if}
+
+              <!-- User dropdown results (only when scope = 'user') -->
+              {#if searchScope === 'user' && showUserDropdown && userSearchResults.length > 0}
+                <div
+                  class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
+                  transition:fade={{ duration: 150 }}
+                >
+                  {#each userSearchResults as user}
+                    <button
+                      onclick={() => selectUser(user)}
+                      class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
+                    >
+                      <div class="flex flex-col gap-0.5">
+                        <span class="text-sm font-medium text-default">{user.email}</span>
+                      </div>
+                    </button>
+                  {/each}
+                </div>
               {/if}
             </div>
 
-            <!-- Quick Filters Row -->
-            <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span class="text-xs font-medium text-muted">{m.audit_quick_range()}</span>
-              <button
-                onclick={() => setDatePreset(7)}
-                class={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                  activePreset === 7
-                    ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 border border-accent-default'
-                    : 'border border-default text-default hover:bg-subtle'
-                }`}
-              >
-                <Clock class="h-3.5 w-3.5" />
-                {m.audit_last_7_days()}
-              </button>
-              <button
-                onclick={() => setDatePreset(30)}
-                class={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                  activePreset === 30
-                    ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 border border-accent-default'
-                    : 'border border-default text-default hover:bg-subtle'
-                }`}
-              >
-                <Clock class="h-3.5 w-3.5" />
-                {m.audit_last_30_days()}
-              </button>
-              <button
-                onclick={() => setDatePreset(90)}
-                class={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                  activePreset === 90
-                    ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 border border-accent-default'
-                    : 'border border-default text-default hover:bg-subtle'
-                }`}
-              >
-                <Clock class="h-3.5 w-3.5" />
-                {m.audit_last_90_days()}
-              </button>
-            </div>
-
-            <!-- Filter Grid - Stack vertically on small/medium screens to prevent overlap -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <!-- Date Range Filter -->
-              <div>
-                <!-- svelte-ignore a11y_label_has_associated_control -->
-                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_date_range()}</label>
-                <div class="h-10">
-                  <Input.DateRange bind:value={dateRange} class="w-full h-full" />
-                </div>
+            <!-- Date Range + Quick Filters -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="w-full sm:w-auto">
+                <Input.DateRange bind:value={dateRange} />
               </div>
 
-              <!-- Action Type Filter -->
-              <div>
-                <!-- svelte-ignore a11y_label_has_associated_control -->
-                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_action_type()}</label>
-                <Select.Root customStore={actionStore}>
-                  <Select.Trigger class="w-full h-10 text-sm truncate" placeholder="Select action type" />
-                  <Select.Options>
-                    {#each actionOptions as option}
-                      <Select.Item value={option.value} label={option.label} />
-                    {/each}
-                  </Select.Options>
-                </Select.Root>
-              </div>
-
-              <!-- Entity Search Filter -->
-              <div class="min-w-0">
-                <!-- svelte-ignore a11y_label_has_associated_control -->
-                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_search_label()}</label>
-                <div class="relative h-10">
-                  <Input.Text
-                    bind:value={entitySearchQuery}
-                    oninput={(e) => handleEntitySearch(e.currentTarget.value)}
-                    placeholder={m.audit_search_placeholder()}
-                    class="w-full h-10"
-                  />
-                  {#if entitySearchQuery.length > 0}
-                    <button
-                      onclick={clearEntitySearch}
-                      class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
-                      aria-label={m.audit_search_clear()}
-                    >
-                      <IconXMark class="h-4 w-4 text-muted" />
-                    </button>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- User Filter -->
-              <div class="min-w-0">
-                <!-- svelte-ignore a11y_label_has_associated_control -->
-                <label class="block text-xs sm:text-sm font-medium text-default mb-1.5">{m.audit_user_filter()}</label>
-                <div class="relative h-10">
-                  <Input.Text
-                    bind:value={userSearchQuery}
-                    oninput={(e) => searchUsers(e.currentTarget.value)}
-                    onfocus={() => userSearchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
-                    placeholder={m.audit_user_filter_placeholder()}
-                    class="w-full h-10"
-                  />
-                  {#if selectedUser}
-                    <button
-                      onclick={clearUserFilter}
-                      class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
-                      aria-label="Clear user filter"
-                    >
-                      <IconXMark class="h-4 w-4 text-muted" />
-                    </button>
-                  {/if}
-                  {#if isSearchingUsers}
-                    <div class="absolute right-2 top-1/2 -translate-y-1/2">
-                      <div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-                    </div>
-                  {/if}
-
-                  <!-- Dropdown Results -->
-                  {#if showUserDropdown && userSearchResults.length > 0}
-                    <div
-                      class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
-                      transition:fade={{ duration: 150 }}
-                    >
-                      {#each userSearchResults as user}
-                        <button
-                          onclick={() => selectUser(user)}
-                          class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
-                        >
-                          <div class="flex flex-col gap-0.5">
-                            <span class="text-sm font-medium text-default">{user.email}</span>
-                            {#if user.name}
-                              <span class="text-xs text-muted">{user.name}</span>
-                            {/if}
-                          </div>
-                        </button>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
+              <!-- Quick filter buttons (connected button group) -->
+              <div class="flex items-center h-10 rounded-md border border-default/50 overflow-hidden">
+                <button
+                  onclick={() => setDatePreset(7)}
+                  class={`px-3 py-2 text-xs font-medium transition-colors ${
+                    activePreset === 7
+                      ? 'bg-accent-default/10 text-accent-default'
+                      : 'text-muted hover:bg-hover hover:text-default'
+                  }`}
+                >
+                  7d
+                </button>
+                <button
+                  onclick={() => setDatePreset(30)}
+                  class={`px-3 py-2 text-xs font-medium border-x border-default/50 transition-colors ${
+                    activePreset === 30
+                      ? 'bg-accent-default/10 text-accent-default'
+                      : 'text-muted hover:bg-hover hover:text-default'
+                  }`}
+                >
+                  30d
+                </button>
+                <button
+                  onclick={() => setDatePreset(90)}
+                  class={`px-3 py-2 text-xs font-medium transition-colors ${
+                    activePreset === 90
+                      ? 'bg-accent-default/10 text-accent-default'
+                      : 'text-muted hover:bg-hover hover:text-default'
+                  }`}
+                >
+                  90d
+                </button>
               </div>
             </div>
 
-            <!-- Active Filter Chips -->
-            {#if selectedUser || entitySearchQuery.length >= 3}
-              <div class="flex flex-wrap items-center gap-2">
-                <!-- Selected User Chip -->
-                {#if selectedUser}
-                  <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-sm">
-                    <span class="text-blue-900 dark:text-blue-300">
-                      {m.audit_filtering_by_user()}: <strong>{selectedUser.email}</strong>
-                    </span>
-                    <button
-                      onclick={clearUserFilter}
-                      class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
-                      aria-label="Clear user filter"
-                    >
-                      <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
-                    </button>
-                  </div>
-                {/if}
-
-                <!-- Entity Search Chip -->
-                {#if entitySearchQuery.length >= 3}
-                  <div class="inline-flex items-center gap-2 rounded-full bg-green-50 dark:bg-green-950 px-3 py-1 text-sm">
-                    <span class="text-green-900 dark:text-green-300">
-                      {m.audit_filtering_by_entity()}: <strong>"{entitySearchQuery}"</strong>
-                    </span>
-                    <button
-                      onclick={clearEntitySearch}
-                      class="rounded-full hover:bg-green-100 dark:hover:bg-green-900 p-0.5 transition-colors"
-                      aria-label={m.audit_search_clear()}
-                    >
-                      <IconXMark class="h-3 w-3 text-green-700 dark:text-green-300" />
-                    </button>
-                  </div>
-                {/if}
-              </div>
-            {/if}
+            <!-- Action Select (compact) -->
+            <div class="w-full sm:w-[220px]">
+              <Select.Root customStore={actionStore}>
+                <Select.Trigger class="w-full h-10 text-sm truncate" placeholder={m.audit_all_actions()} />
+                <Select.Options>
+                  {#each actionOptions as option}
+                    <Select.Item value={option.value} label={option.label} />
+                  {/each}
+                </Select.Options>
+              </Select.Root>
+            </div>
           </div>
         </div>
+
+        <!-- Active Filter Chips (OUTSIDE toolbar) -->
+        {#if activeFilterCount > 0}
+          <div class="flex flex-wrap items-center gap-2 mb-4">
+            {#if dateRange?.start && dateRange?.end && !activePreset}
+              <span class="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-xs">
+                <span class="text-blue-800 dark:text-blue-300">
+                  {dateRange.start.toString()} – {dateRange.end.toString()}
+                </span>
+                <button
+                  onclick={() => { dateRange = { start: undefined, end: undefined }; applyFilters(); }}
+                  class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
+                >
+                  <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+                </button>
+              </span>
+            {/if}
+
+            {#if selectedAction !== 'all'}
+              <span class="inline-flex items-center gap-1.5 rounded-full bg-purple-50 dark:bg-purple-950 px-3 py-1 text-xs">
+                <span class="text-purple-800 dark:text-purple-300">
+                  {actionOptions.find(o => o.value === selectedAction)?.label}
+                </span>
+                <button
+                  onclick={() => { selectedAction = 'all'; actionStore.set({ value: 'all', label: m.audit_all_actions() }); applyFilters(); }}
+                  class="rounded-full hover:bg-purple-100 dark:hover:bg-purple-900 p-0.5 transition-colors"
+                >
+                  <IconXMark class="h-3 w-3 text-purple-700 dark:text-purple-300" />
+                </button>
+              </span>
+            {/if}
+
+            {#if selectedUser}
+              <span class="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-950 px-3 py-1 text-xs">
+                <span class="text-green-800 dark:text-green-300">
+                  {m.audit_filtering_by_user()}: {selectedUser.email}
+                </span>
+                <button
+                  onclick={clearUserFilter}
+                  class="rounded-full hover:bg-green-100 dark:hover:bg-green-900 p-0.5 transition-colors"
+                >
+                  <IconXMark class="h-3 w-3 text-green-700 dark:text-green-300" />
+                </button>
+              </span>
+            {/if}
+
+            {#if searchScope === 'entity' && searchQuery.length >= 3}
+              <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950 px-3 py-1 text-xs">
+                <span class="text-amber-800 dark:text-amber-300">
+                  {m.audit_filtering_by_entity()}: "{searchQuery}"
+                </span>
+                <button
+                  onclick={clearSearch}
+                  class="rounded-full hover:bg-amber-100 dark:hover:bg-amber-900 p-0.5 transition-colors"
+                >
+                  <IconXMark class="h-3 w-3 text-amber-700 dark:text-amber-300" />
+                </button>
+              </span>
+            {/if}
+
+            <!-- Clear all (ghost button with icon) -->
+            <button
+              onclick={clearFilters}
+              class="ml-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-md transition-colors"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+              {m.audit_clear_all()}
+            </button>
+          </div>
+        {/if}
 
         <!-- Results Summary and Top Pagination -->
         <div class="mb-6 rounded-lg bg-subtle p-4">
