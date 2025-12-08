@@ -21,23 +21,43 @@
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { m } from "$lib/paraglide/messages";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  interface ImageModel {
+    id: string;
+    name: string;
+    nickname: string;
+    is_org_enabled: boolean;
+    is_org_default: boolean;
+    is_locked?: boolean | null;
+    lock_reason?: string | null;
+    security_classification?: any;
+  }
+
+  export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  export let type: "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   const intric = getIntric();
 
   async function togglePreferred() {
     if (!("is_org_default" in model)) return;
     try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
+      if (type === "imageModel") {
+        model = await intric.imageModels.update({
+          imageModel: { id: model.id },
           update: {
             is_org_default: !model.is_org_default
           }
-        }
-      );
+        });
+      } else {
+        model = await intric.models.update(
+          //@ts-expect-error ts doesn't understand this
+          {
+            [type]: model,
+            update: {
+              is_org_default: !model.is_org_default
+            }
+          }
+        );
+      }
       invalidate("admin:models:load");
     } catch (e) {
       alert(`${m.error_changing_model_status()} ${model.name}`);
@@ -46,15 +66,24 @@
 
   async function toggleEnabled() {
     try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
+      if (type === "imageModel") {
+        model = await intric.imageModels.update({
+          imageModel: { id: model.id },
           update: {
             is_org_enabled: !model.is_org_enabled
           }
-        }
-      );
+        });
+      } else {
+        model = await intric.models.update(
+          //@ts-expect-error ts doesn't understand this
+          {
+            [type]: model,
+            update: {
+              is_org_enabled: !model.is_org_enabled
+            }
+          }
+        );
+      }
       invalidate("admin:models:load");
     } catch (e) {
       alert(`${m.error_changing_model_status()} ${model.name}`);
