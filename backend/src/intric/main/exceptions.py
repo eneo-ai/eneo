@@ -1,5 +1,12 @@
 from enum import Enum
 
+from intric.files.text import (
+    CorruptFileError,
+    EncryptedFileError,
+    ExtractionError,
+    UnsupportedFormatError,
+)
+
 
 class ErrorCodes(int, Enum):
     NOT_FOUND = 9000
@@ -29,6 +36,11 @@ class ErrorCodes(int, Enum):
     INTERNAL_SERVER_ERROR = 9024
     TENANT_SUSPENDED = 9025
     API_KEY_NOT_CONFIGURED = 9026
+    # File extraction errors
+    FILE_EXTRACTION_ERROR = 9027
+    FILE_ENCRYPTED = 9028
+    FILE_CORRUPT = 9029
+    FILE_FORMAT_UNSUPPORTED = 9030
 
 
 class NotFoundException(Exception):
@@ -194,4 +206,9 @@ EXCEPTION_MAP = {
     ),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
+    # File extraction errors - use None to pass through the exception's own message
+    ExtractionError: (400, None, ErrorCodes.FILE_EXTRACTION_ERROR),
+    EncryptedFileError: (400, None, ErrorCodes.FILE_ENCRYPTED),
+    CorruptFileError: (400, None, ErrorCodes.FILE_CORRUPT),
+    UnsupportedFormatError: (415, None, ErrorCodes.FILE_FORMAT_UNSUPPORTED),
 }
