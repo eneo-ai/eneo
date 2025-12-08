@@ -1144,10 +1144,10 @@
         {/if}
 
         <!-- Filter Toolbar -->
-        <div class="mb-4 rounded-lg border border-default bg-subtle px-4 py-2">
-          <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-            <!-- Scoped Search -->
-            <div class="scope-dropdown-container user-dropdown-container relative flex-1 w-full">
+        <div class="mb-4 rounded-lg border border-default bg-subtle p-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Scoped Search (first, fills available space) -->
+            <div class="scope-dropdown-container user-dropdown-container relative flex-1 min-w-[280px]">
               <!-- Scope trigger (inside input, left side) -->
               <div class="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex items-center">
                 <button
@@ -1190,7 +1190,7 @@
                 oninput={(e) => handleScopedSearch(e.currentTarget.value)}
                 onfocus={() => searchScope === 'user' && searchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
                 placeholder={searchScope === 'entity' ? m.audit_search_placeholder_entity() : m.audit_search_placeholder_user()}
-                class="w-full h-10 pl-32 pr-10 rounded-md border border-default bg-primary text-sm text-default placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent-default/20 focus:border-accent-default transition-colors"
+                class="w-full h-11 pl-32 pr-10 rounded-md border border-default bg-primary text-sm text-default placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent-default/20 focus:border-accent-default transition-colors"
               />
 
               <!-- Clear button (right side) -->
@@ -1231,14 +1231,12 @@
               {/if}
             </div>
 
-            <!-- Date Range + Quick Filters -->
-            <div class="flex flex-wrap items-center gap-2">
-              <div class="w-full sm:w-auto">
-                <Input.DateRange bind:value={dateRange} />
-              </div>
+            <!-- Filters Row (second) -->
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3 lg:gap-4">
+              <Input.DateRange bind:value={dateRange} />
 
               <!-- Quick filter buttons (connected button group) -->
-              <div class="flex items-center h-10 rounded-md border border-default/50 overflow-hidden">
+              <div class="flex items-center h-10 rounded-md border border-default/50 overflow-hidden flex-shrink-0">
                 <button
                   onclick={() => setDatePreset(7)}
                   class={`px-3 py-2 text-xs font-medium transition-colors ${
@@ -1270,18 +1268,18 @@
                   90d
                 </button>
               </div>
-            </div>
 
-            <!-- Action Select (compact) -->
-            <div class="w-full sm:w-[220px]">
-              <Select.Root customStore={actionStore}>
-                <Select.Trigger class="w-full h-10 text-sm truncate" placeholder={m.audit_all_actions()} />
-                <Select.Options>
-                  {#each actionOptions as option}
-                    <Select.Item value={option.value} label={option.label} />
-                  {/each}
-                </Select.Options>
-              </Select.Root>
+              <!-- Action Select -->
+              <div class="min-w-[200px]">
+                <Select.Root customStore={actionStore}>
+                  <Select.Trigger placeholder={m.audit_all_actions()} />
+                  <Select.Options>
+                    {#each actionOptions as option}
+                      <Select.Item value={option.value} label={option.label} />
+                    {/each}
+                  </Select.Options>
+                </Select.Root>
+              </div>
             </div>
           </div>
         </div>
