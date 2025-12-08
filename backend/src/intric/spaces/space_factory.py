@@ -284,4 +284,5 @@ class SpaceFactory:
             websites=space_websites,
             members=members,
             security_classification=security_classification,
+            icon_id=space_in_db.icon_id,
         )

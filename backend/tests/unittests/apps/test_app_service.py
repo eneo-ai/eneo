@@ -21,6 +21,7 @@ def service():
         app_template_service=AsyncMock(),
         actor_manager=MagicMock(),
         completion_service=AsyncMock(),
+        icon_repo=AsyncMock(),
     )
 
 

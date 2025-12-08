@@ -863,6 +863,7 @@ class SpaceRepository:
                     if space.security_classification is not None
                     else None
                 ),
+                icon_id=space.icon_id,
             )
             .where(Spaces.id == space.id)
             .returning(Spaces)

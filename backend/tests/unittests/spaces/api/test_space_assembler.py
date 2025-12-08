@@ -70,6 +70,7 @@ def space():
         groups=[],
         members={},
         security_classification=None,
+        icon_id=None,
     )
     space.name = TEST_NAME
 

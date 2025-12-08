@@ -21,6 +21,7 @@ from intric.embedding_models.presentation.embedding_model_router import (
 from intric.files.file_router import router as files_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
+from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
 from intric.integration.presentation.integration_auth_router import (
     router as integration_auth_router,
@@ -114,6 +115,7 @@ router.include_router(
     tags=["transcription-models"],
 )
 router.include_router(files_router, prefix="/files", tags=["files"])
+router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
 router.include_router(space_router, prefix="/spaces", tags=["spaces"])
 router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])

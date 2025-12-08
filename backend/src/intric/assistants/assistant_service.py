@@ -15,6 +15,7 @@ from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
+from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.prompts.api.prompt_models import PromptCreate
@@ -108,7 +109,8 @@ class AssistantService:
         actor_manager: "ActorManager",
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         completion_service: "CompletionService",
-        references_service: "ReferencesService", 
+        references_service: "ReferencesService",
+        icon_repo: IconRepository,
     ):
         self.repo = repo
         self.space_repo = space_repo
@@ -127,6 +129,7 @@ class AssistantService:
         self.integration_knowledge_repo = integration_knowledge_repo
         self.completion_service = completion_service
         self.references_service = references_service
+        self.icon_repo = icon_repo
 
     @property
     async def web_search(self):
@@ -291,6 +294,7 @@ class AssistantService:
         insight_enabled: Optional[bool] = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -349,6 +353,7 @@ class AssistantService:
             insight_enabled=insight_enabled,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
+            icon_id=icon_id,
         )
 
         self.validate_space_assistant(space=space, assistant=assistant)
@@ -403,8 +408,13 @@ class AssistantService:
             raise UnauthorizedException()
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        icon_id = assistant.icon_id
+
         space.remove_assistant(assistant)
         await self.space_repo.update(space)
+
+        if icon_id:
+            await self.icon_repo.delete(icon_id)
 
     @validate_permissions(Permission.ADMIN)
     async def generate_api_key(self, assistant_id: UUID):

@@ -204,6 +204,7 @@ class AppRepository:
                 transcription_model_id=transcription_model_id,
                 published=app.published,
                 data_retention_days=app.data_retention_days,
+                icon_id=app.icon_id,
             )
             .where(Apps.id == app.id)
             .returning(Apps)
