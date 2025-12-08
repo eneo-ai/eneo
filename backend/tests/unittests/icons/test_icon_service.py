@@ -21,7 +21,7 @@ def service():
     )
 
 
-@pytest.mark.parametrize("mimetype", ICON_ALLOWED_MIMETYPES)
+@pytest.mark.parametrize("mimetype", sorted(ICON_ALLOWED_MIMETYPES))
 def test_validate_mimetype_allowed_ok(mimetype: str):
     IconService.validate_mimetype(mimetype)
 
