@@ -117,6 +117,20 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "env_attr": "crawl_job_max_age_seconds",
         "description": "Maximum job retry age before permanent failure (5 min to 2 hours)",
     },
+    "tenant_worker_semaphore_ttl_seconds": {
+        "type": int,
+        "min": 3600,       # 1 hour minimum
+        "max": 86400,      # 24 hours maximum
+        "env_attr": "tenant_worker_semaphore_ttl_seconds",
+        "description": "Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)",
+    },
+    "crawl_page_batch_size": {
+        "type": int,
+        "min": 10,
+        "max": 1000,
+        "env_attr": "crawl_page_batch_size",
+        "description": "Commit after every N pages during crawl (10 to 1000)",
+    },
 }
 
 

@@ -295,20 +295,37 @@ class CrawlFeeder:
             return False
 
     async def _mark_slot_preacquired(
-        self, job_id: UUID, redis_client: aioredis.Redis
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        redis_client: aioredis.Redis,
+        tenant_crawler_settings: dict | None = None,
     ) -> None:
         """Mark that the feeder pre-acquired a slot for this job.
 
         Why: Worker checks this flag to skip limiter.acquire() (slot already held).
         TTL ensures cleanup if job is never picked up.
 
+        Args:
+            job_id: The job identifier
+            tenant_id: The tenant identifier - stored in the value so worker can
+                       release the slot even if tenant injection fails
+            redis_client: Redis connection
+            tenant_crawler_settings: Optional tenant-specific settings for TTL
+
         Raises:
             Exception: If Redis operation fails - caller MUST handle and release slot.
         """
         key = f"job:{job_id}:slot_preacquired"
-        # Use 1 hour TTL to survive queue backlogs (worker deletes on pickup)
-        # Why: Semaphore TTL may be shorter than worst-case queue wait time
-        await redis_client.set(key, "1", ex=3600)
+        # Get per-tenant TTL if available, otherwise use global default
+        ttl = get_crawler_setting(
+            "tenant_worker_semaphore_ttl_seconds",
+            tenant_crawler_settings,
+            default=self.settings.tenant_worker_semaphore_ttl_seconds,
+        )
+        # Store tenant_id so worker can release slot even if tenant lookup fails
+        # Use semaphore TTL for consistency - ensures flag and slot expire together
+        await redis_client.set(key, str(tenant_id), ex=ttl)
 
     async def _release_slot(
         self, tenant_id: UUID, redis_client: aioredis.Redis
@@ -756,7 +773,9 @@ class CrawlFeeder:
             # Why: If enqueue succeeds but mark fails, worker would double-acquire
             # By marking first, we ensure flag exists before job enters ARQ queue
             try:
-                await self._mark_slot_preacquired(job_id, redis_client)
+                await self._mark_slot_preacquired(
+                    job_id, tenant_id, redis_client, tenant_crawler_settings
+                )
             except Exception as mark_exc:
                 # Mark failed - MUST release slot and skip enqueue to prevent double-acquire
                 logger.error(

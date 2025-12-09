@@ -9,6 +9,8 @@ from arq import Retry
 from dependency_injector import providers
 import redis.asyncio as aioredis
 import sqlalchemy as sa
+from sqlalchemy.exc import PendingRollbackError, InvalidRequestError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.main.container.container import Container
 from intric.main.config import get_settings
@@ -24,6 +26,128 @@ from intric.websites.crawl_dependencies.crawl_models import (
 logger = get_logger(__name__)
 
 _BACKOFF_JITTER_RATIO = 0.25
+
+# Lua script for atomic slot release (matches TenantConcurrencyLimiter._release_lua)
+# Duplicated here to enable release even when limiter object is unavailable
+# (e.g., when tenant injection fails but we still need to release a pre-acquired slot)
+# NOTE: Keep in sync with TenantConcurrencyLimiter._release_lua in tenant_concurrency.py
+_RELEASE_SLOT_LUA = (
+    "local key = KEYS[1]\n"
+    "local ttl = tonumber(ARGV[1])\n"
+    "local current = redis.call('GET', key)\n"
+    "if not current then return 0 end\n"
+    "current = redis.call('DECR', key)\n"
+    "if not current or current <= 0 then\n"
+    "  redis.call('DEL', key)\n"
+    "  return 0\n"
+    "end\n"
+    "redis.call('EXPIRE', key, ttl)\n"
+    "return current\n"
+)
+
+
+def _is_invalid_transaction_error(error: Exception) -> bool:
+    """Check if error indicates an invalid/broken transaction state.
+
+    Uses both exception types AND string matching for robustness
+    across SQLAlchemy versions.
+
+    Args:
+        error: The exception to check
+
+    Returns:
+        True if this indicates a corrupted transaction that requires session recovery
+    """
+    # Type-based detection (preferred)
+    if isinstance(error, (PendingRollbackError, InvalidRequestError)):
+        return True
+
+    # String-based fallback for edge cases
+    error_msg = str(error).lower()
+    return (
+        "invalid transaction" in error_msg
+        or "can't reconnect" in error_msg
+        or "pending rollback" in error_msg
+    )
+
+
+def _is_invalid_transaction_error_msg(message: str | None) -> bool:
+    """Check if an error message string indicates invalid transaction state.
+
+    This is needed because process_page_with_retry() catches all exceptions
+    and returns (False, error_message) rather than raising. We need to detect
+    transaction corruption from the returned error message string.
+
+    Args:
+        message: The error message string to check
+
+    Returns:
+        True if this indicates a corrupted transaction that requires session recovery
+    """
+    if not message:
+        return False
+    msg_lower = message.lower()
+    return (
+        "invalid transaction" in msg_lower
+        or "can't reconnect" in msg_lower
+        or "pending rollback" in msg_lower
+    )
+
+
+async def _recover_session(
+    container: Container,
+    old_session: AsyncSession,
+    created_sessions: list[AsyncSession],
+    logger_instance,
+) -> tuple[AsyncSession, any]:
+    """Recover from an invalid transaction by creating a new session.
+
+    This function handles SQLAlchemy transaction corruption by:
+    1. Rolling back and closing the corrupted session (best effort)
+    2. Creating a fresh session from the session manager
+    3. Tracking the new session for cleanup in the finally block
+    4. Updating the container to use the new session
+
+    Args:
+        container: DI container to update
+        old_session: The corrupted session to clean up
+        created_sessions: List to track sessions for cleanup
+        logger_instance: Logger instance for metrics/debugging
+
+    Returns:
+        Tuple of (new_session, new_uploader) for continued processing
+    """
+    from intric.database.database import sessionmanager
+
+    # Clean up old session (best effort - may already be in bad state)
+    try:
+        await old_session.rollback()
+    except Exception:
+        pass
+    try:
+        await old_session.close()
+    except Exception:
+        pass
+
+    # Create fresh session
+    new_session = await sessionmanager.session().__aenter__()
+    await new_session.begin()
+
+    # Track for cleanup in finally block
+    created_sessions.append(new_session)
+
+    # Update container to use new session
+    container.session.override(providers.Object(new_session))
+
+    # Get fresh uploader with new session
+    new_uploader = container.text_processor()
+
+    logger_instance.info(
+        "Session recovered after invalid transaction",
+        extra={"metric_name": "crawl.session.recovered", "metric_value": 1}
+    )
+
+    return new_session, new_uploader
 
 
 def _calculate_exponential_backoff(
@@ -226,6 +350,22 @@ async def process_page_with_retry(
                 raise  # Re-raise to trigger retry logic
 
         except Exception as e:
+            # CRITICAL: If transaction is corrupted, return immediately for caller recovery
+            # Don't waste remaining retries on a session that can't recover
+            if _is_invalid_transaction_error(e):
+                error_msg = f"Transaction corrupted on attempt {attempt + 1}: {str(e)}"
+                logger.warning(
+                    f"Invalid transaction detected, returning for session recovery: {page.url}",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "tenant_id": str(website.tenant_id),
+                        "tenant_slug": tenant_slug,
+                        "page_url": page.url,
+                        "attempt": attempt + 1,
+                    },
+                )
+                return False, error_msg  # Return immediately, let caller recover session
+
             if attempt < max_retries - 1:
                 # Calculate exponential backoff: 1s, 2s, 4s
                 delay = retry_delay * (2**attempt)
@@ -482,6 +622,38 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     limiter = None
     acquired = False
     redis_client: aioredis.Redis | None = None
+    # Track pre-acquired slot for guaranteed cleanup even if tenant injection fails
+    preacquired_tenant_id: UUID | None = None
+
+    # Track sessions for cleanup (addresses session lifecycle leak on recovery)
+    # When we recover from invalid transaction, we create new sessions that must be
+    # closed in the finally block to prevent connection pool exhaustion
+    created_sessions: list[AsyncSession] = []
+    # Use mutable holder so page loop and heartbeat can access current session
+    # This allows session recovery to update the reference mid-processing
+    session_holder: dict = {"session": None, "uploader": None}
+
+    # CRITICAL: Check for pre-acquired slot BEFORE tenant injection
+    # Why: If feeder acquired a slot but tenant injection fails, we must still release
+    # This read is safe even without tenant context
+    try:
+        _early_redis = container.redis_client()
+        preacquired_key = f"job:{job_id}:slot_preacquired"
+        preacquired_value = await _early_redis.get(preacquired_key)
+        if preacquired_value:
+            # Store tenant_id for guaranteed cleanup in finally block
+            preacquired_tenant_id = UUID(preacquired_value.decode())
+            # Delete flag immediately - we now own this slot
+            await _early_redis.delete(preacquired_key)
+            logger.debug(
+                "Pre-acquired slot detected, will ensure release",
+                extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
+            )
+    except Exception as exc:
+        logger.warning(
+            "Failed to check pre-acquired slot early",
+            extra={"job_id": str(job_id), "error": str(exc)},
+        )
 
     try:
         tenant = container.tenant()
@@ -495,42 +667,83 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         except Exception:  # pragma: no cover - container guard
             redis_client = None
 
-        # FIX: Check if feeder pre-acquired the slot (eliminates race condition)
-        # Why: Feeder atomically acquires slot before enqueueing to ARQ
-        # Worker checks this flag to skip redundant acquire attempt
-        slot_preacquired = False
-        if redis_client:
+        # FALLBACK: If early check failed (transient Redis error), retry now
+        # Why: Early check runs before tenant injection. If it failed, the flag
+        # is still in Redis and we'd double-acquire without this retry.
+        if preacquired_tenant_id is None and redis_client:
             try:
                 preacquired_key = f"job:{job_id}:slot_preacquired"
-                preacquired = await redis_client.get(preacquired_key)
-                if preacquired:
-                    slot_preacquired = True
-                    # Clean up the flag - slot is now "owned" by this worker
+                preacquired_value = await redis_client.get(preacquired_key)
+                if preacquired_value:
+                    preacquired_tenant_id = UUID(preacquired_value.decode())
                     await redis_client.delete(preacquired_key)
                     logger.debug(
-                        "Slot pre-acquired by feeder, skipping limiter.acquire()",
-                        extra={"job_id": str(job_id), "tenant_id": str(tenant.id)},
+                        "Pre-acquired slot detected on retry (early check failed)",
+                        extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
                     )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to check slot_preacquired flag",
-                    extra={"job_id": str(job_id), "error": str(exc)},
-                )
-
-        if slot_preacquired:
-            acquired = True  # Slot was pre-acquired by feeder
-            # FIX: Refresh semaphore TTL - we now own this slot
-            # Why: Normal acquire() refreshes TTL via Lua script. When we skip acquire,
-            # we must manually refresh to prevent semaphore expiry during long queue times.
-            try:
-                concurrency_key = f"tenant:{tenant.id}:active_jobs"
-                await redis_client.expire(
-                    concurrency_key,
-                    settings.tenant_worker_semaphore_ttl_seconds
-                )
             except Exception:
-                pass  # Best effort - slot is still valid
+                pass  # Best effort - will acquire normally if this fails too
+
+        # Check if we already detected a pre-acquired slot in early check
+        # The early check happens BEFORE tenant injection to ensure cleanup even if injection fails
+        if preacquired_tenant_id is not None:
+            if preacquired_tenant_id == tenant.id:
+                # Normal case: feeder pre-acquired slot for this tenant
+                acquired = True
+                logger.debug(
+                    "Slot pre-acquired by feeder, skipping limiter.acquire()",
+                    extra={"job_id": str(job_id), "tenant_id": str(tenant.id)},
+                )
+                # Refresh semaphore TTL - we now own this slot
+                # Why: Normal acquire() refreshes TTL via Lua script. When we skip acquire,
+                # we must manually refresh to prevent semaphore expiry during long queue times.
+                if redis_client:
+                    try:
+                        semaphore_ttl = get_crawler_setting(
+                            "tenant_worker_semaphore_ttl_seconds",
+                            tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                            default=settings.tenant_worker_semaphore_ttl_seconds,
+                        )
+                        concurrency_key = f"tenant:{tenant.id}:active_jobs"
+                        await redis_client.expire(concurrency_key, semaphore_ttl)
+                    except Exception:
+                        pass  # Best effort - slot is still valid
+            else:
+                # EDGE CASE: Feeder and worker disagree on tenant_id
+                # This should never happen in normal operation but we handle it defensively
+                logger.error(
+                    "Tenant ID mismatch between feeder and worker",
+                    extra={
+                        "job_id": str(job_id),
+                        "feeder_tenant_id": str(preacquired_tenant_id),
+                        "worker_tenant_id": str(tenant.id),
+                        "action": "releasing_feeder_slot_and_acquiring_new",
+                    },
+                )
+                # Release the mismatched slot to prevent leak
+                if redis_client:
+                    try:
+                        # Use per-tenant TTL if available
+                        semaphore_ttl = get_crawler_setting(
+                            "tenant_worker_semaphore_ttl_seconds",
+                            tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                            default=settings.tenant_worker_semaphore_ttl_seconds,
+                        )
+                        release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
+                        await redis_client.eval(
+                            _RELEASE_SLOT_LUA,
+                            1,
+                            release_key,
+                            str(semaphore_ttl),
+                        )
+                    except Exception:
+                        pass  # Best effort
+                # Clear preacquired_tenant_id so finally block doesn't double-release
+                preacquired_tenant_id = None
+                # Acquire slot for the correct tenant
+                acquired = await limiter.acquire(tenant.id)
         else:
+            # No pre-acquired slot, acquire normally
             acquired = await limiter.acquire(tenant.id)
 
         if not acquired:
@@ -658,6 +871,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             website = await website_service.get_website(params.website_id)
             session = container.session()
 
+            # Initialize session holder for recovery support
+            # This allows session recovery to update the reference mid-processing
+            session_holder["session"] = session
+            session_holder["uploader"] = uploader
+
             # CRITICAL: Verify tenant isolation
             current_tenant = container.tenant()
             if website.tenant_id != current_tenant.id:
@@ -775,6 +993,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 last_heartbeat_time = time.time()
 
+                # Get batch size for periodic commits (bounds data loss on failure)
+                batch_size = get_crawler_setting(
+                    "crawl_page_batch_size",
+                    tenant.crawler_settings if tenant else None,
+                    default=settings.crawl_page_batch_size,
+                )
+                pages_since_commit = 0
+
                 # Import for suicide check
                 from intric.main.models import Status as JobStatus
 
@@ -789,6 +1015,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         try:
                             await job_repo.touch_job(job_id)
                             last_heartbeat_time = current_time
+
+                            # Refresh semaphore TTL to prevent expiry during long crawls
+                            # Why: Semaphore TTL may be close to max crawl time
+                            # Without refresh, counter could expire before job completes
+                            if redis_client and tenant:
+                                try:
+                                    semaphore_ttl = get_crawler_setting(
+                                        "tenant_worker_semaphore_ttl_seconds",
+                                        tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                                        default=settings.tenant_worker_semaphore_ttl_seconds,
+                                    )
+                                    concurrency_key = f"tenant:{tenant.id}:active_jobs"
+                                    await redis_client.expire(concurrency_key, semaphore_ttl)
+                                except Exception:
+                                    pass  # Non-fatal: counter still valid, just not refreshed
+
                             logger.debug(
                                 f"Heartbeat: crawl job still alive after {num_pages} pages",
                                 extra={"job_id": str(job_id), "pages_processed": num_pages},
@@ -810,36 +1052,203 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 return {"status": "preempted_during_crawl", "pages_crawled": num_pages}
 
                         except Exception as heartbeat_exc:
-                            # Non-fatal: Log warning but continue crawling
+                            # Handle invalid transaction during heartbeat
+                            if _is_invalid_transaction_error(heartbeat_exc):
+                                logger.warning(
+                                    "Heartbeat skipped due to invalid transaction - will recover on next page",
+                                    extra={"job_id": str(job_id)}
+                                )
+                            else:
+                                # Non-fatal: Log warning but continue crawling
+                                logger.warning(
+                                    f"Failed to update heartbeat: {heartbeat_exc}",
+                                    extra={"job_id": str(job_id)},
+                                )
+
+                    # Process page with retry logic using session_holder (may be recovered)
+                    try:
+                        success, error_message = await process_page_with_retry(
+                            page=page,
+                            uploader=session_holder["uploader"],
+                            session=session_holder["session"],
+                            params=params,
+                            website=website,
+                            tenant_slug=tenant.slug if tenant else None,
+                        )
+
+                        if success:
+                            crawled_titles.add(page.url)
+                            pages_since_commit += 1
+
+                            # Batched commit to bound data loss
+                            if pages_since_commit >= batch_size:
+                                try:
+                                    await session_holder["session"].commit()
+                                    await session_holder["session"].begin()
+                                    pages_since_commit = 0
+                                    logger.debug(
+                                        f"Committed batch of {batch_size} pages",
+                                        extra={
+                                            "batch_size": batch_size,
+                                            "total_pages": num_pages,
+                                            "job_id": str(job_id),
+                                        }
+                                    )
+                                except Exception as commit_exc:
+                                    if _is_invalid_transaction_error(commit_exc):
+                                        # Recover session and continue
+                                        logger.warning(
+                                            "Invalid transaction during batch commit, recovering...",
+                                            extra={
+                                                "job_id": str(job_id),
+                                                "pages_since_commit": pages_since_commit,
+                                            }
+                                        )
+                                        new_session, new_uploader = await _recover_session(
+                                            container,
+                                            session_holder["session"],
+                                            created_sessions,
+                                            logger,
+                                        )
+                                        session_holder["session"] = new_session
+                                        session_holder["uploader"] = new_uploader
+                                        pages_since_commit = 0
+                                    else:
+                                        raise
+                        else:
+                            # CRITICAL: Check if failure is due to invalid transaction
+                            # process_page_with_retry catches exceptions and returns (False, msg)
+                            # We must detect transaction corruption from the message string
+                            if _is_invalid_transaction_error_msg(error_message):
+                                logger.warning(
+                                    "Invalid transaction detected from page failure, recovering...",
+                                    extra={
+                                        "job_id": str(job_id),
+                                        "page_url": page.url,
+                                        "error": error_message,
+                                    }
+                                )
+                                # Recover session
+                                new_session, new_uploader = await _recover_session(
+                                    container,
+                                    session_holder["session"],
+                                    created_sessions,
+                                    logger,
+                                )
+                                session_holder["session"] = new_session
+                                session_holder["uploader"] = new_uploader
+                                pages_since_commit = 0
+
+                                # Retry this page with recovered session
+                                try:
+                                    retry_success, retry_error = await process_page_with_retry(
+                                        page=page,
+                                        uploader=session_holder["uploader"],
+                                        session=session_holder["session"],
+                                        params=params,
+                                        website=website,
+                                        tenant_slug=tenant.slug if tenant else None,
+                                    )
+                                    if retry_success:
+                                        crawled_titles.add(page.url)
+                                        pages_since_commit += 1
+                                    else:
+                                        num_failed_pages += 1
+                                        logger.error(
+                                            f"Page still failed after session recovery: {page.url}",
+                                            extra={"error": retry_error}
+                                        )
+                                except Exception as recovery_retry_exc:
+                                    num_failed_pages += 1
+                                    logger.error(
+                                        f"Page failed during recovery retry: {page.url}",
+                                        extra={"error": str(recovery_retry_exc)}
+                                    )
+                            else:
+                                num_failed_pages += 1
+                                logger.error(
+                                    f"Failed page: {page.url} - {error_message}",
+                                    extra={
+                                        "website_id": str(params.website_id),
+                                        "tenant_id": str(website.tenant_id),
+                                        "tenant_slug": tenant.slug if tenant else None,
+                                        "page_url": page.url,
+                                        "embedding_model": getattr(website.embedding_model, "name", None),
+                                    },
+                                )
+
+                    except Exception as page_exc:
+                        # Check if this is a recoverable transaction error
+                        if _is_invalid_transaction_error(page_exc):
                             logger.warning(
-                                f"Failed to update heartbeat: {heartbeat_exc}",
-                                extra={"job_id": str(job_id)},
+                                "Invalid transaction detected during page processing, recovering...",
+                                extra={
+                                    "job_id": str(job_id),
+                                    "page_url": page.url,
+                                    "pages_since_commit": pages_since_commit,
+                                    "error": str(page_exc),
+                                }
                             )
 
-                    # Process page with retry logic
-                    success, error_message = await process_page_with_retry(
-                        page=page,
-                        uploader=uploader,
-                        session=session,
-                        params=params,
-                        website=website,
-                        tenant_slug=tenant.slug if tenant else None,
-                    )
+                            # Recover session
+                            new_session, new_uploader = await _recover_session(
+                                container,
+                                session_holder["session"],
+                                created_sessions,
+                                logger,
+                            )
+                            session_holder["session"] = new_session
+                            session_holder["uploader"] = new_uploader
+                            pages_since_commit = 0
 
-                    if success:
-                        crawled_titles.add(page.url)
-                    else:
-                        num_failed_pages += 1
-                        logger.error(
-                            f"Failed page: {page.url} - {error_message}",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "tenant_id": str(website.tenant_id),
-                                "tenant_slug": tenant.slug if tenant else None,
-                                "page_url": page.url,
-                                "embedding_model": getattr(website.embedding_model, "name", None),
-                            },
+                            # Retry this page with recovered session
+                            try:
+                                success, error_message = await process_page_with_retry(
+                                    page=page,
+                                    uploader=session_holder["uploader"],
+                                    session=session_holder["session"],
+                                    params=params,
+                                    website=website,
+                                    tenant_slug=tenant.slug if tenant else None,
+                                )
+                                if success:
+                                    crawled_titles.add(page.url)
+                                    pages_since_commit += 1
+                                else:
+                                    num_failed_pages += 1
+                            except Exception as retry_exc:
+                                num_failed_pages += 1
+                                logger.error(
+                                    f"Page failed even after session recovery: {page.url}",
+                                    extra={
+                                        "job_id": str(job_id),
+                                        "error": str(retry_exc),
+                                    }
+                                )
+                        else:
+                            # Non-transaction error, just count as failed
+                            num_failed_pages += 1
+                            logger.error(
+                                f"Unexpected error processing page: {page.url} - {page_exc}",
+                                extra={
+                                    "website_id": str(params.website_id),
+                                    "tenant_id": str(website.tenant_id),
+                                    "page_url": page.url,
+                                },
+                            )
+
+                # Final commit for any remaining uncommitted pages
+                if pages_since_commit > 0:
+                    try:
+                        await session_holder["session"].commit()
+                        await session_holder["session"].begin()
+                        logger.debug(
+                            f"Final commit of {pages_since_commit} remaining pages",
+                            extra={"pages_since_commit": pages_since_commit, "job_id": str(job_id)}
                         )
+                    except Exception:
+                        pass  # Best effort - pages already processed
+
                 timings["process_pages"] = time.time() - process_start
 
                 # Measure file processing time
@@ -875,9 +1284,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                         # File changed or new - process normally
                         # Create explicit savepoint for proper transaction handling
-                        savepoint = await session.begin_nested()
+                        # Use session_holder for recovery support
+                        savepoint = await session_holder["session"].begin_nested()
                         try:
-                            await uploader.process_file(
+                            await session_holder["uploader"].process_file(
                                 filepath=file,
                                 filename=filename,
                                 website_id=params.website_id,
@@ -890,18 +1300,63 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         except Exception:
                             await savepoint.rollback()
                             raise
-                    except Exception:
-                        logger.exception(
-                            "Exception while uploading file",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "tenant_id": str(website.tenant_id),
-                                "tenant_slug": tenant.slug if tenant else None,
-                                "filename": filename,
-                                "embedding_model": getattr(website.embedding_model, "name", None),
-                            },
-                        )
-                        num_failed_files += 1
+                    except Exception as file_exc:
+                        # Check if this is a recoverable transaction error
+                        if _is_invalid_transaction_error(file_exc):
+                            logger.warning(
+                                "Invalid transaction during file processing, recovering...",
+                                extra={
+                                    "job_id": str(job_id),
+                                    "filename": filename,
+                                }
+                            )
+                            # Recover session
+                            new_session, new_uploader = await _recover_session(
+                                container,
+                                session_holder["session"],
+                                created_sessions,
+                                logger,
+                            )
+                            session_holder["session"] = new_session
+                            session_holder["uploader"] = new_uploader
+
+                            # Retry this file with recovered session
+                            try:
+                                savepoint = await session_holder["session"].begin_nested()
+                                await session_holder["uploader"].process_file(
+                                    filepath=file,
+                                    filename=filename,
+                                    website_id=params.website_id,
+                                    embedding_model=website.embedding_model,
+                                    content_hash=new_file_hash,
+                                )
+                                await savepoint.commit()
+                                crawled_titles.add(filename)
+                            except Exception as retry_exc:
+                                try:
+                                    await savepoint.rollback()
+                                except Exception:
+                                    pass
+                                num_failed_files += 1
+                                logger.error(
+                                    f"File failed even after session recovery: {filename}",
+                                    extra={
+                                        "job_id": str(job_id),
+                                        "error": str(retry_exc),
+                                    }
+                                )
+                        else:
+                            logger.exception(
+                                "Exception while uploading file",
+                                extra={
+                                    "website_id": str(params.website_id),
+                                    "tenant_id": str(website.tenant_id),
+                                    "tenant_slug": tenant.slug if tenant else None,
+                                    "filename": filename,
+                                    "embedding_model": getattr(website.embedding_model, "name", None),
+                                },
+                            )
+                            num_failed_files += 1
                 timings["process_files"] = time.time() - file_start
 
             # Measure cleanup phase (delete stale blobs)
@@ -913,10 +1368,30 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             ]
 
             # Batch delete in ONE query instead of N individual queries
+            # Wrapped with recovery fallback in case session was corrupted during page processing
             if stale_titles:
-                num_deleted_blobs = await info_blob_repo.batch_delete_by_titles_and_website(
-                    titles=stale_titles, website_id=params.website_id
-                )
+                try:
+                    num_deleted_blobs = await info_blob_repo.batch_delete_by_titles_and_website(
+                        titles=stale_titles, website_id=params.website_id
+                    )
+                except Exception as delete_exc:
+                    if _is_invalid_transaction_error(delete_exc):
+                        logger.warning(
+                            "Recovering session for stale blob cleanup...",
+                            extra={"job_id": str(job_id), "num_stale": len(stale_titles)}
+                        )
+                        new_session, new_uploader = await _recover_session(
+                            container, session_holder["session"], created_sessions, logger
+                        )
+                        session_holder["session"] = new_session
+                        session_holder["uploader"] = new_uploader
+                        # Retry with fresh repo from container
+                        info_blob_repo = container.info_blob_repo()
+                        num_deleted_blobs = await info_blob_repo.batch_delete_by_titles_and_website(
+                            titles=stale_titles, website_id=params.website_id
+                        )
+                    else:
+                        raise
                 if num_deleted_blobs > 0:
                     logger.info(
                         f"Batch deleted {num_deleted_blobs} stale blobs",
@@ -946,7 +1421,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 .where(WebsitesTable.tenant_id == website.tenant_id)  # Tenant isolation
                 .values(last_crawled_at=sa.func.now())
             )
-            await session.execute(stmt)
+            await session_holder["session"].execute(stmt)
 
             # Calculate file skip rate for performance analysis
             file_skip_rate = (num_skipped_files / num_files * 100) if num_files > 0 else 0
@@ -1006,14 +1481,39 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # the crawl_run or website stats since a new crawl should handle that
                 return {"status": "preempted", "pages_crawled": num_pages}
 
-            crawl_run = await crawl_run_repo.one(params.run_id)
-            crawl_run.update(
-                pages_crawled=num_pages,
-                files_downloaded=num_files,
-                pages_failed=num_failed_pages,
-                files_failed=num_failed_files,
-            )
-            await crawl_run_repo.update(crawl_run)
+            # Update crawl run with recovery fallback
+            try:
+                crawl_run = await crawl_run_repo.one(params.run_id)
+                crawl_run.update(
+                    pages_crawled=num_pages,
+                    files_downloaded=num_files,
+                    pages_failed=num_failed_pages,
+                    files_failed=num_failed_files,
+                )
+                await crawl_run_repo.update(crawl_run)
+            except Exception as update_exc:
+                if _is_invalid_transaction_error(update_exc):
+                    logger.warning(
+                        "Recovering session for crawl_run update...",
+                        extra={"job_id": str(job_id), "run_id": str(params.run_id)}
+                    )
+                    new_session, new_uploader = await _recover_session(
+                        container, session_holder["session"], created_sessions, logger
+                    )
+                    session_holder["session"] = new_session
+                    session_holder["uploader"] = new_uploader
+                    # Retry with fresh repo
+                    crawl_run_repo = container.crawl_run_repo()
+                    crawl_run = await crawl_run_repo.one(params.run_id)
+                    crawl_run.update(
+                        pages_crawled=num_pages,
+                        files_downloaded=num_files,
+                        pages_failed=num_failed_pages,
+                        files_failed=num_failed_files,
+                    )
+                    await crawl_run_repo.update(crawl_run)
+                else:
+                    raise
 
             # ✅ CIRCUIT BREAKER: Update failure tracking and exponential backoff
             # Why: Prevent wasted resources on persistently failing websites
@@ -1037,14 +1537,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     .where(WebsitesTable.tenant_id == website.tenant_id)
                     .values(consecutive_failures=0, next_retry_at=None)
                 )
-                await session.execute(stmt)
+                await session_holder["session"].execute(stmt)
             else:
                 # Failure: Increment counter and apply exponential backoff
                 # Get current failure count
                 current_failures_stmt = sa.select(WebsitesTable.consecutive_failures).where(
                     WebsitesTable.id == params.website_id
                 )
-                current_failures = await session.scalar(current_failures_stmt) or 0
+                current_failures = await session_holder["session"].scalar(current_failures_stmt) or 0
                 new_failures = current_failures + 1
 
                 # Auto-disable threshold: Stop trying after too many failures
@@ -1075,7 +1575,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             next_retry_at=None,  # Clear retry time
                         )
                     )
-                    await session.execute(stmt)
+                    await session_holder["session"].execute(stmt)
                 else:
                     # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
                     # Formula: 2^(n-1) gives: 1st=1h, 2nd=2h, 3rd=4h, 4th=8h, 5th=16h, 6th+=24h
@@ -1100,7 +1600,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         .where(WebsitesTable.tenant_id == website.tenant_id)
                         .values(consecutive_failures=new_failures, next_retry_at=next_retry)
                     )
-                    await session.execute(stmt)
+                    await session_holder["session"].execute(stmt)
 
             task_manager.result_location = (
                 f"/api/v1/websites/{params.website_id}/info-blobs/"
@@ -1108,11 +1608,50 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
         return task_manager.successful()
     finally:
+        # Primary path: normal release when everything worked
         if limiter is not None and tenant is not None and acquired:
             await limiter.release(tenant.id)
             await _reset_tenant_retry_delay(
                 tenant_id=tenant.id, redis_client=redis_client
             )
+        # Fallback path: release pre-acquired slot if tenant injection failed
+        # This ensures we don't leak slots when the worker fails early
+        elif preacquired_tenant_id is not None and not acquired:
+            # Feeder acquired slot but we never set acquired=True
+            # Must release directly via Redis to prevent leak
+            logger.warning(
+                "Releasing pre-acquired slot due to early failure",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(preacquired_tenant_id),
+                    "reason": "tenant_injection_failed" if tenant is None else "acquired_not_set",
+                },
+            )
+            try:
+                # Try to get redis client if we don't have one
+                _fallback_redis = redis_client
+                if _fallback_redis is None:
+                    try:
+                        _fallback_redis = container.redis_client()
+                    except Exception:
+                        pass
+                if _fallback_redis is not None:
+                    release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
+                    await _fallback_redis.eval(
+                        _RELEASE_SLOT_LUA,
+                        1,
+                        release_key,
+                        str(settings.tenant_worker_semaphore_ttl_seconds),
+                    )
+            except Exception as release_exc:
+                logger.error(
+                    "Failed to release pre-acquired slot in fallback",
+                    extra={
+                        "job_id": str(job_id),
+                        "tenant_id": str(preacquired_tenant_id),
+                        "error": str(release_exc),
+                    },
+                )
 
         # P1 FIX: Cleanup Redis retry counters to prevent memory leak
         # Why: Counters persist after job completion, causing Redis bloat
@@ -1121,5 +1660,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 await redis_client.delete(
                     f"job:{job_id}:start_time", f"job:{job_id}:retry_count"
                 )
+            except Exception:
+                pass  # Best effort cleanup
+
+        # Clean up any recovery sessions we created
+        # Why: Session recovery creates new sessions that must be closed
+        # to prevent connection pool exhaustion
+        for recovery_session in created_sessions:
+            try:
+                await recovery_session.close()
             except Exception:
                 pass  # Best effort cleanup

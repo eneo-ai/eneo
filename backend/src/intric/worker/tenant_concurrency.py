@@ -51,6 +51,8 @@ class TenantConcurrencyLimiter:
         "end\n"
         "return current\n"
     ))
+    # NOTE: This script is duplicated in crawl_tasks.py as _RELEASE_SLOT_LUA
+    # Keep both in sync if making changes
     _release_lua: str = field(init=False, default=(
         "local key = KEYS[1]\n"
         "local ttl = tonumber(ARGV[1])\n"
