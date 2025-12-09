@@ -42,8 +42,8 @@ class TestCrawlerSettingSpecs:
             )
 
     def test_expected_settings_count(self):
-        """Verify we have all 17 crawler settings."""
-        assert len(CRAWLER_SETTING_SPECS) == 17
+        """Verify we have all 18 crawler settings."""
+        assert len(CRAWLER_SETTING_SPECS) == 18
 
     def test_known_settings_present(self):
         """Verify all known settings are present."""
@@ -162,7 +162,7 @@ class TestGetAllCrawlerSettings:
             result = get_all_crawler_settings({})
             assert "download_timeout" in result
             assert "crawl_max_length" in result
-            assert len(result) == 17
+            assert len(result) == 18
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
@@ -210,7 +210,7 @@ class TestGetAllCrawlerSettings:
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings(None)
-            assert len(result) == 17
+            assert len(result) == 18
 
 
 class TestValidateCrawlerSetting:

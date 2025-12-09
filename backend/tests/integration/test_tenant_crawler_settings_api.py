@@ -63,7 +63,7 @@ class TestUpdateCrawlerSettings:
         assert response.status_code == 200
         data = response.json()
         assert "settings" in data
-        assert len(data["settings"]) == 17
+        assert len(data["settings"]) == 18
 
     async def test_validation_rejects_out_of_range_below_min(
         self, client, test_tenant, super_api_key
@@ -197,7 +197,7 @@ class TestGetCrawlerSettings:
         data = response.json()
         assert data["overrides"] == []
         assert "download_timeout" in data["settings"]
-        assert len(data["settings"]) == 17
+        assert len(data["settings"]) == 18
 
     async def test_returns_merged_settings_after_update(
         self, client, test_tenant, super_api_key

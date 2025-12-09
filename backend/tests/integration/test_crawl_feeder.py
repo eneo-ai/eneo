@@ -472,7 +472,15 @@ class TestCrawlFeederSplitBrain:
 
         # Simulate lock expiry by setting very short TTL
         await redis_client.expire("crawl_feeder:leader", 1)
-        await asyncio.sleep(1.5)  # Wait for expiry
+
+        # Poll until key actually expires (more reliable than fixed sleep in CI)
+        for _ in range(10):
+            await asyncio.sleep(0.5)
+            if not await redis_client.exists("crawl_feeder:leader"):
+                break
+
+        # Verify key expired before testing acquisition
+        assert not await redis_client.exists("crawl_feeder:leader"), "Lock should have expired"
 
         # Now feeder 2 can acquire
         result_2_after = await feeder_2._try_acquire_leader_lock(redis_client)
