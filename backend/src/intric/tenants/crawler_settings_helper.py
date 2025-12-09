@@ -82,7 +82,14 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "min": 5,
         "max": 1440,
         "env_attr": "crawl_stale_threshold_minutes",
-        "description": "Minutes without activity before job is considered stale (5 min to 24 hours)",
+        "description": "Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)",
+    },
+    "queued_stale_threshold_minutes": {
+        "type": int,
+        "min": 1,
+        "max": 60,
+        "default": 5,
+        "description": "Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)",
     },
     "crawl_heartbeat_interval_seconds": {
         "type": int,

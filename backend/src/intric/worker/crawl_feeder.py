@@ -577,54 +577,157 @@ class CrawlFeeder:
             )
 
     async def _cleanup_orphaned_crawl_jobs(self) -> None:
-        """Clean up orphaned crawl Jobs to prevent "Crawl already in progress" blocking.
+        """Clean up orphaned crawl Jobs with Safe Watchdog pattern.
 
         Why: CrawlRun.status comes from Job.status (via relationship). If a crawl Job gets
         stuck in QUEUED/IN_PROGRESS, the CrawlRun appears as "in progress" and blocks new crawls.
 
-        Strategy: Time-based cleanup - mark crawl Jobs stuck in QUEUED/IN_PROGRESS for
-        > timeout_hours as FAILED. Uses compare-and-set bulk UPDATE for race safety.
+        Safe Watchdog Pattern (prevents infinite re-queue loops):
+        1. KILL expired: Jobs where created_at > max_age → Mark FAILED permanently
+           (Uses created_at which is immutable - prevents infinite loops)
+        2. RESCUE stuck: Jobs where updated_at is stale but created_at is fresh
+           → Re-queue to Redis pending queue, bump updated_at (visibility timeout)
+        3. FAIL long-running: IN_PROGRESS jobs older than conservative timeout → FAILED
 
         Note: CrawlRuns table does NOT have a status column. Status is derived from Job.status.
         """
-        from sqlalchemy import update, and_
+        from sqlalchemy import update, and_, select
 
         from intric.database.database import sessionmanager
         from intric.database.tables.job_table import Jobs
+        from intric.database.tables.websites_table import CrawlRuns, Websites
         from intric.main.models import Status
 
-        timeout_hours = self.settings.orphan_crawl_run_timeout_hours
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
+        # Thresholds (using tenant defaults - could be made per-tenant later)
+        # Stale threshold: 5 minutes - if updated_at hasn't changed, job is likely stuck
+        stale_threshold_minutes = 5
+        # Max age: Hard TTL to prevent infinite re-queue loops (default 2 hours)
+        max_age_seconds = self.settings.crawl_job_max_age_seconds or 7200
+        # IN_PROGRESS timeout: Conservative - long crawls may legitimately run for hours
+        in_progress_timeout_hours = self.settings.orphan_crawl_run_timeout_hours
+
+        now = datetime.now(timezone.utc)
+        stale_cutoff = now - timedelta(minutes=stale_threshold_minutes)
+        max_age_cutoff = now - timedelta(seconds=max_age_seconds)
+        in_progress_cutoff = now - timedelta(hours=in_progress_timeout_hours)
 
         session = None  # Initialize to prevent UnboundLocalError in except block
         try:
             async with sessionmanager.session() as session, session.begin():
-                # Time-based cleanup: Mark stuck crawl jobs as FAILED
-                # Only affects CRAWL task jobs (not file uploads, transcriptions, etc.)
-                # Compare-and-set WHERE clause prevents race conditions
-                cleanup_stmt = (
+                # Phase 1: KILL expired jobs (created_at > max_age)
+                # Why: Prevents infinite re-queue loops. created_at is immutable.
+                kill_expired_stmt = (
                     update(Jobs)
                     .where(
                         and_(
-                            Jobs.task == "CRAWL",  # Only crawl jobs
-                            Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
-                            Jobs.updated_at < cutoff_time,
+                            Jobs.task == "CRAWL",
+                            Jobs.status == Status.QUEUED,
+                            Jobs.created_at < max_age_cutoff,
                         )
                     )
-                    .values(status=Status.FAILED)
+                    .values(
+                        status=Status.FAILED,
+                        updated_at=now,
+                    )
                     .execution_options(synchronize_session=False)
                 )
-                result = await session.execute(cleanup_stmt)
-                cleaned_count = result.rowcount
+                kill_result = await session.execute(kill_expired_stmt)
+                killed_count = kill_result.rowcount
+
+                # Phase 2: RESCUE stuck jobs (stale updated_at but fresh created_at)
+                # Query to get stuck jobs with their crawl data for re-queuing
+                rescue_query = (
+                    select(
+                        Jobs.id.label("job_id"),
+                        Jobs.user_id,
+                        CrawlRuns.id.label("run_id"),
+                        CrawlRuns.tenant_id,
+                        CrawlRuns.website_id,
+                        Websites.url,
+                        Websites.download_files,
+                        Websites.crawl_type,
+                    )
+                    .select_from(Jobs)
+                    .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
+                    .join(Websites, Websites.id == CrawlRuns.website_id)
+                    .where(
+                        and_(
+                            Jobs.task == "CRAWL",
+                            Jobs.status == Status.QUEUED,
+                            Jobs.updated_at < stale_cutoff,  # Stale (stuck)
+                            Jobs.created_at >= max_age_cutoff,  # Not expired (can rescue)
+                        )
+                    )
+                )
+                rescue_result = await session.execute(rescue_query)
+                stuck_jobs = rescue_result.fetchall()
+
+                # Re-queue stuck jobs to Redis pending queue
+                rescued_count = 0
+                for row in stuck_jobs:
+                    try:
+                        await self._requeue_stuck_job(
+                            job_id=row.job_id,
+                            user_id=row.user_id,
+                            run_id=row.run_id,
+                            tenant_id=row.tenant_id,
+                            website_id=row.website_id,
+                            url=row.url,
+                            download_files=row.download_files,
+                            crawl_type=row.crawl_type,
+                        )
+                        rescued_count += 1
+                    except Exception as requeue_exc:
+                        logger.warning(
+                            "Failed to re-queue stuck job",
+                            extra={"job_id": str(row.job_id), "error": str(requeue_exc)},
+                        )
+
+                # Bump updated_at for rescued jobs (visibility timeout)
+                # Why: Prevents immediate re-pickup in next cycle
+                if stuck_jobs:
+                    rescued_job_ids = [row.job_id for row in stuck_jobs]
+                    bump_stmt = (
+                        update(Jobs)
+                        .where(Jobs.id.in_(rescued_job_ids))
+                        .values(updated_at=now)
+                        .execution_options(synchronize_session=False)
+                    )
+                    await session.execute(bump_stmt)
+
+                # Phase 3: FAIL long-running IN_PROGRESS jobs (conservative timeout)
+                # Why: Long crawls may legitimately run for hours, but not forever
+                fail_in_progress_stmt = (
+                    update(Jobs)
+                    .where(
+                        and_(
+                            Jobs.task == "CRAWL",
+                            Jobs.status == Status.IN_PROGRESS,
+                            Jobs.updated_at < in_progress_cutoff,
+                        )
+                    )
+                    .values(
+                        status=Status.FAILED,
+                        updated_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                in_progress_result = await session.execute(fail_in_progress_stmt)
+                failed_in_progress = in_progress_result.rowcount
                 # Transaction auto-commits on exit of session.begin() context
 
-                # Log only if we cleaned something (avoid log spam)
-                if cleaned_count > 0:
+                # Log only if we did something (avoid log spam)
+                if killed_count > 0 or rescued_count > 0 or failed_in_progress > 0:
                     logger.info(
-                        f"Orphan cleanup complete: {cleaned_count} stuck crawl jobs marked as FAILED",
+                        f"Safe Watchdog: killed={killed_count} (expired), "
+                        f"rescued={rescued_count} (re-queued), "
+                        f"failed_in_progress={failed_in_progress}",
                         extra={
-                            "cleaned_count": cleaned_count,
-                            "timeout_hours": timeout_hours,
+                            "killed_expired": killed_count,
+                            "rescued_stuck": rescued_count,
+                            "failed_in_progress": failed_in_progress,
+                            "max_age_seconds": max_age_seconds,
+                            "stale_threshold_minutes": stale_threshold_minutes,
                         },
                     )
 
@@ -636,9 +739,113 @@ class CrawlFeeder:
                 except Exception:
                     pass  # Best effort rollback
             logger.warning(
-                "Failed to cleanup orphaned crawl jobs",
+                "Failed to run Safe Watchdog cleanup",
                 extra={"error": str(exc)},
             )
+
+    async def _requeue_stuck_job(
+        self,
+        job_id: UUID,
+        user_id: UUID,
+        run_id: UUID,
+        tenant_id: UUID,
+        website_id: UUID,
+        url: str,
+        download_files: bool,
+        crawl_type: str,
+    ) -> bool:
+        """Re-queue a stuck job directly to ARQ with Job.status() check.
+
+        Uses ARQ's native enqueue_job() with _job_id for atomic deduplication.
+        Checks Job.status() first to avoid duplicates when DB is out of sync.
+
+        Returns:
+            True if job was re-queued, False if skipped (already in ARQ)
+        """
+        if not self._redis_client:
+            raise RuntimeError("Redis client not initialized")
+
+        # Check ARQ status before re-queuing to prevent duplicates
+        from arq.jobs import Job, JobStatus
+
+        arq_job = Job(job_id=str(job_id), redis=self._redis_client)
+        try:
+            status = await arq_job.status()
+        except Exception as status_exc:
+            logger.warning(
+                "Failed to check ARQ job status, proceeding with re-queue",
+                extra={"job_id": str(job_id), "error": str(status_exc)},
+            )
+            status = JobStatus.not_found  # Assume not found on error
+
+        if status != JobStatus.not_found:
+            # Job is already in ARQ (queued, in_progress, or complete)
+            # Don't re-queue - this would create duplicates
+            logger.info(
+                "Job already in ARQ, skipping re-queue",
+                extra={
+                    "job_id": str(job_id),
+                    "arq_status": status.value,
+                    "tenant_id": str(tenant_id),
+                },
+            )
+            return False
+
+        # FIX: Use ARQ native enqueue instead of redis.rpush()
+        # Why: ARQ's enqueue_job() uses atomic SETNX with _job_id for deduplication.
+        # Manual rpush() bypasses this safety mechanism.
+        from intric.jobs.job_manager import job_manager
+        from intric.jobs.job_models import Task
+        from intric.websites.crawl_dependencies.crawl_models import CrawlTask, CrawlType
+
+        params = CrawlTask(
+            user_id=user_id,
+            website_id=website_id,
+            run_id=run_id,
+            url=url,
+            download_files=download_files,
+            crawl_type=CrawlType(crawl_type) if isinstance(crawl_type, str) else crawl_type,
+        )
+
+        try:
+            await job_manager.enqueue(
+                task=Task.CRAWL,
+                job_id=job_id,  # Use existing job_id for idempotency
+                params=params,
+            )
+
+            logger.info(
+                "Re-queued stuck job directly to ARQ",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "website_id": str(website_id),
+                    "url": url,
+                },
+            )
+            return True
+
+        except Exception as enqueue_exc:
+            # Handle "job already exists" as success (idempotency)
+            error_msg = str(enqueue_exc).lower()
+            if "already exists" in error_msg or "duplicate" in error_msg:
+                logger.info(
+                    "Job already in ARQ (duplicate error), treating as success",
+                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
+                )
+                return True
+
+            logger.error(
+                "Failed to re-queue stuck job to ARQ",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "error": str(enqueue_exc),
+                },
+            )
+            raise
+
+    # NOTE: _hydrate_pending_queues_from_db() removed - Safe Watchdog handles orphan recovery
 
     async def _cleanup_orphaned_crawl_runs(self) -> None:
         """Clean up CrawlRuns with NULL job_id older than timeout threshold.
@@ -872,6 +1079,8 @@ class CrawlFeeder:
                     # Why: Prevents "Crawl already in progress" blocking from stale records
                     await self._cleanup_orphaned_crawl_jobs()
                     await self._cleanup_orphaned_crawl_runs()
+
+                    # DB hydration removed - Safe Watchdog handles orphan recovery
 
                     # Find all tenants with pending crawls
                     # Why: Use SCAN instead of KEYS for production safety

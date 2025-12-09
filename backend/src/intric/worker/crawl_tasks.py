@@ -3,6 +3,7 @@ import hashlib
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
 from uuid import UUID
 
 from arq import Retry
@@ -91,6 +92,8 @@ def _is_invalid_transaction_error_msg(message: str | None) -> bool:
         "invalid transaction" in msg_lower
         or "can't reconnect" in msg_lower
         or "pending rollback" in msg_lower
+        or "autobegin is disabled" in msg_lower  # Session lost transaction state
+        or "another operation is in progress" in msg_lower  # asyncpg connection busy
     )
 
 
@@ -102,11 +105,15 @@ async def _recover_session(
 ) -> tuple[AsyncSession, any]:
     """Recover from an invalid transaction by creating a new session.
 
+    CRITICAL: Aggressively cleans up old session to prevent
+    'InterfaceError: another operation is in progress' from leaking into the new session.
+
     This function handles SQLAlchemy transaction corruption by:
-    1. Rolling back and closing the corrupted session (best effort)
-    2. Creating a fresh session from the session manager
-    3. Tracking the new session for cleanup in the finally block
-    4. Updating the container to use the new session
+    1. Expunging all objects to prevent accidental stale access
+    2. Rolling back and closing the corrupted session (with timeouts)
+    3. Creating a fresh session from the session manager
+    4. Tracking the new session for cleanup in the finally block
+    5. Updating the container to use the new session
 
     Args:
         container: DI container to update
@@ -119,35 +126,122 @@ async def _recover_session(
     """
     from intric.database.database import sessionmanager
 
-    # Clean up old session (best effort - may already be in bad state)
+    # 1. Aggressive Cleanup with timeouts to prevent hanging on wedged connections
     try:
-        await old_session.rollback()
-    except Exception:
-        pass
-    try:
-        await old_session.close()
-    except Exception:
-        pass
+        if old_session:
+            # Detach all objects first to prevent accidental access to stale data
+            old_session.expunge_all()
+            try:
+                # Attempt rollback with timeout to free locks
+                await asyncio.wait_for(old_session.rollback(), timeout=2.0)
+            except Exception:
+                pass  # Rollback may fail if connection is truly broken
 
-    # Create fresh session
+            # Close session with timeout - may return poisoned connection to pool
+            try:
+                await asyncio.wait_for(old_session.close(), timeout=2.0)
+            except Exception:
+                pass  # Close may hang if socket is wedged
+    except Exception as cleanup_exc:
+        logger_instance.warning(
+            f"Error cleaning up old session during recovery: {cleanup_exc}"
+        )
+
+    # 2. Create fresh session
     new_session = await sessionmanager.session().__aenter__()
+
+    # 3. Explicitly start transaction - required since autobegin=False
     await new_session.begin()
 
     # Track for cleanup in finally block
     created_sessions.append(new_session)
 
-    # Update container to use new session
+    # 4. Update container to use new session
     container.session.override(providers.Object(new_session))
 
     # Get fresh uploader with new session
     new_uploader = container.text_processor()
 
     logger_instance.info(
-        "Session recovered after invalid transaction",
+        "Session recovered and initialized",
         extra={"metric_name": "crawl.session.recovered", "metric_value": 1}
     )
 
     return new_session, new_uploader
+
+
+async def execute_with_recovery(
+    container: Container,
+    session_holder: dict,
+    created_sessions: list[AsyncSession],
+    operation_name: str,
+    operation: Callable[..., Any],
+) -> Any:
+    """Execute a database operation with automatic session recovery.
+
+    Wraps the 'try-except-recover-retry' pattern into a reusable function
+    to prevent cascading failures and code duplication. This is critical
+    for post-processing operations that may fail due to corrupted transactions.
+
+    The operation callable should:
+    - Be async (awaitable)
+    - Fetch fresh services from container if needed (they may have stale sessions)
+    - Not require any arguments (use closure to capture needed values)
+
+    Args:
+        container: DI container for session override and service creation
+        session_holder: Dict with 'session' and 'uploader' keys to update on recovery
+        created_sessions: List to track sessions for cleanup
+        operation_name: Human-readable name for logging
+        operation: Async callable to execute (no arguments)
+
+    Returns:
+        Result from the operation
+
+    Raises:
+        Exception: Re-raises non-transaction errors
+    """
+    try:
+        return await operation()
+    except Exception as exc:
+        # Check for both invalid transaction AND autobegin errors
+        if _is_invalid_transaction_error(exc) or _is_invalid_transaction_error_msg(str(exc)):
+            logger.warning(
+                f"Recovering session for {operation_name}...",
+                extra={"error": str(exc), "operation": operation_name}
+            )
+
+            # Perform Recovery
+            new_session, new_uploader = await _recover_session(
+                container,
+                session_holder["session"],
+                created_sessions,
+                logger,
+            )
+
+            # Update References
+            session_holder["session"] = new_session
+            session_holder["uploader"] = new_uploader
+
+            # FIX: Ensure transaction is started on recovered session
+            # Why: _recover_session() calls begin(), but if there's any issue
+            # or if the retry operation commits/rolls back, subsequent operations
+            # may find no active transaction. This defensive check prevents
+            # "Autobegin is disabled" errors in cascading recovery scenarios.
+            if not session_holder["session"].in_transaction():
+                await session_holder["session"].begin()
+
+            # Retry Operation - caller must ensure fresh services are fetched
+            try:
+                return await operation()
+            except Exception as retry_exc:
+                logger.warning(
+                    f"Retry failed after session recovery for {operation_name}",
+                    extra={"error": str(retry_exc), "operation": operation_name},
+                )
+                raise
+        else:
+            raise
 
 
 def _calculate_exponential_backoff(
@@ -334,6 +428,9 @@ async def process_page_with_retry(
     for attempt in range(max_retries):
         try:
             # Create explicit savepoint for proper transaction handling
+            # FIX: Ensure transaction is active before begin_nested()
+            if not session.in_transaction():
+                await session.begin()
             savepoint = await session.begin_nested()
             try:
                 await uploader.process_text(
@@ -866,7 +963,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Get services
             info_blob_repo = container.info_blob_repo()
-            update_website_size_service = container.update_website_size_service()
             website_service = container.website_crud_service()
             website = await website_service.get_website(params.website_id)
             session = container.session()
@@ -875,6 +971,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # This allows session recovery to update the reference mid-processing
             session_holder["session"] = session
             session_holder["uploader"] = uploader
+
+            # Accessor function to get current active session (handles recovery transparently)
+            # Why: After session recovery, container.session.override() doesn't reliably
+            # propagate to Factory-created services. Using this accessor ensures all
+            # post-processing DB operations use the same recovered session.
+            def current_session() -> AsyncSession:
+                """Get the current active session (handles recovery transparently)."""
+                return session_holder["session"]
 
             # CRITICAL: Verify tenant isolation
             current_tenant = container.tenant()
@@ -1285,7 +1389,31 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         # File changed or new - process normally
                         # Create explicit savepoint for proper transaction handling
                         # Use session_holder for recovery support
-                        savepoint = await session_holder["session"].begin_nested()
+                        # FIX: Session recovery if transaction context is closed
+                        # Why: in_transaction()==False but begin() can still fail if the
+                        # session's outer context manager is closed. Need fresh session.
+                        sess = session_holder["session"]
+                        try:
+                            if not sess.in_transaction():
+                                await sess.begin()
+                            savepoint = await sess.begin_nested()
+                        except Exception as tx_exc:
+                            if _is_invalid_transaction_error(tx_exc):
+                                # Session context manager is closed, need recovery
+                                new_session, new_uploader = await _recover_session(
+                                    container,
+                                    sess,
+                                    created_sessions,
+                                    logger,
+                                )
+                                session_holder["session"] = new_session
+                                session_holder["uploader"] = new_uploader
+                                sess = new_session
+                                if not sess.in_transaction():
+                                    await sess.begin()
+                                savepoint = await sess.begin_nested()
+                            else:
+                                raise
                         try:
                             await session_holder["uploader"].process_file(
                                 filepath=file,
@@ -1321,8 +1449,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             session_holder["uploader"] = new_uploader
 
                             # Retry this file with recovered session
+                            # Session was just recovered, should be in clean state
                             try:
-                                savepoint = await session_holder["session"].begin_nested()
+                                sess = session_holder["session"]
+                                if not sess.in_transaction():
+                                    await sess.begin()
+                                savepoint = await sess.begin_nested()
                                 await session_holder["uploader"].process_file(
                                     filepath=file,
                                     filename=filename,
@@ -1405,23 +1537,71 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 num_deleted_blobs = 0
             timings["cleanup_deleted"] = time.time() - cleanup_start
 
-            # Measure website size update
+            # Measure website size update with recovery wrapper
             update_start = time.time()
-            await update_website_size_service.update_website_size(website_id=website.id)
+
+            async def _do_update_size():
+                # FIX: Use current_session() directly instead of container service
+                # Why: Container.session.override() doesn't reliably propagate to
+                # Factory-created services after session recovery. This caused
+                # "Autobegin is disabled" errors when _do_update_size() and
+                # _do_timestamp_update() used different sessions.
+                sess = current_session()
+
+                # Inline the SQL from UpdateWebsiteSizeService to use our session
+                from intric.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
+
+                update_size_stmt = (
+                    sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
+                    .where(InfoBlobsTable.website_id == website.id)
+                    .scalar_subquery()
+                )
+                stmt = (
+                    sa.update(WebsitesTable)
+                    .where(WebsitesTable.id == website.id)
+                    .values(size=update_size_stmt)
+                )
+                await sess.execute(stmt)
+
+            await execute_with_recovery(
+                container=container,
+                session_holder=session_holder,
+                created_sessions=created_sessions,
+                operation_name="website_size_update",
+                operation=_do_update_size,
+            )
             timings["update_size"] = time.time() - update_start
 
-            # Update last_crawled_at timestamp
+            # Update last_crawled_at timestamp with recovery wrapper
             # Why: Track crawl completion time independently from record updates
             # Use database server time for timezone correctness
             from intric.database.tables.websites_table import Websites as WebsitesTable
 
-            stmt = (
+            last_crawled_stmt = (
                 sa.update(WebsitesTable)
                 .where(WebsitesTable.id == params.website_id)
                 .where(WebsitesTable.tenant_id == website.tenant_id)  # Tenant isolation
                 .values(last_crawled_at=sa.func.now())
             )
-            await session_holder["session"].execute(stmt)
+
+            async def _do_timestamp_update():
+                # FIX: Use current_session() for consistency with _do_update_size()
+                sess = current_session()
+                # Defensive: Ensure transaction is active after potential recovery
+                # Why: After session recovery, transaction may not be started if
+                # execute_with_recovery doesn't guarantee it
+                if not sess.in_transaction():
+                    await sess.begin()
+                await sess.execute(last_crawled_stmt)
+                await sess.commit()
+
+            await execute_with_recovery(
+                container=container,
+                session_holder=session_holder,
+                created_sessions=created_sessions,
+                operation_name="last_crawled_at_update",
+                operation=_do_timestamp_update,
+            )
 
             # Calculate file skip rate for performance analysis
             file_skip_rate = (num_skipped_files / num_files * 100) if num_files > 0 else 0
@@ -1464,9 +1644,29 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # SUICIDE CHECK: Verify job wasn't preempted while we were crawling
             # If another user triggered a recrawl and safe preemption marked this job FAILED,
             # we should NOT write results (a new crawl is already running)
+            # FIX: Use current_session() directly instead of container.job_repo()
+            # (container services have stale sessions after recovery)
             from intric.main.models import Status as JobStatus
-            current_job = await job_repo.get_job(job_id)
-            if current_job and current_job.status == JobStatus.FAILED:
+            from intric.database.tables.job_table import Jobs
+
+            async def _do_suicide_check():
+                sess = current_session()
+                if not sess.in_transaction():
+                    await sess.begin()
+                result = await sess.execute(
+                    sa.select(Jobs.status).where(Jobs.id == job_id)
+                )
+                return result.scalar_one_or_none()
+
+            job_status_value = await execute_with_recovery(
+                container=container,
+                session_holder=session_holder,
+                created_sessions=created_sessions,
+                operation_name="suicide_check",
+                operation=_do_suicide_check,
+            )
+
+            if job_status_value == JobStatus.FAILED.value:
                 logger.warning(
                     "Crawl job was preempted during execution - aborting without writing results",
                     extra={
@@ -1481,130 +1681,177 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # the crawl_run or website stats since a new crawl should handle that
                 return {"status": "preempted", "pages_crawled": num_pages}
 
-            # Update crawl run with recovery fallback
-            try:
-                crawl_run = await crawl_run_repo.one(params.run_id)
-                crawl_run.update(
-                    pages_crawled=num_pages,
-                    files_downloaded=num_files,
-                    pages_failed=num_failed_pages,
-                    files_failed=num_failed_files,
-                )
-                await crawl_run_repo.update(crawl_run)
-            except Exception as update_exc:
-                if _is_invalid_transaction_error(update_exc):
-                    logger.warning(
-                        "Recovering session for crawl_run update...",
-                        extra={"job_id": str(job_id), "run_id": str(params.run_id)}
-                    )
-                    new_session, new_uploader = await _recover_session(
-                        container, session_holder["session"], created_sessions, logger
-                    )
-                    session_holder["session"] = new_session
-                    session_holder["uploader"] = new_uploader
-                    # Retry with fresh repo
-                    crawl_run_repo = container.crawl_run_repo()
-                    crawl_run = await crawl_run_repo.one(params.run_id)
-                    crawl_run.update(
+            # Update crawl run with recovery wrapper
+            # FIX: Use current_session() directly instead of container.crawl_run_repo()
+            # (container services have stale sessions after recovery)
+            from intric.database.tables.websites_table import CrawlRuns
+
+            async def _do_crawl_run_update():
+                sess = current_session()
+                if not sess.in_transaction():
+                    await sess.begin()
+                stmt = (
+                    sa.update(CrawlRuns)
+                    .where(CrawlRuns.id == params.run_id)
+                    .values(
                         pages_crawled=num_pages,
                         files_downloaded=num_files,
                         pages_failed=num_failed_pages,
                         files_failed=num_failed_files,
                     )
-                    await crawl_run_repo.update(crawl_run)
-                else:
-                    raise
+                )
+                await sess.execute(stmt)
+
+            await execute_with_recovery(
+                container=container,
+                session_holder=session_holder,
+                created_sessions=created_sessions,
+                operation_name="crawl_run_update",
+                operation=_do_crawl_run_update,
+            )
 
             # ✅ CIRCUIT BREAKER: Update failure tracking and exponential backoff
             # Why: Prevent wasted resources on persistently failing websites
-            from intric.database.tables.websites_table import Websites as WebsitesTable
+            # Note: WebsitesTable import already done above for last_crawled_at
 
             # Determine if crawl was successful
             # Success = at least one item (page or file) AND not everything failed
             total_items = num_pages + num_files
             total_failed = num_failed_pages + num_failed_files
-
             crawl_successful = total_items > 0 and total_failed < total_items
 
-            if crawl_successful:
-                # Success: Reset circuit breaker
-                logger.info(
-                    f"Crawl successful, resetting circuit breaker for website {params.website_id}"
-                )
-                stmt = (
-                    sa.update(WebsitesTable)
-                    .where(WebsitesTable.id == params.website_id)
-                    .where(WebsitesTable.tenant_id == website.tenant_id)
-                    .values(consecutive_failures=0, next_retry_at=None)
-                )
-                await session_holder["session"].execute(stmt)
-            else:
-                # Failure: Increment counter and apply exponential backoff
-                # Get current failure count
-                current_failures_stmt = sa.select(WebsitesTable.consecutive_failures).where(
-                    WebsitesTable.id == params.website_id
-                )
-                current_failures = await session_holder["session"].scalar(current_failures_stmt) or 0
-                new_failures = current_failures + 1
-
-                # Auto-disable threshold: Stop trying after too many failures
-                # Why: Prevents wasting resources on permanently dead sites
-                MAX_FAILURES_BEFORE_DISABLE = 10
-
-                if new_failures >= MAX_FAILURES_BEFORE_DISABLE:
-                    # Auto-disable: Set update_interval to NEVER
-                    from intric.websites.domain.website import UpdateInterval
-
-                    logger.error(
-                        f"Website {params.website_id} auto-disabled after {new_failures} consecutive failures. "
-                        f"User action required to re-enable.",
-                        extra={
-                            "website_id": str(params.website_id),
-                            "url": website.url,
-                            "consecutive_failures": new_failures,
-                        },
+            async def _do_circuit_breaker_update():
+                """Update circuit breaker state with appropriate backoff/reset."""
+                # FIX: Use current_session() for consistency with other operations
+                sess = current_session()
+                if crawl_successful:
+                    # Success: Reset circuit breaker
+                    logger.info(
+                        f"Crawl successful, resetting circuit breaker for website {params.website_id}"
                     )
-
-                    stmt = (
+                    reset_stmt = (
                         sa.update(WebsitesTable)
                         .where(WebsitesTable.id == params.website_id)
                         .where(WebsitesTable.tenant_id == website.tenant_id)
-                        .values(
-                            consecutive_failures=new_failures,
-                            update_interval=UpdateInterval.NEVER,  # Auto-disable
-                            next_retry_at=None,  # Clear retry time
-                        )
+                        .values(consecutive_failures=0, next_retry_at=None)
                     )
-                    await session_holder["session"].execute(stmt)
+                    await sess.execute(reset_stmt)
                 else:
-                    # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
-                    # Formula: 2^(n-1) gives: 1st=1h, 2nd=2h, 3rd=4h, 4th=8h, 5th=16h, 6th+=24h
-                    backoff_hours = min(2 ** (new_failures - 1), 24)
-                    next_retry = datetime.now(timezone.utc) + timedelta(hours=backoff_hours)
-
-                    logger.warning(
-                        f"Crawl failed for website {params.website_id}. "
-                        f"Failure {new_failures}/{MAX_FAILURES_BEFORE_DISABLE}, "
-                        f"backoff {backoff_hours}h until {next_retry.isoformat()}",
-                        extra={
-                            "website_id": str(params.website_id),
-                            "consecutive_failures": new_failures,
-                            "backoff_hours": backoff_hours,
-                            "next_retry_at": next_retry.isoformat(),
-                        },
+                    # Failure: Increment counter and apply exponential backoff
+                    # Get current failure count
+                    current_failures_stmt = sa.select(WebsitesTable.consecutive_failures).where(
+                        WebsitesTable.id == params.website_id
                     )
+                    current_failures = await sess.scalar(current_failures_stmt) or 0
+                    new_failures = current_failures + 1
 
-                    stmt = (
-                        sa.update(WebsitesTable)
-                        .where(WebsitesTable.id == params.website_id)
-                        .where(WebsitesTable.tenant_id == website.tenant_id)
-                        .values(consecutive_failures=new_failures, next_retry_at=next_retry)
-                    )
-                    await session_holder["session"].execute(stmt)
+                    # Auto-disable threshold: Stop trying after too many failures
+                    MAX_FAILURES_BEFORE_DISABLE = 10
+
+                    if new_failures >= MAX_FAILURES_BEFORE_DISABLE:
+                        # Auto-disable: Set update_interval to NEVER
+                        from intric.websites.domain.website import UpdateInterval
+
+                        logger.error(
+                            f"Website {params.website_id} auto-disabled after {new_failures} consecutive failures. "
+                            f"User action required to re-enable.",
+                            extra={
+                                "website_id": str(params.website_id),
+                                "url": website.url,
+                                "consecutive_failures": new_failures,
+                            },
+                        )
+
+                        disable_stmt = (
+                            sa.update(WebsitesTable)
+                            .where(WebsitesTable.id == params.website_id)
+                            .where(WebsitesTable.tenant_id == website.tenant_id)
+                            .values(
+                                consecutive_failures=new_failures,
+                                update_interval=UpdateInterval.NEVER,  # Auto-disable
+                                next_retry_at=None,  # Clear retry time
+                            )
+                        )
+                        await sess.execute(disable_stmt)
+                    else:
+                        # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
+                        backoff_hours = min(2 ** (new_failures - 1), 24)
+                        next_retry = datetime.now(timezone.utc) + timedelta(hours=backoff_hours)
+
+                        logger.warning(
+                            f"Crawl failed for website {params.website_id}. "
+                            f"Failure {new_failures}/{MAX_FAILURES_BEFORE_DISABLE}, "
+                            f"backoff {backoff_hours}h until {next_retry.isoformat()}",
+                            extra={
+                                "website_id": str(params.website_id),
+                                "consecutive_failures": new_failures,
+                                "backoff_hours": backoff_hours,
+                                "next_retry_at": next_retry.isoformat(),
+                            },
+                        )
+
+                        backoff_stmt = (
+                            sa.update(WebsitesTable)
+                            .where(WebsitesTable.id == params.website_id)
+                            .where(WebsitesTable.tenant_id == website.tenant_id)
+                            .values(consecutive_failures=new_failures, next_retry_at=next_retry)
+                        )
+                        await sess.execute(backoff_stmt)
+
+            await execute_with_recovery(
+                container=container,
+                session_holder=session_holder,
+                created_sessions=created_sessions,
+                operation_name="circuit_breaker_update",
+                operation=_do_circuit_breaker_update,
+            )
 
             task_manager.result_location = (
                 f"/api/v1/websites/{params.website_id}/info-blobs/"
             )
+
+            # FIX: Handle job completion here using current_session() to avoid
+            # stale session in task_manager. The task_manager was created with the
+            # ORIGINAL session, so after session recovery, task_manager.job_service
+            # has a stale session that will fail with "closed transaction" error.
+            async def _do_complete_job():
+                """Complete the job using current_session() directly."""
+                from intric.database.tables.job_table import Jobs
+                from intric.main.models import Status
+
+                sess = current_session()
+                if not sess.in_transaction():
+                    await sess.begin()
+
+                stmt = (
+                    sa.update(Jobs)
+                    .where(Jobs.id == job_id)
+                    .values(
+                        status=Status.COMPLETE.value,
+                        finished_at=datetime.now(timezone.utc),
+                        result_location=task_manager.result_location,
+                    )
+                )
+                await sess.execute(stmt)
+                await sess.commit()
+
+                logger.debug(
+                    "Job completed via current_session()",
+                    extra={"job_id": str(job_id)},
+                )
+
+            await execute_with_recovery(
+                container=container,
+                session_holder=session_holder,
+                created_sessions=created_sessions,
+                operation_name="complete_job",
+                operation=_do_complete_job,
+            )
+
+            # Signal task_manager to skip its complete_job() call
+            # Why: We've already completed the job with a fresh session above,
+            # task_manager's job_service has stale session references
+            task_manager._job_already_handled = True
 
         return task_manager.successful()
     finally:

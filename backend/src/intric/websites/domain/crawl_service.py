@@ -138,18 +138,24 @@ class CrawlService:
             )
             return False
 
-    async def _mark_slot_preacquired(self, job_id: UUID) -> None:
+    async def _mark_slot_preacquired(self, job_id: UUID, tenant_id: UUID) -> None:
         """Mark that we pre-acquired a slot for this job.
 
         Worker checks this flag to skip limiter.acquire() (slot already held).
         TTL ensures cleanup if job is never picked up.
 
+        Args:
+            job_id: Job identifier for the flag key
+            tenant_id: Stored in value so worker can release slot even if tenant
+                       injection fails. Consistent with Feeder's implementation.
+
         Raises on failure - caller must handle rollback to prevent double-acquire.
         """
         key = f"job:{job_id}:slot_preacquired"
+        # Store tenant_id (same as Feeder) so worker can release slot on failure
         # Let exception propagate - caller handles rollback
         await self.redis_client.set(
-            key, "1", ex=self.settings.tenant_worker_semaphore_ttl_seconds
+            key, str(tenant_id), ex=self.settings.tenant_worker_semaphore_ttl_seconds
         )
 
     async def _release_slot(self, tenant_id: UUID) -> None:
@@ -210,6 +216,24 @@ class CrawlService:
                     "error": str(exc),
                 },
             )
+            # CRITICAL: Fail the job immediately to prevent orphaned DB records
+            # Why: If rpush fails, job stays QUEUED in DB but never enters Redis.
+            # Without this, job becomes zombie (blocks recrawl but never runs).
+            # By marking FAILED, user can immediately retry.
+            try:
+                await self.task_service.job_service.fail_job(
+                    job_id, error_message=f"Failed to queue: {exc}"
+                )
+                logger.info(
+                    "Marked orphaned job as FAILED after rpush failure",
+                    extra={"job_id": str(job_id)},
+                )
+            except Exception as fail_exc:
+                # Best effort - orphan cleanup will catch it eventually
+                logger.warning(
+                    "Could not fail orphaned job",
+                    extra={"job_id": str(job_id), "error": str(fail_exc)},
+                )
             raise
 
     async def _enqueue_to_arq(
@@ -274,7 +298,7 @@ class CrawlService:
                 try:
                     # Mark flag BEFORE enqueueing (safe hand-off)
                     # Must be inside try block - if mark fails, rollback slot
-                    await self._mark_slot_preacquired(crawl_job.id)
+                    await self._mark_slot_preacquired(crawl_job.id, website.tenant_id)
 
                     # Enqueue directly to ARQ
                     await self._enqueue_to_arq(crawl_job.id, website, crawl_run.id)
