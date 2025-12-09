@@ -1,5 +1,6 @@
 """Minimal adapter for tenant models using LiteLLM."""
 import base64
+import re
 from typing import TYPE_CHECKING, AsyncIterator
 
 import litellm
@@ -19,6 +20,9 @@ from intric.model_providers.infrastructure.tenant_model_credential_resolver impo
 logger = get_logger(__name__)
 
 TOKENS_RESERVED_FOR_COMPLETION = 1000
+
+# Regex to match Qwen3 thinking blocks: <think>...</think>
+THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 if TYPE_CHECKING:
     from intric.ai_models.completion_models.completion_model import Context
@@ -69,6 +73,23 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Example: "openai/openai/gpt-4" -> sends "openai/gpt-4" to custom endpoint
         self.litellm_model = f"{provider_type}/{model.name}"
         self.provider_type = provider_type
+
+    def _strip_thinking_content(self, text: str) -> str:
+        """
+        Strip Qwen3-style thinking blocks from response text.
+
+        Qwen3 models with thinking enabled wrap reasoning in <think>...</think> tags.
+        This method removes those blocks to return only the final response.
+
+        Args:
+            text: Response text potentially containing thinking blocks
+
+        Returns:
+            str: Text with thinking blocks removed
+        """
+        if not text:
+            return text
+        return THINKING_BLOCK_PATTERN.sub("", text).strip()
 
     def _build_image(self, file: File) -> dict:
         """
@@ -241,12 +262,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            # Reasoning model support: Add max_completion_tokens for reasoning models
-            if self.model.reasoning:
-                # O1 and similar reasoning models need max_completion_tokens
-                if "max_completion_tokens" not in model_kwargs_dict:
-                    model_kwargs_dict["max_completion_tokens"] = 5000
-                    logger.debug("Added max_completion_tokens=5000 for reasoning model")
+            # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
+            # require it explicitly or return empty responses
+            if "max_tokens" not in model_kwargs_dict and "max_completion_tokens" not in model_kwargs_dict:
+                # Use 1/4 of model's token limit, capped at 4096
+                default_max = min(self.model.token_limit // 4, 4096) if self.model.token_limit else 4096
+                model_kwargs_dict["max_tokens"] = default_max
+                logger.debug(f"Added default max_tokens={default_max} (from token_limit={self.model.token_limit})")
 
             kwargs.update(model_kwargs_dict)
 
@@ -301,12 +323,24 @@ class TenantModelAdapter(CompletionModelAdapter):
                 **litellm_kwargs,
             )
 
+            # DEBUG: Log raw response
+            logger.debug(f"[DEBUG] Raw response: {response}")
+
             # Parse response
             completion = Completion()
             if response.choices and len(response.choices) > 0:
                 choice = response.choices[0]
+
+                # DEBUG: Log message details
+                logger.debug(f"[DEBUG] Message: {choice.message}")
+                logger.debug(f"[DEBUG] Message attrs: {dir(choice.message)}")
+                if hasattr(choice.message, "reasoning_content"):
+                    logger.debug(f"[DEBUG] reasoning_content: {choice.message.reasoning_content}")
+
                 if hasattr(choice.message, "content"):
-                    completion.text = choice.message.content
+                    content = choice.message.content
+                    # Strip thinking blocks for models like Qwen3
+                    completion.text = self._strip_thinking_content(content)
                 completion.stop = choice.finish_reason == "stop"
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Completion successful")
@@ -389,6 +423,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
+        # DEBUG: Log incoming parameters
+        logger.debug(f"[DEBUG] model_kwargs received: {model_kwargs}")
+        logger.debug(f"[DEBUG] extra kwargs received: {kwargs}")
+
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -406,6 +444,11 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
+            # DEBUG: Log what we're sending
+            logger.debug(f"[DEBUG] litellm_model: {self.litellm_model}")
+            logger.debug(f"[DEBUG] messages: {messages}")
+            logger.debug(f"[DEBUG] litellm_kwargs: {litellm_kwargs}")
+
             # Create stream - can raise exceptions for auth/network errors
             stream = await litellm.acompletion(
                 model=self.litellm_model,
@@ -495,21 +538,67 @@ class TenantModelAdapter(CompletionModelAdapter):
         try:
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration")
 
+            # Buffer for handling thinking blocks that span chunks
+            buffer = ""
+            inside_thinking = False
+            thinking_stripped = False
+
             async for chunk in stream:
+                # DEBUG: Log raw chunk to diagnose empty responses
+                logger.debug(f"[DEBUG] Raw chunk: {chunk}")
+
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
 
-                    completion = Completion()
+                    # DEBUG: Log delta details
+                    logger.debug(f"[DEBUG] Delta: {delta}")
+
+                    content = ""
                     if hasattr(delta, "content") and delta.content:
-                        completion.text = delta.content
+                        content = delta.content
 
                     finish_reason = chunk.choices[0].finish_reason
-                    if finish_reason:
-                        completion.stop = finish_reason == "stop"
 
-                    # Only yield if there's content or it's the final chunk
-                    if completion.text or completion.stop:
-                        yield completion
+                    # Handle thinking blocks for Qwen3-style models
+                    if content:
+                        buffer += content
+
+                        # Check if we're entering a thinking block
+                        if "<think>" in buffer and not inside_thinking:
+                            inside_thinking = True
+                            # Keep content before <think>
+                            pre_think = buffer.split("<think>")[0]
+                            if pre_think.strip():
+                                yield Completion(text=pre_think)
+                            buffer = buffer[buffer.index("<think>"):]
+
+                        # Check if thinking block is complete
+                        if inside_thinking and "</think>" in buffer:
+                            inside_thinking = False
+                            thinking_stripped = True
+                            # Get content after </think>
+                            post_think = buffer.split("</think>", 1)[1].lstrip()
+                            buffer = post_think
+                            if buffer:
+                                yield Completion(text=buffer)
+                                buffer = ""
+
+                        # If not in thinking block, yield content
+                        if not inside_thinking and buffer and not thinking_stripped:
+                            yield Completion(text=buffer)
+                            buffer = ""
+                        elif not inside_thinking and buffer and thinking_stripped:
+                            yield Completion(text=buffer)
+                            buffer = ""
+
+                    # Handle final chunk
+                    if finish_reason:
+                        # Yield any remaining buffer (stripped of thinking if incomplete)
+                        if buffer and not inside_thinking:
+                            cleaned = self._strip_thinking_content(buffer)
+                            if cleaned:
+                                yield Completion(text=cleaned)
+                        yield Completion(text="", stop=finish_reason == "stop")
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed")
 
