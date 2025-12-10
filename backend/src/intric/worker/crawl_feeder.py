@@ -612,10 +612,49 @@ class CrawlFeeder:
         in_progress_cutoff = now - timedelta(hours=in_progress_timeout_hours)
 
         session = None  # Initialize to prevent UnboundLocalError in except block
+        expired_jobs = []  # Track expired jobs for slot release after transaction
+        orphaned_job_ids = []  # Track orphaned jobs (no CrawlRun) for flag-based slot release
         try:
             async with sessionmanager.session() as session, session.begin():
                 # Phase 1: KILL expired jobs (created_at > max_age)
                 # Why: Prevents infinite re-queue loops. created_at is immutable.
+
+                # Step 1a: SELECT ALL expired job IDs (including orphaned jobs without CrawlRun)
+                all_expired_query = (
+                    select(Jobs.id)
+                    .where(
+                        and_(
+                            Jobs.task == "CRAWL",
+                            Jobs.status == Status.QUEUED,
+                            Jobs.created_at < max_age_cutoff,
+                        )
+                    )
+                )
+                all_expired_result = await session.execute(all_expired_query)
+                all_expired_ids = {row.id for row in all_expired_result.fetchall()}
+
+                # Step 1b: SELECT jobs WITH CrawlRuns (need tenant_id for slot release)
+                expired_query = (
+                    select(Jobs.id.label("job_id"), CrawlRuns.tenant_id)
+                    .select_from(Jobs)
+                    .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
+                    .where(
+                        and_(
+                            Jobs.task == "CRAWL",
+                            Jobs.status == Status.QUEUED,
+                            Jobs.created_at < max_age_cutoff,
+                        )
+                    )
+                )
+                expired_result = await session.execute(expired_query)
+                expired_jobs = expired_result.fetchall()
+
+                # Step 1c: Identify orphaned jobs (expired but no CrawlRun)
+                # These still need slot release if they have a pre-acquired flag
+                jobs_with_crawlrun = {row.job_id for row in expired_jobs}
+                orphaned_job_ids = list(all_expired_ids - jobs_with_crawlrun)
+
+                # Step 1b: UPDATE - mark expired jobs as FAILED
                 kill_expired_stmt = (
                     update(Jobs)
                     .where(
@@ -697,8 +736,15 @@ class CrawlFeeder:
 
                 # Phase 3: FAIL long-running IN_PROGRESS jobs (conservative timeout)
                 # Why: Long crawls may legitimately run for hours, but not forever
-                fail_in_progress_stmt = (
-                    update(Jobs)
+                # CRITICAL: We must release Redis slots for these jobs, not just update DB
+                # Otherwise we get "zombie slots" that permanently block new jobs
+                fail_in_progress_query = (
+                    select(
+                        Jobs.id.label("job_id"),
+                        CrawlRuns.tenant_id,
+                    )
+                    .select_from(Jobs)
+                    .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
                     .where(
                         and_(
                             Jobs.task == "CRAWL",
@@ -706,30 +752,142 @@ class CrawlFeeder:
                             Jobs.updated_at < in_progress_cutoff,
                         )
                     )
-                    .values(
-                        status=Status.FAILED,
-                        updated_at=now,
-                    )
-                    .execution_options(synchronize_session=False)
                 )
-                in_progress_result = await session.execute(fail_in_progress_stmt)
-                failed_in_progress = in_progress_result.rowcount
+                fail_in_progress_result = await session.execute(fail_in_progress_query)
+                stale_in_progress_jobs = fail_in_progress_result.fetchall()
+
+                # Mark jobs as FAILED in database
+                failed_in_progress = 0
+                if stale_in_progress_jobs:
+                    stale_job_ids = [row.job_id for row in stale_in_progress_jobs]
+                    fail_stmt = (
+                        update(Jobs)
+                        .where(Jobs.id.in_(stale_job_ids))
+                        .values(status=Status.FAILED, updated_at=now)
+                        .execution_options(synchronize_session=False)
+                    )
+                    fail_result = await session.execute(fail_stmt)
+                    failed_in_progress = fail_result.rowcount
                 # Transaction auto-commits on exit of session.begin() context
 
-                # Log only if we did something (avoid log spam)
-                if killed_count > 0 or rescued_count > 0 or failed_in_progress > 0:
+            # Release Redis slots OUTSIDE the DB transaction
+            # Why: Redis operations shouldn't block DB commit, and we want to
+            # release even if there are Redis errors (best effort)
+            redis_client = self._redis_client
+
+            # Phase 1 slot release: Release slots for expired QUEUED jobs
+            # Only release if flag exists (job had pre-acquired slot from optimistic acquire)
+            if expired_jobs and redis_client:
+                expired_released = 0
+                for row in expired_jobs:
+                    flag_key = f"job:{row.job_id}:slot_preacquired"
+                    try:
+                        # Only release if flag exists (job had pre-acquired slot)
+                        if await redis_client.get(flag_key):
+                            await self._release_slot(row.tenant_id, redis_client)
+                            await redis_client.delete(flag_key)
+                            expired_released += 1
+                            logger.debug(
+                                "Released slot for expired QUEUED job",
+                                extra={"job_id": str(row.job_id), "tenant_id": str(row.tenant_id)},
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to release slot for expired job",
+                            extra={"job_id": str(row.job_id), "error": str(exc)},
+                        )
+                if expired_released > 0:
                     logger.info(
-                        f"Safe Watchdog: killed={killed_count} (expired), "
-                        f"rescued={rescued_count} (re-queued), "
-                        f"failed_in_progress={failed_in_progress}",
-                        extra={
-                            "killed_expired": killed_count,
-                            "rescued_stuck": rescued_count,
-                            "failed_in_progress": failed_in_progress,
-                            "max_age_seconds": max_age_seconds,
-                            "stale_threshold_minutes": stale_threshold_minutes,
-                        },
+                        f"Safe Watchdog released {expired_released} slots for expired QUEUED jobs",
+                        extra={"expired_released": expired_released},
                     )
+
+            # Phase 1b: Release slots for orphaned jobs (no CrawlRun, e.g., Website deleted)
+            # These jobs are marked FAILED by the bulk UPDATE but weren't in expired_jobs
+            # because they don't have a CrawlRun to JOIN with. We read tenant_id from the flag.
+            if orphaned_job_ids and redis_client:
+                orphaned_released = 0
+                # Use pipelining for batch performance
+                pipeline = redis_client.pipeline()
+                for job_id in orphaned_job_ids:
+                    pipeline.get(f"job:{job_id}:slot_preacquired")
+                try:
+                    flag_values = await pipeline.execute()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to fetch flags for orphaned jobs",
+                        extra={"error": str(exc)},
+                    )
+                    flag_values = [None] * len(orphaned_job_ids)
+
+                for job_id, flag_value in zip(orphaned_job_ids, flag_values):
+                    if not flag_value:
+                        # Flag expired or never existed - permanent leak requiring manual intervention
+                        logger.error(
+                            "Slot leak detected: Orphaned job has no Redis flag (expired or missing)",
+                            extra={"job_id": str(job_id)},
+                        )
+                        continue
+
+                    try:
+                        tenant_id = UUID(flag_value.decode())
+                        await self._release_slot(tenant_id, redis_client)
+                        await redis_client.delete(f"job:{job_id}:slot_preacquired")
+                        orphaned_released += 1
+                        logger.info(
+                            "Released slot for orphaned job (Website likely deleted)",
+                            extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to release slot for orphaned job",
+                            extra={"job_id": str(job_id), "error": str(exc)},
+                        )
+                if orphaned_released > 0:
+                    logger.info(
+                        f"Safe Watchdog released {orphaned_released} slots for orphaned jobs",
+                        extra={"orphaned_released": orphaned_released},
+                    )
+
+            # Phase 3 slot release: Release slots for long-running IN_PROGRESS jobs
+            if stale_in_progress_jobs and redis_client:
+                released_slots = 0
+                for row in stale_in_progress_jobs:
+                    try:
+                        await self._release_slot(row.tenant_id, redis_client)
+                        # Also clean up pre-acquired flag if it exists (prevents zombie flags)
+                        flag_key = f"job:{row.job_id}:slot_preacquired"
+                        await redis_client.delete(flag_key)
+                        released_slots += 1
+                    except Exception as slot_exc:
+                        logger.warning(
+                            "Failed to release slot for failed job",
+                            extra={
+                                "job_id": str(row.job_id),
+                                "tenant_id": str(row.tenant_id),
+                                "error": str(slot_exc),
+                            },
+                        )
+                if released_slots > 0:
+                    logger.info(
+                        f"Safe Watchdog released {released_slots} zombie slots",
+                        extra={"released_slots": released_slots},
+                    )
+
+            # Log only if we did something (avoid log spam)
+            if killed_count > 0 or rescued_count > 0 or failed_in_progress > 0:
+                logger.info(
+                    f"Safe Watchdog: killed={killed_count} (expired), "
+                    f"rescued={rescued_count} (re-queued), "
+                    f"failed_in_progress={failed_in_progress}",
+                    extra={
+                        "killed_expired": killed_count,
+                        "rescued_stuck": rescued_count,
+                        "failed_in_progress": failed_in_progress,
+                        "max_age_seconds": max_age_seconds,
+                        "stale_threshold_minutes": stale_threshold_minutes,
+                    },
+                )
 
         except Exception as exc:
             # Rollback on failure to prevent partial state

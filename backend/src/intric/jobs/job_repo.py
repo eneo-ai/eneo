@@ -52,6 +52,38 @@ class JobRepository:
         )
         await self.delegate.session.execute(stmt)
 
+    async def mark_job_started(self, id: UUID) -> bool:
+        """Atomically transition job from QUEUED to IN_PROGRESS.
+
+        Uses Compare-and-Swap (CAS) pattern to prevent race conditions where:
+        1. Safe Watchdog marks expired QUEUED job as FAILED
+        2. Worker dequeues same job from ARQ (doesn't know DB changed)
+        3. Worker would blindly set status to IN_PROGRESS, "resurrecting" the job
+
+        This atomic check-and-update ensures the worker only starts the job if
+        it's still in QUEUED state, preventing zombie job resurrection.
+
+        Args:
+            id: Job UUID to start
+
+        Returns:
+            True if job was successfully transitioned to IN_PROGRESS
+            False if job status had already changed (e.g., to FAILED by watchdog)
+        """
+        from intric.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.status == Status.QUEUED)  # KEY: Only if still QUEUED
+            .values(
+                status=Status.IN_PROGRESS,
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate.session.execute(stmt)
+        return result.rowcount > 0
+
     async def mark_job_failed_if_running(
         self, id: UUID, error_message: str
     ) -> int:

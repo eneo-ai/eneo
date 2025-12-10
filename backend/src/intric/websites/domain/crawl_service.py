@@ -171,6 +171,36 @@ class CrawlService:
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
 
+    async def release_job_resources(self, job_id: UUID, tenant_id: UUID) -> None:
+        """Release slot and clean up flag for a failed/preempted job.
+
+        Called by Safe Preemption (WebsiteCRUDService) when preempting stale jobs.
+        Safe to call even if resources don't exist (idempotent).
+        Double-release is handled gracefully by Lua script (counter clamps at 0).
+
+        Args:
+            job_id: Job ID to clean up flag for
+            tenant_id: Tenant ID for slot release
+        """
+        # Release slot using Redis EVAL for atomic Lua script execution (best-effort)
+        key = f"tenant:{tenant_id}:active_jobs"
+        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
+        try:
+            # Note: redis_client.eval runs Lua script atomically on Redis server
+            await self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl))
+        except Exception as exc:
+            logger.warning(
+                "Failed to release slot for preempted job",
+                extra={"tenant_id": str(tenant_id), "job_id": str(job_id), "error": str(exc)},
+            )
+
+        # Delete pre-acquired flag (harmless if doesn't exist)
+        flag_key = f"job:{job_id}:slot_preacquired"
+        try:
+            await self.redis_client.delete(flag_key)
+        except Exception:
+            pass  # Best effort - flag may not exist
+
     async def _add_to_pending_queue(
         self,
         tenant_id: UUID,
