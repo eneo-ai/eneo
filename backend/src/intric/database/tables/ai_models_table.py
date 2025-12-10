@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from intric.database.tables.base_class import BaseCrossReference, BasePublic
+from intric.database.tables.base_class import BasePublic
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationsTable,
 )
@@ -40,30 +40,21 @@ class CompletionModels(BasePublic):
         ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
+    # Settings (previously in separate completion_model_settings table)
+    is_enabled: Mapped[bool] = mapped_column(server_default="True")
+    is_default: Mapped[bool] = mapped_column(server_default="False")
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
+        relationship(back_populates="completion_models")
+    )
+
     __table_args__ = (
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
             name="ck_completion_models_tenant_provider",
         ),
-    )
-
-
-class CompletionModelSettings(BaseCrossReference):
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True
-    )
-    completion_model_id: Mapped[UUID] = mapped_column(
-        ForeignKey(CompletionModels.id, ondelete="CASCADE"), primary_key=True
-    )
-    is_org_enabled: Mapped[bool] = mapped_column(server_default="False")
-    is_org_default: Mapped[bool] = mapped_column(server_default="False")
-
-    # Security classification relationship
-    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
-    )
-    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
-        relationship(back_populates="completion_model_settings")
     )
 
 
@@ -88,30 +79,21 @@ class TranscriptionModels(BasePublic):
         ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
+    # Settings (previously in separate transcription_model_settings table)
+    is_enabled: Mapped[bool] = mapped_column(server_default="True")
+    is_default: Mapped[bool] = mapped_column(server_default="False")
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
+        relationship(back_populates="transcription_models")
+    )
+
     __table_args__ = (
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
             name="ck_transcription_models_tenant_provider",
         ),
-    )
-
-
-class TranscriptionModelSettings(BaseCrossReference):
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True
-    )
-    transcription_model_id: Mapped[UUID] = mapped_column(
-        ForeignKey(TranscriptionModels.id, ondelete="CASCADE"), primary_key=True
-    )
-    is_org_enabled: Mapped[bool] = mapped_column(server_default="False")
-    is_org_default: Mapped[bool] = mapped_column(server_default="False")
-
-    # Security classification relationship
-    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
-    )
-    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
-        relationship(back_populates="transcription_model_settings")
     )
 
 
@@ -139,30 +121,21 @@ class EmbeddingModels(BasePublic):
         ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
+    # Settings (previously in separate embedding_model_settings table)
+    is_enabled: Mapped[bool] = mapped_column(server_default="True")
+    is_default: Mapped[bool] = mapped_column(server_default="False")
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
+        relationship(back_populates="embedding_models")
+    )
+
     __table_args__ = (
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
             name="ck_embedding_models_tenant_provider",
         ),
-    )
-
-
-class EmbeddingModelSettings(BaseCrossReference):
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True
-    )
-    embedding_model_id: Mapped[UUID] = mapped_column(
-        ForeignKey(EmbeddingModels.id, ondelete="CASCADE"), primary_key=True
-    )
-    is_org_enabled: Mapped[bool] = mapped_column(server_default="False")
-    is_org_default: Mapped[bool] = mapped_column(server_default="False")
-
-    # Security classification relationship
-    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
-    )
-    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
-        relationship(back_populates="embedding_model_settings")
     )
 
 

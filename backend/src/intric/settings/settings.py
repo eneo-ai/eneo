@@ -22,7 +22,6 @@ class SettingsInDB(SettingsUpsert, InDB):
 class SettingsPublic(SettingsBase):
     using_templates: bool = False  # Feature flag for template management
     tenant_credentials_enabled: bool = False  # Global config for tenant credential enforcement
-    tenant_models_enabled: bool = False  # Global config for tenant-specific model management
 
 
 class GetModelsResponse(BaseModel):

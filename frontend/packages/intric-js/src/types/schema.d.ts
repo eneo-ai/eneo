@@ -6524,11 +6524,6 @@ export interface components {
        * @default false
        */
       tenant_credentials_enabled?: boolean;
-      /**
-       * Tenant Models Enabled
-       * @default false
-       */
-      tenant_models_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {

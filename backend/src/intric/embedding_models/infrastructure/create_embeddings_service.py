@@ -39,11 +39,10 @@ class CreateEmbeddingsService:
         self.session = session
 
     async def _get_adapter(self, model: "EmbeddingModel") -> EmbeddingModelAdapter:
-        # PRIORITY 1: Check for tenant model (has provider_id) - only if feature flag enabled
+        # PRIORITY 1: Check for tenant model (has provider_id)
         # Tenant models use LiteLLMEmbeddingAdapter with auto-generated LiteLLM names
         if (hasattr(model, 'provider_id') and
-            model.provider_id and
-            self.config.tenant_models_enabled):
+            model.provider_id):
 
             # Check if session is available
             if not self.session:

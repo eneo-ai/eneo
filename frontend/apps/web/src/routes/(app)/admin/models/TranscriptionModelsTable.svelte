@@ -33,14 +33,11 @@
       }[]
     | undefined = undefined;
   export let tenantCredentialsEnabled: boolean = false;
-  export let tenantModelsEnabled: boolean = false;
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
 
-  // When tenant_models_enabled, backend returns both global and tenant models
+  // Backend returns both global and tenant models
   // Filter to show only tenant models in UI
-  $: filteredModels = tenantModelsEnabled
-    ? transcriptionModels.filter(m => m.provider_id != null)
-    : transcriptionModels;
+  $: filteredModels = transcriptionModels.filter(m => m.provider_id != null);
 
   const table = Table.createWithResource(filteredModels);
 
@@ -128,52 +125,32 @@
 
   function createGroupFilter(groupKey: string) {
     return function (model: TranscriptionModel) {
-      if (tenantModelsEnabled) {
-        return model.provider_id === groupKey;
-      } else {
-        return model.org === groupKey;
-      }
+      return model.provider_id === groupKey;
     };
   }
 
   function listGroups(models: TranscriptionModel[]): Array<{ key: string; name: string }> {
-    if (tenantModelsEnabled) {
-      const uniqueProviders = new Set<string>();
-      for (const model of models) {
-        if (model.provider_id) uniqueProviders.add(model.provider_id);
-      }
-      return Array.from(uniqueProviders).map(providerId => {
-        const provider = providers.find(p => p.id === providerId);
-        return {
-          key: providerId,
-          name: provider?.name || "Unknown Provider"
-        };
-      });
-    } else {
-      const uniqueOrgs = new Set<string>();
-      for (const model of models) {
-        if (model.org) uniqueOrgs.add(model.org);
-      }
-      return Array.from(uniqueOrgs).map(org => ({
-        key: org,
-        name: org
-      }));
+    // Always group by provider for tenant models
+    const uniqueProviders = new Set<string>();
+    for (const model of models) {
+      if (model.provider_id) uniqueProviders.add(model.provider_id);
     }
+    return Array.from(uniqueProviders).map(providerId => {
+      const provider = providers.find(p => p.id === providerId);
+      return {
+        key: providerId,
+        name: provider?.name || "Unknown Provider"
+      };
+    });
   }
 
   /**
    * Get the credential provider ID for a given group.
    * For tenant models, returns the provider's credential type.
-   * For global models, returns the model's credential_provider field.
    */
   function getProviderIdForGroup(groupKey: string): string | undefined {
-    if (tenantModelsEnabled) {
-      const provider = providers.find(p => p.id === groupKey);
-      return provider?.type;
-    } else {
-      const model = transcriptionModels.find((m) => m.org === groupKey);
-      return model?.credential_provider;
-    }
+    const provider = providers.find(p => p.id === groupKey);
+    return provider?.type;
   }
 
   function getCredentialForGroup(groupKey: string, groupName: string) {
@@ -212,7 +189,7 @@
     {/each}
   </Table.Root>
 
-  {#if tenantModelsEnabled && addModelDialogOpen}
+  {#if addModelDialogOpen}
     <div class="flex justify-center pb-4">
       <Button variant="outlined" on:click={() => addModelDialogOpen?.set(true)}>
         <Plus class="w-4 h-4 mr-2" />

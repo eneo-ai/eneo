@@ -18,9 +18,6 @@ if TYPE_CHECKING:
     from intric.database.tables.ai_models_table import (
         TranscriptionModels as TranscriptionModelsDB,
     )
-    from intric.database.tables.ai_models_table import (
-        TranscriptionModelSettings,
-    )
     from intric.users.user import UserInDB
 
 
@@ -76,28 +73,14 @@ class TranscriptionModel(AIModel):
     def create_from_db(
         cls,
         transcription_model_db: "TranscriptionModelsDB",
-        transcription_model_settings: Optional["TranscriptionModelSettings"],
         user: "UserInDB",
     ):
-        if transcription_model_settings is None:
-            is_org_enabled = False
-            is_org_default = False
-            updated_at = transcription_model_db.updated_at
-            security_classification = None
-        else:
-            is_org_enabled = transcription_model_settings.is_org_enabled
-            is_org_default = transcription_model_settings.is_org_default
-            updated_at = transcription_model_settings.updated_at
-            security_classification = (
-                transcription_model_settings.security_classification
-            )
-
-        # Pass raw string values - parent class will convert to enum if valid
+        # Settings are now directly on the model table
         return cls(
             user=user,
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
-            updated_at=updated_at,
+            updated_at=transcription_model_db.updated_at,
             nickname=transcription_model_db.name,
             name=transcription_model_db.model_name,
             family=transcription_model_db.family,
@@ -109,10 +92,10 @@ class TranscriptionModel(AIModel):
             hf_link=transcription_model_db.hf_link,
             base_url=transcription_model_db.base_url,
             is_deprecated=transcription_model_db.is_deprecated,
-            is_org_enabled=is_org_enabled,
-            is_org_default=is_org_default,
+            is_org_enabled=transcription_model_db.is_enabled,
+            is_org_default=transcription_model_db.is_default,
             security_classification=SecurityClassification.to_domain(
-                db_security_classification=security_classification
+                db_security_classification=transcription_model_db.security_classification
             ),
             tenant_id=transcription_model_db.tenant_id,
             provider_id=transcription_model_db.provider_id,

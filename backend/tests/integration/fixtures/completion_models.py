@@ -1,7 +1,7 @@
 """
 Fixtures for completion models (mirrors src/intric/completion_models/).
 
-These fixtures create completion models and their settings.
+These fixtures create completion models with settings stored directly on the model.
 """
 import pytest
 
@@ -11,10 +11,7 @@ from intric.ai_models.model_enums import (
     ModelOrg,
     ModelStability,
 )
-from intric.database.tables.ai_models_table import (
-    CompletionModels,
-    CompletionModelSettings,
-)
+from intric.database.tables.ai_models_table import CompletionModels
 
 
 @pytest.fixture
@@ -22,8 +19,8 @@ def completion_model_factory(admin_user):
     """
     Factory fixture for creating completion models dynamically.
 
-    Creates both the CompletionModel record and its associated settings
-    for the admin user's tenant.
+    Creates CompletionModel records for the admin user's tenant with
+    settings (is_enabled, is_default) stored directly on the model.
 
     Usage:
         async def test_migration(completion_model_factory, db_container):
@@ -41,8 +38,8 @@ def completion_model_factory(admin_user):
         vision: Vision support (defaults to False)
         reasoning: Reasoning support (defaults to False)
         is_deprecated: Whether model is deprecated (defaults to False)
-        is_org_enabled: Whether enabled for tenant (defaults to True)
-        is_org_default: Whether default for tenant (defaults to False)
+        is_enabled: Whether enabled for tenant (defaults to True)
+        is_default: Whether default for tenant (defaults to False)
         family: Model family (defaults to provider-based)
         **kwargs: Additional model properties (hosting, stability, etc.)
 
@@ -58,8 +55,8 @@ def completion_model_factory(admin_user):
         vision: bool = False,
         reasoning: bool = False,
         is_deprecated: bool = False,
-        is_org_enabled: bool = True,
-        is_org_default: bool = False,
+        is_enabled: bool = True,
+        is_default: bool = False,
         family: ModelFamily = None,
         **kwargs
     ) -> CompletionModels:
@@ -87,8 +84,10 @@ def completion_model_factory(admin_user):
         }
         org = org_map.get(provider)
 
-        # Create the completion model
+        # Create the completion model with settings directly on it
         model = CompletionModels(
+            tenant_id=admin_user.tenant_id,
+            provider_id=None,  # Can be set via kwargs if needed
             name=name,
             nickname=nickname,
             token_limit=token_limit,
@@ -106,20 +105,13 @@ def completion_model_factory(admin_user):
             deployment_name=kwargs.get("deployment_name"),
             base_url=kwargs.get("base_url"),
             litellm_model_name=kwargs.get("litellm_model_name"),
+            # Settings are now directly on the model
+            is_enabled=is_enabled,
+            is_default=is_default,
+            security_classification_id=kwargs.get("security_classification_id"),
         )
 
         session.add(model)
-        await session.flush()
-
-        # Create settings for the admin user's tenant
-        settings = CompletionModelSettings(
-            completion_model_id=model.id,
-            tenant_id=admin_user.tenant_id,
-            is_org_enabled=is_org_enabled,
-            is_org_default=is_org_default,
-        )
-
-        session.add(settings)
         await session.flush()
 
         return model

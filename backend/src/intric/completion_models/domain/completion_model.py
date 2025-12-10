@@ -15,10 +15,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from intric.database.tables.ai_models_table import (
-        CompletionModels,
-        CompletionModelSettings,
-    )
+    from intric.database.tables.ai_models_table import CompletionModels
     from intric.users.user import UserInDB
 
 
@@ -97,26 +94,14 @@ class CompletionModel(AIModel):
     def create_from_db(
         cls,
         completion_model_db: "CompletionModels",
-        completion_model_settings: Optional["CompletionModelSettings"],
         user: "UserInDB",
     ):
-        if completion_model_settings is None:
-            is_org_enabled = False
-            is_org_default = False
-            updated_at = completion_model_db.updated_at
-            security_classification = None
-        else:
-            is_org_enabled = completion_model_settings.is_org_enabled
-            is_org_default = completion_model_settings.is_org_default
-            updated_at = completion_model_settings.updated_at
-            security_classification = completion_model_settings.security_classification
-
-        # Pass raw string values - parent class will convert to enum if valid
+        # Settings are now directly on the model table
         return cls(
             user=user,
             id=completion_model_db.id,
             created_at=completion_model_db.created_at,
-            updated_at=updated_at,
+            updated_at=completion_model_db.updated_at,
             nickname=completion_model_db.nickname,
             name=completion_model_db.name,
             token_limit=completion_model_db.token_limit,
@@ -131,13 +116,13 @@ class CompletionModel(AIModel):
             hf_link=completion_model_db.hf_link,
             is_deprecated=completion_model_db.is_deprecated,
             deployment_name=completion_model_db.deployment_name,
-            is_org_enabled=is_org_enabled,
-            is_org_default=is_org_default,
+            is_org_enabled=completion_model_db.is_enabled,
+            is_org_default=completion_model_db.is_default,
             reasoning=completion_model_db.reasoning,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
             security_classification=SecurityClassification.to_domain(
-                db_security_classification=security_classification
+                db_security_classification=completion_model_db.security_classification
             ),
             tenant_id=completion_model_db.tenant_id,
             provider_id=completion_model_db.provider_id,

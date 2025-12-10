@@ -123,62 +123,39 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             )
             cur.execute(assign_role_to_user_query, (user_id, predefined_role_id))
 
-        # Check if any completion model exists and assign it to the user
+        # Check if any completion model exists for this tenant
         check_completion_models_query = sql.SQL(
-            "SELECT id FROM completion_models limit 1"
+            "SELECT id FROM completion_models WHERE tenant_id = %s LIMIT 1"
         )
-        cur.execute(check_completion_models_query)
+        cur.execute(check_completion_models_query, (tenant_id,))
         completion_model = cur.fetchone()
 
         if completion_model is None:
-            # Check if gpt-4o exists
-            check_model_query = sql.SQL("SELECT id FROM completion_models WHERE name = %s")
-            cur.execute(check_model_query, ("gpt-4o",))
-            model = cur.fetchone()
-
-            # Add completion model if none exist
-            if model is None:
-                add_model_query = sql.SQL(
-                    """INSERT INTO completion_models
-                    (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
-                )
-                cur.execute(
-                    add_model_query,
-                    (
-                        "gpt-4o",
-                        "GPT-4o",
-                        "openai",
-                        128000,
-                        "stable",
-                        "usa",
-                        "OpenAI's latest and greatest model, trained on both text and images.",
-                        "OpenAI",
-                        True,
-                        False,
-                    ),
-                )
-                model_id = cur.fetchone()[0]
-            else:
-                model_id = model[0]
-        else:
-            model_id = completion_model[0]
-
-        # Enable the completion model for the tenant
-        check_model_setting_query = sql.SQL(
-            """SELECT 1 FROM completion_model_settings
-            WHERE completion_model_id = %s AND tenant_id = %s"""
-        )
-        cur.execute(check_model_setting_query, (model_id, tenant_id))
-        model_setting = cur.fetchone()
-
-        if model_setting is None:
-            enable_model_query = sql.SQL(
-                """INSERT INTO completion_model_settings
-                (completion_model_id, tenant_id, is_org_enabled, is_org_default)
-                VALUES (%s, %s, %s, %s)"""
+            # Create a tenant-specific completion model with settings directly on it
+            add_model_query = sql.SQL(
+                """INSERT INTO completion_models
+                (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning,
+                 tenant_id, is_enabled, is_default)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
             )
-            cur.execute(enable_model_query, (model_id, tenant_id, True, True))
+            cur.execute(
+                add_model_query,
+                (
+                    "gpt-4o",
+                    "GPT-4o",
+                    "openai",
+                    128000,
+                    "stable",
+                    "usa",
+                    "OpenAI's latest and greatest model, trained on both text and images.",
+                    "OpenAI",
+                    True,
+                    False,
+                    tenant_id,
+                    True,  # is_enabled
+                    True,  # is_default
+                ),
+            )
 
         # Create organization space for the tenant (if not already exists)
         check_org_space_query = sql.SQL(

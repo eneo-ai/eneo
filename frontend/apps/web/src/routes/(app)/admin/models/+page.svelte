@@ -20,11 +20,6 @@
 
   setSecurityContext(data.securityClassifications);
 
-  // Debug logging
-  console.log('Page component data:', data);
-  console.log('data.tenantModelsEnabled:', data.tenantModelsEnabled);
-  console.log('Type of tenantModelsEnabled:', typeof data.tenantModelsEnabled);
-
   let addCompletionModelDialogOpen = writable(false);
   let addEmbeddingModelDialogOpen = writable(false);
   let addTranscriptionModelDialogOpen = writable(false);
@@ -50,7 +45,6 @@
         providers={data.providers}
         credentials={data.credentials}
         tenantCredentialsEnabled={data.tenantCredentialsEnabled}
-        tenantModelsEnabled={data.tenantModelsEnabled}
         addModelDialogOpen={addCompletionModelDialogOpen}
       />
     </Page.Tab>
@@ -60,7 +54,6 @@
         providers={data.providers}
         credentials={data.credentials}
         tenantCredentialsEnabled={data.tenantCredentialsEnabled}
-        tenantModelsEnabled={data.tenantModelsEnabled}
         addModelDialogOpen={addEmbeddingModelDialogOpen}
       />
     </Page.Tab>
@@ -70,15 +63,12 @@
         providers={data.providers}
         credentials={data.credentials}
         tenantCredentialsEnabled={data.tenantCredentialsEnabled}
-        tenantModelsEnabled={data.tenantModelsEnabled}
         addModelDialogOpen={addTranscriptionModelDialogOpen}
       />
     </Page.Tab>
   </Page.Main>
 </Page.Root>
 
-{#if data.tenantModelsEnabled}
-  <AddCompletionModelDialog openController={addCompletionModelDialogOpen} providers={data.providers} />
-  <AddEmbeddingModelDialog openController={addEmbeddingModelDialogOpen} providers={data.providers} />
-  <AddTranscriptionModelDialog openController={addTranscriptionModelDialogOpen} providers={data.providers} />
-{/if}
+<AddCompletionModelDialog openController={addCompletionModelDialogOpen} providers={data.providers} />
+<AddEmbeddingModelDialog openController={addEmbeddingModelDialogOpen} providers={data.providers} />
+<AddTranscriptionModelDialog openController={addTranscriptionModelDialogOpen} providers={data.providers} />

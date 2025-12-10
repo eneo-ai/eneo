@@ -64,7 +64,16 @@ async def create_tenant_completion_model(
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
 
-    # Create the completion model
+    # If setting as default, unset all other defaults first
+    if model_create.is_default:
+        stmt = (
+            sa.update(CompletionModels)
+            .where(CompletionModels.tenant_id == user.tenant_id)
+            .values(is_default=False)
+        )
+        await session.execute(stmt)
+
+    # Create the completion model with settings directly on it
     # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
     # at runtime as f"{provider.provider_type}/{model.name}"
     new_model = CompletionModels(
@@ -88,36 +97,16 @@ async def create_tenant_completion_model(
         is_deprecated=False,
         deployment_name=None,
         base_url=None,
+        # Settings (now directly on model)
+        is_enabled=model_create.is_active,
+        is_default=model_create.is_default,
+        security_classification_id=None,
     )
 
     session.add(new_model)
     await session.flush()
 
-    # Create model settings if is_default is True
-    if model_create.is_default or model_create.is_active:
-        from intric.database.tables.ai_models_table import CompletionModelSettings
-
-        # If setting as default, unset all other defaults first
-        if model_create.is_default:
-            stmt = (
-                sa.update(CompletionModelSettings)
-                .where(CompletionModelSettings.tenant_id == user.tenant_id)
-                .values(is_org_default=False)
-            )
-            await session.execute(stmt)
-
-        # Create settings for this model
-        model_settings = CompletionModelSettings(
-            completion_model_id=new_model.id,
-            tenant_id=user.tenant_id,
-            is_org_enabled=model_create.is_active,
-            is_org_default=model_create.is_default,
-            security_classification_id=None,
-        )
-        session.add(model_settings)
-        await session.flush()
-
-    # Load the model with settings BEFORE committing
+    # Load the model BEFORE committing
     from intric.completion_models.domain.completion_model_repo import CompletionModelRepository
     repo = CompletionModelRepository(session, user)
     completion_model = await repo.one(new_model.id)
@@ -138,7 +127,7 @@ async def delete_tenant_completion_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Delete a tenant-specific completion model."""
-    from intric.database.tables.ai_models_table import CompletionModels, CompletionModelSettings
+    from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
     from intric.main.exceptions import ForbiddenException, NotFoundException
 
@@ -157,14 +146,7 @@ async def delete_tenant_completion_model(
     if model.tenant_id is None:
         raise ForbiddenException("Cannot delete global models")
 
-    # Delete model settings first
-    stmt = sa.delete(CompletionModelSettings).where(
-        CompletionModelSettings.completion_model_id == model_id,
-        CompletionModelSettings.tenant_id == user.tenant_id,
-    )
-    await session.execute(stmt)
-
-    # Delete the model
+    # Delete the model (settings are now on the model itself)
     await session.delete(model)
     await session.commit()
 

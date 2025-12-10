@@ -34,14 +34,11 @@
       }[]
     | undefined = undefined;
   export let tenantCredentialsEnabled: boolean = false;
-  export let tenantModelsEnabled: boolean = false;
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
 
-  // When tenant_models_enabled, backend returns both global and tenant models
+  // Backend returns both global and tenant models
   // Filter to show only tenant models in UI
-  $: filteredModels = tenantModelsEnabled
-    ? completionModels.filter(m => m.provider_id != null)
-    : completionModels;
+  $: filteredModels = completionModels.filter(m => m.provider_id != null);
 
   const table = Table.createWithResource(filteredModels);
 
@@ -67,43 +64,41 @@
       }
     }),
 
-    // Only show provider column if tenant models are enabled
-    ...(tenantModelsEnabled ? [
-      table.column({
-        accessor: (model) => model,
-        header: "Provider",
-        cell: (item) => {
-          const model = item.value;
-          // Tenant models have provider_id
-          if (model.provider_id) {
-            const provider = providers.find((p) => p.id === model.provider_id);
-            return provider?.name || "Unknown";
+    // Provider column - always shown for tenant models
+    table.column({
+      accessor: (model) => model,
+      header: "Provider",
+      cell: (item) => {
+        const model = item.value;
+        // Tenant models have provider_id
+        if (model.provider_id) {
+          const provider = providers.find((p) => p.id === model.provider_id);
+          return provider?.name || "Unknown";
+        }
+        // Global models show org
+        return model.org || "-";
+      },
+      plugins: {
+        sort: {
+          getSortValue(value) {
+            if (value.provider_id) {
+              const provider = providers.find((p) => p.id === value.provider_id);
+              return provider?.name || "";
+            }
+            return value.org || "";
           }
-          // Global models show org
-          return model.org || "-";
         },
-        plugins: {
-          sort: {
-            getSortValue(value) {
-              if (value.provider_id) {
-                const provider = providers.find((p) => p.id === value.provider_id);
-                return provider?.name || "";
-              }
-              return value.org || "";
+        tableFilter: {
+          getFilterValue(value) {
+            if (value.provider_id) {
+              const provider = providers.find((p) => p.id === value.provider_id);
+              return provider?.name || "";
             }
-          },
-          tableFilter: {
-            getFilterValue(value) {
-              if (value.provider_id) {
-                const provider = providers.find((p) => p.id === value.provider_id);
-                return provider?.name || "";
-              }
-              return value.org || "";
-            }
+            return value.org || "";
           }
         }
-      })
-    ] : []),
+      }
+    }),
 
     table.column({
       accessor: (model) => model,
@@ -170,22 +165,15 @@
 
   $: viewModel = table.createViewModel(columns);
 
-  // For tenant models: group by provider_id
-  // For global models: group by org
+  // Group by provider_id for tenant models
   function createGroupFilter(groupKey: string) {
     return function (model: CompletionModel) {
-      if (tenantModelsEnabled) {
-        // Tenant models: filter by provider_id
-        return model.provider_id === groupKey;
-      } else {
-        // Global models: filter by org
-        return model.org === groupKey;
-      }
+      return model.provider_id === groupKey;
     };
   }
 
   function listGroups(models: CompletionModel[]): Array<{ key: string; name: string }> {
-    if (tenantModelsEnabled) {
+    // Always group by provider for tenant models
       // Group by provider_id for tenant models
       const uniqueProviders = new Set<string>();
       for (const model of models) {
@@ -198,34 +186,16 @@
           name: provider?.name || "Unknown Provider"
         };
       });
-    } else {
-      // Group by org for global models
-      const uniqueOrgs = new Set<string>();
-      for (const model of models) {
-        if (model.org) uniqueOrgs.add(model.org);
-      }
-      return Array.from(uniqueOrgs).map(org => ({
-        key: org,
-        name: org
-      }));
-    }
   }
 
   /**
    * Get the credential provider ID for a given group.
    * For tenant models, returns the provider's credential type.
-   * For global models, returns the model's credential_provider field.
    */
   function getProviderIdForGroup(groupKey: string): string | undefined {
-    if (tenantModelsEnabled) {
-      // For tenant models, get provider's type
-      const provider = providers.find(p => p.id === groupKey);
-      return provider?.type;
-    } else {
-      // For global models, use credential_provider from model
-      const model = completionModels.find((m) => m.org === groupKey);
-      return model?.credential_provider;
-    }
+    // For tenant models, get provider's type
+    const provider = providers.find(p => p.id === groupKey);
+    return provider?.type;
   }
 
   function getCredentialForGroup(groupKey: string, groupName: string) {
@@ -263,7 +233,7 @@
     {/each}
   </Table.Root>
 
-  {#if tenantModelsEnabled && addModelDialogOpen}
+  {#if addModelDialogOpen}
     <div class="flex justify-center pb-4">
       <Button variant="outlined" on:click={() => addModelDialogOpen?.set(true)}>
         <Plus class="w-4 h-4 mr-2" />
