@@ -10,24 +10,12 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
-from intric.ai_models.model_enums import ModelFamily
-from intric.main.exceptions import APIKeyNotConfiguredException
-from intric.completion_models.infrastructure.adapters import (
-    AzureOpenAIModelAdapter,
-    ClaudeModelAdapter,
-    LiteLLMModelAdapter,
-    MistralModelAdapter,
-    OpenAIModelAdapter,
-    OVHCloudModelAdapter,
-    VLMMModelAdapter,
-)
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.logging import get_logger
 from intric.sessions.session import SessionInDB
-from intric.settings.credential_resolver import CredentialResolver
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -58,14 +46,6 @@ class CompletionService:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
-        self._adapters = {
-            ModelFamily.OPEN_AI: OpenAIModelAdapter,
-            ModelFamily.VLLM: VLMMModelAdapter,
-            ModelFamily.CLAUDE: ClaudeModelAdapter,
-            ModelFamily.AZURE: AzureOpenAIModelAdapter,
-            ModelFamily.OVHCLOUD: OVHCloudModelAdapter,
-            ModelFamily.MISTRAL: MistralModelAdapter,
-        }
         self.context_builder = context_builder
         self.tenant = tenant
         self.config = config or SETTINGS
@@ -73,137 +53,80 @@ class CompletionService:
         self.session = session
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
-        # PRIORITY 1: Check for tenant model (has provider_id)
-        # Tenant models use TenantModelAdapter with auto-generated LiteLLM names
-        if (hasattr(model, 'provider_id') and
-            model.provider_id):
+        """
+        Get the adapter for the given model.
 
-            # Check if session is available
-            if not self.session:
-                logger.error(
-                    "Tenant model requires database session but none available",
-                    extra={
-                        "model_id": str(model.id) if hasattr(model, 'id') else None,
-                        "model_name": model.name,
-                        "provider_id": str(model.provider_id),
-                        "tenant_id": str(self.tenant.id) if self.tenant else None,
-                    }
-                )
-                raise ValueError(
-                    f"Tenant model '{model.name}' requires database session to load provider credentials. "
-                    "Please ensure the CompletionService is initialized with a database session."
-                )
+        All models must have a provider_id linking to a ModelProvider.
+        Uses TenantModelAdapter which routes through LiteLLM.
+        """
+        import sqlalchemy as sa
+        from intric.database.tables.model_providers_table import ModelProviders
+        from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
+            TenantModelCredentialResolver,
+        )
+        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
 
-            # Load provider data from database
-            import sqlalchemy as sa
-            from intric.database.tables.model_providers_table import ModelProviders
-            from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
-                TenantModelCredentialResolver,
-            )
-            from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
-                TenantModelAdapter,
+        # All models must have provider_id
+        if not hasattr(model, 'provider_id') or not model.provider_id:
+            raise ValueError(
+                f"Model '{model.name}' is missing required provider_id. "
+                "All models must be associated with a ModelProvider."
             )
 
-            stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-            result = await self.session.execute(stmt)
-            provider_db = result.scalar_one_or_none()
-
-            if provider_db is None:
-                raise ValueError(f"Model provider {model.provider_id} not found")
-
-            if not provider_db.is_active:
-                raise ValueError(f"Model provider {model.provider_id} is not active")
-
-            # Create tenant model credential resolver
-            credential_resolver = TenantModelCredentialResolver(
-                provider_id=provider_db.id,
-                provider_type=provider_db.provider_type,
-                credentials=provider_db.credentials,
-                config=provider_db.config,
-                encryption_service=self.encryption_service,
-            )
-
-            logger.info(
-                f"Using TenantModelAdapter for tenant model '{model.name}'",
+        # Check if session is available
+        if not self.session:
+            logger.error(
+                "Model requires database session but none available",
                 extra={
                     "model_id": str(model.id) if hasattr(model, 'id') else None,
                     "model_name": model.name,
                     "provider_id": str(model.provider_id),
-                    "provider_type": provider_db.provider_type,
                     "tenant_id": str(self.tenant.id) if self.tenant else None,
                 }
             )
-
-            # Use TenantModelAdapter for all tenant models
-            return TenantModelAdapter(
-                model=model,
-                credential_resolver=credential_resolver,
-                provider_type=provider_db.provider_type,
+            raise ValueError(
+                f"Model '{model.name}' requires database session to load provider credentials. "
+                "Please ensure the CompletionService is initialized with a database session."
             )
 
-        # PRIORITY 2: Global models
-        # Create credential resolver for tenant's global credentials
-        credential_resolver = None
-        if self.tenant:
-            credential_resolver = CredentialResolver(
-                tenant=self.tenant,
-                settings=self.config,
-                encryption_service=self.encryption_service,
-            )
+        # Load provider data from database
+        stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
+        result = await self.session.execute(stmt)
+        provider_db = result.scalar_one_or_none()
 
-        try:
-            # Check for LiteLLM model first
-            if model.litellm_model_name:
-                return LiteLLMModelAdapter(
-                    model, credential_resolver=credential_resolver
-                )
+        if provider_db is None:
+            raise ValueError(f"Model provider {model.provider_id} not found")
 
-            # Fall back to existing family-based selection
-            adapter_class = self._adapters.get(model.family.value)
-            if not adapter_class:
-                raise ValueError(
-                    f"No adapter found for modelfamily {model.family.value}"
-                )
+        if not provider_db.is_active:
+            raise ValueError(f"Model provider {model.provider_id} is not active")
 
-            # Inject credential_resolver into family-based adapters
-            return adapter_class(model, credential_resolver=credential_resolver)
+        # Create credential resolver
+        credential_resolver = TenantModelCredentialResolver(
+            provider_id=provider_db.id,
+            provider_type=provider_db.provider_type,
+            credentials=provider_db.credentials,
+            config=provider_db.config,
+            encryption_service=self.encryption_service,
+        )
 
-        except ValueError as e:
-            error_message = str(e)
+        logger.info(
+            f"Using TenantModelAdapter for model '{model.name}'",
+            extra={
+                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_name": model.name,
+                "provider_id": str(model.provider_id),
+                "provider_type": provider_db.provider_type,
+                "tenant_id": str(self.tenant.id) if self.tenant else None,
+            }
+        )
 
-            # Check if this is a credential resolution error
-            if "No API key configured" in error_message:
-                # Extract provider from error message if possible
-                # Error format: "No API key configured for provider 'openai'. ..."
-                provider = "unknown"
-                if "provider '" in error_message:
-                    start = error_message.find("provider '") + len("provider '")
-                    end = error_message.find("'", start)
-                    if end > start:
-                        provider = error_message[start:end]
-
-                tenant_name = self.tenant.name if self.tenant else "N/A"
-
-                logger.error(
-                    f"API key not configured for provider {provider}",
-                    extra={
-                        "tenant_id": str(self.tenant.id) if self.tenant else None,
-                        "tenant_name": tenant_name,
-                        "provider": provider,
-                        "model_name": model.name,
-                        "model_family": model.family.value,
-                    },
-                )
-
-                # Raise custom exception with user-friendly message
-                # The exception handler will format this as GeneralError with error code
-                raise APIKeyNotConfiguredException(
-                    f"No API key configured for provider '{provider}'. "
-                    f"Please contact your administrator to configure credentials for this provider."
-                )
-
-            # Re-raise if it's a different ValueError (e.g., unsupported model family)
-            raise
+        return TenantModelAdapter(
+            model=model,
+            credential_resolver=credential_resolver,
+            provider_type=provider_db.provider_type,
+        )
 
     @staticmethod
     def is_valid_arguments(arguments: str):

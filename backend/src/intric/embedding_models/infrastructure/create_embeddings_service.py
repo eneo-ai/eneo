@@ -1,24 +1,21 @@
 from typing import TYPE_CHECKING, Optional
 
-from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
-from intric.embedding_models.infrastructure.adapters.e5_embeddings import E5Adapter
 from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
-)
-from intric.embedding_models.infrastructure.adapters.openai_embeddings import (
-    OpenAIEmbeddingAdapter,
 )
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import SETTINGS, Settings
-from intric.settings.credential_resolver import CredentialResolver
+from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
+
+logger = get_logger(__name__)
 
 
 class CreateEmbeddingsService:
@@ -29,114 +26,89 @@ class CreateEmbeddingsService:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
-        self._adapters = {
-            ModelFamily.OPEN_AI: OpenAIEmbeddingAdapter,
-            ModelFamily.E5: E5Adapter,
-        }
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
 
     async def _get_adapter(self, model: "EmbeddingModel") -> EmbeddingModelAdapter:
-        # PRIORITY 1: Check for tenant model (has provider_id)
-        # Tenant models use LiteLLMEmbeddingAdapter with auto-generated LiteLLM names
-        if (hasattr(model, 'provider_id') and
-            model.provider_id):
+        """
+        Get the adapter for the given embedding model.
 
-            # Check if session is available
-            if not self.session:
-                from intric.main.logging import get_logger
-                logger = get_logger(__name__)
-                logger.error(
-                    "Tenant embedding model requires database session but none available",
-                    extra={
-                        "model_id": str(model.id) if hasattr(model, 'id') else None,
-                        "model_name": model.name,
-                        "provider_id": str(model.provider_id),
-                        "tenant_id": str(self.tenant.id) if self.tenant else None,
-                    }
-                )
-                raise ValueError(
-                    f"Tenant model '{model.name}' requires database session to load provider credentials. "
-                    "Please ensure the CreateEmbeddingsService is initialized with a database session."
-                )
+        All models must have a provider_id linking to a ModelProvider.
+        Uses LiteLLMEmbeddingAdapter which routes through LiteLLM.
+        """
+        import sqlalchemy as sa
+        from intric.database.tables.model_providers_table import ModelProviders
+        from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
+            TenantModelCredentialResolver,
+        )
 
-            # Load provider data from database
-            import sqlalchemy as sa
-            from intric.database.tables.model_providers_table import ModelProviders
-            from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
-                TenantModelCredentialResolver,
+        # All models must have provider_id
+        if not hasattr(model, 'provider_id') or not model.provider_id:
+            raise ValueError(
+                f"Model '{model.name}' is missing required provider_id. "
+                "All models must be associated with a ModelProvider."
             )
 
-            stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-            result = await self.session.execute(stmt)
-            provider_db = result.scalar_one_or_none()
-
-            if provider_db is None:
-                raise ValueError(f"Model provider {model.provider_id} not found")
-
-            if not provider_db.is_active:
-                raise ValueError(f"Model provider {model.provider_id} is not active")
-
-            # Create tenant model credential resolver
-            credential_resolver = TenantModelCredentialResolver(
-                provider_id=provider_db.id,
-                provider_type=provider_db.provider_type,
-                credentials=provider_db.credentials,
-                config=provider_db.config,
-                encryption_service=self.encryption_service,
-            )
-
-            # Construct LiteLLM model name with provider prefix
-            # This is what TenantModelAdapter does for completion models
-            litellm_model_name = f"{provider_db.provider_type}/{model.name}"
-
-            # Temporarily set litellm_model_name on the model for the adapter
-            # (the model object is not persisted, so this is safe)
-            model.litellm_model_name = litellm_model_name
-
-            from intric.main.logging import get_logger
-            logger = get_logger(__name__)
-            logger.info(
-                f"Using LiteLLMEmbeddingAdapter for tenant model '{model.name}'",
+        # Check if session is available
+        if not self.session:
+            logger.error(
+                "Model requires database session but none available",
                 extra={
                     "model_id": str(model.id) if hasattr(model, 'id') else None,
                     "model_name": model.name,
                     "provider_id": str(model.provider_id),
-                    "provider_type": provider_db.provider_type,
-                    "litellm_model_name": litellm_model_name,
                     "tenant_id": str(self.tenant.id) if self.tenant else None,
                 }
             )
-
-            # Use LiteLLMEmbeddingAdapter for all tenant models
-            return LiteLLMEmbeddingAdapter(
-                model, credential_resolver=credential_resolver
+            raise ValueError(
+                f"Model '{model.name}' requires database session to load provider credentials. "
+                "Please ensure the CreateEmbeddingsService is initialized with a database session."
             )
 
-        # PRIORITY 2: Global models
-        # Create credential resolver for tenant's global credentials
-        credential_resolver = None
-        if self.tenant:
-            credential_resolver = CredentialResolver(
-                tenant=self.tenant,
-                settings=self.config,
-                encryption_service=self.encryption_service,
-            )
+        # Load provider data from database
+        stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
+        result = await self.session.execute(stmt)
+        provider_db = result.scalar_one_or_none()
 
-        # Check for LiteLLM model first
-        if model.litellm_model_name:
-            return LiteLLMEmbeddingAdapter(
-                model, credential_resolver=credential_resolver
-            )
+        if provider_db is None:
+            raise ValueError(f"Model provider {model.provider_id} not found")
 
-        # Fall back to existing family-based selection for global models
-        adapter_class = self._adapters.get(model.family.value)
-        if not adapter_class:
-            raise ValueError(f"No adapter found for hosting {model.family.value}")
+        if not provider_db.is_active:
+            raise ValueError(f"Model provider {model.provider_id} is not active")
 
-        return adapter_class(model, credential_resolver=credential_resolver)
+        # Create credential resolver
+        credential_resolver = TenantModelCredentialResolver(
+            provider_id=provider_db.id,
+            provider_type=provider_db.provider_type,
+            credentials=provider_db.credentials,
+            config=provider_db.config,
+            encryption_service=self.encryption_service,
+        )
+
+        # Construct LiteLLM model name with provider prefix
+        litellm_model_name = f"{provider_db.provider_type}/{model.name}"
+
+        # Temporarily set litellm_model_name on the model for the adapter
+        # (the model object is not persisted, so this is safe)
+        model.litellm_model_name = litellm_model_name
+
+        logger.info(
+            f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
+            extra={
+                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_name": model.name,
+                "provider_id": str(model.provider_id),
+                "provider_type": provider_db.provider_type,
+                "litellm_model_name": litellm_model_name,
+                "tenant_id": str(self.tenant.id) if self.tenant else None,
+            }
+        )
+
+        return LiteLLMEmbeddingAdapter(
+            model, credential_resolver=credential_resolver
+        )
 
     async def get_embeddings(
         self,
