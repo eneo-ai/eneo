@@ -3,6 +3,7 @@
 import pytest
 from uuid import uuid4
 
+from intric.audit.application.audit_export_service import AuditExportService
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
@@ -65,6 +66,7 @@ async def test_csv_export_format(db_session, test_tenant, test_user):
     async with db_session() as session:
         repository = AuditLogRepositoryImpl(session)
         service = AuditService(repository)
+        export_service = AuditExportService(repository)
 
         # Create test log
         await service.log(
@@ -81,7 +83,7 @@ async def test_csv_export_format(db_session, test_tenant, test_user):
         )
 
         # Export to CSV
-        csv_content = await service.export_csv(
+        csv_content = await export_service.export_csv(
             tenant_id=test_tenant.id,
             user_id=test_user,
         )
@@ -103,6 +105,7 @@ async def test_csv_export_with_metadata(db_session, test_tenant, test_user):
     async with db_session() as session:
         repository = AuditLogRepositoryImpl(session)
         service = AuditService(repository)
+        export_service = AuditExportService(repository)
 
         # Create log with rich metadata
         metadata = {
@@ -122,7 +125,7 @@ async def test_csv_export_with_metadata(db_session, test_tenant, test_user):
         )
 
         # Export to CSV
-        csv_content = await service.export_csv(
+        csv_content = await export_service.export_csv(
             tenant_id=test_tenant.id,
             user_id=test_user,
         )

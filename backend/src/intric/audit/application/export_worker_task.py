@@ -5,7 +5,7 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 
-from intric.audit.application.audit_service import AuditService
+from intric.audit.application.audit_export_service import AuditExportService
 from intric.audit.application.audit_task_params import AuditExportTaskParams
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from intric.audit.infrastructure.export_job_manager import ExportJobManager
@@ -66,9 +66,9 @@ async def export_audit_logs_task(
     # Mark job as processing
     await job_manager.mark_processing(task_params.tenant_id, job_uuid)
 
-    # Create service with repository
+    # Create export service with repository
     repository = AuditLogRepositoryImpl(session)
-    service = AuditService(repository=repository)
+    service = AuditExportService(repository=repository)
 
     # Define progress callback
     async def progress_callback(processed: int, total: int) -> None:

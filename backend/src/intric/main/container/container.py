@@ -5,6 +5,7 @@ from intric.admin.admin_service import AdminService
 from intric.admin.quota_service import QuotaService
 from intric.ai_models.ai_models_service import AIModelsService
 from intric.audit.application.audit_config_service import AuditConfigService
+from intric.audit.application.audit_export_service import AuditExportService
 from intric.audit.application.audit_service import AuditService
 from intric.audit.application.retention_service import RetentionService
 from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
@@ -662,6 +663,10 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    audit_export_service = providers.Factory(
+        AuditExportService,
+        repository=audit_log_repo,
     )
     retention_service = providers.Factory(
         RetentionService,

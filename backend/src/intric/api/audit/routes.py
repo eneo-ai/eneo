@@ -631,6 +631,7 @@ async def export_audit_logs(
     validate_permission(current_user, Permission.ADMIN)
 
     audit_service = container.audit_service()
+    audit_export_service = container.audit_export_service()
 
     # Normalize format
     export_format = format.lower().strip()
@@ -731,7 +732,7 @@ async def export_audit_logs(
     }
 
     if export_format == "json":
-        content = await audit_service.export_jsonl(
+        content = await audit_export_service.export_jsonl(
             tenant_id=current_user.tenant_id,
             user_id=user_id,
             actor_id=actor_id,
@@ -747,7 +748,7 @@ async def export_audit_logs(
             headers=response_headers,
         )
     else:
-        content = await audit_service.export_csv(
+        content = await audit_export_service.export_csv(
             tenant_id=current_user.tenant_id,
             user_id=user_id,
             actor_id=actor_id,

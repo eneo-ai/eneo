@@ -1,7 +1,8 @@
 """Redis-backed manager for tracking async audit log export jobs."""
 
-import json
 from datetime import datetime, timedelta, timezone
+
+import orjson
 from typing import Optional
 from uuid import UUID
 
@@ -79,7 +80,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         logger.info(
@@ -109,7 +110,7 @@ class ExportJobManager:
         if not data:
             return None
 
-        return ExportJob.from_redis_dict(json.loads(data))
+        return ExportJob.from_redis_dict(orjson.loads(data))
 
     async def update_progress(
         self,
@@ -155,7 +156,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         return job
@@ -187,7 +188,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         logger.info(
@@ -238,7 +239,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         logger.info(
@@ -284,7 +285,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         logger.error(
@@ -330,7 +331,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         logger.info(
@@ -370,7 +371,7 @@ class ExportJobManager:
         await self.redis.setex(
             key,
             ttl,
-            json.dumps(job.to_redis_dict()),
+            orjson.dumps(job.to_redis_dict()),
         )
 
         logger.info(
@@ -430,7 +431,7 @@ class ExportJobManager:
             for key in keys:
                 data = await self.redis.get(key)
                 if data:
-                    job = ExportJob.from_redis_dict(json.loads(data))
+                    job = ExportJob.from_redis_dict(orjson.loads(data))
                     if not job.is_terminal():
                         active_count += 1
 
@@ -478,7 +479,7 @@ class ExportJobManager:
             for key in keys:
                 data = await self.redis.get(key)
                 if data:
-                    job = ExportJob.from_redis_dict(json.loads(data))
+                    job = ExportJob.from_redis_dict(orjson.loads(data))
                     if job.expires_at <= now:
                         expired_jobs.append(job)
 

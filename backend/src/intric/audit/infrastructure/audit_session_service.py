@@ -5,9 +5,10 @@ Audit access sessions store justification data server-side to prevent
 sensitive information from appearing in URLs, browser history, or server logs.
 """
 
-import json
 import logging
 import secrets
+
+import orjson
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
@@ -68,7 +69,7 @@ class AuditSessionService:
             await self.redis.setex(
                 f"audit_session:{session_id}",
                 self.ttl_seconds,
-                json.dumps(session_data),
+                orjson.dumps(session_data),
             )
         except redis.exceptions.RedisError as e:
             logger.error(f"Redis error creating audit session: {e}", exc_info=True)
@@ -97,7 +98,7 @@ class AuditSessionService:
             if not data:
                 return None
 
-            parsed = json.loads(data.decode("utf-8"))
+            parsed = orjson.loads(data)
 
             # Validate that parsed data is a dict with required keys
             if not isinstance(parsed, dict):
@@ -107,7 +108,7 @@ class AuditSessionService:
                 return None
 
             return parsed
-        except json.JSONDecodeError as e:
+        except orjson.JSONDecodeError as e:
             # Handle corrupted JSON in Redis (should not happen in normal operation)
             logger.warning(f"Corrupted session JSON for {session_id}: {e}")
             return None
