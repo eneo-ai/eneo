@@ -15,7 +15,7 @@
   const intric = getIntric();
 
   let providerName = "";
-  let providerType = "openai";
+  let providerType = "hosted_vllm";
   let apiKey = "";
   let endpoint = "";
   let apiVersion = "";
@@ -24,8 +24,8 @@
   let error: string | null = null;
 
   const providerTypes = [
-    { value: "openai", label: "OpenAI Compatible (Self-Hosted)" },
-    { value: "openai-hosted", label: "OpenAI" },
+    { value: "hosted_vllm", label: "OpenAI Compatible (Self-Hosted)" },
+    { value: "openai", label: "OpenAI" },
     { value: "azure", label: "Azure OpenAI" },
     { value: "anthropic", label: "Anthropic (Claude)" },
     { value: "gemini", label: "Google Gemini" },
@@ -60,7 +60,7 @@
     if (requiresEndpoint && !endpoint.trim()) {
       if (providerType === "azure") {
         error = "Endpoint is required for Azure OpenAI";
-      } else if (providerType === "openai") {
+      } else if (providerType === "hosted_vllm") {
         error = "Endpoint is required for self-hosted OpenAI-compatible providers";
       }
       return;
@@ -80,12 +80,9 @@
     try {
       isSubmitting = true;
 
-      // Normalize provider type: "openai-hosted" -> "openai"
-      const normalizedType = providerType === "openai-hosted" ? "openai" : providerType;
-
       const providerData: any = {
         name: providerName,
-        provider_type: normalizedType,
+        provider_type: providerType,
         credentials: { api_key: apiKey },
         config: {},
         is_active: true
@@ -138,8 +135,8 @@
     error = null;
   }
 
-  // Endpoint is required for Azure and self-hosted OpenAI
-  $: requiresEndpoint = providerType === "azure" || providerType === "openai";
+  // Endpoint is required for Azure and self-hosted OpenAI-compatible
+  $: requiresEndpoint = providerType === "azure" || providerType === "hosted_vllm";
 </script>
 
 <Dialog.Root {openController}>
@@ -205,11 +202,11 @@
                 : "https://api.openai.com (default) or custom endpoint"}
             required={requiresEndpoint}
           />
-          {#if providerType === "openai"}
+          {#if providerType === "hosted_vllm"}
             <p class="text-muted-foreground text-xs">
               <strong>Required</strong> for self-hosted. Common examples: vLLM (http://localhost:8000/v1), Ollama (http://localhost:11434/v1), llama.cpp (http://localhost:8080/v1)
             </p>
-          {:else if providerType === "openai-hosted"}
+          {:else if providerType === "openai"}
             <p class="text-muted-foreground text-xs">
               Optional. Leave empty to use default OpenAI endpoint (https://api.openai.com/v1)
             </p>
