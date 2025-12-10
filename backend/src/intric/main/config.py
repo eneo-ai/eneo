@@ -144,6 +144,10 @@ class Settings(BaseSettings):
     # Background worker configuration
     worker_max_jobs: int = 20
     tenant_worker_concurrency_limit: int = 4
+    # IMPORTANT: Must be >= crawl_max_length to prevent semaphore expiry mid-crawl
+    # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
+    # See validate_worker_settings() which enforces this constraint
+    # Configurable per-tenant via crawler_settings API
     tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
 
     # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
@@ -155,6 +159,7 @@ class Settings(BaseSettings):
     orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
     crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
     crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
+    crawl_page_batch_size: int = 100  # Commit after every N pages during crawl (bounds data loss)
 
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
@@ -219,6 +224,9 @@ class Settings(BaseSettings):
     dev: bool = False
 
     # Crawl - Scrapy crawler settings
+    # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
+    # Otherwise the concurrency slot could expire before crawl completes
+    # See validate_worker_settings() which enforces this constraint
     crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)

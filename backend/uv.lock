@@ -166,16 +166,15 @@ wheels = [
 
 [[package]]
 name = "arq"
-version = "0.25.0"
+version = "0.26.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "redis", extra = ["hiredis"] },
-    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/ae/24a5e6476aba4e931b3b6ec19b6b45a9da2ba048992b4b49f12861a6df6f/arq-0.25.0.tar.gz", hash = "sha256:d176ebadfba920c039dc578814d19b7814d67fa15f82fdccccaedb4330d65dae", size = 288899, upload-time = "2022-12-02T13:21:18.284Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/65/5add7049297a449d1453e26a8d5924f0d5440b3876edc9e80d5dc621f16d/arq-0.26.3.tar.gz", hash = "sha256:362063ea3c726562fb69c723d5b8ee80827fdefda782a8547da5be3d380ac4b1", size = 291111, upload-time = "2025-01-06T22:44:49.771Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/47/626ad09333ffc73fdd2ed270d81ddd60befd8f5b3c904be132bc0e7ccede/arq-0.25.0-py3-none-any.whl", hash = "sha256:db072d0f39c0bc06b436db67ae1f315c81abc1527563b828955670531815290b", size = 25774, upload-time = "2022-12-02T13:21:15.874Z" },
+    { url = "https://files.pythonhosted.org/packages/85/b3/a24a183c628da633b7cafd1759b14aaf47958de82ba6bcae9f1c2898781d/arq-0.26.3-py3-none-any.whl", hash = "sha256:9f4b78149a58c9dc4b88454861a254b7c4e7a159f2c973c89b548288b77e9005", size = 25968, upload-time = "2025-01-06T22:44:45.771Z" },
 ]
 
 [[package]]
@@ -1130,7 +1129,7 @@ requires-dist = [
     { name = "aiocache", specifier = ">=0.12.2,<0.13" },
     { name = "alembic", specifier = ">=1.10.2,<2" },
     { name = "anthropic", specifier = ">=0.28.1,<0.29" },
-    { name = "arq", specifier = ">=0,<1" },
+    { name = "arq", specifier = ">=0.26,<1" },
     { name = "arrow", specifier = ">=1.2.3,<2" },
     { name = "asyncpg", specifier = ">=0.27.0,<0.28" },
     { name = "audioread", specifier = ">=3.0.1,<4" },
