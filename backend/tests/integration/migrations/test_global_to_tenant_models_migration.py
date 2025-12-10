@@ -485,15 +485,15 @@ def migration_test_db(test_settings):
 
     try:
         # First, downgrade to before the migration (if possible)
-        # The migration's down_revision is 'f7f7647d5327'
+        # The migration's down_revision is '20251127_add_icons'
         try:
-            command.downgrade(alembic_cfg, "f7f7647d5327")
-            print("Downgraded to f7f7647d5327 (before global-to-tenant migration)")
+            command.downgrade(alembic_cfg, "20251127_add_icons")
+            print("Downgraded to 20251127_add_icons (before global-to-tenant migration)")
         except Exception as e:
             print(f"Downgrade not possible (may already be at base or migration not applied): {e}")
             # If downgrade fails, upgrade to that revision instead
-            command.upgrade(alembic_cfg, "f7f7647d5327")
-            print("Upgraded to f7f7647d5327")
+            command.upgrade(alembic_cfg, "20251127_add_icons")
+            print("Upgraded to 20251127_add_icons")
 
         # Create legacy data
         now = datetime.now(timezone.utc)
