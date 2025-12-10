@@ -147,8 +147,9 @@ async def _recover_session(
             f"Error cleaning up old session during recovery: {cleanup_exc}"
         )
 
-    # 2. Create fresh session
-    new_session = await sessionmanager.session().__aenter__()
+    # 2. Create fresh session via explicit factory (no context manager)
+    # This avoids orphaned async generator that causes GC-triggered session.close()
+    new_session = sessionmanager.create_session()
 
     # 3. Explicitly start transaction - required since autobegin=False
     await new_session.begin()
