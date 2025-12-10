@@ -11,6 +11,11 @@ MIMETYPE_EXTENSIONS_MAPPER = {
     TextMimeTypes.TEXT_CSV.value: [".csv"],
     TextMimeTypes.APP_CSV.value: [".csv"],
     TextMimeTypes.PPTX.value: [".pptx"],
+    TextMimeTypes.XLSX.value: [".xlsx"],
+    TextMimeTypes.XLS.value: [".xls"],
+    # Legacy formats (for detection/rejection)
+    TextMimeTypes.DOC.value: [".doc"],
+    TextMimeTypes.PPT.value: [".ppt"],
     # AUDIO
     AudioMimeTypes.M4A.value: [".m4a"],
     AudioMimeTypes.OGG.value: [".oga", ".ogg", ".spx", ".opus"],
