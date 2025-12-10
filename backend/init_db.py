@@ -131,12 +131,41 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
         completion_model = cur.fetchone()
 
         if completion_model is None:
-            # Create a tenant-specific completion model with settings directly on it
+            # First, create or get an OpenAI provider for this tenant
+            check_provider_query = sql.SQL(
+                "SELECT id FROM model_providers WHERE tenant_id = %s AND provider_type = %s LIMIT 1"
+            )
+            cur.execute(check_provider_query, (tenant_id, "openai"))
+            provider = cur.fetchone()
+
+            if provider is None:
+                # Create OpenAI provider (user will need to configure API key later)
+                add_provider_query = sql.SQL(
+                    """INSERT INTO model_providers
+                    (tenant_id, name, provider_type, credentials, config, is_active)
+                    VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s) RETURNING id"""
+                )
+                cur.execute(
+                    add_provider_query,
+                    (
+                        tenant_id,
+                        "OpenAI",
+                        "openai",
+                        '{"api_key": ""}',  # Empty - user must configure
+                        '{}',
+                        False,  # Not active until API key is configured
+                    ),
+                )
+                provider_id = cur.fetchone()[0]
+            else:
+                provider_id = provider[0]
+
+            # Create a tenant-specific completion model with provider_id
             add_model_query = sql.SQL(
                 """INSERT INTO completion_models
                 (name, nickname, family, token_limit, stability, hosting, description, org, vision, reasoning,
-                 tenant_id, is_enabled, is_default)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
+                 tenant_id, provider_id, is_enabled, is_default)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"""
             )
             cur.execute(
                 add_model_query,
@@ -152,6 +181,7 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
                     True,
                     False,
                     tenant_id,
+                    provider_id,
                     True,  # is_enabled
                     True,  # is_default
                 ),
