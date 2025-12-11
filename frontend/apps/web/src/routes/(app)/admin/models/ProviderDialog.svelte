@@ -9,10 +9,16 @@
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { writable, type Writable } from "svelte/store";
+  import type { ModelProviderPublic } from "@intric/intric-js";
 
   export let openController: Writable<boolean>;
+  /** If provided, dialog is in edit mode. If null/undefined, dialog is in add mode. */
+  export let provider: ModelProviderPublic | null = null;
 
   const intric = getIntric();
+
+  // Determine mode
+  $: isEditMode = provider !== null;
 
   let providerName = "";
   let providerType = "hosted_vllm";
@@ -20,6 +26,7 @@
   let endpoint = "";
   let apiVersion = "";
   let deploymentName = "";
+  let isActive = true;
   let isSubmitting = false;
   let error: string | null = null;
 
@@ -34,14 +41,39 @@
 
   const providerTypeStore = writable(providerTypes[0]);
 
-  // Sync the store with providerType variable
-  $: {
-    if ($providerTypeStore && $providerTypeStore.value) {
-      const value = typeof $providerTypeStore.value === 'object'
-        ? $providerTypeStore.value.value
-        : $providerTypeStore.value;
-      providerType = value;
+  // Sync the store with providerType variable (only in add mode)
+  $: if (!isEditMode && $providerTypeStore && $providerTypeStore.value) {
+    const value = typeof $providerTypeStore.value === 'object'
+      ? $providerTypeStore.value.value
+      : $providerTypeStore.value;
+    providerType = value;
+  }
+
+  // Initialize form when provider changes (for edit mode)
+  $: if (provider) {
+    initializeFromProvider(provider);
+  }
+
+  function initializeFromProvider(p: ModelProviderPublic) {
+    providerName = p.name;
+    providerType = p.provider_type;
+    isActive = p.is_active;
+    // API key is not returned from server - leave empty (user can update if needed)
+    apiKey = "";
+    // Config fields
+    endpoint = p.config?.endpoint || "";
+    apiVersion = p.config?.api_version || "";
+    deploymentName = p.config?.deployment_name || "";
+
+    // Set the store to match the provider type (for display)
+    const matchingType = providerTypes.find(t => t.value === p.provider_type);
+    if (matchingType) {
+      providerTypeStore.set(matchingType);
     }
+  }
+
+  function getProviderTypeLabel(type: string): string {
+    return providerTypes.find(t => t.value === type)?.label || type;
   }
 
   async function handleSubmit() {
@@ -52,7 +84,8 @@
       return;
     }
 
-    if (!apiKey.trim()) {
+    // API key is required only in add mode
+    if (!isEditMode && !apiKey.trim()) {
       error = "API key is required";
       return;
     }
@@ -80,30 +113,62 @@
     try {
       isSubmitting = true;
 
-      const providerData: any = {
-        name: providerName,
-        provider_type: providerType,
-        credentials: { api_key: apiKey },
-        config: {},
-        is_active: true
-      };
+      if (isEditMode && provider) {
+        // Update existing provider
+        const updateData: any = {
+          name: providerName,
+          config: {},
+          is_active: isActive
+        };
 
-      // Add endpoint to config if provided
-      if (endpoint.trim()) {
-        providerData.config.endpoint = endpoint;
-      }
-
-      // Add Azure-specific fields to config
-      if (providerType === "azure") {
-        if (apiVersion.trim()) {
-          providerData.config.api_version = apiVersion;
+        // Only include credentials if user provided a new API key
+        if (apiKey.trim()) {
+          updateData.credentials = { api_key: apiKey };
         }
-        if (deploymentName.trim()) {
-          providerData.config.deployment_name = deploymentName;
-        }
-      }
 
-      await intric.modelProviders.create(providerData);
+        // Add endpoint to config if provided
+        if (endpoint.trim()) {
+          updateData.config.endpoint = endpoint;
+        }
+
+        // Add Azure-specific fields to config
+        if (providerType === "azure") {
+          if (apiVersion.trim()) {
+            updateData.config.api_version = apiVersion;
+          }
+          if (deploymentName.trim()) {
+            updateData.config.deployment_name = deploymentName;
+          }
+        }
+
+        await intric.modelProviders.update({ id: provider.id }, updateData);
+      } else {
+        // Create new provider
+        const providerData: any = {
+          name: providerName,
+          provider_type: providerType,
+          credentials: { api_key: apiKey },
+          config: {},
+          is_active: true
+        };
+
+        // Add endpoint to config if provided
+        if (endpoint.trim()) {
+          providerData.config.endpoint = endpoint;
+        }
+
+        // Add Azure-specific fields to config
+        if (providerType === "azure") {
+          if (apiVersion.trim()) {
+            providerData.config.api_version = apiVersion;
+          }
+          if (deploymentName.trim()) {
+            providerData.config.deployment_name = deploymentName;
+          }
+        }
+
+        await intric.modelProviders.create(providerData);
+      }
 
       // Reload providers
       await invalidate("admin:model-providers:load");
@@ -114,7 +179,7 @@
       // Reset form
       resetForm();
     } catch (e: any) {
-      error = e.message || "Failed to create provider";
+      error = e.message || (isEditMode ? "Failed to update provider" : "Failed to create provider");
     } finally {
       isSubmitting = false;
     }
@@ -123,10 +188,12 @@
   function resetForm() {
     providerName = "";
     providerTypeStore.set(providerTypes[0]);
+    providerType = "hosted_vllm";
     apiKey = "";
     endpoint = "";
     apiVersion = "";
     deploymentName = "";
+    isActive = true;
   }
 
   function handleCancel() {
@@ -141,7 +208,7 @@
 
 <Dialog.Root {openController}>
   <Dialog.Content width="large" form>
-    <Dialog.Title>Add Model Provider</Dialog.Title>
+    <Dialog.Title>{isEditMode ? "Edit Provider" : "Add Model Provider"}</Dialog.Title>
 
     <Dialog.Section>
       <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4">
@@ -152,15 +219,27 @@
         {/if}
 
         <div class="flex flex-col gap-2">
-          <Select.Root customStore={providerTypeStore} class="border-b border-dimmer">
-            <Select.Label>Provider Type</Select.Label>
-            <Select.Trigger placeholder="Select provider type"></Select.Trigger>
-            <Select.Options>
-              {#each providerTypes as type}
-                <Select.Item value={type} label={type.label}>{type.label}</Select.Item>
-              {/each}
-            </Select.Options>
-          </Select.Root>
+          {#if isEditMode}
+            <!-- In edit mode, show provider type as read-only -->
+            <label class="text-sm font-medium">Provider Type</label>
+            <div class="bg-muted rounded px-3 py-2 text-sm">
+              {getProviderTypeLabel(providerType)}
+            </div>
+            <p class="text-muted-foreground text-xs">
+              Provider type cannot be changed after creation
+            </p>
+          {:else}
+            <!-- In add mode, show dropdown -->
+            <Select.Root customStore={providerTypeStore} class="border-b border-dimmer">
+              <Select.Label>Provider Type</Select.Label>
+              <Select.Trigger placeholder="Select provider type"></Select.Trigger>
+              <Select.Options>
+                {#each providerTypes as type}
+                  <Select.Item value={type} label={type.label}>{type.label}</Select.Item>
+                {/each}
+              </Select.Options>
+            </Select.Root>
+          {/if}
         </div>
 
         <div class="flex flex-col gap-2">
@@ -182,11 +261,15 @@
             id="api-key"
             type="password"
             bind:value={apiKey}
-            placeholder="Enter API key"
-            required
+            placeholder={isEditMode ? "Leave empty to keep current key" : "Enter API key"}
+            required={!isEditMode}
           />
           <p class="text-muted-foreground text-xs">
-            Will be encrypted before storage
+            {#if isEditMode}
+              Leave empty to keep the current API key, or enter a new one to update it
+            {:else}
+              Will be encrypted before storage
+            {/if}
           </p>
         </div>
 
@@ -248,6 +331,18 @@
             </p>
           </div>
         {/if}
+
+        {#if isEditMode}
+          <div class="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="is-active"
+              bind:checked={isActive}
+              class="h-4 w-4 rounded border-gray-300"
+            />
+            <label for="is-active" class="text-sm font-medium">Provider is active</label>
+          </div>
+        {/if}
       </form>
     </Dialog.Section>
 
@@ -258,7 +353,11 @@
         on:click={handleSubmit}
         disabled={isSubmitting}
       >
-        {isSubmitting ? "Creating..." : "Create Provider"}
+        {#if isSubmitting}
+          {isEditMode ? "Saving..." : "Creating..."}
+        {:else}
+          {isEditMode ? "Save Changes" : "Create Provider"}
+        {/if}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

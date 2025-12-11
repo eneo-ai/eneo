@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel, ModelProviderPublic } from "@intric/intric-js";
   import { Table } from "@intric/ui";
   import { createRender } from "svelte-headless-table";
   import ModelEnabledSwitch from "./ModelEnableSwitch.svelte";
@@ -17,15 +17,17 @@
   import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
+  import ProviderActions from "./ProviderActions.svelte";
   import { m } from "$lib/paraglide/messages";
   import { browser } from "$app/environment";
 
-  import type { Writable } from "svelte/store";
+  import { writable, type Writable } from "svelte/store";
   import { Button } from "@intric/ui";
   import { Plus } from "lucide-svelte";
+  import ProviderDialog from "./ProviderDialog.svelte";
 
   export let completionModels: CompletionModel[];
-  export let providers: any[] = [];
+  export let providers: ModelProviderPublic[] = [];
   export let credentials:
     | {
         provider: string;
@@ -35,6 +37,8 @@
     | undefined = undefined;
   export let tenantCredentialsEnabled: boolean = false;
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
+
+  const addProviderDialogOpen = writable(false);
 
   // Backend returns both global and tenant models
   // Filter to show only tenant models in UI
@@ -172,20 +176,12 @@
     };
   }
 
-  function listGroups(models: CompletionModel[]): Array<{ key: string; name: string }> {
-    // Always group by provider for tenant models
-      // Group by provider_id for tenant models
-      const uniqueProviders = new Set<string>();
-      for (const model of models) {
-        if (model.provider_id) uniqueProviders.add(model.provider_id);
-      }
-      return Array.from(uniqueProviders).map(providerId => {
-        const provider = providers.find(p => p.id === providerId);
-        return {
-          key: providerId,
-          name: provider?.name || "Unknown Provider"
-        };
-      });
+  function listGroups(providerList: ModelProviderPublic[]): Array<{ key: string; name: string }> {
+    // Show all providers, including those without models
+    return providerList.map(provider => ({
+      key: provider.id,
+      name: provider.name
+    }));
   }
 
   /**
@@ -195,7 +191,14 @@
   function getProviderIdForGroup(groupKey: string): string | undefined {
     // For tenant models, get provider's type
     const provider = providers.find(p => p.id === groupKey);
-    return provider?.type;
+    return provider?.provider_type;
+  }
+
+  /**
+   * Get the full provider object for a given group.
+   */
+  function getProviderForGroup(groupKey: string): ModelProviderPublic | undefined {
+    return providers.find(p => p.id === groupKey);
   }
 
   function getCredentialForGroup(groupKey: string, groupName: string) {
@@ -212,33 +215,52 @@
     };
   }
 
-  $: groups = listGroups(filteredModels);
+  /**
+   * Handle "Add Model" action from provider dropdown.
+   * Opens the add model dialog with this provider pre-selected.
+   */
+  function handleAddModelToProvider(providerId: string) {
+    // For now, just open the general add model dialog
+    // TODO: Pass providerId to pre-select the provider
+    addModelDialogOpen?.set(true);
+  }
+
+  $: groups = listGroups(providers);
   $: table.update(filteredModels);</script>
 
 <div class="flex flex-col gap-4">
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
     {#each groups as group (group.key)}
-      {@const providerId = getProviderIdForGroup(group.key)}
+      {@const providerType = getProviderIdForGroup(group.key)}
+      {@const provider = getProviderForGroup(group.key)}
       <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
         <svelte:fragment slot="title-suffix">
-          {#if browser && tenantCredentialsEnabled && providerId}
-            <ProviderCredentialIcon
-              provider={providerId}
-              displayName={group.name}
-              credential={getCredentialForGroup(group.key, group.name)}
-            />
-          {/if}
+          <div class="flex items-center gap-2">
+            {#if browser && tenantCredentialsEnabled && providerType}
+              <ProviderCredentialIcon
+                provider={providerType}
+                displayName={group.name}
+                credential={getCredentialForGroup(group.key, group.name)}
+              />
+            {/if}
+            {#if provider}
+              <ProviderActions
+                {provider}
+                onAddModel={handleAddModelToProvider}
+              />
+            {/if}
+          </div>
         </svelte:fragment>
       </Table.Group>
     {/each}
   </Table.Root>
 
-  {#if addModelDialogOpen}
-    <div class="flex justify-center pb-4">
-      <Button variant="outlined" on:click={() => addModelDialogOpen?.set(true)}>
-        <Plus class="w-4 h-4 mr-2" />
-        Add Completion Model
-      </Button>
-    </div>
-  {/if}
+  <div class="flex justify-center pb-4">
+    <Button variant="outlined" on:click={() => addProviderDialogOpen.set(true)}>
+      <Plus class="w-4 h-4 mr-2" />
+      Add Provider
+    </Button>
+  </div>
 </div>
+
+<ProviderDialog openController={addProviderDialogOpen} />
