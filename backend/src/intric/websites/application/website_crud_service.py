@@ -222,6 +222,21 @@ class WebsiteCRUDService:
 
                 if rows_affected > 0:
                     # We successfully preempted the job
+                    # Release Redis slot and clean up flag to prevent zombie slots
+                    # Safe to call even if resources don't exist (idempotent)
+                    try:
+                        await self.crawl_service.release_job_resources(
+                            job_id=latest_crawl.job_id,
+                            tenant_id=website.tenant_id,
+                        )
+                    except Exception as slot_exc:
+                        logger.warning(
+                            "Failed to release slot for preempted job",
+                            extra={
+                                "job_id": str(latest_crawl.job_id),
+                                "error": str(slot_exc),
+                            },
+                        )
                     logger.info(
                         "Preempted stale crawl job",
                         extra={
