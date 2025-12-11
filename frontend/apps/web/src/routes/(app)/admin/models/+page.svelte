@@ -50,8 +50,6 @@
       <EmbeddingModelsTable
         embeddingModels={data.models.embeddingModels}
         providers={data.providers}
-        credentials={data.credentials}
-        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
         addModelDialogOpen={addEmbeddingModelDialogOpen}
       />
     </Page.Tab>
@@ -59,8 +57,6 @@
       <TranscriptionModelsTable
         transcriptionModels={data.models.transcriptionModels}
         providers={data.providers}
-        credentials={data.credentials}
-        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
         addModelDialogOpen={addTranscriptionModelDialogOpen}
       />
     </Page.Tab>

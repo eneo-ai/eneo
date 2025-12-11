@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import type { EmbeddingModel } from "@intric/intric-js";
+  import type { EmbeddingModel, ModelProviderPublic } from "@intric/intric-js";
   import { Table } from "@intric/ui";
   import { createRender } from "svelte-headless-table";
   import ModelEnableSwitch from "./ModelEnableSwitch.svelte";
@@ -17,23 +17,22 @@
   import ModelActions from "./ModelActions.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
+  import ProviderActions from "./ProviderActions.svelte";
+  import ProviderDialog from "./ProviderDialog.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { browser } from "$app/environment";
-  import type { Writable } from "svelte/store";
+  import { writable, type Writable } from "svelte/store";
   import { Button } from "@intric/ui";
   import { Plus } from "lucide-svelte";
 
   export let embeddingModels: EmbeddingModel[];
-  export let providers: any[] = [];
-  export let credentials:
-    | {
-        provider: string;
-        masked_key: string;
-        config: Record<string, any>;
-      }[]
-    | undefined = undefined;
-  export let tenantCredentialsEnabled: boolean = false;
+  export let providers: ModelProviderPublic[] = [];
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
+
+  const addProviderDialogOpen = writable(false);
+
+  // Track provider being edited
+  let editingProvider: ModelProviderPublic | null = null;
+  const editProviderDialogOpen = writable(false);
 
   // Backend returns both global and tenant models
   // Filter to show only tenant models in UI
@@ -123,78 +122,80 @@
     })
   ]);
 
+  // Group by provider_id for tenant models
   function createGroupFilter(groupKey: string) {
     return function (model: EmbeddingModel) {
       return model.provider_id === groupKey;
     };
   }
 
-  function listGroups(models: EmbeddingModel[]): Array<{ key: string; name: string }> {
-    // Always group by provider for tenant models
-      const uniqueProviders = new Set<string>();
-      for (const model of models) {
-        if (model.provider_id) uniqueProviders.add(model.provider_id);
-      }
-      return Array.from(uniqueProviders).map(providerId => {
-        const provider = providers.find(p => p.id === providerId);
-        return {
-          key: providerId,
-          name: provider?.name || "Unknown Provider"
-        };
-      });
+  function listGroups(providerList: ModelProviderPublic[]): Array<{ key: string; name: string }> {
+    // Show all providers, including those without models
+    return providerList.map(provider => ({
+      key: provider.id,
+      name: provider.name
+    }));
   }
 
   /**
-   * Get the credential provider ID for a given group.
-   * For tenant models, returns the provider's credential type.
+   * Get the full provider object for a given group.
    */
-  function getProviderIdForGroup(groupKey: string): string | undefined {
-    const provider = providers.find(p => p.id === groupKey);
-    return provider?.type;
+  function getProviderForGroup(groupKey: string): ModelProviderPublic | undefined {
+    return providers.find(p => p.id === groupKey);
   }
 
-  function getCredentialForGroup(groupKey: string, groupName: string) {
-    if (!credentials) return undefined;
-
-    const providerId = getProviderIdForGroup(groupKey);
-    if (!providerId) return undefined;
-
-    const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
-    if (!cred) return undefined;
-    return {
-      masked_key: cred.masked_key,
-      config: cred.config
-    };
+  /**
+   * Handle "Add Model" action from provider dropdown.
+   */
+  function handleAddModelToProvider(providerId: string) {
+    addModelDialogOpen?.set(true);
   }
 
-  $: groups = listGroups(filteredModels);
+  /**
+   * Handle editing a provider.
+   */
+  function handleEditProvider(provider: ModelProviderPublic) {
+    editingProvider = provider;
+    editProviderDialogOpen.set(true);
+  }
+
+  $: groups = listGroups(providers);
   $: table.update(filteredModels);
 </script>
 
 <div class="flex flex-col gap-4">
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
     {#each groups as group (group.key)}
-      {@const providerId = getProviderIdForGroup(group.key)}
+      {@const provider = getProviderForGroup(group.key)}
       <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
         <svelte:fragment slot="title-suffix">
-          {#if browser && tenantCredentialsEnabled && providerId}
-            <ProviderCredentialIcon
-              provider={providerId}
-              displayName={group.name}
-              credential={getCredentialForGroup(group.key, group.name)}
-            />
-          {/if}
+          <div class="flex items-center gap-2">
+            {#if provider}
+              <ProviderCredentialIcon
+                {provider}
+                onEdit={() => handleEditProvider(provider)}
+              />
+              <ProviderActions
+                {provider}
+                onAddModel={handleAddModelToProvider}
+              />
+            {/if}
+          </div>
         </svelte:fragment>
       </Table.Group>
     {/each}
   </Table.Root>
 
-  {#if addModelDialogOpen}
-    <div class="flex justify-center pb-4">
-      <Button variant="outlined" on:click={() => addModelDialogOpen?.set(true)}>
-        <Plus class="w-4 h-4 mr-2" />
-        Add Embedding Model
-      </Button>
-    </div>
-  {/if}
+  <div class="flex justify-center pb-4">
+    <Button variant="outlined" on:click={() => addProviderDialogOpen.set(true)}>
+      <Plus class="w-4 h-4 mr-2" />
+      {m.add_provider()}
+    </Button>
+  </div>
 </div>
+
+<!-- Add Provider Dialog -->
+<ProviderDialog openController={addProviderDialogOpen} />
+
+<!-- Edit Provider Dialog -->
+<ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />
