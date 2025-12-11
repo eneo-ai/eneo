@@ -1629,7 +1629,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 if not sess.in_transaction():
                     await sess.begin()
                 await sess.execute(last_crawled_stmt)
-                await sess.commit()
+                # No commit here - let final _do_complete_job() commit everything atomically.
+                # Committing mid-flow closes the context manager's transaction, causing
+                # "Can't operate on closed transaction" errors in subsequent operations.
 
             await execute_with_recovery(
                 container=container,
