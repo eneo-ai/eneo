@@ -4,7 +4,6 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
     CompletionModelFamily,
     CompletionModelPublic,
-    ModelHostingLocation,
 )
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
@@ -19,7 +18,6 @@ from intric.ai_models.embedding_models.embedding_models_repo import (
 )
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.modules.module import Modules
 from intric.roles.permissions import Permission, validate_permissions
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
@@ -42,9 +40,6 @@ class AIModelsService:
         self,
         model: CompletionModel | EmbeddingModelLegacy,
     ):
-        if model.hosting == ModelHostingLocation.EU:
-            if Modules.EU_HOSTING not in self.user.modules:
-                return True
         return False
 
     def _can_access(
