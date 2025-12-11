@@ -10,21 +10,12 @@
   import { derived, type Readable } from "svelte/store";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import AppInput from "./AppInput.svelte";
+  import DashboardAppInput from "./DashboardAppInput.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { m } from "$lib/paraglide/messages";
 
   const intric = getIntric();
-  const {
-    state: { currentSpace }
-  } = getSpacesManager();
 
-  // Small hack to get the selected app as a store, if exported as prop we would need to
-  // manually transform it to a store and update it everytime the exported prop is updated.
-  // Why do we need it as a store in the first place? So we don't have to recreate the
-  // `AttachmentManager` with new rules everytime we change the selected app. This is mostly
-  // relevant when
   const app = derived(page, ($page) => $page.data.app) as Readable<App>;
 
   const { clearUploads } = initAttachmentManager({
@@ -62,12 +53,10 @@
           text: inputs.text
         }
       });
-      // Reset the app, should not really be needed when we redirect to the result bc the component will unmount
       inputs = createEmptyInputs();
       clearUploads();
       isSubmitting = false;
-      // Forward to the newly created run
-      goto(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`);
+      goto(`/dashboard/app/${$app.id}/results/${result.id}`);
     } catch (err) {
       const msg = err instanceof IntricError ? err.getReadableMessage() : err;
       console.error(err);
@@ -79,7 +68,7 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
-  class="relative flex h-full w-full flex-grow flex-col items-center justify-center gap-2 p-4"
+  class="flex h-full w-full flex-col overflow-y-auto"
   on:dragenter={(event) => {
     if ($dragDropEnabled) {
       event.preventDefault();
@@ -87,33 +76,25 @@
     }
   }}
 >
-  <div
-    class="border-default bg-primary flex w-full max-w-[64ch] flex-col gap-2 rounded-xl border p-2 shadow-xl"
-  >
-    <div class="-mt-[2.5rem] flex flex-grow flex-col items-center justify-center rounded pb-2">
-      <div class="bg-primary flex items-center gap-4 rounded-2xl pr-6 pl-4">
-        <AppIcon app={$app} size="medium"></AppIcon>
-        <span class="text-2xl md:text-4xl font-extrabold">{formatEmojiTitle($app.name)}</span>
-      </div>
-    </div>
-
+  <div class="flex flex-col items-center gap-2 px-4 py-6">
+    <AppIcon app={$app} size="medium"></AppIcon>
+    <h2 class="text-center text-xl font-bold">{formatEmojiTitle($app.name)}</h2>
     {#if $app.description}
-      <p class="text-secondary mx-auto max-w-[50ch] pb-2 text-center">
+      <p class="text-secondary max-w-[50ch] text-center text-sm">
         {$app.description}
       </p>
     {/if}
-    <div
-      class="border-dynamic-dimmer bg-dynamic-dimmer flex min-h-[14rem] w-full flex-grow flex-col items-center justify-center gap-4 rounded-lg border py-6"
-    >
-      <AppInput app={$app} bind:inputData={inputs}></AppInput>
-    </div>
+  </div>
+
+  <div class="flex flex-grow flex-col gap-4 px-4 pb-4">
+    <DashboardAppInput app={$app} bind:inputData={inputs}></DashboardAppInput>
 
     <Tooltip text={hasData ? undefined : m.input_data_required_tooltip()}>
       <Button
         disabled={!hasData || isSubmitting}
-        unstyled
+        variant="primary"
         on:click={createRun}
-        class="border-stronger bg-dynamic-default text-on-fill hover:border-dynamic-default hover:bg-dynamic-dimmer hover:text-dynamic-stronger flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg shadow-lg "
+        class="flex w-full items-center justify-center gap-2 py-3 text-lg"
       >
         <IconPlay />
         {isSubmitting ? m.submitting() : m.submit()}
@@ -125,3 +106,4 @@
 {#if isDragging}
   <AttachmentDropArea bind:isDragging label={m.drop_files_here_upload({ appName: $app.name })} />
 {/if}
+
