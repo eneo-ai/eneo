@@ -98,6 +98,9 @@ class CompletionModelUpdateFlags(BaseModel):
 class CompletionModel(CompletionModelBase, InDB):
     is_org_enabled: bool = False
     is_org_default: bool = False
+    # Tenant model fields (required for provider-based architecture)
+    tenant_id: Optional[UUID] = None
+    provider_id: Optional[UUID] = None
 
 
 class CompletionModelPublic(CompletionModel):
@@ -106,9 +109,7 @@ class CompletionModelPublic(CompletionModel):
     lock_reason: Optional[str] = None
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
-    # Tenant model fields
-    tenant_id: Optional[UUID] = None
-    provider_id: Optional[UUID] = None
+    # tenant_id and provider_id inherited from CompletionModel
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):

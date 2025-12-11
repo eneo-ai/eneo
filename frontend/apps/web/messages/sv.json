@@ -584,6 +584,7 @@
   "next": "Nästa",
   "no": "Nej",
   "no_api_key_found": "Ingen API-nyckel hittades. Vänligen generera en ny.",
+  "no_completion_model_description": "Ingen AI-modell tillgänglig. Kontakta din administratör för att aktivera modeller.",
   "no_completion_models_warning": "Denna yta har för närvarande inga kompletteringsmodeller aktiverade. Aktivera minst en kompletteringsmodell för att kunna skapa en app.",
   "no_conversations": "Inga konversationer",
   "no_data": "Ingen data tillgänglig",

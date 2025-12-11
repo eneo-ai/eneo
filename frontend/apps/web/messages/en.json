@@ -585,6 +585,7 @@
   "next": "Next",
   "no": "No",
   "no_api_key_found": "No api key found. Please generate a new one.",
+  "no_completion_model_description": "No AI model available. Contact your administrator to enable models.",
   "no_completion_models_warning": "This space does currently not have any completion models enabled. Enable at least one completion model to be able to create an app.",
   "no_conversations": "No conversations",
   "no_data": "No data available",

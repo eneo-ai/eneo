@@ -958,6 +958,7 @@ async def seed_default_models(setup_database, monkeypatch):
     This fixture runs automatically for all integration tests after database setup.
     """
     from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+    from intric.database.tables.model_providers_table import ModelProviders
     from intric.database.database import sessionmanager
     from intric.tenants.tenant_service import TenantService
     from intric.tenants.tenant import TenantBase, TenantInDB
@@ -967,6 +968,7 @@ async def seed_default_models(setup_database, monkeypatch):
     # Store IDs of created models for the patch function
     completion_model_ids = {}
     embedding_model_ids = {}
+    provider_ids = {}
 
     # Create default models for all existing tenants
     async with sessionmanager.session() as session:
@@ -975,10 +977,23 @@ async def seed_default_models(setup_database, monkeypatch):
             tenants = result.scalars().all()
 
             for tenant in tenants:
+                # First create a provider for this tenant
+                provider = ModelProviders(
+                    tenant_id=tenant.id,
+                    name="OpenAI",
+                    provider_type="openai",
+                    credentials={"api_key": "test-key-encrypted"},
+                    config={},
+                    is_active=True,
+                )
+                session.add(provider)
+                await session.flush()
+                provider_ids[tenant.id] = provider.id
+
                 # Create a tenant-specific completion model
                 completion_model = CompletionModels(
                     tenant_id=tenant.id,
-                    provider_id=None,  # Will be set if we have providers
+                    provider_id=provider.id,
                     name="fixture-gpt-4",
                     nickname="Fixture GPT-4",
                     family="openai",
@@ -1002,7 +1017,7 @@ async def seed_default_models(setup_database, monkeypatch):
                 # Create a tenant-specific embedding model
                 embedding_model = EmbeddingModels(
                     tenant_id=tenant.id,
-                    provider_id=None,
+                    provider_id=provider.id,
                     name="fixture-text-embedding",
                     family="openai",
                     is_deprecated=False,
@@ -1031,10 +1046,22 @@ async def seed_default_models(setup_database, monkeypatch):
         # Auto-create models for the new tenant (test-only behavior)
         session = self.repo.session
 
+        # First create a provider for this tenant
+        provider = ModelProviders(
+            tenant_id=tenant_in_db.id,
+            name="OpenAI",
+            provider_type="openai",
+            credentials={"api_key": "test-key-encrypted"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
         # Create completion model for new tenant
         completion_model = CompletionModels(
             tenant_id=tenant_in_db.id,
-            provider_id=None,
+            provider_id=provider.id,
             name="fixture-gpt-4",
             nickname="Fixture GPT-4",
             family="openai",
@@ -1056,7 +1083,7 @@ async def seed_default_models(setup_database, monkeypatch):
         # Create embedding model for new tenant
         embedding_model = EmbeddingModels(
             tenant_id=tenant_in_db.id,
-            provider_id=None,
+            provider_id=provider.id,
             name="fixture-text-embedding",
             family="openai",
             is_deprecated=False,

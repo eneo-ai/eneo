@@ -98,8 +98,12 @@ class AppAssembler:
             if app.prompt is not None
             else None
         )
-        completion_model = CompletionModelAssembler.from_completion_model_to_sparse(
-            completion_model=app.completion_model
+        completion_model = (
+            CompletionModelAssembler.from_completion_model_to_sparse(
+                completion_model=app.completion_model
+            )
+            if app.completion_model is not None
+            else None
         )
         model_kwargs = (
             app.completion_model_kwargs
@@ -114,7 +118,11 @@ class AppAssembler:
             limit=Limit(max_files=3, max_size=26214400),
         )
 
-        transcription_model = TranscriptionModelPublic.from_domain(app.transcription_model)
+        transcription_model = (
+            TranscriptionModelPublic.from_domain(app.transcription_model)
+            if app.transcription_model is not None
+            else None
+        )
 
         return AppPublic(
             created_at=app.created_at,

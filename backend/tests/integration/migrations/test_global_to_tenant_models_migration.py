@@ -23,6 +23,12 @@ NOTE: These tests use a special approach where we:
 2. Create legacy data (global models with FK relations)
 3. Run the migration (upgrade)
 4. Verify results
+
+IMPORTANT: These tests use their own isolated PostgreSQL container to avoid
+interference with other integration tests. This is necessary because:
+- Migration tests need to downgrade/upgrade the database schema
+- Other tests expect the database to be at the latest migration
+- Using a shared database would cause test failures when run together
 """
 
 import json
@@ -34,6 +40,12 @@ from alembic import command
 from alembic.config import Config
 from datetime import datetime, timezone
 from uuid import uuid4
+
+
+# Mark tests to run only when explicitly selected (not as part of larger suite)
+# These tests downgrade/upgrade the database schema and must run in isolation.
+# Run with: pytest -m migration_isolation tests/integration/migrations/test_global_to_tenant_models_migration.py -v
+pytestmark = pytest.mark.migration_isolation
 
 
 def get_alembic_config(database_url: str) -> Config:
@@ -132,15 +144,17 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for model in completion_models:
         model_id = str(uuid4())
         completion_model_ids[model["name"]] = model_id
+        # Note: At 20251127_add_icons level, tenant_id and provider_id columns
+        # don't exist yet - they are added by f7f7647d5327_add_model_providers
         cur.execute("""
             INSERT INTO completion_models (
-                id, tenant_id, provider_id, name, nickname, family,
+                id, name, nickname, family,
                 token_limit, vision, reasoning, is_deprecated,
                 stability, hosting, open_source,
                 created_at, updated_at
             )
             VALUES (
-                %s, NULL, NULL, %s, %s, %s,
+                %s, %s, %s, %s,
                 %s, %s, %s, false,
                 'stable', 'usa', false,
                 %s, %s
@@ -163,15 +177,17 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for model in embedding_models:
         model_id = str(uuid4())
         embedding_model_ids[model["name"]] = model_id
+        # Note: At 20251127_add_icons level, tenant_id and provider_id columns
+        # don't exist yet - they are added by f7f7647d5327_add_model_providers
         cur.execute("""
             INSERT INTO embedding_models (
-                id, tenant_id, provider_id, name, family,
+                id, name, family,
                 dimensions, max_input, max_batch_size, is_deprecated,
                 stability, hosting, open_source,
                 created_at, updated_at
             )
             VALUES (
-                %s, NULL, NULL, %s, %s,
+                %s, %s, %s,
                 %s, %s, 100, false,
                 'stable', 'usa', false,
                 %s, %s
@@ -191,14 +207,16 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for model in transcription_models:
         model_id = str(uuid4())
         transcription_model_ids[model["name"]] = model_id
+        # Note: At 20251127_add_icons level, tenant_id and provider_id columns
+        # don't exist yet - they are added by f7f7647d5327_add_model_providers
         cur.execute("""
             INSERT INTO transcription_models (
-                id, tenant_id, provider_id, name, model_name, family,
+                id, name, model_name, family,
                 is_deprecated, stability, hosting, open_source, base_url,
                 created_at, updated_at
             )
             VALUES (
-                %s, NULL, NULL, %s, %s, %s,
+                %s, %s, %s, %s,
                 false, 'stable', 'usa', false, '',
                 %s, %s
             )
@@ -463,11 +481,16 @@ def migration_test_db(test_settings):
     """
     Special database setup for migration tests.
 
-    This fixture:
-    1. Runs migrations up to the revision BEFORE the global-to-tenant migration
-    2. Creates legacy data (global models)
-    3. Runs the migration
-    4. Returns connection info for tests to verify results
+    This fixture tests BOTH migrations in sequence:
+    1. Downgrade stepwise to BEFORE migrate_global_to_tenant_models
+       (this runs consolidate_model_settings downgrade which recreates settings tables)
+    2. Creates legacy data (global models + settings in separate tables)
+    3. Runs migrate_global_to_tenant_models (updates FK references)
+    4. Runs consolidate_model_settings (moves settings to model columns)
+    5. Returns connection info for tests to verify results
+
+    NOTE: These tests must be run in isolation:
+        pytest tests/integration/migrations/test_global_to_tenant_models_migration.py -v
 
     Using module scope so all tests in this module share the same migrated state.
     """
@@ -484,13 +507,21 @@ def migration_test_db(test_settings):
     alembic_cfg = get_alembic_config(test_settings.sync_database_url)
 
     try:
-        # First, downgrade to before the migration (if possible)
-        # The migration's down_revision is '20251127_add_icons'
+        # Stepwise downgrade to restore settings tables:
+        # 1. First downgrade to migrate_global_to_tenant_models
+        #    (this runs consolidate_model_settings downgrade, recreating settings tables)
+        # 2. Then downgrade to 20251127_add_icons (before migrate_global)
         try:
+            print("Downgrading stepwise to restore settings tables...")
+            # This triggers consolidate_model_settings downgrade which recreates settings tables
+            command.downgrade(alembic_cfg, "migrate_global_to_tenant_models")
+            print("Downgraded past consolidate_model_settings (settings tables recreated)")
+
+            # Now downgrade to before migrate_global_to_tenant_models
             command.downgrade(alembic_cfg, "20251127_add_icons")
             print("Downgraded to 20251127_add_icons (before global-to-tenant migration)")
         except Exception as e:
-            print(f"Downgrade not possible (may already be at base or migration not applied): {e}")
+            print(f"Downgrade not possible (may already be at base): {e}")
             # If downgrade fails, upgrade to that revision instead
             command.upgrade(alembic_cfg, "20251127_add_icons")
             print("Upgraded to 20251127_add_icons")
@@ -499,6 +530,8 @@ def migration_test_db(test_settings):
         now = datetime.now(timezone.utc)
         with conn.cursor() as cur:
             # Clear any existing data first (in case of rerun)
+            # Note: At 20251127_add_icons level, model_providers table doesn't exist yet
+            # (it's created in f7f7647d5327_add_model_providers migration)
             cur.execute("DELETE FROM completion_model_settings")
             cur.execute("DELETE FROM embedding_model_settings")
             cur.execute("DELETE FROM spaces_completion_models")
@@ -513,7 +546,7 @@ def migration_test_db(test_settings):
             cur.execute("DELETE FROM completion_models")
             cur.execute("DELETE FROM embedding_models")
             cur.execute("DELETE FROM transcription_models")
-            cur.execute("DELETE FROM model_providers")
+            # Don't delete from model_providers - it doesn't exist at this migration level
 
             legacy_data = create_legacy_database_state(cur, now)
             conn.commit()
@@ -523,17 +556,30 @@ def migration_test_db(test_settings):
         print(f"  - {len(legacy_data['embedding_model_ids'])} embedding models")
         print(f"  - {len(legacy_data['transcription_model_ids'])} transcription models")
 
-        # Verify global models exist before migration
+        # Verify models and settings exist before migration
+        # Note: At 20251127_add_icons level, tenant_id column doesn't exist yet
+        # so we just count all models (they are all "global" at this point)
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM completion_models WHERE tenant_id IS NULL")
+            cur.execute("SELECT COUNT(*) FROM completion_models")
             global_cm_count = cur.fetchone()[0]
-            print(f"Global completion models before migration: {global_cm_count}")
-            assert global_cm_count > 0, "Should have global models before migration"
+            print(f"Completion models before migration: {global_cm_count}")
+            assert global_cm_count > 0, "Should have models before migration"
 
-        # Run the migration
-        print("\nRunning global-to-tenant-models migration...")
+            # Verify settings tables exist and have data
+            cur.execute("SELECT COUNT(*) FROM completion_model_settings")
+            settings_count = cur.fetchone()[0]
+            print(f"Completion model settings before migration: {settings_count}")
+            assert settings_count > 0, "Should have completion model settings before migration"
+
+        # Run migrate_global_to_tenant_models
+        print("\nRunning migrate_global_to_tenant_models...")
         command.upgrade(alembic_cfg, "migrate_global_to_tenant_models")
-        print("Migration completed!")
+        print("migrate_global_to_tenant_models completed!")
+
+        # Run consolidate_model_settings
+        print("\nRunning consolidate_model_settings...")
+        command.upgrade(alembic_cfg, "consolidate_model_settings")
+        print("consolidate_model_settings completed!")
 
         yield {
             "conn": conn,
@@ -727,25 +773,39 @@ class TestGlobalToTenantModelsMigration:
 
     def test_migration_preserves_model_settings(self, migration_test_db):
         """
-        Test that model settings (is_org_enabled, is_org_default) are preserved after migration.
+        Test that model settings (is_enabled, is_default) are preserved on model columns
+        after consolidate_model_settings migration.
+
+        After consolidate_model_settings, settings are stored directly on model columns
+        (is_enabled, is_default) instead of separate settings tables.
         """
         conn = migration_test_db["conn"]
         legacy_data = migration_test_db["legacy_data"]
 
         with conn.cursor() as cur:
-            # Verify each tenant has completion model settings
+            # Verify each tenant has models with settings migrated to columns
             for tenant_id in legacy_data["tenant_ids"]:
+                # Check is_enabled column (should have enabled models)
                 cur.execute("""
                     SELECT COUNT(*)
-                    FROM completion_model_settings cms
-                    JOIN completion_models cm ON cms.completion_model_id = cm.id
-                    WHERE cms.tenant_id = %s
-                    AND cm.tenant_id = %s
-                """, (tenant_id, tenant_id))
-                settings_count = cur.fetchone()[0]
+                    FROM completion_models
+                    WHERE tenant_id = %s AND is_enabled = true
+                """, (tenant_id,))
+                enabled_count = cur.fetchone()[0]
 
-                assert settings_count > 0, \
-                    f"Tenant {tenant_id} should have completion model settings"
+                assert enabled_count > 0, \
+                    f"Tenant {tenant_id} should have enabled completion models"
+
+                # Check is_default column (should have one default model)
+                cur.execute("""
+                    SELECT COUNT(*)
+                    FROM completion_models
+                    WHERE tenant_id = %s AND is_default = true
+                """, (tenant_id,))
+                default_count = cur.fetchone()[0]
+
+                assert default_count >= 1, \
+                    f"Tenant {tenant_id} should have at least one default completion model"
 
 
 @pytest.mark.integration
@@ -931,3 +991,145 @@ class TestMigrationCredentialHandling:
 
                 # Azure config can have endpoint and api_version
                 # (depends on how migration handles these)
+
+
+@pytest.mark.integration
+class TestConsolidateModelSettings:
+    """
+    Tests for consolidate_model_settings migration.
+
+    This migration moves settings from separate tables (completion_model_settings,
+    embedding_model_settings, transcription_model_settings) to columns directly
+    on the model tables (is_enabled, is_default, security_classification_id).
+    """
+
+    def test_is_enabled_column_populated(self, migration_test_db):
+        """Verify is_enabled column is populated from settings."""
+        conn = migration_test_db["conn"]
+
+        with conn.cursor() as cur:
+            # Check completion models
+            cur.execute("""
+                SELECT COUNT(*) FROM completion_models
+                WHERE tenant_id IS NOT NULL AND is_enabled = true
+            """)
+            assert cur.fetchone()[0] > 0, "Should have enabled completion models"
+
+            # Check embedding models
+            cur.execute("""
+                SELECT COUNT(*) FROM embedding_models
+                WHERE tenant_id IS NOT NULL AND is_enabled = true
+            """)
+            assert cur.fetchone()[0] > 0, "Should have enabled embedding models"
+
+    def test_is_default_column_populated(self, migration_test_db):
+        """Verify is_default column is populated from settings."""
+        conn = migration_test_db["conn"]
+        legacy_data = migration_test_db["legacy_data"]
+
+        with conn.cursor() as cur:
+            # Each tenant should have at least one default completion model
+            for tenant_id in legacy_data["tenant_ids"]:
+                cur.execute("""
+                    SELECT COUNT(*) FROM completion_models
+                    WHERE tenant_id = %s AND is_default = true
+                """, (tenant_id,))
+                default_count = cur.fetchone()[0]
+                assert default_count >= 1, \
+                    f"Tenant {tenant_id} should have at least one default completion model"
+
+            # Each tenant should have at least one default embedding model
+            for tenant_id in legacy_data["tenant_ids"]:
+                cur.execute("""
+                    SELECT COUNT(*) FROM embedding_models
+                    WHERE tenant_id = %s AND is_default = true
+                """, (tenant_id,))
+                default_count = cur.fetchone()[0]
+                assert default_count >= 1, \
+                    f"Tenant {tenant_id} should have at least one default embedding model"
+
+    def test_settings_tables_removed(self, migration_test_db):
+        """Verify settings tables are dropped after consolidate migration."""
+        conn = migration_test_db["conn"]
+
+        with conn.cursor() as cur:
+            # completion_model_settings should not exist
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'completion_model_settings'
+                )
+            """)
+            assert cur.fetchone()[0] is False, \
+                "completion_model_settings should be dropped"
+
+            # embedding_model_settings should not exist
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'embedding_model_settings'
+                )
+            """)
+            assert cur.fetchone()[0] is False, \
+                "embedding_model_settings should be dropped"
+
+            # transcription_model_settings should not exist
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'transcription_model_settings'
+                )
+            """)
+            assert cur.fetchone()[0] is False, \
+                "transcription_model_settings should be dropped"
+
+    def test_model_columns_exist(self, migration_test_db):
+        """Verify is_enabled, is_default columns exist on model tables."""
+        conn = migration_test_db["conn"]
+
+        with conn.cursor() as cur:
+            # Check completion_models has required columns
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'completion_models'
+                AND column_name IN ('is_enabled', 'is_default', 'security_classification_id')
+            """)
+            columns = {row[0] for row in cur.fetchall()}
+            assert 'is_enabled' in columns, "completion_models should have is_enabled column"
+            assert 'is_default' in columns, "completion_models should have is_default column"
+
+            # Check embedding_models has required columns
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'embedding_models'
+                AND column_name IN ('is_enabled', 'is_default', 'security_classification_id')
+            """)
+            columns = {row[0] for row in cur.fetchall()}
+            assert 'is_enabled' in columns, "embedding_models should have is_enabled column"
+            assert 'is_default' in columns, "embedding_models should have is_default column"
+
+    def test_coalesce_defaults_applied(self, migration_test_db):
+        """
+        Test COALESCE logic: models without explicit settings should have
+        is_enabled defaulting to true (since all models were enabled by default).
+        """
+        conn = migration_test_db["conn"]
+
+        with conn.cursor() as cur:
+            # All tenant models should have is_enabled set (not NULL)
+            cur.execute("""
+                SELECT COUNT(*) FROM completion_models
+                WHERE tenant_id IS NOT NULL AND is_enabled IS NULL
+            """)
+            null_enabled_count = cur.fetchone()[0]
+            assert null_enabled_count == 0, \
+                "All tenant models should have is_enabled set (not NULL)"
+
+            # All tenant models should have is_default set (not NULL)
+            cur.execute("""
+                SELECT COUNT(*) FROM completion_models
+                WHERE tenant_id IS NOT NULL AND is_default IS NULL
+            """)
+            null_default_count = cur.fetchone()[0]
+            assert null_default_count == 0, \
+                "All tenant models should have is_default set (not NULL)"

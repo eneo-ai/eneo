@@ -4,6 +4,7 @@ Fixtures for completion models (mirrors src/intric/completion_models/).
 These fixtures create completion models with settings stored directly on the model.
 """
 import pytest
+from sqlalchemy import select
 
 from intric.ai_models.model_enums import (
     ModelFamily,
@@ -12,6 +13,7 @@ from intric.ai_models.model_enums import (
     ModelStability,
 )
 from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.model_providers_table import ModelProviders
 
 
 @pytest.fixture
@@ -46,6 +48,43 @@ def completion_model_factory(admin_user):
     Returns:
         CompletionModels: The created database model
     """
+    # Cache for providers per tenant/provider_type combo
+    _provider_cache = {}
+
+    async def _get_or_create_provider(session, tenant_id, provider_type: str):
+        """Get existing provider or create a new one for this tenant/provider combo."""
+        cache_key = (tenant_id, provider_type)
+        if cache_key in _provider_cache:
+            return _provider_cache[cache_key]
+
+        # Check if provider already exists
+        result = await session.execute(
+            select(ModelProviders).where(
+                ModelProviders.tenant_id == tenant_id,
+                ModelProviders.provider_type == provider_type,
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            _provider_cache[cache_key] = existing.id
+            return existing.id
+
+        # Create new provider
+        provider = ModelProviders(
+            tenant_id=tenant_id,
+            name=provider_type.title(),
+            provider_type=provider_type,
+            credentials={"api_key": "test-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        _provider_cache[cache_key] = provider.id
+        return provider.id
+
     async def _create_model(
         session,
         name: str,
@@ -84,10 +123,13 @@ def completion_model_factory(admin_user):
         }
         org = org_map.get(provider)
 
+        # Get or create provider for this tenant (required by check constraint)
+        provider_id = await _get_or_create_provider(session, admin_user.tenant_id, provider)
+
         # Create the completion model with settings directly on it
         model = CompletionModels(
             tenant_id=admin_user.tenant_id,
-            provider_id=None,  # Can be set via kwargs if needed
+            provider_id=provider_id,
             name=name,
             nickname=nickname,
             token_limit=token_limit,

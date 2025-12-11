@@ -44,6 +44,8 @@
     return $app.input_fields.map((field) => field.type).some((type) => type.includes("upload"));
   });
 
+  const hasCompletionModel = derived(app, ($app) => $app.completion_model !== null);
+
   let isSubmitting = false;
   async function createRun() {
     if (inputs.files.length === 0 && !inputs.text) {
@@ -102,23 +104,43 @@
         {$app.description}
       </p>
     {/if}
-    <div
-      class="border-dynamic-dimmer bg-dynamic-dimmer flex min-h-[14rem] w-full flex-grow flex-col items-center justify-center gap-4 rounded-lg border py-6"
-    >
-      <AppInput app={$app} bind:inputData={inputs}></AppInput>
-    </div>
 
-    <Tooltip text={hasData ? undefined : m.input_data_required_tooltip()}>
+    {#if $hasCompletionModel}
+      <div
+        class="border-dynamic-dimmer bg-dynamic-dimmer flex min-h-[14rem] w-full flex-grow flex-col items-center justify-center gap-4 rounded-lg border py-6"
+      >
+        <AppInput app={$app} bind:inputData={inputs}></AppInput>
+      </div>
+
+      <Tooltip text={hasData ? undefined : m.input_data_required_tooltip()}>
+        <Button
+          disabled={!hasData || isSubmitting}
+          unstyled
+          on:click={createRun}
+          class="border-stronger bg-dynamic-default text-on-fill hover:border-dynamic-default hover:bg-dynamic-dimmer hover:text-dynamic-stronger flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg shadow-lg "
+        >
+          <IconPlay />
+          {isSubmitting ? m.submitting() : m.submit()}
+        </Button>
+      </Tooltip>
+    {:else}
+      <div
+        class="border-dynamic-dimmer bg-dynamic-dimmer flex min-h-[14rem] w-full flex-grow flex-col items-center justify-center gap-4 rounded-lg border py-6 opacity-50"
+      >
+        <p class="text-secondary max-w-[50ch] text-center text-sm">
+          {m.no_completion_model_description()}
+        </p>
+      </div>
+
       <Button
-        disabled={!hasData || isSubmitting}
+        disabled
         unstyled
-        on:click={createRun}
-        class="border-stronger bg-dynamic-default text-on-fill hover:border-dynamic-default hover:bg-dynamic-dimmer hover:text-dynamic-stronger flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg shadow-lg "
+        class="border-stronger bg-dynamic-default text-on-fill flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg opacity-50 shadow-lg"
       >
         <IconPlay />
-        {isSubmitting ? m.submitting() : m.submit()}
+        {m.submit()}
       </Button>
-    </Tooltip>
+    {/if}
   </div>
 </div>
 

@@ -104,9 +104,9 @@ class AppService:
         self,
         space: "Space",
         template_data: "TemplateCreate",
-        completion_model: "CompletionModel",
+        completion_model: Optional["CompletionModel"],
         name: str | None = None,
-        transcription_model: "TranscriptionModel" = None,
+        transcription_model: Optional["TranscriptionModel"] = None,
     ):
         template = await self.app_template_service.get_app_template(
             app_template_id=template_data.id
@@ -144,22 +144,21 @@ class AppService:
 
         return await self.repo.add(app)
 
-    async def get_completion_model(self, space: Space) -> "CompletionModel":
+    async def get_completion_model(self, space: Space) -> Optional["CompletionModel"]:
+        """Get a completion model for the space. Returns None if no model is available."""
         completion_model = space.get_default_completion_model() or (
             space.get_latest_completion_model()
             if not space.is_personal()
             else await self.completion_model_crud_service.get_default_completion_model()
         )
 
-        if completion_model is None:
-            raise BadRequestException()
-
         return completion_model
 
-    async def get_transcription_model(self, space: Space) -> "TranscriptionModel":
+    async def get_transcription_model(self, space: Space) -> Optional["TranscriptionModel"]:
+        """Get a transcription model for the space. Returns None if no model is available."""
         transcription_model = space.get_latest_transcription_model()
-        if not transcription_model and not space.is_personal():
-            # Get default from tenant
+        if not transcription_model:
+            # Get default from tenant (for both personal and non-personal spaces)
             transcription_model = (
                 await self.transcription_model_crud_service.get_default_transcription_model()
             )

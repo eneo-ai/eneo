@@ -33,16 +33,30 @@ from intric.spaces.api.space_models import (
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 from intric.roles.permissions import Permission
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 async def forbid_org_space(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    space = await container.space_service().get_space(id)
-    if space.user_id is None and space.tenant_space_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return True
+    logger.warning(f"forbid_org_space called with space_id={id}")
+    try:
+        space = await container.space_service().get_space(id)
+        logger.warning(
+            f"forbid_org_space check: space_id={id}, user_id={space.user_id}, "
+            f"tenant_space_id={space.tenant_space_id}, is_org={space.user_id is None and space.tenant_space_id is None}"
+        )
+        if space.user_id is None and space.tenant_space_id is None:
+            logger.warning(f"Blocking org space access: space_id={id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return True
+    except Exception as e:
+        logger.error(f"forbid_org_space error: {type(e).__name__}: {e}")
+        raise
     
 @router.post("/", response_model=SpacePublic, status_code=201)
 async def create_space(
@@ -251,18 +265,26 @@ async def create_app(
     create_service_req: CreateSpaceAppRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    space_service = container.space_service()
-    app_service = container.app_service()
-    assembler = container.app_assembler()
+    logger.warning(f"create_app called with space_id={id}, request={create_service_req}")
+    try:
+        space_service = container.space_service()
+        app_service = container.app_service()
+        assembler = container.app_assembler()
 
-    space = await space_service.get_space(id)
-    app, permissions = await app_service.create_app(
-        name=create_service_req.name,
-        space=space,
-        template_data=create_service_req.from_template,
-    )
+        logger.warning(f"Getting space {id}")
+        space = await space_service.get_space(id)
+        logger.warning(f"Got space, creating app with name={create_service_req.name}")
+        app, permissions = await app_service.create_app(
+            name=create_service_req.name,
+            space=space,
+            template_data=create_service_req.from_template,
+        )
+        logger.warning(f"App created: {app.id}")
 
-    return assembler.from_app_to_model(app, permissions=permissions)
+        return assembler.from_app_to_model(app, permissions=permissions)
+    except Exception as e:
+        logger.error(f"create_app error: {type(e).__name__}: {e}")
+        raise
 
 
 @router.post(
