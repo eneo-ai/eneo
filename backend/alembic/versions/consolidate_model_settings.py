@@ -36,7 +36,7 @@ def upgrade() -> None:
     print("\n[1/4] Adding new columns to model tables...")
 
     # CompletionModels
-    op.add_column('completion_models', sa.Column('is_enabled', sa.Boolean(), server_default='true', nullable=False))
+    op.add_column('completion_models', sa.Column('is_enabled', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('completion_models', sa.Column('is_default', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('completion_models', sa.Column('security_classification_id', UUID(as_uuid=True), nullable=True))
     op.create_foreign_key(
@@ -48,7 +48,7 @@ def upgrade() -> None:
     print("  ✓ Added columns to completion_models")
 
     # EmbeddingModels
-    op.add_column('embedding_models', sa.Column('is_enabled', sa.Boolean(), server_default='true', nullable=False))
+    op.add_column('embedding_models', sa.Column('is_enabled', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('embedding_models', sa.Column('is_default', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('embedding_models', sa.Column('security_classification_id', UUID(as_uuid=True), nullable=True))
     op.create_foreign_key(
@@ -60,7 +60,7 @@ def upgrade() -> None:
     print("  ✓ Added columns to embedding_models")
 
     # TranscriptionModels
-    op.add_column('transcription_models', sa.Column('is_enabled', sa.Boolean(), server_default='true', nullable=False))
+    op.add_column('transcription_models', sa.Column('is_enabled', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('transcription_models', sa.Column('is_default', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('transcription_models', sa.Column('security_classification_id', UUID(as_uuid=True), nullable=True))
     op.create_foreign_key(
