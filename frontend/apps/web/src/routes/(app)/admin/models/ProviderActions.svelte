@@ -13,6 +13,7 @@
   import { writable, type Writable } from "svelte/store";
   import { Plus, Pencil, Trash2 } from "lucide-svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let provider: ModelProviderPublic;
   /** Pass this to open AddCompletionModelDialog with this provider pre-selected */
@@ -33,7 +34,7 @@
       await invalidate("admin:model-providers:load");
       $showDeleteConfirm = false;
     } catch (e: any) {
-      deleteError = e.message || "Failed to delete provider";
+      deleteError = e.message || m.failed_to_delete_provider();
     } finally {
       isDeleting = false;
     }
@@ -54,7 +55,7 @@
         on:click={() => onAddModel?.(provider.id)}
       >
         <Plus class="h-4 w-4" />
-        Add Model
+        {m.add_model()}
       </Button>
     {/if}
     <Button
@@ -65,7 +66,7 @@
       }}
     >
       <Pencil class="h-4 w-4" />
-      Edit Provider
+      {m.edit_provider()}
     </Button>
     <Button
       is={item}
@@ -76,7 +77,7 @@
       }}
     >
       <Trash2 class="h-4 w-4" />
-      Delete Provider
+      {m.delete_provider()}
     </Button>
   </Dropdown.Menu>
 </Dropdown.Root>
@@ -87,7 +88,7 @@
 <!-- Delete Confirmation Dialog -->
 <Dialog.Root openController={showDeleteConfirm}>
   <Dialog.Content width="small">
-    <Dialog.Title>Delete Provider</Dialog.Title>
+    <Dialog.Title>{m.delete_provider()}</Dialog.Title>
     <Dialog.Section>
       <div class="flex flex-col gap-4 p-4">
         {#if deleteError}
@@ -96,24 +97,23 @@
           </div>
         {/if}
         <p>
-          Are you sure you want to delete <strong>{provider.name}</strong>?
+          {m.delete_provider_confirm({ name: provider.name })}
         </p>
         <p class="text-muted-foreground text-sm">
-          This will also delete all models associated with this provider.
-          This action cannot be undone.
+          {m.delete_provider_warning()}
         </p>
       </div>
     </Dialog.Section>
     <Dialog.Controls>
       <Button variant="outlined" on:click={() => ($showDeleteConfirm = false)}>
-        Cancel
+        {m.cancel()}
       </Button>
       <Button
         variant="destructive"
         on:click={handleDelete}
         disabled={isDeleting}
       >
-        {isDeleting ? "Deleting..." : "Delete Provider"}
+        {isDeleting ? m.deleting() : m.delete_provider()}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

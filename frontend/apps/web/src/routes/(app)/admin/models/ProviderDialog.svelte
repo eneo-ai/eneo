@@ -10,6 +10,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { writable, type Writable } from "svelte/store";
   import type { ModelProviderPublic } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   export let openController: Writable<boolean>;
   /** If provided, dialog is in edit mode. If null/undefined, dialog is in add mode. */
@@ -29,14 +30,16 @@
   let isActive = true;
   let isSubmitting = false;
   let error: string | null = null;
+  let isEditingApiKey = false;
 
+  // Provider type options with i18n labels
   const providerTypes = [
-    { value: "hosted_vllm", label: "OpenAI Compatible (Self-Hosted)" },
-    { value: "openai", label: "OpenAI" },
-    { value: "azure", label: "Azure OpenAI" },
-    { value: "anthropic", label: "Anthropic (Claude)" },
-    { value: "gemini", label: "Google Gemini" },
-    { value: "cohere", label: "Cohere" },
+    { value: "hosted_vllm", label: m.provider_type_hosted_vllm() },
+    { value: "openai", label: m.provider_type_openai() },
+    { value: "azure", label: m.provider_type_azure() },
+    { value: "anthropic", label: m.provider_type_anthropic() },
+    { value: "gemini", label: m.provider_type_gemini() },
+    { value: "cohere", label: m.provider_type_cohere() },
   ];
 
   const providerTypeStore = writable(providerTypes[0]);
@@ -80,32 +83,32 @@
     error = null;
 
     if (!providerName.trim()) {
-      error = "Provider name is required";
+      error = m.provider_name_required();
       return;
     }
 
     // API key is required only in add mode
     if (!isEditMode && !apiKey.trim()) {
-      error = "API key is required";
+      error = m.api_key_required();
       return;
     }
 
     if (requiresEndpoint && !endpoint.trim()) {
       if (providerType === "azure") {
-        error = "Endpoint is required for Azure OpenAI";
+        error = m.endpoint_required_for_azure();
       } else if (providerType === "hosted_vllm") {
-        error = "Endpoint is required for self-hosted OpenAI-compatible providers";
+        error = m.endpoint_required_for_vllm();
       }
       return;
     }
 
     if (providerType === "azure") {
       if (!apiVersion.trim()) {
-        error = "API Version is required for Azure OpenAI";
+        error = m.api_version_required_for_azure();
         return;
       }
       if (!deploymentName.trim()) {
-        error = "Deployment Name is required for Azure OpenAI";
+        error = m.deployment_name_required_for_azure();
         return;
       }
     }
@@ -179,7 +182,7 @@
       // Reset form
       resetForm();
     } catch (e: any) {
-      error = e.message || (isEditMode ? "Failed to update provider" : "Failed to create provider");
+      error = e.message || (isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
     }
@@ -194,6 +197,7 @@
     apiVersion = "";
     deploymentName = "";
     isActive = true;
+    isEditingApiKey = false;
   }
 
   function handleCancel() {
@@ -208,7 +212,7 @@
 
 <Dialog.Root {openController}>
   <Dialog.Content width="large" form>
-    <Dialog.Title>{isEditMode ? "Edit Provider" : "Add Model Provider"}</Dialog.Title>
+    <Dialog.Title>{isEditMode ? m.edit_provider() : m.add_model_provider()}</Dialog.Title>
 
     <Dialog.Section>
       <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4">
@@ -221,18 +225,18 @@
         <div class="flex flex-col gap-2">
           {#if isEditMode}
             <!-- In edit mode, show provider type as read-only -->
-            <label class="text-sm font-medium">Provider Type</label>
+            <label class="text-sm font-medium">{m.provider_type()}</label>
             <div class="bg-muted rounded px-3 py-2 text-sm">
               {getProviderTypeLabel(providerType)}
             </div>
             <p class="text-muted-foreground text-xs">
-              Provider type cannot be changed after creation
+              {m.provider_type_cannot_be_changed()}
             </p>
           {:else}
             <!-- In add mode, show dropdown -->
             <Select.Root customStore={providerTypeStore} class="border-b border-dimmer">
-              <Select.Label>Provider Type</Select.Label>
-              <Select.Trigger placeholder="Select provider type"></Select.Trigger>
+              <Select.Label>{m.provider_type()}</Select.Label>
+              <Select.Trigger placeholder={m.select_provider_type()}></Select.Trigger>
               <Select.Options>
                 {#each providerTypes as type}
                   <Select.Item value={type} label={type.label}>{type.label}</Select.Item>
@@ -243,38 +247,61 @@
         </div>
 
         <div class="flex flex-col gap-2">
-          <label for="provider-name" class="text-sm font-medium">Provider Name</label>
+          <label for="provider-name" class="text-sm font-medium">{m.provider_name()}</label>
           <Input.Text
             id="provider-name"
             bind:value={providerName}
-            placeholder="e.g., My Azure Instance, GDM"
+            placeholder={m.provider_name_placeholder()}
             required
           />
           <p class="text-muted-foreground text-xs">
-            A unique name to identify this provider instance
+            {m.provider_name_hint()}
           </p>
         </div>
 
         <div class="flex flex-col gap-2">
-          <label for="api-key" class="text-sm font-medium">API Key</label>
-          <Input.Text
-            id="api-key"
-            type="password"
-            bind:value={apiKey}
-            placeholder={isEditMode ? "Leave empty to keep current key" : "Enter API key"}
-            required={!isEditMode}
-          />
-          <p class="text-muted-foreground text-xs">
-            {#if isEditMode}
-              Leave empty to keep the current API key, or enter a new one to update it
+          <label for="api-key" class="text-sm font-medium">{m.api_key()}</label>
+          {#if isEditMode && provider?.masked_api_key && !isEditingApiKey}
+            <!-- Show masked key with edit button -->
+            <div class="flex items-center gap-2">
+              <span class="bg-muted rounded px-3 py-2 text-sm font-mono">
+                {provider.masked_api_key}
+              </span>
+              <Button
+                variant="outlined"
+                size="sm"
+                on:click={() => isEditingApiKey = true}
+              >
+                {m.change()}
+              </Button>
+            </div>
+          {:else}
+            <!-- Show input field -->
+            <Input.Text
+              id="api-key"
+              type="password"
+              bind:value={apiKey}
+              placeholder={m.enter_api_key()}
+              required={!isEditMode || !provider?.masked_api_key}
+            />
+            {#if isEditMode && provider?.masked_api_key}
+              <button
+                type="button"
+                class="text-muted-foreground text-xs underline text-left"
+                on:click={() => { isEditingApiKey = false; apiKey = ""; }}
+              >
+                {m.cancel_keep_current_key()} ({provider.masked_api_key})
+              </button>
             {:else}
-              Will be encrypted before storage
+              <p class="text-muted-foreground text-xs">
+                {m.will_be_encrypted()}
+              </p>
             {/if}
-          </p>
+          {/if}
         </div>
 
         <div class="flex flex-col gap-2">
-          <label for="endpoint" class="text-sm font-medium">Endpoint URL</label>
+          <label for="endpoint" class="text-sm font-medium">{m.endpoint_url()}</label>
           <Input.Text
             id="endpoint"
             bind:value={endpoint}
@@ -287,47 +314,47 @@
           />
           {#if providerType === "hosted_vllm"}
             <p class="text-muted-foreground text-xs">
-              <strong>Required</strong> for self-hosted. Common examples: vLLM (http://localhost:8000/v1), Ollama (http://localhost:11434/v1), llama.cpp (http://localhost:8080/v1)
+              {m.endpoint_required_vllm()}
             </p>
           {:else if providerType === "openai"}
             <p class="text-muted-foreground text-xs">
-              Optional. Leave empty to use default OpenAI endpoint (https://api.openai.com/v1)
+              {m.endpoint_optional_openai()}
             </p>
           {:else if providerType === "azure"}
             <p class="text-muted-foreground text-xs">
-              <strong>Required</strong>. Your Azure OpenAI resource endpoint
+              {m.endpoint_required_azure()}
             </p>
           {:else}
             <p class="text-muted-foreground text-xs">
-              Optional. Leave empty to use default endpoint for this provider
+              {m.endpoint_optional_default()}
             </p>
           {/if}
         </div>
 
         {#if providerType === "azure"}
           <div class="flex flex-col gap-2">
-            <label for="api-version" class="text-sm font-medium">API Version</label>
+            <label for="api-version" class="text-sm font-medium">{m.api_version()}</label>
             <Input.Text
               id="api-version"
               bind:value={apiVersion}
-              placeholder="e.g., 2024-02-15-preview"
+              placeholder={m.api_version_placeholder()}
               required
             />
             <p class="text-muted-foreground text-xs">
-              <strong>Required</strong>. The Azure OpenAI API version to use
+              {m.api_version_required()}
             </p>
           </div>
 
           <div class="flex flex-col gap-2">
-            <label for="deployment-name" class="text-sm font-medium">Deployment Name</label>
+            <label for="deployment-name" class="text-sm font-medium">{m.deployment_name()}</label>
             <Input.Text
               id="deployment-name"
               bind:value={deploymentName}
-              placeholder="e.g., gpt-4-deployment"
+              placeholder={m.deployment_name_placeholder()}
               required
             />
             <p class="text-muted-foreground text-xs">
-              <strong>Required</strong>. Your Azure OpenAI deployment name
+              {m.deployment_name_required()}
             </p>
           </div>
         {/if}
@@ -340,23 +367,23 @@
               bind:checked={isActive}
               class="h-4 w-4 rounded border-gray-300"
             />
-            <label for="is-active" class="text-sm font-medium">Provider is active</label>
+            <label for="is-active" class="text-sm font-medium">{m.provider_is_active()}</label>
           </div>
         {/if}
       </form>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button variant="outlined" on:click={handleCancel}>Cancel</Button>
+      <Button variant="outlined" on:click={handleCancel}>{m.cancel()}</Button>
       <Button
         variant="primary"
         on:click={handleSubmit}
         disabled={isSubmitting}
       >
         {#if isSubmitting}
-          {isEditMode ? "Saving..." : "Creating..."}
+          {isEditMode ? m.saving() : m.creating()}
         {:else}
-          {isEditMode ? "Save Changes" : "Create Provider"}
+          {isEditMode ? m.save_changes() : m.create_provider()}
         {/if}
       </Button>
     </Dialog.Controls>

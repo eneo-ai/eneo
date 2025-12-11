@@ -57,7 +57,7 @@ PROVIDER_NAMES = {
     "berget": "Berget.ai",
     "cohere": "Cohere",
     "gemini": "Google Gemini",
-    "gdm": "Google DeepMind",
+    "gdm": "GDM",
 }
 
 # ENV variable names per provider

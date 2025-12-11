@@ -43,8 +43,6 @@
       <CompletionModelsTable
         completionModels={data.models.completionModels}
         providers={data.providers}
-        credentials={data.credentials}
-        tenantCredentialsEnabled={data.tenantCredentialsEnabled}
         addModelDialogOpen={addCompletionModelDialogOpen}
       />
     </Page.Tab>

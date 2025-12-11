@@ -19,7 +19,6 @@
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import ProviderActions from "./ProviderActions.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { browser } from "$app/environment";
 
   import { writable, type Writable } from "svelte/store";
   import { Button } from "@intric/ui";
@@ -28,17 +27,13 @@
 
   export let completionModels: CompletionModel[];
   export let providers: ModelProviderPublic[] = [];
-  export let credentials:
-    | {
-        provider: string;
-        masked_key: string;
-        config: Record<string, any>;
-      }[]
-    | undefined = undefined;
-  export let tenantCredentialsEnabled: boolean = false;
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
 
   const addProviderDialogOpen = writable(false);
+
+  // Track provider being edited (for credential icon click -> edit provider)
+  let editingProvider: ModelProviderPublic | null = null;
+  const editProviderDialogOpen = writable(false);
 
   // Backend returns both global and tenant models
   // Filter to show only tenant models in UI
@@ -185,34 +180,10 @@
   }
 
   /**
-   * Get the credential provider ID for a given group.
-   * For tenant models, returns the provider's credential type.
-   */
-  function getProviderIdForGroup(groupKey: string): string | undefined {
-    // For tenant models, get provider's type
-    const provider = providers.find(p => p.id === groupKey);
-    return provider?.provider_type;
-  }
-
-  /**
    * Get the full provider object for a given group.
    */
   function getProviderForGroup(groupKey: string): ModelProviderPublic | undefined {
     return providers.find(p => p.id === groupKey);
-  }
-
-  function getCredentialForGroup(groupKey: string, groupName: string) {
-    if (!credentials) return undefined;
-
-    const providerId = getProviderIdForGroup(groupKey);
-    if (!providerId) return undefined;
-
-    const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
-    if (!cred) return undefined;
-    return {
-      masked_key: cred.masked_key,
-      config: cred.config
-    };
   }
 
   /**
@@ -225,25 +196,30 @@
     addModelDialogOpen?.set(true);
   }
 
+  /**
+   * Handle editing a provider (e.g., when clicking the credential icon).
+   * Opens the ProviderDialog in edit mode.
+   */
+  function handleEditProvider(provider: ModelProviderPublic) {
+    editingProvider = provider;
+    editProviderDialogOpen.set(true);
+  }
+
   $: groups = listGroups(providers);
   $: table.update(filteredModels);</script>
 
 <div class="flex flex-col gap-4">
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
     {#each groups as group (group.key)}
-      {@const providerType = getProviderIdForGroup(group.key)}
       {@const provider = getProviderForGroup(group.key)}
       <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
         <svelte:fragment slot="title-suffix">
           <div class="flex items-center gap-2">
-            {#if browser && tenantCredentialsEnabled && providerType}
-              <ProviderCredentialIcon
-                provider={providerType}
-                displayName={group.name}
-                credential={getCredentialForGroup(group.key, group.name)}
-              />
-            {/if}
             {#if provider}
+              <ProviderCredentialIcon
+                {provider}
+                onEdit={() => handleEditProvider(provider)}
+              />
               <ProviderActions
                 {provider}
                 onAddModel={handleAddModelToProvider}
@@ -258,9 +234,13 @@
   <div class="flex justify-center pb-4">
     <Button variant="outlined" on:click={() => addProviderDialogOpen.set(true)}>
       <Plus class="w-4 h-4 mr-2" />
-      Add Provider
+      {m.add_provider()}
     </Button>
   </div>
 </div>
 
+<!-- Add Provider Dialog -->
 <ProviderDialog openController={addProviderDialogOpen} />
+
+<!-- Edit Provider Dialog -->
+<ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />

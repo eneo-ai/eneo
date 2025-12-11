@@ -34,6 +34,7 @@ class ModelProviderPublic(BaseModel):
     provider_type: str
     config: dict[str, Any]
     is_active: bool
+    masked_api_key: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -4831,6 +4831,11 @@ export interface components {
       /** Is Active */
       is_active: boolean;
       /**
+       * Masked Api Key
+       * @description Masked API key for display (e.g., "...xyz9"), or null if not configured
+       */
+      masked_api_key: string | null;
+      /**
        * Created At
        * Format: date-time
        */
