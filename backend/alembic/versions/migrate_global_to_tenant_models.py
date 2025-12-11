@@ -168,6 +168,10 @@ def get_env_credentials(provider_type: str) -> dict:
     if provider_type == "vllm":
         credentials["endpoint"] = os.environ.get("VLLM_MODEL_URL", "")
 
+    # Berget needs endpoint (OpenAI-compatible API)
+    if provider_type == "berget":
+        credentials["endpoint"] = os.environ.get("BERGET_API_BASE", "https://api.berget.ai/v1")
+
     return credentials
 
 

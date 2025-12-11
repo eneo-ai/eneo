@@ -1013,6 +1013,7 @@ class Container(containers.DeclarativeContainer):
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,
+        session=session,
     )
     crawler = providers.Factory(Crawler)
 

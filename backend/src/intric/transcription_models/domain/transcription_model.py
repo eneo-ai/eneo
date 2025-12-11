@@ -69,6 +69,15 @@ class TranscriptionModel(AIModel):
         self.tenant_id = tenant_id
         self.provider_id = provider_id
 
+    @property
+    def model_name(self) -> str:
+        """Return the actual model name (e.g., 'whisper-1', 'kb-whisper-large').
+
+        This is the model identifier used with the API, stored as 'name' in the domain
+        but as 'model_name' in the database.
+        """
+        return self.name
+
     @classmethod
     def create_from_db(
         cls,
