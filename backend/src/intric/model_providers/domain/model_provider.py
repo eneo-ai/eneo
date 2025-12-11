@@ -55,7 +55,15 @@ class ModelProvider:
             "provider_type": self.provider_type,
             "config": self.config,
             "is_active": self.is_active,
+            "masked_api_key": self._get_masked_api_key(),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             # Note: credentials are NOT included in the public dict
         }
+
+    def _get_masked_api_key(self) -> str | None:
+        """Return masked API key for display, or None if not configured."""
+        api_key = self.credentials.get("api_key")
+        if not api_key:
+            return None
+        return f"...{api_key[-4:]}" if len(api_key) >= 4 else "****"

@@ -57,7 +57,7 @@ PROVIDER_NAMES = {
     "berget": "Berget.ai",
     "cohere": "Cohere",
     "gemini": "Google Gemini",
-    "gdm": "Google DeepMind",
+    "gdm": "GDM",
 }
 
 # ENV variable names per provider
@@ -167,6 +167,10 @@ def get_env_credentials(provider_type: str) -> dict:
     # vLLM needs endpoint
     if provider_type == "vllm":
         credentials["endpoint"] = os.environ.get("VLLM_MODEL_URL", "")
+
+    # Berget needs endpoint (OpenAI-compatible API)
+    if provider_type == "berget":
+        credentials["endpoint"] = os.environ.get("BERGET_API_BASE", "https://api.berget.ai/v1")
 
     return credentials
 
@@ -455,6 +459,11 @@ def create_tenant_transcription_models(conn, tenant_id: str, global_models: list
         family = (model.family or "openai").lower()
         # Transcription models don't have litellm_model_name
         provider_type = get_provider_type_for_family(family, None)
+
+        # Special case: If org is Berget, use berget provider
+        if model.org and model.org.lower() == "berget":
+            provider_type = "berget"
+
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
