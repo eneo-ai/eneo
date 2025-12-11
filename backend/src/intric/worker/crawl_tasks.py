@@ -147,8 +147,9 @@ async def _recover_session(
             f"Error cleaning up old session during recovery: {cleanup_exc}"
         )
 
-    # 2. Create fresh session
-    new_session = await sessionmanager.session().__aenter__()
+    # 2. Create fresh session via explicit factory (no context manager)
+    # This avoids orphaned async generator that causes GC-triggered session.close()
+    new_session = sessionmanager.create_session()
 
     # 3. Explicitly start transaction - required since autobegin=False
     await new_session.begin()
@@ -945,7 +946,42 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             raise Retry(defer=retry_delay)
 
     try:
-        async with task_manager.set_status_on_exception():
+        # CRITICAL: Atomic status check to prevent worker resurrection
+        # Why: Safe Watchdog may have marked this job FAILED while it was in ARQ queue.
+        # Without this check, we'd blindly set IN_PROGRESS, "resurrecting" a dead job.
+        # This uses Compare-and-Swap: only transitions QUEUED → IN_PROGRESS
+        job_repo_for_atomic_check = container.job_repo()
+        job_started = await job_repo_for_atomic_check.mark_job_started(job_id)
+
+        if not job_started:
+            # Job status changed externally (likely FAILED by watchdog)
+            # We must NOT process this job - abort immediately
+            logger.warning(
+                "Worker resurrection prevented: job status changed externally",
+                extra={
+                    "job_id": str(job_id),
+                    "website_id": str(params.website_id),
+                    "url": params.url,
+                    "tenant_id": str(tenant.id) if tenant else None,
+                    "acquired_new_slot": acquired and preacquired_tenant_id is None,
+                    "metric_name": "crawl.worker.resurrection_prevented",
+                    "metric_value": 1,
+                },
+            )
+
+            # CRITICAL: Prevent finally block from releasing slot!
+            # The Watchdog ALREADY released the slot when it marked job FAILED.
+            # If we release again, we'd "steal" a slot from another running job.
+            # Clear both flags to ensure neither finally path triggers:
+            # - Primary path: if acquired → release (blocked by acquired=False)
+            # - Fallback path: elif preacquired_tenant_id and not acquired → release (blocked by None)
+            acquired = False
+            preacquired_tenant_id = None
+
+            return {"status": "resurrection_prevented", "job_id": str(job_id)}
+
+        # Job successfully transitioned to IN_PROGRESS, pass flag to skip redundant update
+        async with task_manager.set_status_on_exception(status_already_set=True):
             # Initialize timing tracking for performance analysis
             timings = {
                 "fetch_existing_titles": 0.0,

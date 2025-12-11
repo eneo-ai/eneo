@@ -86,8 +86,16 @@ class TaskManager:
             )
 
     @asynccontextmanager
-    async def set_status_on_exception(self):
-        await self.set_status(Status.IN_PROGRESS)
+    async def set_status_on_exception(self, *, status_already_set: bool = False):
+        """Context manager that handles job status updates and exception handling.
+
+        Args:
+            status_already_set: If True, skip the initial IN_PROGRESS status update.
+                Used when mark_job_started() has already atomically set the status
+                to prevent worker resurrection race condition.
+        """
+        if not status_already_set:
+            await self.set_status(Status.IN_PROGRESS)
 
         try:
             yield
