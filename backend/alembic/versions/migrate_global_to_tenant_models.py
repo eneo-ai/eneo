@@ -455,6 +455,11 @@ def create_tenant_transcription_models(conn, tenant_id: str, global_models: list
         family = (model.family or "openai").lower()
         # Transcription models don't have litellm_model_name
         provider_type = get_provider_type_for_family(family, None)
+
+        # Special case: If org is Berget, use berget provider
+        if model.org and model.org.lower() == "berget":
+            provider_type = "berget"
+
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
