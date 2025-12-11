@@ -125,8 +125,18 @@ def is_already_encrypted(value: str) -> bool:
 # HELPER FUNCTIONS
 # =============================================================================
 
-def get_provider_type_for_family(family: str) -> str:
-    """Map model family to provider type."""
+def get_provider_type_for_family(family: str, litellm_model_name: str = None) -> str:
+    """Map model family to provider type.
+
+    If litellm_model_name has a prefix (e.g., 'gdm/gemma3', 'azure/gpt-4'),
+    use that prefix as provider type. Otherwise fall back to family mapping.
+    """
+    # Check litellm_model_name prefix first (e.g., 'gdm/model' -> 'gdm')
+    if litellm_model_name and "/" in litellm_model_name:
+        prefix = litellm_model_name.split("/")[0].lower()
+        if prefix:
+            return prefix
+
     if not family:
         return "openai"  # Default fallback
     return FAMILY_TO_PROVIDER_TYPE.get(family.lower(), family.lower())
@@ -323,7 +333,7 @@ def create_tenant_completion_models(conn, tenant_id: str, global_models: list,
     for model in global_models:
         global_model_id = str(model.id)
         family = (model.family or "openai").lower()
-        provider_type = get_provider_type_for_family(family)
+        provider_type = get_provider_type_for_family(family, model.litellm_model_name)
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
@@ -387,7 +397,7 @@ def create_tenant_embedding_models(conn, tenant_id: str, global_models: list,
     for model in global_models:
         global_model_id = str(model.id)
         family = (model.family or "openai").lower()
-        provider_type = get_provider_type_for_family(family)
+        provider_type = get_provider_type_for_family(family, model.litellm_model_name)
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
@@ -443,7 +453,8 @@ def create_tenant_transcription_models(conn, tenant_id: str, global_models: list
     for model in global_models:
         global_model_id = str(model.id)
         family = (model.family or "openai").lower()
-        provider_type = get_provider_type_for_family(family)
+        # Transcription models don't have litellm_model_name
+        provider_type = get_provider_type_for_family(family, None)
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
@@ -867,13 +878,15 @@ def upgrade() -> None:
     print(f"Single-tenant mode: {is_single_tenant}")
 
     # Determine required provider types from model families
+    # Pass litellm_model_name to handle special cases like GDM (family='openai' but litellm='gdm/...')
     required_provider_types = set()
     for model in global_completion_models:
-        required_provider_types.add(get_provider_type_for_family(model.family or "openai"))
+        required_provider_types.add(get_provider_type_for_family(model.family or "openai", model.litellm_model_name))
     for model in global_embedding_models:
-        required_provider_types.add(get_provider_type_for_family(model.family or "openai"))
+        required_provider_types.add(get_provider_type_for_family(model.family or "openai", model.litellm_model_name))
     for model in global_transcription_models:
-        required_provider_types.add(get_provider_type_for_family(model.family or "openai"))
+        # Transcription models don't have litellm_model_name
+        required_provider_types.add(get_provider_type_for_family(model.family or "openai", None))
 
     print(f"Required provider types: {required_provider_types}")
 
