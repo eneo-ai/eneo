@@ -36,6 +36,7 @@ export type SecurityClassification = components["schemas"]["SecurityClassificati
 export type Job = components["schemas"]["JobPublic"];
 export type JobStatus = components["schemas"]["Status"];
 export type Tenant = components["schemas"]["TenantPublic"];
+export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
 export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
