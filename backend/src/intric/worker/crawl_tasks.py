@@ -1471,7 +1471,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 "Invalid transaction during file processing, recovering...",
                                 extra={
                                     "job_id": str(job_id),
-                                    "filename": filename,
+                                    "crawled_filename": filename,
                                 }
                             )
                             # Recover session
@@ -1520,7 +1520,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                     "website_id": str(params.website_id),
                                     "tenant_id": str(website.tenant_id),
                                     "tenant_slug": tenant.slug if tenant else None,
-                                    "filename": filename,
+                                    "crawled_filename": filename,
                                     "embedding_model": getattr(website.embedding_model, "name", None),
                                 },
                             )
@@ -1629,7 +1629,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 if not sess.in_transaction():
                     await sess.begin()
                 await sess.execute(last_crawled_stmt)
-                await sess.commit()
+                # No commit here - let final _do_complete_job() commit everything atomically.
+                # Committing mid-flow closes the context manager's transaction, causing
+                # "Can't operate on closed transaction" errors in subsequent operations.
 
             await execute_with_recovery(
                 container=container,

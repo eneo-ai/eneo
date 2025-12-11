@@ -90,6 +90,8 @@ class CrawlFeeder:
             pass  # Silent failure, next acquire attempt will handle it
 
     # Lua script for atomic slot acquisition (same logic as TenantConcurrencyLimiter)
+    # FIX: Only refresh TTL on SUCCESS path - prevents zombie counters when acquire fails
+    # Bug: Previous version refreshed TTL on both success AND failure, keeping counter alive forever
     _acquire_slot_lua: str = (
         "local key = KEYS[1]\n"
         "local limit = tonumber(ARGV[1])\n"
@@ -98,16 +100,16 @@ class CrawlFeeder:
         "  return 1\n"
         "end\n"
         "local current = redis.call('INCR', key)\n"
-        "redis.call('EXPIRE', key, ttl)\n"
         "if current > limit then\n"
         "  local after_decr = redis.call('DECR', key)\n"
         "  if after_decr <= 0 then\n"
         "    redis.call('DEL', key)\n"
-        "  else\n"
-        "    redis.call('EXPIRE', key, ttl)\n"
         "  end\n"
+        "  -- DO NOT refresh TTL on failure - let counter expire naturally if unused\n"
         "  return 0\n"
         "end\n"
+        "-- Success: refresh TTL only after confirming slot acquired\n"
+        "redis.call('EXPIRE', key, ttl)\n"
         "return current\n"
     )
 
@@ -126,6 +128,33 @@ class CrawlFeeder:
         "end\n"
         "redis.call('EXPIRE', key, ttl)\n"
         "return current\n"
+    )
+
+    # CAS Lua script for atomic zombie counter reconciliation (Phase 0)
+    # Why: Prevents TOCTOU race where counter changes between GET and SET
+    # Returns: "ok:set", "ok:del", "mismatch:X", "deleted", "invalid"
+    _reconcile_cas_lua: str = (
+        "local key = KEYS[1]\n"
+        "local observed = tonumber(ARGV[1])\n"
+        "local new_value = tonumber(ARGV[2])\n"
+        "local ttl = tonumber(ARGV[3])\n"
+        "-- Key deleted between GET and CAS\n"
+        "local current = redis.call('GET', key)\n"
+        "if not current then return 'deleted' end\n"
+        "-- Non-numeric value (data corruption)\n"
+        "current = tonumber(current)\n"
+        "if current == nil then return 'invalid' end\n"
+        "-- CAS check: abort if counter changed\n"
+        "if current ~= observed then return 'mismatch:' .. tostring(current) end\n"
+        "-- Apply correction atomically\n"
+        "if new_value <= 0 then\n"
+        "  redis.call('DEL', key)\n"
+        "  return 'ok:del'\n"
+        "end\n"
+        "-- Guard: reject invalid TTL (should never happen, config validates)\n"
+        "if ttl <= 0 then return 'invalid_ttl' end\n"
+        "redis.call('SET', key, tostring(new_value), 'EX', ttl)\n"
+        "return 'ok:set'\n"
     )
 
     async def _get_tenant_crawler_settings(
@@ -583,6 +612,8 @@ class CrawlFeeder:
         stuck in QUEUED/IN_PROGRESS, the CrawlRun appears as "in progress" and blocks new crawls.
 
         Safe Watchdog Pattern (prevents infinite re-queue loops):
+        0. RECONCILE: Detect zombie counters (Redis active_jobs > actual DB active jobs)
+           → Reset Redis counter to actual DB count (self-healing for slot leaks)
         1. KILL expired: Jobs where created_at > max_age → Mark FAILED permanently
            (Uses created_at which is immutable - prevents infinite loops)
         2. RESCUE stuck: Jobs where updated_at is stale but created_at is fresh
@@ -616,7 +647,147 @@ class CrawlFeeder:
         orphaned_job_ids = []  # Track orphaned jobs (no CrawlRun) for flag-based slot release
         try:
             async with sessionmanager.session() as session, session.begin():
+                # ============================================================
+                # Phase 0: Zombie Counter Reconciliation
+                # ============================================================
+                # Detect and fix cases where Redis active_jobs counter is higher
+                # than actual QUEUED/IN_PROGRESS jobs in DB (zombie counters).
+                # This can happen if:
+                # - Worker crashed after slot acquire but before job completion
+                # - Safe Watchdog marked job FAILED but flag had expired (no slot release)
+                # - Manual DB interventions
+                # ============================================================
+                redis_client = self._redis_client
+                if redis_client:
+                    from sqlalchemy import func
+                    try:
+                        reconciled_count = 0
+                        # SCAN for all tenant active_jobs counters
+                        # NOTE: SCAN is O(N) but safe for large Redis (cursor-based)
+                        async for key in redis_client.scan_iter(match="tenant:*:active_jobs"):
+                            try:
+                                key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                                parts = key_str.split(':')
+                                if len(parts) != 3:
+                                    continue
+                                tenant_id_str = parts[1]
+
+                                # Get Redis counter value
+                                redis_val = await redis_client.get(key)
+                                if not redis_val:
+                                    continue
+                                redis_count = int(redis_val.decode() if isinstance(redis_val, bytes) else redis_val)
+
+                                if redis_count <= 0:
+                                    # Counter already at or below zero, skip
+                                    continue
+
+                                # Query DB for actual active jobs (QUEUED or IN_PROGRESS)
+                                # NOTE: Convert tenant_id_str to UUID for proper column comparison
+                                # SQLAlchemy doesn't auto-coerce string to UUID in WHERE clause
+                                try:
+                                    tenant_uuid = UUID(tenant_id_str)
+                                except ValueError:
+                                    # Invalid UUID format in key, skip
+                                    continue
+                                actual_active = await session.scalar(
+                                    select(func.count())
+                                    .select_from(Jobs)
+                                    .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
+                                    .where(
+                                        Jobs.task == "CRAWL",
+                                        Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
+                                        CrawlRuns.tenant_id == tenant_uuid,
+                                    )
+                                )
+
+                                # Reconcile if Redis is inflated (zombie slots)
+                                # Uses CAS (Compare-And-Swap) to prevent TOCTOU race
+                                if redis_count > actual_active:
+                                    ttl = self.settings.tenant_worker_semaphore_ttl_seconds
+                                    # Atomic CAS: only modify if counter hasn't changed
+                                    # Uses execute_command for Lua script execution
+                                    cas_result = await redis_client.execute_command(
+                                        "EVAL",
+                                        self._reconcile_cas_lua,
+                                        1,
+                                        key,
+                                        str(redis_count),      # observed value
+                                        str(actual_active),    # new value from DB
+                                        str(ttl),              # TTL for SET
+                                    )
+                                    result_str = (
+                                        cas_result.decode()
+                                        if isinstance(cas_result, bytes)
+                                        else str(cas_result)
+                                    )
+
+                                    if result_str.startswith("ok:"):
+                                        logger.warning(
+                                            "Zombie counter reconciled",
+                                            extra={
+                                                "tenant_id": tenant_id_str,
+                                                "redis_count": redis_count,
+                                                "actual_active": actual_active,
+                                                "released": redis_count - actual_active,
+                                                "cas_result": result_str,
+                                            },
+                                        )
+                                        reconciled_count += 1
+                                    elif result_str.startswith("mismatch:"):
+                                        # Counter changed during DB query - skip, next cycle catches
+                                        logger.debug(
+                                            "Phase 0 CAS skipped - concurrent modification",
+                                            extra={
+                                                "tenant_id": tenant_id_str,
+                                                "observed": redis_count,
+                                                "cas_result": result_str,
+                                            },
+                                        )
+                                    elif result_str == "deleted":
+                                        logger.debug(
+                                            "Phase 0 key already deleted",
+                                            extra={"tenant_id": tenant_id_str},
+                                        )
+                                    elif result_str == "invalid":
+                                        logger.warning(
+                                            "Phase 0 found invalid counter value",
+                                            extra={
+                                                "tenant_id": tenant_id_str,
+                                                "key": key_str,
+                                            },
+                                        )
+                                    elif result_str == "invalid_ttl":
+                                        logger.error(
+                                            "Phase 0 CAS rejected - invalid TTL passed",
+                                            extra={
+                                                "tenant_id": tenant_id_str,
+                                                "ttl": ttl,
+                                            },
+                                        )
+
+                            except Exception as key_exc:
+                                logger.debug(
+                                    "Phase 0 reconciliation error for key",
+                                    extra={"key": str(key), "error": str(key_exc)},
+                                )
+                                continue  # Don't crash watchdog on individual key errors
+
+                        if reconciled_count > 0:
+                            logger.info(
+                                f"Phase 0: Reconciled {reconciled_count} zombie counters",
+                                extra={"reconciled_count": reconciled_count},
+                            )
+                    except Exception as phase0_exc:
+                        logger.warning(
+                            "Phase 0 reconciliation failed",
+                            extra={"error": str(phase0_exc)},
+                        )
+                        # Continue to other phases - reconciliation is best-effort
+
+                # ============================================================
                 # Phase 1: KILL expired jobs (created_at > max_age)
+                # ============================================================
                 # Why: Prevents infinite re-queue loops. created_at is immutable.
 
                 # Step 1a: SELECT ALL expired job IDs (including orphaned jobs without CrawlRun)
