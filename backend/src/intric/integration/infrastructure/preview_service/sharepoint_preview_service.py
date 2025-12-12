@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from intric.integration.infrastructure.oauth_token_service import OauthTokenService
     from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
     from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
+    from intric.integration.infrastructure.auth_service.service_account_auth_service import ServiceAccountAuthService
 
 logger = get_logger(__name__)
 
@@ -23,9 +24,11 @@ class SharePointPreviewService(BasePreviewService):
         self,
         oauth_token_service: "OauthTokenService",
         tenant_app_auth_service: Optional["TenantAppAuthService"] = None,
+        service_account_auth_service: Optional["ServiceAccountAuthService"] = None,
     ):
         super().__init__(oauth_token_service)
         self.tenant_app_auth_service = tenant_app_auth_service
+        self.service_account_auth_service = service_account_auth_service
 
     async def get_preview_info(
         self,
@@ -72,11 +75,28 @@ class SharePointPreviewService(BasePreviewService):
     ) -> List[IntegrationPreview]:
         """Get preview information from SharePoint using tenant app credentials"""
 
-        if not self.tenant_app_auth_service:
-            raise ValueError("TenantAppAuthService not configured")
-
-        # Get access token using tenant app credentials
-        access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+        # Get access token based on auth method
+        if tenant_app.is_service_account():
+            if not self.service_account_auth_service:
+                raise ValueError("ServiceAccountAuthService not configured")
+            logger.info(
+                "Refreshing service account token",
+                extra={"tenant_app_id": str(tenant_app.id), "auth_method": tenant_app.auth_method}
+            )
+            token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+            access_token = token_data["access_token"]
+            logger.info(
+                "Service account token refreshed successfully",
+                extra={"tenant_app_id": str(tenant_app.id), "token_length": len(access_token) if access_token else 0}
+            )
+        else:
+            if not self.tenant_app_auth_service:
+                raise ValueError("TenantAppAuthService not configured")
+            access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+            logger.info(
+                "Using tenant app authentication for preview",
+                extra={"tenant_app_id": str(tenant_app.id), "auth_method": tenant_app.auth_method}
+            )
 
         # Use the token to fetch sites
         data = {}

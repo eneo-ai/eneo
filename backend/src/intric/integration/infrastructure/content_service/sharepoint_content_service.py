@@ -44,6 +44,9 @@ if TYPE_CHECKING:
     from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
         TenantAppAuthService,
     )
+    from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+        ServiceAccountAuthService,
+    )
     from intric.integration.infrastructure.oauth_token_service import (
         OauthTokenService,
     )
@@ -78,6 +81,7 @@ class SharePointContentService:
         session: "AsyncSession",
         tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
         tenant_app_auth_service: "TenantAppAuthService",
+        service_account_auth_service: "ServiceAccountAuthService" = None,
         sync_log_repo: "SyncLogRepository" = None,
         change_key_service: "OfficeChangeKeyService" = None,
     ):
@@ -92,6 +96,7 @@ class SharePointContentService:
         self.session = session
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
         self.tenant_app_auth_service = tenant_app_auth_service
+        self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
         self.change_key_service = change_key_service
 
@@ -112,7 +117,16 @@ class SharePointContentService:
         try:
             if tenant_app_id:
                 tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
-                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                # Use service account or tenant app auth based on auth_method
+                if tenant_app.is_service_account():
+                    if not self.service_account_auth_service:
+                        raise ValueError("ServiceAccountAuthService not configured")
+                    token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+                    access_token = token_data["access_token"]
+                    logger.info(f"Using service account auth for tenant_app {tenant_app_id}")
+                else:
+                    access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                    logger.info(f"Using tenant app auth for tenant_app {tenant_app_id}")
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
             elif token_id:
@@ -242,7 +256,16 @@ class SharePointContentService:
         try:
             if tenant_app_id:
                 tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
-                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                # Use service account or tenant app auth based on auth_method
+                if tenant_app.is_service_account():
+                    if not self.service_account_auth_service:
+                        raise ValueError("ServiceAccountAuthService not configured")
+                    token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+                    access_token = token_data["access_token"]
+                    logger.info(f"Using service account auth for delta sync tenant_app {tenant_app_id}")
+                else:
+                    access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                    logger.info(f"Using tenant app auth for delta sync tenant_app {tenant_app_id}")
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
             elif token_id:

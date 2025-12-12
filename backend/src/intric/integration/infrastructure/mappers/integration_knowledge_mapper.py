@@ -19,6 +19,7 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
     def to_db_dict(self, entity: IntegrationKnowledge) -> Dict[str, Any]:
         return {
             "name": entity.name,
+            "original_name": entity.original_name,
             "tenant_id": entity.tenant_id,
             "url": entity.url,
             "space_id": entity.space_id,
@@ -33,6 +34,8 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
             "folder_id": entity.folder_id,
             "folder_path": entity.folder_path,
             "selected_item_type": entity.selected_item_type,
+            "resource_type": entity.resource_type,
+            "drive_id": entity.drive_id,
         }
 
     def to_entity(

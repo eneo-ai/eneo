@@ -1,8 +1,12 @@
+import secrets
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from typing import Dict, Optional
 from uuid import UUID
 
 from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
+from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountAuthService,
+)
 from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
 from intric.settings.encryption_service import EncryptionService
 from intric.integration.presentation.admin_models import (
@@ -11,6 +15,9 @@ from intric.integration.presentation.admin_models import (
     TenantAppTestResult,
     SharePointSubscriptionPublic,
     SubscriptionRenewalResult,
+    ServiceAccountAuthStart,
+    ServiceAccountAuthStartResponse,
+    ServiceAccountAuthCallback,
 )
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
@@ -19,6 +26,10 @@ from intric.server.dependencies.container import get_container
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+# In-memory storage for OAuth states (in production, use Redis or similar)
+# Format: {state: {client_id, client_secret, tenant_domain, tenant_id, created_at}}
+_oauth_states: Dict[str, Dict] = {}
 
 
 @router.post(
@@ -157,6 +168,8 @@ async def configure_sharepoint_app(
             client_secret_masked=encryption_service.mask_secret(app.client_secret),
             tenant_domain=app.tenant_domain,
             is_active=app.is_active,
+            auth_method=app.auth_method,
+            service_account_email=app.service_account_email,
             certificate_path=app.certificate_path,
             created_by=app.created_by,
             created_at=app.created_at,
@@ -213,6 +226,8 @@ async def get_sharepoint_app(
             client_secret_masked=encryption_service.mask_secret(app.client_secret),
             tenant_domain=app.tenant_domain,
             is_active=app.is_active,
+            auth_method=app.auth_method,
+            service_account_email=app.service_account_email,
             certificate_path=app.certificate_path,
             created_by=app.created_by,
             created_at=app.created_at,
@@ -660,4 +675,227 @@ async def recreate_subscription(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to recreate subscription: {str(e)}"
+        )
+
+
+# Service Account OAuth Endpoints
+
+@router.post(
+    "/sharepoint/service-account/auth/start",
+    response_model=ServiceAccountAuthStartResponse,
+    summary="Start service account OAuth flow",
+    description=(
+        "Start the OAuth flow for configuring a service account. "
+        "Returns an authorization URL that the admin should be redirected to. "
+        "The admin will log in with the service account credentials at Microsoft. "
+        "Requires admin role."
+    ),
+    responses={
+        200: {"description": "OAuth authorization URL generated"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    }
+)
+async def start_service_account_auth(
+    app_config: ServiceAccountAuthStart,
+    container: Container = Depends(get_container(with_user=True))
+) -> ServiceAccountAuthStartResponse:
+    """Start OAuth flow for service account configuration."""
+    try:
+        user = container.user()
+        validate_permission(user, Permission.ADMIN)
+
+        # Generate a secure state token
+        state = secrets.token_urlsafe(32)
+
+        # Store state with credentials for callback verification
+        from datetime import datetime
+        _oauth_states[state] = {
+            "client_id": app_config.client_id,
+            "client_secret": app_config.client_secret,
+            "tenant_domain": app_config.tenant_domain,
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(user.id),
+            "created_at": datetime.utcnow().isoformat(),
+        }
+
+        # Generate OAuth URL
+        service_account_auth_service = ServiceAccountAuthService()
+        auth_result = service_account_auth_service.gen_auth_url(
+            state=state,
+            client_id=app_config.client_id,
+            client_secret=app_config.client_secret,
+            tenant_domain=app_config.tenant_domain,
+        )
+
+        logger.info(
+            f"Started service account OAuth flow for tenant {user.tenant_id} "
+            f"by user {user.id}"
+        )
+
+        return ServiceAccountAuthStartResponse(
+            auth_url=auth_result["auth_url"],
+            state=state,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start service account OAuth: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start service account OAuth: {str(e)}"
+        )
+
+
+@router.post(
+    "/sharepoint/service-account/auth/callback",
+    response_model=TenantSharePointAppPublic,
+    status_code=201,
+    summary="Complete service account OAuth flow",
+    description=(
+        "Complete the OAuth flow by exchanging the authorization code for tokens. "
+        "This will configure the service account for the tenant's SharePoint access. "
+        "Requires admin role."
+    ),
+    responses={
+        201: {"description": "Service account successfully configured"},
+        400: {"description": "Invalid state or auth code"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    }
+)
+async def service_account_auth_callback(
+    callback: ServiceAccountAuthCallback,
+    container: Container = Depends(get_container(with_user=True))
+) -> TenantSharePointAppPublic:
+    """Complete OAuth flow and configure service account."""
+    try:
+        user = container.user()
+        validate_permission(user, Permission.ADMIN)
+
+        # Verify state
+        if callback.state not in _oauth_states:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired OAuth state. Please restart the authentication flow."
+            )
+
+        stored_state = _oauth_states.pop(callback.state)
+
+        # Verify tenant matches
+        if stored_state["tenant_id"] != str(user.tenant_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state was initiated by a different tenant"
+            )
+
+        # Exchange auth code for tokens
+        service_account_auth_service = ServiceAccountAuthService()
+        token_result = await service_account_auth_service.exchange_token(
+            auth_code=callback.auth_code,
+            client_id=callback.client_id,
+            client_secret=callback.client_secret,
+            tenant_domain=callback.tenant_domain,
+        )
+
+        # Configure service account
+        tenant_app_service: TenantSharePointAppService = container.tenant_sharepoint_app_service()
+        encryption_service: EncryptionService = container.encryption_service()
+
+        app = await tenant_app_service.configure_service_account(
+            tenant_id=user.tenant_id,
+            client_id=callback.client_id,
+            client_secret=callback.client_secret,
+            tenant_domain=callback.tenant_domain,
+            refresh_token=token_result.refresh_token,
+            service_account_email=token_result.email or "unknown",
+            created_by=user.id,
+        )
+
+        # Create or update the person-independent UserIntegration
+        user_integration_repo = container.user_integration_repo()
+        tenant_integration_repo = container.tenant_integration_repo()
+        integration_repo = container.integration_repo()
+
+        sharepoint_integrations = await tenant_integration_repo.query(tenant_id=user.tenant_id)
+        sharepoint_integration = next(
+            (ti for ti in sharepoint_integrations
+             if ti.integration.integration_type == "sharepoint"),
+            None
+        )
+
+        if not sharepoint_integration:
+            logger.info(f"SharePoint TenantIntegration not found for tenant {user.tenant_id}, creating it")
+
+            sharepoint_system_integration = await integration_repo.one_or_none(
+                integration_type="sharepoint"
+            )
+
+            if not sharepoint_system_integration:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="SharePoint integration not found in system"
+                )
+
+            from intric.integration.domain.entities.tenant_integration import TenantIntegration
+            sharepoint_integration = TenantIntegration(
+                tenant_id=user.tenant_id,
+                integration=sharepoint_system_integration,
+            )
+            sharepoint_integration = await tenant_integration_repo.add(sharepoint_integration)
+            logger.info(f"Created SharePoint TenantIntegration {sharepoint_integration.id}")
+
+        if sharepoint_integration:
+            existing_integration = await user_integration_repo.one_or_none(
+                tenant_integration_id=sharepoint_integration.id,
+                auth_type="tenant_app",
+                tenant_app_id=app.id
+            )
+
+            if existing_integration:
+                existing_integration.authenticated = True
+                await user_integration_repo.update(existing_integration)
+                logger.info(f"Updated service account integration {existing_integration.id}")
+            else:
+                from intric.integration.domain.entities.user_integration import UserIntegration
+                new_user_integration = UserIntegration(
+                    tenant_integration=sharepoint_integration,
+                    user_id=None,
+                    authenticated=True,
+                    auth_type="tenant_app",
+                    tenant_app_id=app.id,
+                )
+                await user_integration_repo.add(new_user_integration)
+                logger.info(
+                    f"Created new person-independent service account integration for tenant {user.tenant_id}"
+                )
+
+        logger.info(
+            f"Configured service account for tenant {user.tenant_id} "
+            f"({token_result.email}) by user {user.id}"
+        )
+
+        return TenantSharePointAppPublic(
+            id=app.id,
+            tenant_id=app.tenant_id,
+            client_id=app.client_id,
+            client_secret_masked=encryption_service.mask_secret(app.client_secret),
+            tenant_domain=app.tenant_domain,
+            is_active=app.is_active,
+            auth_method=app.auth_method,
+            service_account_email=app.service_account_email,
+            certificate_path=app.certificate_path,
+            created_by=app.created_by,
+            created_at=app.created_at,
+            updated_at=app.updated_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to complete service account OAuth: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete service account OAuth: {str(e)}"
         )

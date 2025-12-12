@@ -27,9 +27,14 @@ from intric.spaces.api.space_models import (
     SpaceMember,
     SpacePublic,
     SpaceSparse,
+    UpdateIntegrationKnowledgeRequest,
     UpdateSpaceDryRunResponse,
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
+)
+from intric.integration.presentation.models import IntegrationKnowledgePublic
+from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
+    IntegrationKnowledgeAssembler,
 )
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
@@ -413,6 +418,25 @@ async def delete_space_integration_knowledge(
 ):
     service = container.integration_knowledge_service()
     await service.remove_knowledge(space_id=id, integration_knowledge_id=integration_knowledge_id)
+
+
+@router.patch(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/",
+    response_model=IntegrationKnowledgePublic,
+)
+async def update_integration_knowledge(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    data: UpdateIntegrationKnowledgeRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.update_knowledge_name(
+        space_id=id,
+        integration_knowledge_id=integration_knowledge_id,
+        name=data.name,
+    )
+    return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 
 
 @router.post(

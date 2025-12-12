@@ -17,6 +17,10 @@ class TenantSharePointApp(BasePublic):
     Stores Azure AD application credentials for SharePoint access.
     One app registration per tenant for organization-wide SharePoint access
     without person-dependency.
+
+    Supports two authentication methods:
+    - tenant_app: Application permissions (client credentials flow)
+    - service_account: Delegated permissions via service account OAuth
     """
 
     __tablename__ = "tenant_sharepoint_apps"
@@ -31,6 +35,18 @@ class TenantSharePointApp(BasePublic):
         String(255), nullable=False
     )  # e.g., "contoso.onmicrosoft.com"
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Auth method: 'tenant_app' (default) or 'service_account'
+    auth_method: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="tenant_app", server_default="tenant_app"
+    )
+
+    # Service account fields (only used when auth_method='service_account')
+    service_account_refresh_token_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    service_account_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

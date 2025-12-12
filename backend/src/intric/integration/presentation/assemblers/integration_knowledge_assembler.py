@@ -39,6 +39,7 @@ class IntegrationKnowledgeAssembler:
         return IntegrationKnowledgePublic(
             id=item.id,
             name=item.name,
+            original_name=getattr(item, "original_name", None),
             url=item.url,
             tenant_id=item.tenant_id,
             space_id=item.space_id,

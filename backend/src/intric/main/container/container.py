@@ -106,6 +106,9 @@ from intric.integration.infrastructure.auth_service.sharepoint_auth_service impo
 from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppAuthService,
 )
+from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountAuthService,
+)
 from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
 from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
 from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import TenantSharePointAppRepositoryImpl
@@ -922,6 +925,11 @@ class Container(containers.DeclarativeContainer):
         tenant_sharepoint_app_service=tenant_sharepoint_app_service,
     )
 
+    # Service account auth service for delegated permissions via service account
+    service_account_auth_service = providers.Factory(
+        ServiceAccountAuthService,
+    )
+
     oauth2_service = providers.Factory(
         Oauth2Service,
         confluence_auth_service=confluence_auth_service,
@@ -945,6 +953,7 @@ class Container(containers.DeclarativeContainer):
         tenant_app_service=tenant_sharepoint_app_service,
         tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
+        service_account_auth_service=service_account_auth_service,
     )
 
     sharepoint_subscription_service = providers.Factory(
@@ -966,6 +975,7 @@ class Container(containers.DeclarativeContainer):
         sharepoint_subscription_service=sharepoint_subscription_service,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
     )
 
     confluence_content_service = providers.Factory(
@@ -996,6 +1006,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
     )
@@ -1015,6 +1026,7 @@ class Container(containers.DeclarativeContainer):
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
         tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,

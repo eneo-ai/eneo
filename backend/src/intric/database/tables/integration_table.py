@@ -102,6 +102,7 @@ class IntegrationKnowledge(BasePublic):
     __tablename__ = "integration_knowledge"
 
     name: Mapped[Optional[str]] = mapped_column(Text)
+    original_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     url: Mapped[Optional[str]] = mapped_column(Text)
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     embedding_model_id: Mapped[UUID] = mapped_column(

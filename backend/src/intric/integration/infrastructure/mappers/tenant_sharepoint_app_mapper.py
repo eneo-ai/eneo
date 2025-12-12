@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.tenant_sharepoint_app_table import (
@@ -14,8 +14,20 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
     def __init__(self, encryption_service: EncryptionService):
         self.encryption_service = encryption_service
 
+    def _encrypt_optional(self, value: Optional[str]) -> Optional[str]:
+        """Encrypt a value if it's not None."""
+        if value is None:
+            return None
+        return self.encryption_service.encrypt(value)
+
+    def _decrypt_optional(self, value: Optional[str]) -> Optional[str]:
+        """Decrypt a value if it's not None."""
+        if value is None:
+            return None
+        return self.encryption_service.decrypt(value)
+
     def to_db_dict(self, entity: TenantSharePointApp) -> Dict[str, Any]:
-        """Convert entity to database dict with encrypted secret."""
+        """Convert entity to database dict with encrypted secrets."""
         db_dict = {
             "id": entity.id,
             "tenant_id": entity.tenant_id,
@@ -24,6 +36,11 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
             "certificate_path": entity.certificate_path,
             "tenant_domain": entity.tenant_domain,
             "is_active": entity.is_active,
+            "auth_method": entity.auth_method,
+            "service_account_refresh_token_encrypted": self._encrypt_optional(
+                entity.service_account_refresh_token
+            ),
+            "service_account_email": entity.service_account_email,
             "created_by": entity.created_by,
         }
 
@@ -37,7 +54,7 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
         return db_dict
 
     def to_entity(self, db_model: TenantSharePointAppDBModel) -> TenantSharePointApp:
-        """Convert database model to entity with decrypted secret."""
+        """Convert database model to entity with decrypted secrets."""
         return TenantSharePointApp(
             id=db_model.id,
             tenant_id=db_model.tenant_id,
@@ -46,6 +63,11 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
             certificate_path=db_model.certificate_path,
             tenant_domain=db_model.tenant_domain,
             is_active=db_model.is_active,
+            auth_method=db_model.auth_method,
+            service_account_refresh_token=self._decrypt_optional(
+                db_model.service_account_refresh_token_encrypted
+            ),
+            service_account_email=db_model.service_account_email,
             created_by=db_model.created_by,
             created_at=db_model.created_at,
             updated_at=db_model.updated_at,

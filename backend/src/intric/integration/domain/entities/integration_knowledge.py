@@ -26,6 +26,7 @@ class IntegrationKnowledge(Entity):
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
         url: str | None = None,
+        original_name: str | None = None,
         site_id: str | None = None,
         last_synced_at: datetime | None = None,
         last_sync_summary: Dict[str, int] | None = None,
@@ -40,6 +41,7 @@ class IntegrationKnowledge(Entity):
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.name = name
+        self.original_name = original_name
         self.url = url
         self.tenant_id = tenant_id
         self.space_id = space_id

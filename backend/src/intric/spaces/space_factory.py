@@ -177,9 +177,23 @@ class SpaceFactory:
 
         integration_knowledge_list = []
         for i in ik_source:
+            # Check if sharepoint_subscription was eager loaded via selectinload
+            # We need to use sqlalchemy.inspect to check if the attribute was loaded
+            # without triggering a lazy load (which causes greenlet errors in async context)
+            from sqlalchemy import inspect
+            sharepoint_subscription = None
+            try:
+                insp = inspect(i)
+                if "sharepoint_subscription" not in insp.unloaded:
+                    sharepoint_subscription = i.sharepoint_subscription
+            except Exception:
+                # If inspection fails (e.g., not a SQLAlchemy model), fall back to None
+                pass
+
             integration_knowledge_list.append(
                 IntegrationKnowledge(
                     name=i.name,
+                    original_name=getattr(i, "original_name", None),
                     user_integration=getattr(i, "user_integration", None),
                     embedding_model=next(
                         (em for em in embedding_models if em.id == i.embedding_model_id),
@@ -194,11 +208,13 @@ class SpaceFactory:
                     last_synced_at=i.last_synced_at,
                     last_sync_summary=i.last_sync_summary,
                     sharepoint_subscription_id=getattr(i, "sharepoint_subscription_id", None),
-                    sharepoint_subscription=None,  # Don't lazy load - not needed in Space context
+                    sharepoint_subscription=sharepoint_subscription,
                     delta_token=getattr(i, "delta_token", None),
                     folder_id=getattr(i, "folder_id", None),
                     folder_path=getattr(i, "folder_path", None),
                     selected_item_type=getattr(i, "selected_item_type", None),
+                    resource_type=getattr(i, "resource_type", None),
+                    drive_id=getattr(i, "drive_id", None),
                 )
             )
 

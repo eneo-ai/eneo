@@ -16,7 +16,10 @@
 
   // Compute subscription status
   let subscriptionStatus = $derived.by(() => {
-    if (!isSharePoint || !subscriptionExpiresAt) return null;
+    if (!isSharePoint) return null;
+
+    // No subscription configured
+    if (!subscriptionExpiresAt) return "none";
 
     const now = new Date();
     const expiresAt = new Date(subscriptionExpiresAt);
@@ -25,14 +28,6 @@
     if (hoursUntilExpiry <= 0) return "expired";
     if (hoursUntilExpiry <= 48) return "expiring_soon";
     return "active";
-  });
-
-  let subscriptionExpiresInHours = $derived.by(() => {
-    if (!subscriptionExpiresAt) return null;
-    const now = new Date();
-    const expiresAt = new Date(subscriptionExpiresAt);
-    const hours = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60)));
-    return hours;
   });
 
   function getTimeAgo(value: string): string {
@@ -59,6 +54,8 @@
 
   function getSubscriptionStatusLabel(status: string): string {
     switch (status) {
+      case "none":
+        return m.sharepoint_webhook_none?.() || "No webhook";
       case "expired":
         return m.sharepoint_webhook_expired();
       case "expiring_soon":
@@ -72,6 +69,8 @@
 
   function getSubscriptionStatusColor(status: string): string {
     switch (status) {
+      case "none":
+        return "text-gray-500";
       case "expired":
         return "text-red-600";
       case "expiring_soon":
@@ -109,18 +108,15 @@
   {#if isSharePoint && subscriptionStatus}
     <div
       class="flex items-center gap-1 text-xs {getSubscriptionStatusColor(subscriptionStatus)}"
-      title={subscriptionStatus === "expired"
-        ? m.sharepoint_webhook_expired_tooltip()
-        : m.sharepoint_webhook_auto_renewal()}
+      title={subscriptionStatus === "none"
+        ? (m.sharepoint_webhook_none_tooltip?.() || "No webhook configured - changes will not sync automatically")
+        : subscriptionStatus === "expired"
+          ? m.sharepoint_webhook_expired_tooltip()
+          : m.sharepoint_webhook_auto_renewal()}
     >
       <span class="truncate">
         {getSubscriptionStatusLabel(subscriptionStatus)}
       </span>
-      {#if subscriptionExpiresInHours !== null}
-        <span class="text-secondary">
-          ({subscriptionExpiresInHours}h)
-        </span>
-      {/if}
     </div>
   {/if}
 </div>

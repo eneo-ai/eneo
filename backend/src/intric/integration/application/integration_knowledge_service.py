@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
         TenantAppAuthService,
     )
+    from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+        ServiceAccountAuthService,
+    )
     from intric.jobs.job_service import JobService
     from intric.spaces.space import Space
     from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
@@ -65,6 +68,7 @@ class IntegrationKnowledgeService:
         sharepoint_subscription_service: "SharePointSubscriptionService",
         tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
         tenant_app_auth_service: "TenantAppAuthService",
+        service_account_auth_service: "ServiceAccountAuthService" = None,
     ):
         self.job_service = job_service
         self.user = user
@@ -77,6 +81,7 @@ class IntegrationKnowledgeService:
         self.sharepoint_subscription_service = sharepoint_subscription_service
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
         self.tenant_app_auth_service = tenant_app_auth_service
+        self.service_account_auth_service = service_account_auth_service
 
     async def create_space_integration_knowledge(
         self,
@@ -120,6 +125,7 @@ class IntegrationKnowledgeService:
 
         obj = IntegrationKnowledge(
             name=name,
+            original_name=name,  # Store original name at creation time
             space_id=space_id,
             embedding_model=embedding_model,
             user_integration=user_integration,
@@ -141,7 +147,14 @@ class IntegrationKnowledgeService:
                 raise BadRequestException("Tenant app ID is required for tenant_app integrations")
 
             tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
-            access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+            # Use service account or tenant app auth based on auth_method
+            if tenant_app.is_service_account():
+                if not self.service_account_auth_service:
+                    raise BadRequestException("ServiceAccountAuthService not configured")
+                token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+                access_token = token_data["access_token"]
+            else:
+                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
             token = SimpleToken(access_token=access_token)
             token_id = None
             tenant_app_id = tenant_app.id
@@ -324,7 +337,14 @@ class IntegrationKnowledgeService:
                         raise BadRequestException("Tenant app ID is required for tenant_app integrations")
 
                     tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
-                    access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                    # Use service account or tenant app auth based on auth_method
+                    if tenant_app.is_service_account():
+                        if not self.service_account_auth_service:
+                            raise BadRequestException("ServiceAccountAuthService not configured")
+                        token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+                        access_token = token_data["access_token"]
+                    else:
+                        access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
                     token = SimpleToken(access_token=access_token)
                 else:
                     token = await self.oauth_token_repo.one(
@@ -348,3 +368,32 @@ class IntegrationKnowledgeService:
                 )
 
         await self.integration_knowledge_repo.remove(id=knowledge.id)
+
+    async def update_knowledge_name(
+        self,
+        space_id: UUID,
+        integration_knowledge_id: UUID,
+        name: str,
+    ) -> IntegrationKnowledge:
+        """Update the name of an integration knowledge item."""
+        space = await self.space_repo.one(id=space_id)
+        # Verify the knowledge exists in this space (for permission check)
+        space_knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
+        actor = self.actor_manager.get_space_actor_from_space(space)
+
+        if not actor.can_edit_integration_knowledge_list():
+            raise UnauthorizedException()
+
+        # Only allow renaming from the space where knowledge was created
+        if space_knowledge.space_id != space.id:
+            raise UnauthorizedException(
+                "Cannot rename knowledge from this space. "
+                "This knowledge belongs to another space and must be renamed from there."
+            )
+
+        # Fetch from repo to get the full entity with created_at for update
+        knowledge = await self.integration_knowledge_repo.one(id=integration_knowledge_id)
+        knowledge.name = name
+        return await self.integration_knowledge_repo.update(knowledge)

@@ -42,6 +42,15 @@ class TenantSharePointAppPublic(BaseModel):
     )
     tenant_domain: str
     is_active: bool
+    auth_method: str = Field(
+        ...,
+        description="Authentication method: 'tenant_app' or 'service_account'",
+        example="service_account"
+    )
+    service_account_email: Optional[str] = Field(
+        None,
+        description="Email of the service account (only for service_account auth method)"
+    )
     certificate_path: Optional[str]
     created_by: Optional[UUID]
     created_at: datetime
@@ -139,4 +148,64 @@ class SubscriptionRenewalResult(BaseModel):
     errors: list[str] = Field(
         default_factory=list,
         description="Error messages for failed renewals"
+    )
+
+
+# Service Account OAuth Models
+
+class ServiceAccountAuthStart(BaseModel):
+    """Request model to start service account OAuth flow."""
+
+    client_id: str = Field(
+        ...,
+        description="Azure AD Application (Client) ID",
+        example="12345678-1234-1234-1234-123456789012"
+    )
+    client_secret: str = Field(
+        ...,
+        description="Azure AD Application Client Secret",
+        example="abc123~xyz789"
+    )
+    tenant_domain: str = Field(
+        ...,
+        description="Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)",
+        example="contoso.onmicrosoft.com"
+    )
+
+
+class ServiceAccountAuthStartResponse(BaseModel):
+    """Response with OAuth URL for service account login."""
+
+    auth_url: str = Field(
+        ...,
+        description="Microsoft OAuth authorization URL. Redirect the admin to this URL."
+    )
+    state: str = Field(
+        ...,
+        description="OAuth state parameter for CSRF protection"
+    )
+
+
+class ServiceAccountAuthCallback(BaseModel):
+    """Request model for service account OAuth callback."""
+
+    auth_code: str = Field(
+        ...,
+        description="OAuth authorization code from Microsoft callback"
+    )
+    state: str = Field(
+        ...,
+        description="OAuth state parameter for verification"
+    )
+    client_id: str = Field(
+        ...,
+        description="Azure AD Application (Client) ID (must match auth/start)"
+    )
+    client_secret: str = Field(
+        ...,
+        description="Azure AD Application Client Secret (must match auth/start)"
+    )
+    tenant_domain: str = Field(
+        ...,
+        description="Azure AD Tenant Domain (must match auth/start)"
     )

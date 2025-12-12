@@ -191,6 +191,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
 class IntegrationKnowledgePublic(BaseModel):
     id: UUID
     name: str
+    original_name: Optional[str] = None
     url: str
     tenant_id: UUID
     space_id: UUID

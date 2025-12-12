@@ -16,14 +16,23 @@ class IntegrationKnowledgeFactory:
     def create_entity(
         cls, record: "IntegrationKnowledgeDBModel", embedding_model: "EmbeddingModel"
     ) -> IntegrationKnowledge:
-        # Don't lazy load - causes greenlet errors
+        # Check if sharepoint_subscription was eager loaded via selectinload
+        # We need to use sqlalchemy.inspect to check if the attribute was loaded
+        # without triggering a lazy load (which causes greenlet errors in async context)
+        from sqlalchemy import inspect
         sharepoint_subscription = None
-        if hasattr(record, "__dict__") and "sharepoint_subscription" in record.__dict__:
-            sharepoint_subscription = getattr(record, "sharepoint_subscription", None)
+        try:
+            insp = inspect(record)
+            if "sharepoint_subscription" not in insp.unloaded:
+                sharepoint_subscription = record.sharepoint_subscription
+        except Exception:
+            # If inspection fails, fall back to None
+            pass
 
         return IntegrationKnowledge(
             id=record.id,
             name=record.name,
+            original_name=getattr(record, "original_name", None),
             url=record.url,
             tenant_id=record.tenant_id,
             space_id=record.space_id,

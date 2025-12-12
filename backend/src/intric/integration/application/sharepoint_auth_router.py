@@ -1,9 +1,12 @@
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
 from intric.integration.domain.entities.oauth_token import SharePointToken
+from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountAuthService,
+)
 from intric.integration.infrastructure.auth_service.sharepoint_auth_service import SharepointAuthService
 from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
 from intric.integration.infrastructure.oauth_token_service import OauthTokenService
@@ -17,14 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class SharePointAuthRouter:
-    """Routes SharePoint authentication between user OAuth and tenant app based on space type.
+    """Routes SharePoint authentication between user OAuth, tenant app, and service account.
 
     Authentication Strategy:
     - Personal spaces: Always use user OAuth (delegated permissions)
-    - Shared/Org spaces with tenant app configured: Use tenant app (application permissions)
+    - Shared/Org spaces with tenant app configured:
+        - If auth_method='service_account': Use service account (delegated permissions via refresh token)
+        - If auth_method='tenant_app': Use tenant app (application permissions via client credentials)
     - Shared/Org spaces without tenant app: Fallback to user OAuth with warning
 
-    This eliminates person-dependency for shared/organization spaces when a tenant app is configured.
+    Service accounts are recommended as they provide granular access control without person-dependency.
     """
 
     def __init__(
@@ -33,11 +38,13 @@ class SharePointAuthRouter:
         tenant_app_service: TenantSharePointAppService,
         tenant_app_auth_service: TenantAppAuthService,
         oauth_token_service: OauthTokenService,
+        service_account_auth_service: Optional[ServiceAccountAuthService] = None,
     ):
         self.user_oauth_service = user_oauth_service
         self.tenant_app_service = tenant_app_service
         self.tenant_app_auth_service = tenant_app_auth_service
         self.oauth_token_service = oauth_token_service
+        self.service_account_auth_service = service_account_auth_service or ServiceAccountAuthService()
 
     async def get_token_for_integration(
         self,
@@ -173,36 +180,67 @@ class SharePointAuthRouter:
         tenant_app: "TenantSharePointApp",
         user_integration: "UserIntegration"
     ) -> SharePointToken:
-        """Get token using tenant app (application permissions via client credentials flow)."""
+        """Get token using tenant app or service account based on auth_method.
+
+        If auth_method='service_account': Uses delegated permissions via refresh token
+        If auth_method='tenant_app': Uses application permissions via client credentials
+        """
         logger.debug(
-            "Acquiring tenant app token",
+            "Acquiring token for organization",
             extra={
                 "tenant_app_id": str(tenant_app.id),
-                "client_id": tenant_app.client_id,
+                "auth_method": tenant_app.auth_method,
                 "tenant_id": str(tenant_app.tenant_id),
             }
         )
 
         try:
-            access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
-            logger.info(
-                "Tenant app token acquired successfully",
-                extra={
-                    "tenant_app_id": str(tenant_app.id),
-                    "has_token": bool(access_token),
-                }
-            )
+            if tenant_app.is_service_account():
+                # Service account: delegated permissions via refresh token
+                token_response = await self.service_account_auth_service.refresh_access_token(
+                    tenant_app
+                )
+                access_token = token_response["access_token"]
+
+                # Update refresh token if a new one was issued
+                if "refresh_token" in token_response:
+                    new_refresh_token = token_response["refresh_token"]
+                    if new_refresh_token != tenant_app.service_account_refresh_token:
+                        tenant_app.update_refresh_token(new_refresh_token)
+                        await self.tenant_app_service.update(tenant_app)
+                        logger.debug(
+                            f"Updated service account refresh token for tenant {tenant_app.tenant_id}"
+                        )
+
+                logger.info(
+                    "Service account token acquired successfully",
+                    extra={
+                        "tenant_app_id": str(tenant_app.id),
+                        "service_account_email": tenant_app.service_account_email,
+                    }
+                )
+            else:
+                # Tenant app: application permissions via client credentials
+                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                logger.info(
+                    "Tenant app token acquired successfully",
+                    extra={
+                        "tenant_app_id": str(tenant_app.id),
+                        "has_token": bool(access_token),
+                    }
+                )
         except Exception as e:
             logger.error(
-                f"Failed to acquire tenant app token: {type(e).__name__}: {str(e)}",
+                f"Failed to acquire token: {type(e).__name__}: {str(e)}",
                 extra={
                     "tenant_app_id": str(tenant_app.id),
-                    "client_id": tenant_app.client_id,
+                    "auth_method": tenant_app.auth_method,
                 },
                 exc_info=True
             )
             raise ValueError(
-                f"Failed to acquire access token for tenant app {tenant_app.id}: {str(e)}"
+                f"Failed to acquire access token for tenant app {tenant_app.id} "
+                f"(auth_method={tenant_app.auth_method}): {str(e)}"
             ) from e
 
         return SharePointToken(
