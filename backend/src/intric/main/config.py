@@ -5,11 +5,18 @@ import sys
 from typing import Optional
 from urllib.parse import urlparse
 
-from intric.definitions import ROOT_DIR
+from pathlib import Path
+
 from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-MANIFEST_LOCATION = f"{ROOT_DIR}/.release-please-manifest.json"
+# Version manifest lookup:
+# - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
+#   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
+# - Local dev: __file__ points to source tree, so we traverse up from this file's location
+#   (src/intric/main/config.py -> 4 levels up -> backend/.release-please-manifest.json)
+_DOCKER_MANIFEST = Path("/app/.release-please-manifest.json")
+_LOCAL_MANIFEST = Path(__file__).resolve().parent.parent.parent.parent / ".release-please-manifest.json"
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -84,8 +91,11 @@ def validate_public_origin(origin: str | None) -> str | None:
 
 
 def _set_app_version():
+    # Try Docker path first, then local dev path
+    manifest_path = _DOCKER_MANIFEST if _DOCKER_MANIFEST.exists() else _LOCAL_MANIFEST
+
     try:
-        with open(MANIFEST_LOCATION) as f:
+        with open(manifest_path) as f:
             manifest_data = json.load(f)
 
         version = manifest_data["."]
@@ -134,10 +144,22 @@ class Settings(BaseSettings):
     # Background worker configuration
     worker_max_jobs: int = 20
     tenant_worker_concurrency_limit: int = 4
+    # IMPORTANT: Must be >= crawl_max_length to prevent semaphore expiry mid-crawl
+    # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
+    # See validate_worker_settings() which enforces this constraint
+    # Configurable per-tenant via crawler_settings API
     tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
-    tenant_worker_retry_delay_seconds: int = 30
-    tenant_worker_retry_max_delay_seconds: int = 5 * 60
-    tenant_worker_retry_backoff_ttl_seconds: int = 5 * 60
+
+    # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
+    crawl_feeder_enabled: bool = False  # Feature flag for gradual rollout
+    crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
+    crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
+
+    # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
+    orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
+    crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
+    crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
+    crawl_page_batch_size: int = 100  # Commit after every N pages during crawl (bounds data loss)
 
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
@@ -202,8 +224,12 @@ class Settings(BaseSettings):
     dev: bool = False
 
     # Crawl - Scrapy crawler settings
+    # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
+    # Otherwise the concurrency slot could expire before crawl completes
+    # See validate_worker_settings() which enforces this constraint
     crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
@@ -218,6 +244,9 @@ class Settings(BaseSettings):
     crawl_page_retry_delay: float = (
         1.0  # Initial retry delay in seconds (exponential backoff)
     )
+
+    # Crawl job age limit (prevents infinite retry loops)
+    crawl_job_max_age_seconds: int = 1800  # Maximum retry window (30 minutes)
 
     # Migration
     migration_auto_recalc_threshold: int = (
@@ -347,38 +376,6 @@ class Settings(BaseSettings):
                 " Increase the TTL to cover the longest crawl duration to avoid leaking slots.",
                 self.tenant_worker_semaphore_ttl_seconds,
                 self.crawl_max_length,
-            )
-            sys.exit(1)
-
-        if self.tenant_worker_retry_delay_seconds < 0:
-            logging.error(
-                "TENANT_WORKER_RETRY_DELAY_SECONDS cannot be negative. Current value: %s",
-                self.tenant_worker_retry_delay_seconds,
-            )
-            sys.exit(1)
-
-        if self.tenant_worker_retry_max_delay_seconds <= 0:
-            logging.error(
-                "TENANT_WORKER_RETRY_MAX_DELAY_SECONDS must be greater than zero. Current value: %s",
-                self.tenant_worker_retry_max_delay_seconds,
-            )
-            sys.exit(1)
-
-        if (
-            self.tenant_worker_retry_max_delay_seconds
-            < self.tenant_worker_retry_delay_seconds
-        ):
-            logging.warning(
-                "TENANT_WORKER_RETRY_MAX_DELAY_SECONDS (%s) is lower than the base retry delay (%s). "
-                "Backoff will be capped at the base delay.",
-                self.tenant_worker_retry_max_delay_seconds,
-                self.tenant_worker_retry_delay_seconds,
-            )
-
-        if self.tenant_worker_retry_backoff_ttl_seconds <= 0:
-            logging.error(
-                "TENANT_WORKER_RETRY_BACKOFF_TTL_SECONDS must be greater than zero. Current value: %s",
-                self.tenant_worker_retry_backoff_ttl_seconds,
             )
             sys.exit(1)
 

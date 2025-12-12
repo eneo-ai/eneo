@@ -36,4 +36,5 @@ import intric.database.tables.websites_table
 import intric.database.tables.widget_table
 import intric.database.tables.workflow_tables
 import intric.database.tables.groups_spaces_table
+import intric.database.tables.icons_table
 import intric.database.tables.websites_spaces_table

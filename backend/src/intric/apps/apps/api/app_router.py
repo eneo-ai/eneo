@@ -9,7 +9,7 @@ from intric.apps.app_runs.api.app_run_models import (
 )
 from intric.apps.apps.api.app_models import AppPublic, AppUpdateRequest
 from intric.main.container.container import Container
-from intric.main.models import PaginatedResponse
+from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.prompts.api.prompt_models import PromptSparse
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
@@ -63,6 +63,12 @@ async def update_app(
         update_service_req.prompt.description if update_service_req.prompt is not None else None
     )
 
+    # Handle icon_id: check if it was provided in the request
+    request_dict = update_service_req.model_dump(exclude_unset=True)
+    icon_id = NOT_PROVIDED
+    if "icon_id" in request_dict:
+        icon_id = update_service_req.icon_id
+
     app, permissions = await service.update_app(
         app_id=id,
         name=update_service_req.name,
@@ -75,6 +81,7 @@ async def update_app(
         prompt_description=prompt_description,
         transcription_model_id=transcription_model_id,
         data_retention_days=update_service_req.data_retention_days,
+        icon_id=icon_id,
     )
 
     return assembler.from_app_to_model(app, permissions=permissions)

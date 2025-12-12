@@ -35,6 +35,7 @@ from intric.websites.presentation.website_models import WebsitePublic
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
+    from intric.apps.apps.app import App
     from intric.assistants.api.assistant_assembler import AssistantAssembler
     from intric.assistants.assistant import Assistant
     from intric.completion_models.presentation import CompletionModelAssembler
@@ -230,6 +231,7 @@ class SpaceAssembler:
             description=assistant.description,
             type="assistant",
             metadata_json=assistant.metadata_json,
+            icon_id=assistant.icon_id,
         )
 
     def _get_group_chat_model(self, group_chat: "GroupChat"):
@@ -243,6 +245,19 @@ class SpaceAssembler:
             permissions=group_chat.permissions,
             type="group-chat",
             metadata_json=group_chat.metadata_json,
+        )
+
+    def _get_app_model(self, app: "App"):
+        return AppSparse(
+            created_at=app.created_at,
+            updated_at=app.updated_at,
+            id=app.id,
+            name=app.name,
+            description=app.description,
+            published=app.published,
+            user_id=app.user_id,
+            permissions=app.permissions,
+            icon_id=app.icon_id,
         )
 
     def _get_applications_model(self, space: Space, only_published: bool = False) -> Applications:
@@ -268,7 +283,7 @@ class SpaceAssembler:
             ),
             apps=PaginatedPermissions[AppSparse](
                 items=[
-                    app
+                    self._get_app_model(app)
                     for app in space.apps
                     if actor.can_read_app(app=app) and (not only_published or app.published)
                 ],
@@ -371,10 +386,11 @@ class SpaceAssembler:
             permissions=self._get_space_permissions(space),
             available_roles=available_roles,
             security_classification=security_classification,
+            icon_id=space.icon_id,
         )
 
-    def from_space_to_sparse_model(self, space: Space) -> SpaceSparse:
-        return SpaceSparse(
+    def from_space_to_sparse_model(self, space: Space, include_applications: bool) -> SpaceSparse:
+        space_sparse = SpaceSparse(
             created_at=space.created_at,
             updated_at=space.updated_at,
             id=space.id,
@@ -383,7 +399,21 @@ class SpaceAssembler:
             personal=space.is_personal(),
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
+            icon_id=space.icon_id,
         )
+
+        if include_applications:
+            default_assistant = None
+            if getattr(space, "default_assistant", None) is not None:
+                default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
+                    space.default_assistant,
+                    permissions=self._get_default_assistant_permissions(space),
+                )
+            applications = self._get_applications_model(space, only_published=True)
+            space_sparse.applications = applications
+            space_sparse.default_assistant = default_assistant
+
+        return space_sparse
 
     def from_space_to_dashboard_model(self, space: Space, only_published: bool) -> SpaceDashboard:
         self._set_permissions_on_resources(space)
@@ -399,6 +429,7 @@ class SpaceAssembler:
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             applications=applications,
+            icon_id=space.icon_id,
         )
 
     @staticmethod

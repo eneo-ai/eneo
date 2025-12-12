@@ -21,6 +21,7 @@ from intric.embedding_models.presentation.embedding_model_router import (
 from intric.files.file_router import router as files_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
+from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
 from intric.integration.presentation.integration_auth_router import (
     router as integration_auth_router,
@@ -74,6 +75,12 @@ from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.tenants.presentation.tenant_credentials_router import (
     router as tenant_credentials_router,
 )
+from intric.tenants.presentation.tenant_crawler_settings_router import (
+    router as tenant_crawler_settings_router,
+)
+from intric.tenants.presentation.tenant_self_credentials_router import (
+    router as tenant_self_credentials_router,
+)
 from intric.tenants.presentation.tenant_federation_router import (
     router as tenant_federation_router,
 )
@@ -96,6 +103,7 @@ router.include_router(services_router, prefix="/services", tags=["services"])
 router.include_router(logging_router, prefix="/logging", tags=["logging"])
 router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
+router.include_router(tenant_self_credentials_router, prefix="/admin", tags=["admin"])
 router.include_router(assistant_template_admin_router, prefix="", tags=["admin-templates"])
 router.include_router(app_template_admin_router, prefix="", tags=["admin-templates"])
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
@@ -113,6 +121,7 @@ router.include_router(
     tags=["transcription-models"],
 )
 router.include_router(files_router, prefix="/files", tags=["files"])
+router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
 router.include_router(space_router, prefix="/spaces", tags=["spaces"])
 router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
@@ -146,6 +155,7 @@ router.include_router(integration_auth_router, prefix="/integrations/auth", tags
 
 router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
+router.include_router(tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
 router.include_router(federation_router, prefix="", tags=["authentication"])  # Public auth endpoints (no prefix)

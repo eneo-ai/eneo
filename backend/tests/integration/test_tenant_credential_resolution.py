@@ -6,7 +6,7 @@ instances with tenant-scoped CredentialResolver when accessed through the
 dependency injection container.
 
 Run with:
-    cd backend && poetry run pytest tests/integration/test_tenant_credential_resolution.py -v
+    cd backend && uv run pytest tests/integration/test_tenant_credential_resolution.py -v
 """
 
 import pytest
@@ -26,6 +26,12 @@ from intric.tenants.tenant_repo import TenantRepository
 from intric.main.config import Settings
 from intric.settings.encryption_service import EncryptionService
 from intric.users.user import UserInDB, UserState
+
+
+@pytest.fixture(autouse=True)
+def enable_tenant_credentials(test_settings, monkeypatch):
+    """Enable tenant credentials feature for all tests in this module."""
+    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
 
 
 async def _put_tenant_credential(

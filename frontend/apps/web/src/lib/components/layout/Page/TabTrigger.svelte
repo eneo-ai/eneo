@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from "$app/environment";
-  import { pushState } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { getContentTabs } from "./ctx";
   import { Button } from "@intric/ui";
@@ -14,12 +14,23 @@
     elements: { trigger }
   } = getContentTabs();
 
+  // Replace pushState with goto to trigger proper SvelteKit navigation
+  // This ensures the load function re-runs with new tab parameter
   function updateUrl() {
-    if (browser) {
-      const url = $page.url;
-      url.searchParams.set("tab", tab);
-      pushState(url, { ...$page.state, tab });
-    }
+    if (!browser) return;
+
+    // CRITICAL: Create new URL object (don't mutate $page.url)
+    const url = new URL($page.url);
+    url.searchParams.set("tab", tab);
+    // Reset to page 1 when switching tabs to avoid empty results
+    url.searchParams.delete("page");
+
+    // goto() triggers real navigation, re-running load function
+    goto(url.toString(), {
+      replaceState: true,  // Don't add to browser history
+      noScroll: true,      // Keep scroll position
+      keepFocus: true      // Maintain focus state
+    });
   }
 </script>
 

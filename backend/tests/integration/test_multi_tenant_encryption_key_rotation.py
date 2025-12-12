@@ -29,6 +29,12 @@ from intric.settings.encryption_service import EncryptionService
 from intric.tenants.tenant_repo import TenantRepository
 
 
+@pytest.fixture(autouse=True)
+def enable_tenant_credentials(test_settings, monkeypatch):
+    """Enable tenant credentials feature for all tests in this module."""
+    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+
+
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
     payload = {
@@ -244,7 +250,7 @@ async def test_mixed_encryption_states_during_migration(
     2. Deploy new ENCRYPTION_KEY in .env (do NOT restart yet)
     3. Run migration script:
        ```
-       poetry run python -m intric.cli.rotate_encryption_key \\
+       uv run python -m intric.cli.rotate_encryption_key \\
          --old-key="OLD_KEY" \\
          --new-key="NEW_KEY" \\
          --dry-run

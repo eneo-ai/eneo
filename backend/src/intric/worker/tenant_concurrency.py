@@ -31,6 +31,8 @@ class TenantConcurrencyLimiter:
     circuit_break_seconds: int = 30
     local_ttl_seconds: int = 120
     local_limit: int | None = None
+    # FIX: Only refresh TTL on SUCCESS path - prevents zombie counters when acquire fails
+    # Bug: Previous version refreshed TTL on both success AND failure, keeping counter alive forever
     _acquire_lua: str = field(init=False, default=(
         "local key = KEYS[1]\n"
         "local limit = tonumber(ARGV[1])\n"
@@ -39,18 +41,20 @@ class TenantConcurrencyLimiter:
         "  return 1\n"
         "end\n"
         "local current = redis.call('INCR', key)\n"
-        "redis.call('EXPIRE', key, ttl)\n"
         "if current > limit then\n"
         "  local after_decr = redis.call('DECR', key)\n"
         "  if after_decr <= 0 then\n"
         "    redis.call('DEL', key)\n"
-        "  else\n"
-        "    redis.call('EXPIRE', key, ttl)\n"
         "  end\n"
+        "  -- DO NOT refresh TTL on failure - let counter expire naturally if unused\n"
         "  return 0\n"
         "end\n"
+        "-- Success: refresh TTL only after confirming slot acquired\n"
+        "redis.call('EXPIRE', key, ttl)\n"
         "return current\n"
     ))
+    # NOTE: This script is duplicated in crawl_tasks.py as _RELEASE_SLOT_LUA
+    # Keep both in sync if making changes
     _release_lua: str = field(init=False, default=(
         "local key = KEYS[1]\n"
         "local ttl = tonumber(ARGV[1])\n"

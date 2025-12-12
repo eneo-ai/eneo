@@ -160,6 +160,10 @@ OVHCLOUD_API_KEY=
 BERGET_API_KEY=
 BERGET_API_BASE=
 
+# GDM.se (Swedish AI provider)
+# Get from: https://ai.gdm.se/
+GDM_API_KEY=
+
 # Flux (Image generation)
 FLUX_API_KEY=
 
@@ -206,6 +210,62 @@ TENANT_WORKER_SEMAPHORE_TTL_SECONDS=36000
 # [OPTIONAL] Retry delay when tenant hits limit (default: 30 seconds)
 # Base delay for exponential backoff: 30s → 60s → 90s → ...
 TENANT_WORKER_RETRY_DELAY_SECONDS=30
+
+# [OPTIONAL] Crawl job age limit - Prevents infinite retry loops (default: 1800 = 30 min)
+# Jobs permanently fail if still retrying after this duration
+# Protects against cascading failures during burst crawl periods (e.g., 2 AM scheduled crawls)
+CRAWL_JOB_MAX_AGE_SECONDS=1800
+
+# ----------------------------------------------------------------------------
+# Crawl Feeder Service (OPTIONAL - Prevents Burst Overload)
+# ----------------------------------------------------------------------------
+# The feeder service meters job enqueue rate to prevent overwhelming the worker
+# queue when schedulers trigger (e.g., 50 websites at 2 AM causing retry storms)
+#
+# When enabled: Scheduler adds jobs to pending queue, feeder enqueues when capacity exists
+# When disabled: Scheduler enqueues directly to ARQ (original behavior)
+# ----------------------------------------------------------------------------
+
+# [OPTIONAL] Enable feeder service (default: false for gradual rollout)
+# Keep false until tested in your production environment
+CRAWL_FEEDER_ENABLED=false
+
+# [OPTIONAL] Feeder check interval (default: 10 seconds)
+# How often the feeder checks for pending jobs and available capacity
+CRAWL_FEEDER_INTERVAL_SECONDS=10
+
+# [OPTIONAL] Feeder batch size (default: 10 jobs per cycle per tenant)
+# Maximum jobs to enqueue per tenant per feeder cycle
+# Prevents enqueueing entire queue at once if large capacity suddenly available
+CRAWL_FEEDER_BATCH_SIZE=10
+
+# ----------------------------------------------------------------------------
+# Crawl Reliability & Recovery
+# ----------------------------------------------------------------------------
+# These settings prevent "Crawl already in progress" blocking and enable
+# safe recovery from crashed workers or stuck jobs
+# ----------------------------------------------------------------------------
+
+# [OPTIONAL] Orphan crawl run cleanup timeout (default: 6 hours)
+# Marks stuck QUEUED/IN_PROGRESS crawl runs as FAILED after this duration
+# Prevents "Crawl already in progress" blocking new crawls indefinitely
+# Higher values are safer for large websites; lower values provide faster cleanup
+ORPHAN_CRAWL_RUN_TIMEOUT_HOURS=6
+
+# [OPTIONAL] Safe preemption threshold for user-initiated recrawls (default: 30 min)
+# When a user triggers a recrawl but an existing job is QUEUED/IN_PROGRESS:
+#   - Job's last activity OLDER than threshold → job is "stale", marked FAILED, new crawl starts
+#   - Job's last activity NEWER than threshold → job is "active", user gets error
+# The worker sends heartbeats (see below) to keep active jobs alive
+# 30 minutes is safe for most; increase for very large sites (>5000 pages)
+CRAWL_STALE_THRESHOLD_MINUTES=30
+
+# [OPTIONAL] Heartbeat interval for crawl jobs (default: 300 seconds = 5 min)
+# During crawl, worker updates job's updated_at timestamp periodically
+# This "heartbeat" signals the job is alive, preventing false-positive staleness
+# TIME-BASED (not page-count-based) to handle slow-loading pages correctly
+# Should be significantly less than CRAWL_STALE_THRESHOLD_MINUTES
+CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
 
 # ----------------------------------------------------------------------------
 # Feature Flags

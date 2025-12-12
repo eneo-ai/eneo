@@ -65,6 +65,7 @@ class Space:
         updated_at: datetime = None,
         group_chats: Optional[list["GroupChat"]] = [],
         security_classification: Optional[SecurityClassification] = None,
+        icon_id: Optional[UUID] = None,
     ):
         self.id = id
         self.tenant_id = tenant_id
@@ -87,6 +88,7 @@ class Space:
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
+        self.icon_id = icon_id
 
     def _get_member_ids(self):
         return self.members.keys()
@@ -280,6 +282,7 @@ class Space:
         completion_models: list["CompletionModel"] = None,
         transcription_models: list[TranscriptionModel] = None,
         security_classification: Union[SecurityClassification, NotProvided, None] = NOT_PROVIDED,
+        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             if self.is_personal():
@@ -339,6 +342,9 @@ class Space:
                 raise BadRequestException("Can not add transcription models to personal space")
 
             self.transcription_models = transcription_models
+
+        if icon_id is not NOT_PROVIDED:
+            self.icon_id = icon_id
 
     def add_member(self, user: SpaceMember):
         if self.is_personal():

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 from uuid import UUID
 
 import crochet
+import sqlalchemy as sa
 from arq.connections import RedisSettings
 from arq.cron import cron
 from dependency_injector import providers
@@ -16,7 +19,7 @@ from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
-from intric.main.models import ChannelType
+from intric.main.models import ChannelType, Status
 from intric.server.dependencies import lifespan
 from intric.worker.task_manager import TaskManager, WorkerConfig
 
@@ -74,9 +77,95 @@ class Worker:
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
+        # Job timeout is a safety net - uses global env default as upper bound.
+        # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
+        # which respects tenant-specific crawl_max_length settings.
         self.job_timeout = settings.crawl_max_length + 60 * 60  # crawl window + 1h buffer
         self.max_jobs = settings.worker_max_jobs
         self.expires_extra_ms = 604800000  # 1 week
+
+        # ARQ v0.26+ features for improved job management
+        # allow_abort_jobs: Enables job.abort() to cancel running/queued jobs
+        # Why: Allows preemption of stale jobs without complex Compare-and-Swap SQL
+        self.allow_abort_jobs = True
+
+        # health_check_interval: How often to update worker health key in Redis
+        self.health_check_interval = 60  # seconds (default is 3600)
+
+        # job_completion_wait: Time to wait for jobs to complete on shutdown
+        # Allows Scrapy/Twisted reactor cleanup via crochet
+        self.job_completion_wait = 60  # seconds
+
+        # ARQ lifecycle hooks for centralized job status management
+        # These run for ALL job types, providing consistent state tracking
+        self.on_job_start = self._on_job_start
+        self.after_job_end = self._after_job_end
+
+    async def _on_job_start(self, ctx: dict) -> None:
+        """ARQ hook: Called before each job starts.
+
+        Updates job status to IN_PROGRESS in the database.
+        This centralizes status management that was previously scattered.
+
+        Args:
+            ctx: ARQ context containing job_id, job_try, enqueue_time
+        """
+        job_id = ctx.get("job_id")
+        if not job_id:
+            return
+
+        try:
+            # Import here to avoid circular import
+            from intric.jobs.job_models import Jobs
+
+            async with sessionmanager.session() as session:
+                async with session.begin():
+                    # Use direct SQL to avoid session lifecycle issues
+                    stmt = (
+                        sa.update(Jobs)
+                        .where(Jobs.id == UUID(job_id))
+                        .values(
+                            status=Status.IN_PROGRESS.value,
+                            updated_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await session.execute(stmt)
+
+            logger.debug(
+                "Job started (ARQ hook)",
+                extra={"job_id": job_id, "job_try": ctx.get("job_try", 1)},
+            )
+        except Exception as exc:
+            # Don't fail the job if status update fails
+            logger.warning(
+                "Failed to update job status on start",
+                extra={"job_id": job_id, "error": str(exc)},
+            )
+
+    async def _after_job_end(self, ctx: dict) -> None:
+        """ARQ hook: Called after each job ends AND result is recorded.
+
+        This is the final hook in the job lifecycle. The job's actual status
+        should already be set by the task itself (complete/failed), so we just
+        log for observability. Could be extended to sync with external systems.
+
+        Args:
+            ctx: ARQ context containing job_id, result, and any exception
+        """
+        job_id = ctx.get("job_id")
+        if not job_id:
+            return
+
+        # Log job completion for observability
+        result = ctx.get("result")
+        logger.debug(
+            "Job ended (ARQ hook)",
+            extra={
+                "job_id": job_id,
+                "job_try": ctx.get("job_try", 1),
+                "success": result is not None and not isinstance(result, Exception),
+            },
+        )
 
     async def _create_container(
         self,
@@ -107,7 +196,55 @@ class Worker:
         await lifespan.startup()
         crochet.setup()
 
+        # Start crawl feeder as background task if enabled
+        # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
+        # Uses leader election to ensure only ONE feeder runs across all workers
+        settings = get_settings()
+        if settings.crawl_feeder_enabled:
+            from intric.worker.crawl_feeder import CrawlFeeder
+
+            try:
+                # CrawlFeeder is now container-independent
+                # Why: It manages its own DB sessions and Redis client to avoid
+                # session lifecycle issues (session closing while feeder runs)
+                feeder = CrawlFeeder()
+
+                # Start feeder as background task
+                # Why: Runs concurrently with worker jobs in same event loop
+                task = asyncio.create_task(feeder.run_forever())
+
+                # Store references for cleanup on shutdown
+                # Why: Allows graceful cancellation and prevents GC
+                ctx["feeder_task"] = task
+                ctx["feeder"] = feeder  # Store feeder for proper stop() call
+
+                logger.info(
+                    "Started crawl feeder background task with leader election",
+                    extra={"feeder_enabled": True},
+                )
+            except Exception as exc:
+                logger.error(
+                    f"Failed to start crawl feeder: {exc}. Continuing without feeder.",
+                    extra={"feeder_enabled": False},
+                )
+
     async def shutdown(self, ctx):
+        # Stop feeder gracefully if running
+        # Why: Prevents orphaned background tasks and closes Redis connection
+        if "feeder" in ctx:
+            feeder = ctx["feeder"]
+            logger.info("Stopping crawl feeder background task")
+            await feeder.stop()  # Gracefully stop and close Redis
+
+        if "feeder_task" in ctx:
+            task = ctx["feeder_task"]
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass  # Expected on cancellation
+
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True):

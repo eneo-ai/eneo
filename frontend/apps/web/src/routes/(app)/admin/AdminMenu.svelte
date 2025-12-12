@@ -86,8 +86,8 @@
   </Navigation.Link>
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link
-    href="/admin/legacy/users"
-    isActive={isSelected("/admin/legacy/users", currentRoute)}
+    href="/admin/users"
+    isActive={isSelected("/admin/users", currentRoute)}
     icon={IconAssistant}
     label={m.users()}
   />

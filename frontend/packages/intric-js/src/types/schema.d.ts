@@ -562,8 +562,79 @@ export interface paths {
   };
   "/api/v1/admin/users/": {
     /**
-     * List all users in tenant
-     * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
+     * List users with pagination and search
+     * @description List tenant users with pagination, fuzzy search, and sorting capabilities.
+     *
+     * **Performance Optimization:**
+     * - Uses pg_trgm GIN indexes for efficient fuzzy text search (email and username)
+     * - Uses composite B-tree indexes for fast tenant-scoped sorting
+     * - Sub-second response time even with 10,000+ users per tenant
+     *
+     * **Pagination:**
+     * - Max depth: 100 pages (prevents deep pagination performance issues)
+     * - Default: 100 users per page, sorted by creation date (newest first)
+     * - Supports custom page sizes (1-100)
+     *
+     * **Search:**
+     * - Email search: Case-insensitive partial match (e.g., "john" matches john.doe@example.com)
+     * - Name search: Case-insensitive partial match on username (e.g., "emma" matches emma.andersson)
+     * - Combined search: Use both filters with AND logic
+     *
+     * **Sorting:**
+     * - Sort by: email, username, or created_at (default)
+     * - Sort order: asc or desc (default)
+     *
+     * **Example Requests:**
+     *
+     * Default (first 100 users, newest first):
+     * ```
+     * GET /api/v1/admin/users/
+     * ```
+     *
+     * Custom page size (50 users per page):
+     * ```
+     * GET /api/v1/admin/users/?page_size=50
+     * ```
+     *
+     * Email search (find users at municipality domain):
+     * ```
+     * GET /api/v1/admin/users/?search_email=@municipality.se
+     * ```
+     *
+     * Name search (find users named Emma):
+     * ```
+     * GET /api/v1/admin/users/?search_name=emma
+     * ```
+     *
+     * Combined search and pagination:
+     * ```
+     * GET /api/v1/admin/users/?search_email=@municipality.se&page=2&page_size=50
+     * ```
+     *
+     * Sort by email ascending:
+     * ```
+     * GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+     * ```
+     *
+     * **Response Format:**
+     * ```json
+     * {
+     *   "items": [...],
+     *   "metadata": {
+     *     "page": 1,
+     *     "page_size": 100,
+     *     "total_count": 543,
+     *     "total_pages": 6,
+     *     "has_next": true,
+     *     "has_previous": false
+     *   }
+     * }
+     * ```
+     *
+     * **Important Notes:**
+     * - Only active users (not soft-deleted) are returned
+     * - All results are isolated to your tenant (cross-tenant access is prevented)
+     * - Max depth limit (100 pages) ensures consistent performance
      */
     get: operations["get_users_api_v1_admin_users__get"];
     /**
@@ -629,6 +700,20 @@ export interface paths {
   "/api/v1/admin/privacy-policy/": {
     /** Update Privacy Policy */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
+  };
+  "/api/v1/admin/credentials/{provider}": {
+    /**
+     * Set API credential for current tenant
+     * @description Set or update API credentials for a specific LLM provider. Tenant admin only. Provider-specific fields are validated.
+     */
+    put: operations["set_credential_api_v1_admin_credentials__provider__put"];
+  };
+  "/api/v1/admin/credentials/": {
+    /**
+     * List API credentials for current tenant
+     * @description List all configured API credentials with masked keys and encryption status. Tenant admin only.
+     */
+    get: operations["list_credentials_api_v1_admin_credentials__get"];
   };
   "/api/v1/admin/templates/assistants/": {
     /**
@@ -1593,6 +1678,75 @@ export interface paths {
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
   };
+  "/api/v1/sysadmin/completion-models/create": {
+    /**
+     * Create Completion Model
+     * @description Create a new completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}/metadata": {
+    /**
+     * Update Completion Model Metadata
+     * @description Update completion model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/completion-models/{id}": {
+    /**
+     * Delete Completion Model
+     * @description Delete a completion model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     * Set force=true to delete even if model is in use (may break references).
+     */
+    delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
+  };
+  "/api/v1/sysadmin/embedding-models/create": {
+    /**
+     * Create Embedding Model
+     * @description Create a new embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * This creates the model metadata only. To enable it for a tenant,
+     * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+     */
+    post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}/metadata": {
+    /**
+     * Update Embedding Model Metadata
+     * @description Update embedding model metadata (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * Updates global model metadata. Does not affect tenant-specific settings.
+     */
+    put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
+  };
+  "/api/v1/sysadmin/embedding-models/{id}": {
+    /**
+     * Delete Embedding Model
+     * @description Delete an embedding model (system-wide operation).
+     *
+     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     *
+     * WARNING: Deletion affects all tenants. Use with caution.
+     */
+    delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     /**
      * Set tenant API credential
@@ -1611,6 +1765,23 @@ export interface paths {
      * @description List all configured API credentials for a tenant with masked keys and encryption status. Shows last 4 characters of API key for verification and encryption state for security auditing. System admin only.
      */
     get: operations["list_tenant_credentials_api_v1_sysadmin_tenants__tenant_id__credentials_get"];
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings": {
+    /**
+     * Get tenant crawler settings
+     * @description Get current crawler settings for a tenant. Returns effective settings (tenant overrides merged with environment defaults). System admin only.
+     */
+    get: operations["get_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_get"];
+    /**
+     * Update tenant crawler settings
+     * @description Update crawler settings for a specific tenant. Only provided fields are updated; missing fields retain previous values. Settings persist across server restarts and override environment defaults. System admin only.
+     */
+    put: operations["update_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_put"];
+    /**
+     * Reset tenant crawler settings
+     * @description Delete all tenant-specific crawler settings, reverting to environment defaults. System admin only.
+     */
+    delete: operations["delete_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_delete"];
   };
   "/api/v1/sysadmin/tenants/{tenant_id}/federation": {
     /**
@@ -2799,6 +2970,39 @@ export interface components {
        */
       is_org_default?: boolean;
     };
+    /** CompletionModelCreate */
+    CompletionModelCreate: {
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      family: components["schemas"]["ModelFamily"];
+      /** Token Limit */
+      token_limit: number;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision: boolean;
+      /** Reasoning */
+      reasoning: boolean;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
     /** CompletionModelPublic */
     CompletionModelPublic: {
       /** Created At */
@@ -2860,6 +3064,10 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** CompletionModelPublicAppTemplate */
@@ -2939,6 +3147,10 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -3061,6 +3273,166 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlerSettingsResponse
+     * @description Response model for crawler settings operations.
+     *
+     * Returns current settings merged with environment defaults.
+     * Tenant overrides are highlighted.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "settings": {
+     *             "crawl_max_length": 14400,
+     *             "download_timeout": 90,
+     *             "dns_timeout": 30,
+     *             "retry_times": 2,
+     *             "closespider_itemcount": 20000,
+     *             "obey_robots": true,
+     *             "autothrottle_enabled": true,
+     *             "tenant_worker_concurrency_limit": 4,
+     *             "crawl_stale_threshold_minutes": 30,
+     *             "crawl_heartbeat_interval_seconds": 300,
+     *             "crawl_feeder_enabled": false,
+     *             "crawl_feeder_interval_seconds": 10,
+     *             "crawl_feeder_batch_size": 10,
+     *             "crawl_job_max_age_seconds": 1800
+     *         },
+     *         "overrides": ["download_timeout", "dns_timeout"],
+     *         "updated_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    CrawlerSettingsResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant UUID
+       */
+      tenant_id: string;
+      /**
+       * Settings
+       * @description Current effective settings (tenant overrides + env defaults)
+       */
+      settings: {
+        [key: string]: unknown;
+      };
+      /**
+       * Overrides
+       * @description List of setting keys that have tenant-specific overrides
+       */
+      overrides: string[];
+      /**
+       * Updated At
+       * @description Timestamp of last settings update
+       */
+      updated_at?: string | null;
+    };
+    /**
+     * CrawlerSettingsUpdate
+     * @description Request model for updating tenant crawler settings.
+     *
+     * All fields are optional - only provided fields will be updated.
+     * Missing fields retain their previous values or fall back to environment defaults.
+     *
+     * Field constraints are derived from CRAWLER_SETTING_SPECS (single source of truth).
+     *
+     * Example - Full configuration:
+     *     {
+     *         "crawl_max_length": 14400,
+     *         "download_timeout": 90,
+     *         "dns_timeout": 30,
+     *         "retry_times": 2,
+     *         "closespider_itemcount": 20000,
+     *         "obey_robots": true,
+     *         "autothrottle_enabled": true,
+     *         "tenant_worker_concurrency_limit": 4,
+     *         "crawl_stale_threshold_minutes": 30,
+     *         "crawl_heartbeat_interval_seconds": 300,
+     *         "crawl_feeder_enabled": false,
+     *         "crawl_feeder_interval_seconds": 10,
+     *         "crawl_feeder_batch_size": 10,
+     *         "crawl_job_max_age_seconds": 1800
+     *     }
+     *
+     * Example - Partial update (adjust timeouts only):
+     *     {
+     *         "download_timeout": 120,
+     *         "dns_timeout": 45
+     *     }
+     */
+    CrawlerSettingsUpdate: {
+      /**
+       * Crawl Max Length
+       * @description Maximum crawl duration in seconds (1 min to 24 hours)
+       */
+      crawl_max_length?: number | null;
+      /**
+       * Download Timeout
+       * @description Per-request download timeout in seconds (10s to 5 min)
+       */
+      download_timeout?: number | null;
+      /**
+       * Dns Timeout
+       * @description DNS resolution timeout in seconds (5s to 2 min)
+       */
+      dns_timeout?: number | null;
+      /**
+       * Retry Times
+       * @description Number of retry attempts per request (0 to 10)
+       */
+      retry_times?: number | null;
+      /**
+       * Closespider Itemcount
+       * @description Maximum pages to crawl before stopping (100 to 100k)
+       */
+      closespider_itemcount?: number | null;
+      /**
+       * Obey Robots
+       * @description Whether to respect robots.txt rules
+       */
+      obey_robots?: boolean | null;
+      /**
+       * Autothrottle Enabled
+       * @description Enable automatic request throttling based on server response times
+       */
+      autothrottle_enabled?: boolean | null;
+      /**
+       * Tenant Worker Concurrency Limit
+       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
+       */
+      tenant_worker_concurrency_limit?: number | null;
+      /**
+       * Crawl Stale Threshold Minutes
+       * @description Minutes without activity before job is considered stale (5 min to 24 hours)
+       */
+      crawl_stale_threshold_minutes?: number | null;
+      /**
+       * Crawl Heartbeat Interval Seconds
+       * @description Heartbeat interval to signal job is alive (30s to 1 hour)
+       */
+      crawl_heartbeat_interval_seconds?: number | null;
+      /**
+       * Crawl Feeder Enabled
+       * @description Enable crawl feeder service for rate-limited job enqueueing
+       */
+      crawl_feeder_enabled?: boolean | null;
+      /**
+       * Crawl Feeder Interval Seconds
+       * @description Feeder check interval in seconds (5s to 5 min)
+       */
+      crawl_feeder_interval_seconds?: number | null;
+      /**
+       * Crawl Feeder Batch Size
+       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
+       */
+      crawl_feeder_batch_size?: number | null;
+      /**
+       * Crawl Job Max Age Seconds
+       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
+       */
+      crawl_job_max_age_seconds?: number | null;
+    };
     /** CreateGroupRequest */
     CreateGroupRequest: {
       /** Name */
@@ -3141,52 +3513,6 @@ export interface components {
        */
       published?: boolean;
       user: components["schemas"]["UserSparse"];
-    };
-    /**
-     * CredentialInfo
-     * @description Information about a configured credential.
-     *
-     * Example:
-     *     {
-     *         "provider": "openai",
-     *         "masked_key": "...xyz9",
-     *         "configured_at": "2025-10-07T12:34:56.789Z",
-     *         "encryption_status": "encrypted",
-     *         "config": {
-     *             "endpoint": "https://my-resource.openai.azure.com",
-     *             "api_version": "2024-02-15-preview"
-     *         }
-     *     }
-     */
-    CredentialInfo: {
-      /**
-       * Provider
-       * @description LLM provider name
-       */
-      provider: string;
-      /**
-       * Masked Key
-       * @description Last 4 characters of API key for identification
-       */
-      masked_key: string;
-      /**
-       * Configured At
-       * @description Timestamp when credential was last updated
-       */
-      configured_at?: string | null;
-      /**
-       * Encryption Status
-       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
-       * @enum {string}
-       */
-      encryption_status: "encrypted" | "plaintext";
-      /**
-       * Config
-       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
-       */
-      config?: {
-        [key: string]: unknown;
-      };
     };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
@@ -3345,6 +3671,60 @@ export interface components {
       success: boolean;
     };
     /**
+     * DeleteSettingsResponse
+     * @description Response model for deleting tenant crawler settings.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "message": "Crawler settings reset to defaults",
+     *         "deleted_keys": ["download_timeout", "dns_timeout"]
+     *     }
+     */
+    DeleteSettingsResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant UUID
+       */
+      tenant_id: string;
+      /**
+       * Message
+       * @description Confirmation message
+       */
+      message: string;
+      /**
+       * Deleted Keys
+       * @description List of setting keys that were removed
+       */
+      deleted_keys: string[];
+    };
+    /** EmbeddingModelCreate */
+    EmbeddingModelCreate: {
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+    };
+    /**
      * EmbeddingModelFamily
      * @enum {string}
      */
@@ -3417,6 +3797,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Can Access
        * @default false
@@ -3427,11 +3809,15 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
        */
       is_org_enabled?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** EmbeddingModelPublicLegacy */
@@ -3482,6 +3868,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
     };
     /** EmbeddingModelSecurityStatus */
     EmbeddingModelSecurityStatus: {
@@ -3512,6 +3900,8 @@ export interface components {
       /** Description */
       description?: string | null;
       org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
       /**
        * Can Access
        * @default false
@@ -3522,14 +3912,52 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
        */
       is_org_enabled?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
+    };
+    /** EmbeddingModelSparse */
+    EmbeddingModelSparse: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Open Source */
+      open_source: boolean;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability: components["schemas"]["ModelStability"];
+      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -4219,38 +4647,6 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
-    };
-    /**
-     * ListCredentialsResponse
-     * @description Response model for listing tenant credentials.
-     *
-     * Example:
-     *     {
-     *         "credentials": [
-     *             {
-     *                 "provider": "openai",
-     *                 "masked_key": "...xyz9",
-     *                 "configured_at": "2025-10-07T12:34:56.789Z",
-     *                 "encryption_status": "encrypted",
-     *                 "config": {}
-     *             },
-     *             {
-     *                 "provider": "azure",
-     *                 "masked_key": "...abc3",
-     *                 "configured_at": "2025-10-07T12:45:00.123Z",
-     *                 "encryption_status": "plaintext",
-     *                 "config": {
-     *                     "endpoint": "https://my-resource.openai.azure.com",
-     *                     "api_version": "2024-02-15-preview",
-     *                     "deployment_name": "gpt-4"
-     *                 }
-     *             }
-     *         ]
-     *     }
-     */
-    ListCredentialsResponse: {
-      /** Credentials */
-      credentials: components["schemas"]["CredentialInfo"][];
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -5066,6 +5462,19 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[PredefinedRolePublic] */
+    PaginatedResponse_PredefinedRolePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PredefinedRolePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -5073,6 +5482,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[RolePublic] */
+    PaginatedResponse_RolePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RolePublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -5170,19 +5592,6 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[UserAdminView] */
-    PaginatedResponse_UserAdminView_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["UserAdminView"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
     /** PaginatedResponse[UserGroupPublic] */
     PaginatedResponse_UserGroupPublic_: {
       /**
@@ -5234,6 +5643,62 @@ export interface components {
        * @description Number of items returned in the response
        */
       count: number;
+    };
+    /** PaginatedUsersResponse[UserAdminView] */
+    PaginatedUsersResponse_UserAdminView_: {
+      /**
+       * Items
+       * @description List of users for the current page
+       */
+      items: components["schemas"]["UserAdminView"][];
+      /** @description Pagination metadata for navigation */
+      metadata: components["schemas"]["PaginationMetadata"];
+    };
+    /**
+     * PaginationMetadata
+     * @description Pagination metadata for frontend navigation.
+     *
+     * Provides all information needed to build pagination UI (page numbers, next/previous buttons).
+     * Includes counts by state for tab display.
+     */
+    PaginationMetadata: {
+      /**
+       * Page
+       * @description Current page number (1-based)
+       */
+      page: number;
+      /**
+       * Page Size
+       * @description Number of items per page
+       */
+      page_size: number;
+      /**
+       * Total Count
+       * @description Total number of items across all pages
+       */
+      total_count: number;
+      /**
+       * Total Pages
+       * @description Total number of pages (calculated from total_count and page_size)
+       */
+      total_pages: number;
+      /**
+       * Has Next
+       * @description Whether there is a next page available
+       */
+      has_next: boolean;
+      /**
+       * Has Previous
+       * @description Whether there is a previous page available
+       */
+      has_previous: boolean;
+      /**
+       * Counts
+       * @description Optional counts by state (active, inactive) for tab display
+       */
+      counts?: {
+        [key: string]: number;
+      } | null;
     };
     /** PartialAssistantUpdatePublic */
     PartialAssistantUpdatePublic: {
@@ -5304,6 +5769,68 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
+    /** PartialCompletionModelUpdate */
+    PartialCompletionModelUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Nickname */
+      nickname?: string | null;
+      family?: components["schemas"]["ModelFamily"] | null;
+      /** Token Limit */
+      token_limit?: number | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Nr Billion Parameters */
+      nr_billion_parameters?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Deployment Name */
+      deployment_name?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Vision */
+      vision?: boolean | null;
+      /** Reasoning */
+      reasoning?: boolean | null;
+      /** Base Url */
+      base_url?: string | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
+    /** PartialEmbeddingModelUpdate */
+    PartialEmbeddingModelUpdate: {
+      /** Name */
+      name?: string | null;
+      family?: components["schemas"]["EmbeddingModelFamily"] | null;
+      /** Is Deprecated */
+      is_deprecated?: boolean | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Dimensions */
+      dimensions?: number | null;
+      /** Max Input */
+      max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      stability?: components["schemas"]["ModelStability"] | null;
+      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Description */
+      description?: string | null;
+      org?: components["schemas"]["ModelOrg"] | null;
+      /** Litellm Model Name */
+      litellm_model_name?: string | null;
+      /** Id */
+      id?: string | null;
+    };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
       predefined_role?: components["schemas"]["ModelId"] | null;
@@ -5360,21 +5887,11 @@ export interface components {
       | "admin"
       | "websites"
       | "integration_knowledge_list";
-    /** PredefinedRoleInDB */
-    PredefinedRoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
+    /** PermissionPublic */
+    PermissionPublic: {
+      name: components["schemas"]["Permission"];
+      /** Description */
+      description: string;
     };
     /** PredefinedRoleInDB */
     PredefinedRoleInDB: {
@@ -5525,26 +6042,12 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
+    /** RoleCreateRequest */
+    RoleCreateRequest: {
       /** Name */
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
     };
     /** RoleInDB */
     RoleInDB: {
@@ -5582,6 +6085,18 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+    };
+    /** RoleUpdateRequest */
+    RoleUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Permissions */
+      permissions?: components["schemas"]["Permission"][] | null;
+    };
+    /** RolesPaginatedResponse */
+    RolesPaginatedResponse: {
+      roles: components["schemas"]["PaginatedResponse_RolePublic_"];
+      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -5933,90 +6448,6 @@ export interface components {
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
     /**
-     * SetCredentialRequest
-     * @description Request model for setting tenant API credentials.
-     *
-     * Provider-specific field requirements:
-     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
-     * - vLLM: api_key + endpoint (required)
-     * - Azure: api_key + endpoint + api_version (required)
-     *
-     * Example for OpenAI:
-     *     {
-     *         "api_key": "sk-proj-abc123..."
-     *     }
-     *
-     * Example for Azure:
-     *     {
-     *         "api_key": "abc123...",
-     *         "endpoint": "https://my-resource.openai.azure.com",
-     *         "api_version": "2024-02-15-preview"
-     *     }
-     *
-     * Example for vLLM:
-     *     {
-     *         "api_key": "vllm-secret-key",
-     *         "endpoint": "http://tenant-vllm:8000"
-     *     }
-     */
-    SetCredentialRequest: {
-      /**
-       * Api Key
-       * @description API key for the provider
-       */
-      api_key: string;
-      /**
-       * Endpoint
-       * @description Azure OpenAI endpoint (required for Azure provider)
-       */
-      endpoint?: string | null;
-      /**
-       * Api Version
-       * @description Azure OpenAI API version (required for Azure provider)
-       */
-      api_version?: string | null;
-      /**
-       * Deployment Name
-       * @description Azure OpenAI deployment name (required for Azure provider)
-       */
-      deployment_name?: string | null;
-    };
-    /**
-     * SetCredentialResponse
-     * @description Response model for setting tenant API credentials.
-     *
-     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
-     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
-     * not returned for security.
-     *
-     * Example:
-     *     {
-     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
-     *         "provider": "openai",
-     *         "masked_key": "...xyz9",
-     *         "message": "API credential for openai set successfully",
-     *         "set_at": "2025-10-22T10:00:00+00:00"
-     *     }
-     */
-    SetCredentialResponse: {
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Provider */
-      provider: string;
-      /** Masked Key */
-      masked_key: string;
-      /** Message */
-      message: string;
-      /**
-       * Set At
-       * Format: date-time
-       */
-      set_at: string;
-    };
-    /**
      * SetFederationRequest
      * @description Request model for setting tenant federation config.
      */
@@ -6088,6 +6519,11 @@ export interface components {
        * @default false
        */
       using_templates?: boolean;
+      /**
+       * Tenant Credentials Enabled
+       * @default false
+       */
+      tenant_credentials_enabled?: boolean;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -6106,6 +6542,18 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
+    /**
+     * SortField
+     * @description Allowed fields for sorting user lists
+     * @enum {string}
+     */
+    SortField: "email" | "username" | "created_at";
+    /**
+     * SortOrder
+     * @description Sort direction for user lists
+     * @enum {string}
+     */
+    SortOrder: "asc" | "desc";
     /** SpaceDashboard */
     SpaceDashboard: {
       /**
@@ -6226,6 +6674,12 @@ export interface components {
       /** Organization */
       organization: boolean;
     };
+    /**
+     * StateFilter
+     * @description Filter for user state in admin users list
+     * @enum {string}
+     */
+    StateFilter: "active" | "inactive";
     /**
      * Status
      * @enum {string}
@@ -6425,6 +6879,10 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
+      /** Crawler Settings */
+      crawler_settings?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TenantInfo
@@ -6607,6 +7065,10 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
+      /** Crawler Settings */
+      crawler_settings?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TokenEstimateBreakdown
@@ -6749,6 +7211,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6759,6 +7223,8 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /** TranscriptionModelSecurityStatus */
@@ -6794,6 +7260,8 @@ export interface components {
        * @default true
        */
       is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -6804,6 +7272,8 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
@@ -7745,6 +8215,241 @@ export interface components {
      * @enum {string}
      */
     WizardType: "attachments" | "groups";
+    /**
+     * CredentialInfo
+     * @description Information about a configured credential.
+     *
+     * Example:
+     *     {
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "configured_at": "2025-10-07T12:34:56.789Z",
+     *         "encryption_status": "encrypted",
+     *         "config": {
+     *             "endpoint": "https://my-resource.openai.azure.com",
+     *             "api_version": "2024-02-15-preview"
+     *         }
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * ListCredentialsResponse
+     * @description Response model for listing tenant credentials.
+     *
+     * Example:
+     *     {
+     *         "credentials": [
+     *             {
+     *                 "provider": "openai",
+     *                 "masked_key": "...xyz9",
+     *                 "configured_at": "2025-10-07T12:34:56.789Z",
+     *                 "encryption_status": "encrypted",
+     *                 "config": {}
+     *             },
+     *             {
+     *                 "provider": "azure",
+     *                 "masked_key": "...abc3",
+     *                 "configured_at": "2025-10-07T12:45:00.123Z",
+     *                 "encryption_status": "plaintext",
+     *                 "config": {
+     *                     "endpoint": "https://my-resource.openai.azure.com",
+     *                     "api_version": "2024-02-15-preview",
+     *                     "deployment_name": "gpt-4"
+     *                 }
+     *             }
+     *         ]
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["intric__tenants__presentation__tenant_credentials_router__CredentialInfo"][];
+    };
+    /**
+     * SetCredentialRequest
+     * @description Request model for setting tenant API credentials.
+     *
+     * Provider-specific field requirements:
+     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
+     * - vLLM: api_key + endpoint (required)
+     * - Azure: api_key + endpoint + api_version (required)
+     *
+     * Example for OpenAI:
+     *     {
+     *         "api_key": "sk-proj-abc123..."
+     *     }
+     *
+     * Example for Azure:
+     *     {
+     *         "api_key": "abc123...",
+     *         "endpoint": "https://my-resource.openai.azure.com",
+     *         "api_version": "2024-02-15-preview"
+     *     }
+     *
+     * Example for vLLM:
+     *     {
+     *         "api_key": "vllm-secret-key",
+     *         "endpoint": "http://tenant-vllm:8000"
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /**
+     * SetCredentialResponse
+     * @description Response model for setting tenant API credentials.
+     *
+     * Returns the tenant ID, provider, masked API key (last 4 chars for verification),
+     * and confirmation message. Sensitive data (api_key, endpoint, api_version) are
+     * not returned for security.
+     *
+     * Example:
+     *     {
+     *         "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+     *         "provider": "openai",
+     *         "masked_key": "...xyz9",
+     *         "message": "API credential for openai set successfully",
+     *         "set_at": "2025-10-22T10:00:00+00:00"
+     *     }
+     */
+    intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
+    /** CredentialInfo */
+    intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo: {
+      /**
+       * Provider
+       * @description LLM provider name
+       */
+      provider: string;
+      /**
+       * Masked Key
+       * @description Last 4 characters of API key for identification
+       */
+      masked_key: string;
+      /**
+       * Configured At
+       * @description Timestamp when credential was last updated
+       */
+      configured_at?: string | null;
+      /**
+       * Encryption Status
+       * @description Encryption status of stored credential. 'encrypted' = secure at rest (Fernet encryption), 'plaintext' = needs migration for security compliance
+       * @enum {string}
+       */
+      encryption_status: "encrypted" | "plaintext";
+      /**
+       * Config
+       * @description Provider-specific configuration (e.g., Azure endpoint, api_version)
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    /** ListCredentialsResponse */
+    intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse: {
+      /** Credentials */
+      credentials: components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo"][];
+    };
+    /** SetCredentialRequest */
+    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest: {
+      /**
+       * Api Key
+       * @description API key for the provider
+       */
+      api_key: string;
+      /**
+       * Endpoint
+       * @description Azure OpenAI endpoint (required for Azure provider)
+       */
+      endpoint?: string | null;
+      /**
+       * Api Version
+       * @description Azure OpenAI API version (required for Azure provider)
+       */
+      api_version?: string | null;
+      /**
+       * Deployment Name
+       * @description Azure OpenAI deployment name (required for Azure provider)
+       */
+      deployment_name?: string | null;
+    };
+    /** SetCredentialResponse */
+    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse: {
+      /** Provider */
+      provider: string;
+      /** Masked Key */
+      masked_key: string;
+      /** Message */
+      message: string;
+      /**
+       * Set At
+       * Format: date-time
+       */
+      set_at: string;
+    };
     /** CrawlRunPublic */
     intric__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
       /** Created At */
@@ -8642,8 +9347,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -9253,6 +9960,10 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -9554,6 +10265,10 @@ export interface operations {
                  * @default true
                  */
                 is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
@@ -11153,15 +11868,110 @@ export interface operations {
     };
   };
   /**
-   * List all users in tenant
-   * @description Returns all active users within your tenant. Only users from your organization will be visible. Soft-deleted users are excluded from results.
+   * List users with pagination and search
+   * @description List tenant users with pagination, fuzzy search, and sorting capabilities.
+   *
+   * **Performance Optimization:**
+   * - Uses pg_trgm GIN indexes for efficient fuzzy text search (email and username)
+   * - Uses composite B-tree indexes for fast tenant-scoped sorting
+   * - Sub-second response time even with 10,000+ users per tenant
+   *
+   * **Pagination:**
+   * - Max depth: 100 pages (prevents deep pagination performance issues)
+   * - Default: 100 users per page, sorted by creation date (newest first)
+   * - Supports custom page sizes (1-100)
+   *
+   * **Search:**
+   * - Email search: Case-insensitive partial match (e.g., "john" matches john.doe@example.com)
+   * - Name search: Case-insensitive partial match on username (e.g., "emma" matches emma.andersson)
+   * - Combined search: Use both filters with AND logic
+   *
+   * **Sorting:**
+   * - Sort by: email, username, or created_at (default)
+   * - Sort order: asc or desc (default)
+   *
+   * **Example Requests:**
+   *
+   * Default (first 100 users, newest first):
+   * ```
+   * GET /api/v1/admin/users/
+   * ```
+   *
+   * Custom page size (50 users per page):
+   * ```
+   * GET /api/v1/admin/users/?page_size=50
+   * ```
+   *
+   * Email search (find users at municipality domain):
+   * ```
+   * GET /api/v1/admin/users/?search_email=@municipality.se
+   * ```
+   *
+   * Name search (find users named Emma):
+   * ```
+   * GET /api/v1/admin/users/?search_name=emma
+   * ```
+   *
+   * Combined search and pagination:
+   * ```
+   * GET /api/v1/admin/users/?search_email=@municipality.se&page=2&page_size=50
+   * ```
+   *
+   * Sort by email ascending:
+   * ```
+   * GET /api/v1/admin/users/?sort_by=email&sort_order=asc
+   * ```
+   *
+   * **Response Format:**
+   * ```json
+   * {
+   *   "items": [...],
+   *   "metadata": {
+   *     "page": 1,
+   *     "page_size": 100,
+   *     "total_count": 543,
+   *     "total_pages": 6,
+   *     "has_next": true,
+   *     "has_previous": false
+   *   }
+   * }
+   * ```
+   *
+   * **Important Notes:**
+   * - Only active users (not soft-deleted) are returned
+   * - All results are isolated to your tenant (cross-tenant access is prevented)
+   * - Max depth limit (100 pages) ensures consistent performance
    */
   get_users_api_v1_admin_users__get: {
+    parameters: {
+      query?: {
+        /** @description Page number (1-100) */
+        page?: number;
+        /** @description Users per page (1-100) */
+        page_size?: number;
+        /** @description Search by email (case-insensitive, partial match) */
+        search_email?: string | null;
+        /** @description Search by username (case-insensitive, partial match) */
+        search_name?: string | null;
+        /** @description Sort field (default: alphabetical by email) */
+        sort_by?: components["schemas"]["SortField"];
+        /** @description Sort order (default: ascending A-Z) */
+        sort_order?: components["schemas"]["SortOrder"];
+        /** @description Filter by user state (active includes invited, inactive for temporary leave) */
+        state_filter?: components["schemas"]["StateFilter"] | null;
+      };
+    };
     responses: {
-      /** @description List of users successfully retrieved */
+      /** @description Paginated list of users successfully retrieved */
       200: {
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_UserAdminView_"];
+          "application/json": components["schemas"]["PaginatedUsersResponse_UserAdminView_"];
+        };
+      };
+      /** @description Invalid pagination parameters (page/page_size out of bounds) */
+      400: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Authentication required (invalid or missing API key) */
@@ -11171,6 +11981,12 @@ export interface operations {
       /** @description Admin permissions required */
       403: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };
@@ -11517,6 +12333,58 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Set API credential for current tenant
+   * @description Set or update API credentials for a specific LLM provider. Tenant admin only. Provider-specific fields are validated.
+   */
+  set_credential_api_v1_admin_credentials__provider__put: {
+    parameters: {
+      path: {
+        provider:
+          | "openai"
+          | "anthropic"
+          | "azure"
+          | "berget"
+          | "gdm"
+          | "mistral"
+          | "ovhcloud"
+          | "vllm";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List API credentials for current tenant
+   * @description List all configured API credentials with masked keys and encryption status. Tenant admin only.
+   */
+  list_credentials_api_v1_admin_credentials__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
         };
       };
     };
@@ -14190,8 +15058,10 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Not Found */
       404: {
@@ -15896,6 +16766,285 @@ export interface operations {
     };
   };
   /**
+   * Create Completion Model
+   * @description Create a new completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/completion-models/{id}/ with tenant credentials.
+   */
+  create_completion_model_api_v1_sysadmin_completion_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Completion Model Metadata
+   * @description Update completion model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Completion Model
+   * @description Delete a completion model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   * Set force=true to delete even if model is in use (may break references).
+   */
+  delete_completion_model_api_v1_sysadmin_completion_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Embedding Model
+   * @description Create a new embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * This creates the model metadata only. To enable it for a tenant,
+   * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+   */
+  create_embedding_model_api_v1_sysadmin_embedding_models_create_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Embedding Model Metadata
+   * @description Update embedding model metadata (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * Updates global model metadata. Does not affect tenant-specific settings.
+   */
+  update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Embedding Model
+   * @description Delete an embedding model (system-wide operation).
+   *
+   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   *
+   * WARNING: Deletion affects all tenants. Use with caution.
+   */
+  delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete: {
+    parameters: {
+      query?: {
+        /** @description Force delete even if in use */
+        force?: boolean;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Set tenant API credential
    * @description Set or update API credentials for a specific LLM provider for a tenant. System admin only. Provider-specific fields are validated: OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; Azure requires api_key, endpoint, and api_version.
    */
@@ -15916,14 +17065,14 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SetCredentialRequest"];
+        "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["SetCredentialResponse"];
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
         };
       };
       /** @description Validation Error */
@@ -15982,7 +17131,87 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["ListCredentialsResponse"];
+          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant crawler settings
+   * @description Get current crawler settings for a tenant. Returns effective settings (tenant overrides merged with environment defaults). System admin only.
+   */
+  get_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_get: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update tenant crawler settings
+   * @description Update crawler settings for a specific tenant. Only provided fields are updated; missing fields retain previous values. Settings persist across server restarts and override environment defaults. System admin only.
+   */
+  update_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_put: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CrawlerSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reset tenant crawler settings
+   * @description Delete all tenant-specific crawler settings, reverting to environment defaults. System admin only.
+   */
+  delete_crawler_settings_api_v1_sysadmin_tenants__tenant_id__crawler_settings_delete: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteSettingsResponse"];
         };
       };
       /** @description Validation Error */
