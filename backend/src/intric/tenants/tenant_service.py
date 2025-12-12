@@ -2,9 +2,13 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
 from intric.main.models import ModelId
-from intric.tenants.crawler_settings_helper import get_all_crawler_settings
+from intric.tenants.crawler_settings_helper import (
+    TTL_MAX_AGE_BUFFER_SECONDS,
+    get_all_crawler_settings,
+)
 from intric.tenants.masking import mask_api_key
 from intric.tenants.provider_field_config import validate_provider_credentials
 from intric.tenants.tenant import (
@@ -299,6 +303,7 @@ class TenantService:
         Update crawler settings for a tenant (partial update).
 
         Uses atomic JSONB merge at DB level to prevent race conditions.
+        Includes cross-field validation to ensure TTL >= max_age + buffer.
 
         Args:
             tenant_id: UUID of the tenant
@@ -313,14 +318,48 @@ class TenantService:
 
         Raises:
             NotFoundException: If tenant not found
+            ValueError: If TTL < max_age + buffer (would cause slot leaks)
         """
-        # Validate tenant exists
+        # Validate tenant exists and get current state
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
 
         # Early return if no settings provided
         if not settings:
             return await self.get_crawler_settings(tenant_id)
+
+        # Cross-field validation: TTL must be >= max_age + buffer to prevent slot leaks
+        # IMPORTANT: This validation uses current tenant state read atomically with update
+        # to prevent TOCTOU race where concurrent requests could violate the invariant
+        if "tenant_worker_semaphore_ttl_seconds" in settings or "crawl_job_max_age_seconds" in settings:
+            current_overrides = tenant.crawler_settings or {}
+            app_settings = get_settings()
+
+            # Compute effective values AFTER this update would be applied
+            effective_ttl = settings.get(
+                "tenant_worker_semaphore_ttl_seconds",
+                current_overrides.get(
+                    "tenant_worker_semaphore_ttl_seconds",
+                    app_settings.tenant_worker_semaphore_ttl_seconds,
+                ),
+            )
+            effective_max_age = settings.get(
+                "crawl_job_max_age_seconds",
+                current_overrides.get(
+                    "crawl_job_max_age_seconds",
+                    app_settings.crawl_job_max_age_seconds,
+                ),
+            )
+
+            # Validate the relationship
+            min_required_ttl = effective_max_age + TTL_MAX_AGE_BUFFER_SECONDS
+            if effective_ttl < min_required_ttl:
+                raise ValueError(
+                    f"tenant_worker_semaphore_ttl_seconds ({effective_ttl}) must be at least "
+                    f"{TTL_MAX_AGE_BUFFER_SECONDS} seconds greater than crawl_job_max_age_seconds ({effective_max_age}). "
+                    f"Required minimum TTL: {min_required_ttl}. "
+                    f"This prevents slot leaks when the Redis flag expires before job timeout."
+                )
 
         # Atomic merge at DB level (prevents race conditions)
         updated_tenant = await self.repo.update_crawler_settings(

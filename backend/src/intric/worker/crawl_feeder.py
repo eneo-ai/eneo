@@ -76,18 +76,49 @@ class CrawlFeeder:
             )
             return False
 
+    # Lua script for ownership-safe leader lock refresh
+    # Why: Prevents any process from extending another process's lock
+    # Only the actual lock owner (verified by value match) can extend TTL
+    # Returns: 1 if refreshed successfully, 0 if not owner or lock doesn't exist
+    _refresh_lock_lua: str = (
+        "local key = KEYS[1]\n"
+        "local expected_owner = ARGV[1]\n"
+        "local ttl = tonumber(ARGV[2])\n"
+        "local current_owner = redis.call('GET', key)\n"
+        "if current_owner == expected_owner then\n"
+        "    redis.call('EXPIRE', key, ttl)\n"
+        "    return 1\n"
+        "end\n"
+        "return 0\n"
+    )
+
     async def _refresh_leader_lock(
         self, redis_client: aioredis.Redis
-    ) -> None:
-        """Refresh leader lock TTL while running.
+    ) -> bool:
+        """Refresh leader lock TTL while running (ownership-safe).
 
         Why: Keeps lock alive while we're the active leader.
+        Only refreshes if we still own the lock (verified atomically via Lua).
+
+        Returns:
+            True if lock was refreshed (we're still leader), False otherwise
         """
         key = "crawl_feeder:leader"
+        ttl = 30
         try:
-            await redis_client.expire(key, 30)
-        except Exception:
-            pass  # Silent failure, next acquire attempt will handle it
+            # NOTE: This is Redis EVAL command for Lua scripts, not Python eval()
+            # Redis EVAL is the standard way to run atomic operations
+            result = await redis_client.eval(
+                self._refresh_lock_lua,
+                1,
+                key,
+                self._worker_id,
+                str(ttl),
+            )
+            return result == 1
+        except Exception as exc:
+            logger.debug("Failed to refresh feeder leader lock", extra={"error": str(exc)})
+            return False  # Assume we lost leadership on error
 
     # Lua script for atomic slot acquisition (same logic as TenantConcurrencyLimiter)
     # FIX: Only refresh TTL on SUCCESS path - prevents zombie counters when acquire fails
@@ -982,22 +1013,35 @@ class CrawlFeeder:
                 pipeline = redis_client.pipeline()
                 for job_id in orphaned_job_ids:
                     pipeline.get(f"job:{job_id}:slot_preacquired")
+                # Track whether we had a pipeline failure (unknown state) vs confirmed missing flags
+                pipeline_failed = False
                 try:
                     flag_values = await pipeline.execute()
                 except Exception as exc:
                     logger.warning(
-                        "Failed to fetch flags for orphaned jobs",
-                        extra={"error": str(exc)},
+                        "Redis pipeline failed - cannot determine flag state for orphaned jobs",
+                        extra={"error": str(exc), "job_count": len(orphaned_job_ids)},
                     )
+                    pipeline_failed = True
                     flag_values = [None] * len(orphaned_job_ids)
 
                 for job_id, flag_value in zip(orphaned_job_ids, flag_values):
-                    if not flag_value:
-                        # Flag expired or never existed - permanent leak requiring manual intervention
-                        logger.error(
-                            "Slot leak detected: Orphaned job has no Redis flag (expired or missing)",
-                            extra={"job_id": str(job_id)},
-                        )
+                    # Use explicit None check - flag_value is bytes if exists, None if missing
+                    # This avoids confusion with empty bytes (unlikely but possible with Redis)
+                    if flag_value is None:
+                        if pipeline_failed:
+                            # Pipeline error - flag state unknown, will retry next cycle
+                            # Phase 0 reconciliation will eventually fix any actual leaks
+                            logger.debug(
+                                "Skipping orphaned job due to pipeline failure - will retry next cycle",
+                                extra={"job_id": str(job_id)},
+                            )
+                        else:
+                            # Confirmed missing flag - permanent leak requiring manual intervention
+                            logger.error(
+                                "Slot leak detected: Orphaned job has no Redis flag (expired or missing)",
+                                extra={"job_id": str(job_id)},
+                            )
                         continue
 
                     try:

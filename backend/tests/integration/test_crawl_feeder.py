@@ -85,10 +85,12 @@ class TestCrawlFeederLeaderElection:
         self, redis_client: aioredis.Redis
     ):
         """Refreshing lock should extend TTL."""
-        # Set lock with short TTL
-        await redis_client.set("crawl_feeder:leader", "leader", ex=5)
-
         feeder = CrawlFeeder()
+
+        # Set lock with short TTL but CORRECT owner (feeder's worker_id)
+        # Why: _refresh_leader_lock uses ownership-safe Lua script that verifies
+        # the lock value matches self._worker_id before extending TTL
+        await redis_client.set("crawl_feeder:leader", feeder._worker_id, ex=5)
 
         # Refresh lock
         await feeder._refresh_leader_lock(redis_client)

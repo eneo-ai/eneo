@@ -1,6 +1,9 @@
 import contextlib
+import os
+import time
 from typing import AsyncIterator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -10,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.inspection import inspect
 
+from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -38,6 +42,7 @@ class DatabaseSessionManager:
     def __init__(self):
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
+        self._pool_events_registered: bool = False  # Guard against double event registration
 
     def init(self, host: str):
         # If already initialized, don't reinitialize (important for tests)
@@ -45,7 +50,67 @@ class DatabaseSessionManager:
             logger.debug("Database already initialized, skipping reinitialization")
             return
 
-        self._engine = create_async_engine(host, pool_size=20, max_overflow=10)
+        settings = get_settings()
+
+        # Build connection URL with application_name for pg_stat_activity attribution
+        # Why: Makes it easy to identify which connections belong to which worker in PostgreSQL
+        worker_name = os.getenv("WORKER_NAME", f"intric-{os.getpid()}")
+        connect_args = {"server_settings": {"application_name": worker_name}}
+
+        # Build kwargs dict - conditionally include pool_recycle only when enabled
+        # Why: Omitting the kwarg is safest across SQLAlchemy versions (avoids None pitfall)
+        kwargs = dict(
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_pool_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            pool_pre_ping=settings.db_pool_pre_ping,
+            connect_args=connect_args,
+        )
+        if settings.db_pool_recycle and settings.db_pool_recycle > 0:
+            kwargs["pool_recycle"] = settings.db_pool_recycle
+
+        self._engine = create_async_engine(host, **kwargs)
+
+        # Singleton engine verification logging
+        # Why: Ensures only ONE engine exists per process (multiple engines = pool multiplication)
+        logger.info(
+            "Database engine initialized",
+            extra={
+                "engine_id": id(self._engine),
+                "pool_id": id(self._engine.sync_engine.pool),
+                "pid": os.getpid(),
+                "pool_size": settings.db_pool_size,
+                "max_overflow": settings.db_pool_max_overflow,
+                "application_name": worker_name,
+            },
+        )
+
+        # Pool checkout duration logging (behind feature flag)
+        # Why: Proves "hour-long holds" during pool exhaustion debugging
+        # IMPORTANT: Use sync_engine.pool for async engines (async wraps sync internally)
+        # Guard against double-registration in case of DI lifecycle oddities
+        if settings.db_pool_debug and not self._pool_events_registered:
+            sync_pool = self._engine.sync_engine.pool
+
+            @event.listens_for(sync_pool, "checkout")
+            def receive_checkout(dbapi_connection, connection_record, connection_proxy):
+                connection_record.info["checkout_time"] = time.time()
+                connection_record.info["checkout_pid"] = os.getpid()
+
+            @event.listens_for(sync_pool, "checkin")
+            def receive_checkin(dbapi_connection, connection_record):
+                checkout_time = connection_record.info.get("checkout_time")
+                if checkout_time:
+                    duration = time.time() - checkout_time
+                    if duration > 60:  # Log if held > 60 seconds
+                        logger.warning(
+                            f"Connection held for {duration:.1f}s",
+                            extra={"pid": connection_record.info.get("checkout_pid")},
+                        )
+
+            self._pool_events_registered = True
+            logger.info("Pool checkout duration logging enabled (DB_POOL_DEBUG=true)")
+
         self._sessionmaker = async_sessionmaker(
             autocommit=False,
             bind=self._engine,

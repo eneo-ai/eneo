@@ -141,6 +141,18 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
 
+    # Database connection pool configuration
+    # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
+    # See pool exhaustion analysis in plans/fuzzy-skipping-cray.md
+    # NOTE: Defaults preserve current behavior (20/10/30). Change via env vars:
+    #   DB_POOL_SIZE=25 DB_POOL_TIMEOUT=60 DB_POOL_PRE_PING=true DB_POOL_RECYCLE=3600
+    db_pool_size: int = 20  # Base pool size (permanent connections) - default: current behavior
+    db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
+    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
+    db_pool_pre_ping: bool = True  # Verify connections before use - prevents stale connection errors
+    db_pool_recycle: int = -1  # Recycle connections after N seconds (-1 = never) - default: SQLAlchemy default
+    db_pool_debug: bool = False  # Enable checkout duration logging (overhead; use for debugging only)
+
     # Background worker configuration
     worker_max_jobs: int = 20
     tenant_worker_concurrency_limit: int = 4
@@ -372,6 +384,21 @@ class Settings(BaseSettings):
                 " Increase the TTL to cover the longest crawl duration to avoid leaking slots.",
                 self.tenant_worker_semaphore_ttl_seconds,
                 self.crawl_max_length,
+            )
+            sys.exit(1)
+
+        # Validate TTL vs job max age to prevent flag expiration race condition
+        # The flag stores tenant_id for slot release - if it expires before watchdog
+        # can kill the job, the slot becomes permanently leaked
+        from intric.tenants.crawler_settings_helper import TTL_MAX_AGE_BUFFER_SECONDS
+        min_required_ttl = self.crawl_job_max_age_seconds + TTL_MAX_AGE_BUFFER_SECONDS
+        if self.tenant_worker_semaphore_ttl_seconds < min_required_ttl:
+            logging.error(
+                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS (%s) must be at least 5 minutes greater than "
+                "CRAWL_JOB_MAX_AGE_SECONDS (%s) to prevent slot leaks. Required minimum: %s",
+                self.tenant_worker_semaphore_ttl_seconds,
+                self.crawl_job_max_age_seconds,
+                min_required_ttl,
             )
             sys.exit(1)
 

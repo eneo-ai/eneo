@@ -15,6 +15,11 @@ from intric.main.config import get_settings
 
 T = TypeVar("T")
 
+# Buffer for TTL vs max_age validation (5 minutes)
+# Used by: config.py startup validation, tenant_service.py API validation
+# Why: Ensures TTL >= max_age + buffer to prevent slot leaks when flag expires before job timeout
+TTL_MAX_AGE_BUFFER_SECONDS: int = 300
+
 # Single source of truth for all crawler settings
 # Used by: get_crawler_setting(), get_all_crawler_settings(), tenant.py validator, router
 CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {

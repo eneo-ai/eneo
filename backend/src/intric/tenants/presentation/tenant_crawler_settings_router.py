@@ -182,6 +182,34 @@ class CrawlerSettingsUpdate(BaseModel):
         examples=[1800],
     )
 
+    # Semaphore TTL (must be >= crawl_job_max_age_seconds + 300 to prevent slot leaks)
+    tenant_worker_semaphore_ttl_seconds: int | None = Field(
+        None,
+        ge=_SPECS["tenant_worker_semaphore_ttl_seconds"]["min"],
+        le=_SPECS["tenant_worker_semaphore_ttl_seconds"]["max"],
+        description=_SPECS["tenant_worker_semaphore_ttl_seconds"]["description"]
+        + " WARNING: Must be >= crawl_job_max_age_seconds + 300",
+        examples=[18000],
+    )
+
+    # Queued job staleness threshold
+    queued_stale_threshold_minutes: int | None = Field(
+        None,
+        ge=_SPECS["queued_stale_threshold_minutes"]["min"],
+        le=_SPECS["queued_stale_threshold_minutes"]["max"],
+        description=_SPECS["queued_stale_threshold_minutes"]["description"],
+        examples=[5],
+    )
+
+    # Page batch size for commits
+    crawl_page_batch_size: int | None = Field(
+        None,
+        ge=_SPECS["crawl_page_batch_size"]["min"],
+        le=_SPECS["crawl_page_batch_size"]["max"],
+        description=_SPECS["crawl_page_batch_size"]["description"],
+        examples=[100],
+    )
+
 
 class CrawlerSettingsResponse(BaseModel):
     """
@@ -236,6 +264,9 @@ class CrawlerSettingsResponse(BaseModel):
                 "crawl_feeder_interval_seconds": 10,
                 "crawl_feeder_batch_size": 10,
                 "crawl_job_max_age_seconds": 1800,
+                "tenant_worker_semaphore_ttl_seconds": 18000,
+                "queued_stale_threshold_minutes": 5,
+                "crawl_page_batch_size": 100,
             }
         ],
     )
@@ -307,6 +338,8 @@ async def update_crawler_settings(
         # Get only non-None values from request
         updates = request.model_dump(exclude_none=True)
 
+        # Cross-field validation (TTL vs max_age) is now performed atomically
+        # in tenant_service.update_crawler_settings() to prevent TOCTOU race conditions
         result = await tenant_service.update_crawler_settings(
             tenant_id=tenant_id,
             settings=updates,

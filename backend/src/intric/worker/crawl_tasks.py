@@ -741,8 +741,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         if preacquired_value:
             # Store tenant_id for guaranteed cleanup in finally block
             preacquired_tenant_id = UUID(preacquired_value.decode())
-            # Delete flag immediately - we now own this slot
-            await _early_redis.delete(preacquired_key)
+            # NOTE: Do NOT delete flag here - keep it for entire crawl lifecycle
+            # Why: Heartbeat refreshes flag TTL, watchdog uses flag for crash recovery
+            # Flag will be deleted in finally block after slot release
             logger.debug(
                 "Pre-acquired slot detected, will ensure release",
                 extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
@@ -774,7 +775,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 preacquired_value = await redis_client.get(preacquired_key)
                 if preacquired_value:
                     preacquired_tenant_id = UUID(preacquired_value.decode())
-                    await redis_client.delete(preacquired_key)
+                    # NOTE: Do NOT delete flag here - keep it for entire crawl lifecycle
+                    # Flag will be deleted in finally block after slot release
                     logger.debug(
                         "Pre-acquired slot detected on retry (early check failed)",
                         extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
@@ -1167,7 +1169,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                         default=settings.tenant_worker_semaphore_ttl_seconds,
                                     )
                                     concurrency_key = f"tenant:{tenant.id}:active_jobs"
-                                    await redis_client.expire(concurrency_key, semaphore_ttl)
+                                    flag_key = f"job:{job_id}:slot_preacquired"
+
+                                    # Atomic TTL refresh for both counter and flag using pipeline
+                                    # This prevents inconsistent state if process crashes mid-refresh
+                                    # Flag stores tenant_id for slot release on crash recovery
+                                    pipe = redis_client.pipeline(transaction=True)
+                                    pipe.expire(concurrency_key, semaphore_ttl)
+                                    pipe.expire(flag_key, semaphore_ttl)
+                                    results = await pipe.execute()
+
+                                    # Check if flag refresh succeeded (returns 1 if key exists, 0 if not)
+                                    if len(results) >= 2 and results[1] == 0:
+                                        logger.warning(
+                                            "Heartbeat: flag key missing during TTL refresh - possible eviction",
+                                            extra={"job_id": str(job_id), "flag_key": flag_key},
+                                        )
                                 except Exception:
                                     pass  # Non-fatal: counter still valid, just not refreshed
 
@@ -1899,6 +1916,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             await _reset_tenant_retry_delay(
                 tenant_id=tenant.id, redis_client=redis_client
             )
+            # Delete pre-acquired flag after slot release
+            # Why: Flag must persist during crawl for heartbeat TTL refresh and watchdog crash recovery
+            # Deleting here (not earlier) ensures flag exists for entire crawl lifecycle
+            if redis_client and job_id:
+                try:
+                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
+                except Exception:
+                    pass  # Best effort cleanup
         # Fallback path: release pre-acquired slot if tenant injection failed
         # This ensures we don't leak slots when the worker fails early
         elif preacquired_tenant_id is not None and not acquired:
@@ -1922,12 +1947,19 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         pass
                 if _fallback_redis is not None:
                     release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
+                    # Redis eval executes Lua script atomically (not Python eval)
                     await _fallback_redis.eval(
                         _RELEASE_SLOT_LUA,
                         1,
                         release_key,
                         str(settings.tenant_worker_semaphore_ttl_seconds),
                     )
+                    # Delete pre-acquired flag after fallback slot release
+                    if job_id:
+                        try:
+                            await _fallback_redis.delete(f"job:{job_id}:slot_preacquired")
+                        except Exception:
+                            pass  # Best effort cleanup
             except Exception as release_exc:
                 logger.error(
                     "Failed to release pre-acquired slot in fallback",
@@ -1956,3 +1988,27 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 await recovery_session.close()
             except Exception:
                 pass  # Best effort cleanup
+
+        # Guaranteed close with rollback for main session
+        # Why: Ensures connection is returned to pool even on error
+        # Critical for preventing connection pool exhaustion during long crawls
+        main_session = session_holder.get("session")
+        if main_session is not None:
+            try:
+                # Only rollback if there's an active transaction
+                # Why: Avoids noisy warnings if commit already happened
+                if main_session.in_transaction():
+                    await main_session.rollback()
+            except Exception as rollback_exc:
+                # Log at debug level - may be expected if session already closed
+                logger.debug(
+                    "Session rollback in finally block (may be expected)",
+                    extra={"error": str(rollback_exc)},
+                )
+            try:
+                await main_session.close()
+            except Exception:
+                pass  # Best effort - connection may already be closed
+            finally:
+                # Clear session_holder to prevent reuse of closed session
+                session_holder["session"] = None
