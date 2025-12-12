@@ -59,6 +59,51 @@ class TestIntegrationKnowledgeMapper(unittest.TestCase):
         # Ensure ID is not in the dictionary (as it should be handled by SQLAlchemy)
         self.assertNotIn("id", db_dict)
 
+    def test_to_db_dict_includes_resource_type_and_drive_id(self):
+        """Test that resource_type and drive_id are included in DB dictionary."""
+        # Create a domain entity with OneDrive fields
+        knowledge = IntegrationKnowledge(
+            id=self.knowledge_id,
+            name=self.name,
+            url=self.url,
+            tenant_id=self.tenant_id,
+            space_id=self.space_id,
+            user_integration=self.user_integration_mock,
+            embedding_model=self.embedding_model_mock,
+            size=self.size,
+            resource_type="onedrive",
+            drive_id="drive-123-abc",
+        )
+
+        # Map to DB dictionary
+        db_dict = self.mapper.to_db_dict(knowledge)
+
+        # Assert resource_type and drive_id are included
+        self.assertEqual(db_dict["resource_type"], "onedrive")
+        self.assertEqual(db_dict["drive_id"], "drive-123-abc")
+
+    def test_to_db_dict_includes_original_name(self):
+        """Test that original_name is included in DB dictionary."""
+        # Create a domain entity with original_name
+        knowledge = IntegrationKnowledge(
+            id=self.knowledge_id,
+            name="Renamed Knowledge",
+            original_name="Original SharePoint Name",
+            url=self.url,
+            tenant_id=self.tenant_id,
+            space_id=self.space_id,
+            user_integration=self.user_integration_mock,
+            embedding_model=self.embedding_model_mock,
+            size=self.size,
+        )
+
+        # Map to DB dictionary
+        db_dict = self.mapper.to_db_dict(knowledge)
+
+        # Assert original_name is included
+        self.assertEqual(db_dict["name"], "Renamed Knowledge")
+        self.assertEqual(db_dict["original_name"], "Original SharePoint Name")
+
     @patch(
         "intric.integration.domain.factories.integration_knowledge_factory.IntegrationKnowledgeFactory.create_entity"  # noqa
     )

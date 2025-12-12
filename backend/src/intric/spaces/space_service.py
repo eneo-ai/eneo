@@ -390,8 +390,8 @@ class SpaceService:
         hub = await self.get_or_create_tenant_space()
         space_name = f"{self.user.username}'s personal space"
         space = self.factory.create_space(
-            name=space_name, 
-            user_id=self.user.id, 
+            name=space_name,
+            user_id=self.user.id,
             tenant_id=self.user.tenant_id,
             tenant_space_id=getattr(hub, "id", None),
         )

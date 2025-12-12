@@ -673,6 +673,12 @@ class SpaceActor:
             resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
         )
 
+    def can_edit_integration_knowledge_list(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+
     def can_read_info_blobs(self):
         return self.can_perform_action(
             action=SpaceAction.READ,
@@ -805,7 +811,7 @@ class SpaceActor:
 
     def get_integration_knowledge_list_permissions(self):
         return self._get_resource_permissions(
-            can_edit=False,
+            can_edit=self.can_edit_integration_knowledge_list(),
             can_delete=self.can_delete_integration_knowledge_list(),
             can_publish=False,
             can_access_insight=False,

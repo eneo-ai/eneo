@@ -1,7 +1,8 @@
-from typing import Optional
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional, Dict
 from uuid import UUID
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import DateTime, JSON, BigInteger, Enum, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +11,10 @@ from intric.database.tables.base_class import BasePublic
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
+from intric.database.tables.sharepoint_subscription_table import SharePointSubscription
+
+if TYPE_CHECKING:
+    from intric.database.tables.tenant_sharepoint_app_table import TenantSharePointApp
 
 
 class Integration(BasePublic):
@@ -44,14 +49,31 @@ class TenantIntegration(BasePublic):
 class UserIntegration(BasePublic):
     __tablename__ = "user_integrations"
 
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), nullable=True
+    )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     tenant_integration_id: Mapped[UUID] = mapped_column(
         ForeignKey(TenantIntegration.id, ondelete="CASCADE")
     )
     authenticated: Mapped[bool] = mapped_column(server_default="False", nullable=False)
 
+    auth_type: Mapped[str] = mapped_column(
+        Enum('user_oauth', 'tenant_app', name='auth_type'),
+        nullable=False,
+        server_default='user_oauth'
+    )
+
+    tenant_app_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("tenant_sharepoint_apps.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
     tenant_integration: Mapped[TenantIntegration] = relationship()
+    tenant_app: Mapped[Optional["TenantSharePointApp"]] = relationship(
+        "TenantSharePointApp", foreign_keys=[tenant_app_id]
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -80,6 +102,7 @@ class IntegrationKnowledge(BasePublic):
     __tablename__ = "integration_knowledge"
 
     name: Mapped[Optional[str]] = mapped_column(Text)
+    original_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     url: Mapped[Optional[str]] = mapped_column(Text)
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     embedding_model_id: Mapped[UUID] = mapped_column(
@@ -90,6 +113,22 @@ class IntegrationKnowledge(BasePublic):
         ForeignKey(UserIntegration.id, ondelete="CASCADE")
     )
     size: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(JSONB, nullable=True)
+    site_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sharepoint_subscription_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("sharepoint_subscriptions.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    delta_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    folder_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+    folder_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    selected_item_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site_root")
+    resource_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site")
+    drive_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user_integration: Mapped[UserIntegration] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
+    sharepoint_subscription: Mapped[Optional[SharePointSubscription]] = relationship()

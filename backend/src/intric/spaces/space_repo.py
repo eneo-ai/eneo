@@ -116,6 +116,9 @@ class SpaceRepository:
             .selectinload(IntegrationKnowledge.user_integration)
             .selectinload(UserIntegrationDBModel.tenant_integration)
             .selectinload(TenantIntegrationDBModel.integration),
+            selectinload(Spaces.integration_knowledge_list).selectinload(
+                IntegrationKnowledge.sharepoint_subscription
+            ),
             selectinload(Spaces.completion_models_mapping),
             selectinload(Spaces.embedding_models_mapping),
             selectinload(Spaces.transcription_models_mapping),
@@ -1043,6 +1046,7 @@ class SpaceRepository:
                 selectinload(ik.user_integration)
                     .selectinload(UserIntegrationDBModel.tenant_integration)
                     .selectinload(TenantIntegrationDBModel.integration),
+                selectinload(ik.sharepoint_subscription),
             )
             .order_by(ik.created_at)
         )

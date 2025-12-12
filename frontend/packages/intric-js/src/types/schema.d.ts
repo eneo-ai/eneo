@@ -4485,6 +4485,17 @@ export interface components {
     IntegrationKnowledgeMetaData: {
       /** Size */
       size: number;
+      /** Last Sync Summary */
+      last_sync_summary?: {
+        files_processed?: number | null;
+        pages_processed?: number | null;
+        folders_processed?: number | null;
+        skipped_items?: number | null;
+      } | null;
+      /** Last Synced At */
+      last_synced_at?: string | null;
+      /** SharePoint Subscription Expires At */
+      sharepoint_subscription_expires_at?: string | null;
     };
     /** IntegrationKnowledgePublic */
     IntegrationKnowledgePublic: {
@@ -4513,6 +4524,9 @@ export interface components {
        */
       user_integration_id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublicLegacy"];
+      site_id?: string | null;
+      sharepoint_subscription_id?: string | null;
+      sharepoint_subscription_expires_at?: string | null;
       /**
        * Permissions
        * @default []

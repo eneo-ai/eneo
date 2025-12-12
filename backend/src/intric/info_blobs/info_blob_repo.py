@@ -1,3 +1,4 @@
+from typing import List
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -83,6 +84,47 @@ class InfoBlobRepository:
 
         return await self.delegate.add(info_blob_to_db)
 
+    async def upsert_by_title_and_integration_knowledge(
+        self, info_blob: InfoBlobAdd
+    ) -> InfoBlobInDB:
+        """Idempotent upsert for integration_knowledge blobs.
+
+        If a blob with the same title already exists, update it.
+        Otherwise, create a new one.
+
+        This handles duplicate webhooks from Microsoft by ensuring
+        we never create duplicates - just update existing ones.
+        """
+        if not info_blob.integration_knowledge_id or not info_blob.title:
+            raise ValueError("title and integration_knowledge_id are required for upsert")
+
+        # Check if blob already exists
+        existing = await self.get_by_title_and_integration_knowledge(
+            title=info_blob.title,
+            integration_knowledge_id=info_blob.integration_knowledge_id,
+        )
+
+        if existing:
+            # Update existing blob - update both text and metadata
+            stmt = (
+                sa.update(InfoBlobs)
+                .where(InfoBlobs.id == existing.id)
+                .values(
+                    text=info_blob.text,
+                    title=info_blob.title,
+                    url=info_blob.url,
+                    size=info_blob.size,  # Update size as well
+                    updated_at=sa.func.now(),
+                )
+                .returning(InfoBlobs)
+            )
+            result = await self.session.execute(stmt)
+            updated_blob = result.scalar_one()
+            return InfoBlobInDB.model_validate(updated_blob)
+        else:
+            # Create new blob
+            return await self.add(info_blob)
+
     async def update(self, info_blob: InfoBlobUpdate) -> InfoBlobInDB:
         return await self.delegate.update(info_blob)
 
@@ -147,8 +189,50 @@ class InfoBlobRepository:
             conditions={InfoBlobs.title: title, InfoBlobs.website_id: website_id}
         )
 
+    async def delete_by_title_and_integration_knowledge(
+        self, title: str, integration_knowledge_id: UUID
+    ) -> List[InfoBlobInDB]:
+        """Delete ALL info_blobs with given title and integration_knowledge_id.
+
+        Returns list of deleted blobs (can be multiple if duplicates exist).
+        """
+        # First, get all matching blobs
+        stmt = sa.select(InfoBlobs).where(
+            sa.and_(
+                InfoBlobs.title == title,
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        blobs_to_delete = result.scalars().all()
+
+        # Delete each one
+        deleted = []
+        for blob in blobs_to_delete:
+            deleted_blob = await self.delegate.delete(blob.id)
+            deleted.append(deleted_blob)
+
+        return deleted
+
     async def delete_by_website(self, website_id: UUID):
         await self.delegate.delete_by(conditions={InfoBlobs.website_id: website_id})
+
+    async def delete_by_integration_knowledge(self, integration_knowledge_id: UUID):
+        """Delete all info_blobs for a specific integration_knowledge."""
+        await self.delegate.delete_by(
+            conditions={InfoBlobs.integration_knowledge_id: integration_knowledge_id}
+        )
+
+    async def get_by_title_and_integration_knowledge(
+        self, title: str, integration_knowledge_id: UUID
+    ) -> InfoBlobInDB:
+        """Get an info_blob by title and integration_knowledge_id."""
+        return await self.delegate.get_by(
+            conditions={
+                InfoBlobs.title: title,
+                InfoBlobs.integration_knowledge_id: integration_knowledge_id,
+            }
+        )
 
     async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDB]:
         query = (
@@ -176,6 +260,23 @@ class InfoBlobRepository:
         )
 
         return await self.session.scalar(stmt)
+
+    async def get_count_by_integration_knowledge(self, integration_knowledge_id: UUID):
+        """Get the count of info_blobs associated with a specific integration_knowledge."""
+        stmt = (
+            sa.select(sa.func.count()).select_from(InfoBlobs).where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
+        )
+
+        return await self.session.scalar(stmt)
+
+    async def get_by_filter_integration_knowledge(self, integration_knowledge_id: UUID) -> list[InfoBlobInDB]:
+        """Get all info_blobs for a specific integration_knowledge."""
+        query = (
+            sa.select(InfoBlobs)
+            .where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
+            .options(selectinload(InfoBlobs.embedding_model))
+        )
+        return await self.delegate.get_models_from_query(query)
 
     def _sum_stmt(self):
         return sa.select(sa.func.sum(InfoBlobs.size)).select_from(InfoBlobs)

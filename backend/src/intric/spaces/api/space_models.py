@@ -284,3 +284,11 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     embedding_model: ModelId
     url: str
     key: Optional[str] = None
+    folder_id: Optional[str] = None
+    folder_path: Optional[str] = None
+    selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
+    resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+
+
+class UpdateIntegrationKnowledgeRequest(BaseModel):
+    name: str
