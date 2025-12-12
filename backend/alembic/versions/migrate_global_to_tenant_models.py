@@ -30,8 +30,9 @@ depends_on = None
 # CONFIGURATION
 # =============================================================================
 
-# Map model family to provider type
-FAMILY_TO_PROVIDER_TYPE = {
+# Map model family to internal provider identifier
+# This determines which provider to create and which credentials to use
+FAMILY_TO_PROVIDER = {
     "openai": "openai",
     "azure": "azure",
     "claude": "anthropic",
@@ -44,6 +45,22 @@ FAMILY_TO_PROVIDER_TYPE = {
     "cohere": "cohere",
     "gemini": "gemini",
     "gdm": "gdm",
+}
+
+# Map internal provider identifier to LiteLLM provider_type
+# This is what gets stored in the provider_type column and used by LiteLLM
+# OpenAI-compatible APIs use "hosted_vllm" since it's designed for custom endpoints
+PROVIDER_TO_LITELLM_TYPE = {
+    "openai": "openai",
+    "azure": "azure",
+    "anthropic": "anthropic",
+    "mistral": "mistral",
+    "vllm": "hosted_vllm",  # Remote vLLM servers are OpenAI-compatible
+    "ovhcloud": "ovhcloud",
+    "berget": "hosted_vllm",  # OpenAI-compatible API
+    "cohere": "cohere",
+    "gemini": "gemini",
+    "gdm": "hosted_vllm",  # OpenAI-compatible API
 }
 
 # Human-friendly provider names
@@ -125,11 +142,13 @@ def is_already_encrypted(value: str) -> bool:
 # HELPER FUNCTIONS
 # =============================================================================
 
-def get_provider_type_for_family(family: str, litellm_model_name: str = None) -> str:
-    """Map model family to provider type.
+def get_provider_for_family(family: str, litellm_model_name: str = None) -> str:
+    """Map model family to internal provider identifier.
 
     If litellm_model_name has a prefix (e.g., 'gdm/gemma3', 'azure/gpt-4'),
-    use that prefix as provider type. Otherwise fall back to family mapping.
+    use that prefix as provider. Otherwise fall back to family mapping.
+
+    Returns internal provider identifier (e.g., 'berget', 'gdm', 'openai').
     """
     # Check litellm_model_name prefix first (e.g., 'gdm/model' -> 'gdm')
     if litellm_model_name and "/" in litellm_model_name:
@@ -139,7 +158,15 @@ def get_provider_type_for_family(family: str, litellm_model_name: str = None) ->
 
     if not family:
         return "openai"  # Default fallback
-    return FAMILY_TO_PROVIDER_TYPE.get(family.lower(), family.lower())
+    return FAMILY_TO_PROVIDER.get(family.lower(), family.lower())
+
+
+def get_litellm_provider_type(provider: str) -> str:
+    """Map internal provider identifier to LiteLLM provider_type.
+
+    Returns the provider_type that LiteLLM understands (e.g., 'hosted_vllm' for berget/gdm).
+    """
+    return PROVIDER_TO_LITELLM_TYPE.get(provider, provider)
 
 
 def get_provider_name(provider_type: str) -> str:
@@ -171,6 +198,10 @@ def get_env_credentials(provider_type: str) -> dict:
     # Berget needs endpoint (OpenAI-compatible API)
     if provider_type == "berget":
         credentials["endpoint"] = os.environ.get("BERGET_API_BASE", "https://api.berget.ai/v1")
+
+    # GDM needs endpoint (OpenAI-compatible API)
+    if provider_type == "gdm":
+        credentials["endpoint"] = os.environ.get("GDM_API_BASE", "https://ai.gdm.se/api/v1")
 
     return credentials
 
@@ -285,6 +316,7 @@ def create_providers_for_tenant(conn, tenant_id: str, api_credentials: dict,
 
         provider_id = str(uuid4())
         provider_name = get_provider_name(provider_type)
+        litellm_type = get_litellm_provider_type(provider_type)
         is_active = bool(credentials.get("api_key"))
 
         conn.execute(text("""
@@ -302,7 +334,7 @@ def create_providers_for_tenant(conn, tenant_id: str, api_credentials: dict,
             "id": provider_id,
             "tenant_id": tenant_id,
             "name": provider_name,
-            "provider_type": provider_type,
+            "provider_type": litellm_type,  # Use LiteLLM-compatible type
             "credentials": json.dumps(credentials),
             "config": json.dumps(config),
             "is_active": is_active,
@@ -337,7 +369,7 @@ def create_tenant_completion_models(conn, tenant_id: str, global_models: list,
     for model in global_models:
         global_model_id = str(model.id)
         family = (model.family or "openai").lower()
-        provider_type = get_provider_type_for_family(family, model.litellm_model_name)
+        provider_type = get_provider_for_family(family, model.litellm_model_name)
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
@@ -401,7 +433,7 @@ def create_tenant_embedding_models(conn, tenant_id: str, global_models: list,
     for model in global_models:
         global_model_id = str(model.id)
         family = (model.family or "openai").lower()
-        provider_type = get_provider_type_for_family(family, model.litellm_model_name)
+        provider_type = get_provider_for_family(family, model.litellm_model_name)
         provider_id = providers_map.get(provider_type)
 
         if not provider_id:
@@ -458,7 +490,7 @@ def create_tenant_transcription_models(conn, tenant_id: str, global_models: list
         global_model_id = str(model.id)
         family = (model.family or "openai").lower()
         # Transcription models don't have litellm_model_name
-        provider_type = get_provider_type_for_family(family, None)
+        provider_type = get_provider_for_family(family, None)
 
         # Special case: If org is Berget, use berget provider
         if model.org and model.org.lower() == "berget":
@@ -890,12 +922,12 @@ def upgrade() -> None:
     # Pass litellm_model_name to handle special cases like GDM (family='openai' but litellm='gdm/...')
     required_provider_types = set()
     for model in global_completion_models:
-        required_provider_types.add(get_provider_type_for_family(model.family or "openai", model.litellm_model_name))
+        required_provider_types.add(get_provider_for_family(model.family or "openai", model.litellm_model_name))
     for model in global_embedding_models:
-        required_provider_types.add(get_provider_type_for_family(model.family or "openai", model.litellm_model_name))
+        required_provider_types.add(get_provider_for_family(model.family or "openai", model.litellm_model_name))
     for model in global_transcription_models:
         # Transcription models don't have litellm_model_name
-        required_provider_types.add(get_provider_type_for_family(model.family or "openai", None))
+        required_provider_types.add(get_provider_for_family(model.family or "openai", None))
 
     print(f"Required provider types: {required_provider_types}")
 

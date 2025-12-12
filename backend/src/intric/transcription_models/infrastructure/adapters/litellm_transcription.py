@@ -44,11 +44,10 @@ class LiteLLMTranscriptionAdapter:
         self.provider_type = provider_type
 
         # Construct LiteLLM model name with provider prefix
-        # For OpenAI-compatible providers (berget, hosted_vllm), use "openai/" prefix
-        if provider_type in {"berget", "hosted_vllm"}:
-            self.litellm_model = f"openai/{model.model_name}"
-        else:
-            self.litellm_model = f"{provider_type}/{model.model_name}"
+        # LiteLLM requires the provider prefix to know which client to use
+        # Users should set provider_type to a LiteLLM-compatible value
+        # (e.g., "openai", "hosted_vllm" for OpenAI-compatible APIs)
+        self.litellm_model = f"{provider_type}/{model.model_name}"
 
         logger.debug(
             f"[LiteLLM] Initializing transcription adapter for model: {model.name} -> {self.litellm_model}"
