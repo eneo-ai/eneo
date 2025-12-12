@@ -3,7 +3,7 @@ import hashlib
 import random
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import UUID
 
 from arq import Retry
@@ -23,6 +23,10 @@ from intric.websites.crawl_dependencies.crawl_models import (
 )
 # Note: Only using hashlib for file content hashing (works reliably)
 # Page content hashing removed due to dynamic content (timestamps, etc.)
+
+if TYPE_CHECKING:
+    from intric.ai_models.embedding_models.embedding_model import EmbeddingModelSparse as EmbeddingModel
+    from intric.embedding_models.infrastructure.create_embeddings_service import CreateEmbeddingsService
 
 logger = get_logger(__name__)
 
@@ -45,6 +49,392 @@ _RELEASE_SLOT_LUA = (
     "redis.call('EXPIRE', key, ttl)\n"
     "return current\n"
 )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HYBRID V2: Module-level embedding semaphore for bounded concurrency
+# ═══════════════════════════════════════════════════════════════════════════════
+# This semaphore limits concurrent embedding API calls across ALL crawl tasks
+# in this worker process. Without this, N concurrent crawls could each fire
+# embedding requests simultaneously, overwhelming the embedding API or hitting
+# rate limits.
+#
+# The semaphore is created lazily on first use (see _get_embedding_semaphore())
+# to ensure it uses the correct concurrency limit from settings.
+# ═══════════════════════════════════════════════════════════════════════════════
+_EMBEDDING_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _get_embedding_semaphore() -> asyncio.Semaphore:
+    """Get or create the module-level embedding semaphore.
+
+    Lazy initialization ensures we read the correct concurrency limit from
+    settings, which may not be available at module import time.
+
+    Returns:
+        asyncio.Semaphore with configured concurrency limit
+    """
+    global _EMBEDDING_SEMAPHORE
+    if _EMBEDDING_SEMAPHORE is None:
+        settings = get_settings()
+        concurrency = getattr(settings, "hybrid_v2_embedding_concurrency", 3)
+        _EMBEDDING_SEMAPHORE = asyncio.Semaphore(concurrency)
+        logger.info(
+            "Hybrid v2: Created embedding semaphore",
+            extra={"concurrency_limit": concurrency},
+        )
+    return _EMBEDDING_SEMAPHORE
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HYBRID V2: Two-Phase Batch Persistence
+# ═══════════════════════════════════════════════════════════════════════════════
+# This implements the session-per-batch pattern to fix connection pool exhaustion:
+#
+# PHASE 1 (Pure Compute - ZERO DB operations):
+#   - Compute content_hash via SHA-256
+#   - Chunk text using RecursiveCharacterTextSplitter
+#   - Call embedding API with semaphore limit and timeout
+#   - Create PreparedPage objects
+#   - ALL network I/O (embedding calls) happens HERE, outside any DB transaction
+#
+# PHASE 2 (Short-lived Session - ~50-300ms):
+#   - Open fresh session from pool
+#   - For each page: delete-then-insert with per-page savepoint
+#   - Bulk insert chunks with embeddings
+#   - Commit and return connection to pool immediately
+#
+# This reduces connection hold time from HOURS to MILLISECONDS.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from intric.completion_models.infrastructure.context_builder import count_tokens
+from intric.info_blobs.info_blob import InfoBlobChunk
+from intric.worker.crawl_context import CrawlContext, PreparedPage
+from intric.database.tables.info_blobs_table import InfoBlobs
+from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
+
+
+# Chunk settings (matching datastore.py defaults)
+_HYBRID_V2_CHUNK_SIZE = 200
+_HYBRID_V2_CHUNK_OVERLAP = 40
+
+
+async def persist_batch(
+    page_buffer: list[dict],
+    ctx: CrawlContext,
+    embedding_model: "EmbeddingModel",
+    create_embeddings_service: "CreateEmbeddingsService",
+) -> tuple[int, int, list[str]]:
+    """
+    Persist a batch of pages using the TWO-PHASE pattern.
+
+    This function is the core of Hybrid v2, designed to minimize database
+    connection hold time by separating compute from persistence.
+
+    PHASE 1 (Pure Compute - ZERO DB operations):
+        - Compute content_hash via SHA-256
+        - Chunk text using RecursiveCharacterTextSplitter
+        - Call embedding API with concurrency limit (semaphore)
+        - Create PreparedPage objects with pre-computed data
+        - Network I/O happens HERE, outside any DB transaction
+
+    PHASE 2 (Short-lived Session - ~50-300ms):
+        - Open fresh session from pool
+        - For each prepared page:
+            - Create savepoint for atomic delete+insert
+            - Delete existing by (title, website_id) for deduplication
+            - Insert InfoBlob
+            - Bulk insert InfoBlobChunks with embeddings
+            - Commit savepoint
+        - Return connection to pool immediately
+
+    Args:
+        page_buffer: List of page dicts with 'url' and 'content' keys
+        ctx: CrawlContext DTO with all primitives (no ORM objects!)
+        embedding_model: EmbeddingModel domain object for API calls
+        create_embeddings_service: Service for embedding API calls
+
+    Returns:
+        Tuple of (success_count, failed_count, successful_urls)
+        - success_count: Number of pages successfully persisted
+        - failed_count: Number of pages that failed to persist
+        - successful_urls: List of URLs that were ACTUALLY persisted (for accurate tracking)
+
+    Note:
+        - Deduplication uses delete-then-insert pattern (not idempotent across workers)
+        - For true idempotency, add UNIQUE constraint on (tenant_id, website_id, title)
+        - CRITICAL: Only URLs in successful_urls should be marked as crawled
+    """
+    from intric.database.database import sessionmanager
+
+    if not page_buffer:
+        return 0, 0, []
+
+    if embedding_model is None:
+        logger.warning(
+            "Hybrid v2: No embedding model provided, skipping batch",
+            extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
+        )
+        return 0, len(page_buffer), []
+
+    success_count = 0
+    failed_count = 0
+    successful_urls: list[str] = []  # Track ONLY URLs that were actually persisted
+    prepared_pages: list[PreparedPage] = []
+    buffer_embedding_bytes = 0
+
+    # Create text splitter (matching datastore.py pattern)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=_HYBRID_V2_CHUNK_SIZE,
+        chunk_overlap=_HYBRID_V2_CHUNK_OVERLAP,
+        length_function=count_tokens,
+    )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PHASE 1: Pure Compute (ZERO DB OPERATIONS)
+    # All embedding API calls happen here, OUTSIDE any database transaction.
+    # ═══════════════════════════════════════════════════════════════════════
+    logger.debug(
+        "Hybrid v2 Phase 1: Computing embeddings for batch",
+        extra={
+            "website_id": str(ctx.website_id),
+            "batch_size": len(page_buffer),
+            "embedding_model": ctx.embedding_model_name,
+        },
+    )
+
+    for page_data in page_buffer:
+        url = page_data.get("url", "unknown")
+        content = page_data.get("content", "")
+
+        if not content.strip():
+            logger.debug(f"Hybrid v2: Skipping empty page {url}")
+            failed_count += 1
+            continue
+
+        try:
+            # 1. Compute content hash (local operation)
+            content_hash = hashlib.sha256(content.encode("utf-8")).digest()
+
+            # 2. Chunk the text (local operation)
+            raw_chunks = splitter.split_text(content)
+            chunks = [chunk.strip() for chunk in raw_chunks if chunk.strip()]
+
+            if not chunks:
+                logger.debug(f"Hybrid v2: No chunks after splitting for {url}")
+                failed_count += 1
+                continue
+
+            # 3. Create InfoBlobChunk objects for embedding service
+            # Note: info_blob_id is a placeholder - will be set in Phase 2
+            chunk_objects = [
+                InfoBlobChunk(
+                    chunk_no=i,
+                    text=chunk_text,
+                    info_blob_id=ctx.website_id,  # Placeholder, not used by embedding service
+                    tenant_id=ctx.tenant_id,
+                )
+                for i, chunk_text in enumerate(chunks)
+            ]
+
+            # 4. Call embedding API with semaphore limit and timeout
+            # This is the expensive network I/O - happens OUTSIDE any DB transaction
+            async with _get_embedding_semaphore():
+                try:
+                    async with asyncio.timeout(ctx.embedding_timeout_seconds):
+                        chunk_embedding_list = await create_embeddings_service.get_embeddings(
+                            model=embedding_model,
+                            chunks=chunk_objects,
+                        )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Hybrid v2: Embedding timeout for {url} after {ctx.embedding_timeout_seconds}s",
+                        extra={
+                            "website_id": str(ctx.website_id),
+                            "tenant_id": str(ctx.tenant_id),
+                            "url": url,
+                            "num_chunks": len(chunks),
+                        },
+                    )
+                    failed_count += 1
+                    continue
+
+            # 5. Extract embeddings from ChunkEmbeddingList
+            embeddings: list[list[float]] = []
+            for _, embedding in chunk_embedding_list:
+                # ChunkEmbeddingList returns numpy arrays, convert to list
+                embeddings.append(embedding.tolist() if hasattr(embedding, "tolist") else list(embedding))
+
+            # 6. Track embedding memory for early flush
+            embedding_bytes = sum(len(e) * 4 for e in embeddings)  # float32 = 4 bytes
+            buffer_embedding_bytes += embedding_bytes
+
+            # 7. Create PreparedPage with all data needed for Phase 2
+            prepared = PreparedPage(
+                url=url,
+                title=url,  # URL as title, matching existing crawler pattern
+                content=content,
+                content_hash=content_hash,
+                chunks=chunks,
+                embeddings=embeddings,
+                tenant_id=ctx.tenant_id,
+                website_id=ctx.website_id,
+                user_id=ctx.user_id,
+                embedding_model_id=ctx.embedding_model_id,
+            )
+            prepared_pages.append(prepared)
+
+            # Check memory cap for early flush
+            if buffer_embedding_bytes >= ctx.max_batch_embedding_bytes:
+                logger.info(
+                    f"Hybrid v2: Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
+                    extra={"website_id": str(ctx.website_id), "pages_prepared": len(prepared_pages)},
+                )
+                break
+
+        except Exception as e:
+            logger.error(
+                f"Hybrid v2 Phase 1: Failed to prepare page {url}: {e}",
+                extra={
+                    "website_id": str(ctx.website_id),
+                    "tenant_id": str(ctx.tenant_id),
+                    "url": url,
+                    "error": str(e),
+                },
+            )
+            failed_count += 1
+            continue
+
+    if not prepared_pages:
+        logger.warning(
+            "Hybrid v2: No pages prepared after Phase 1",
+            extra={"website_id": str(ctx.website_id), "failed_count": failed_count},
+        )
+        return success_count, failed_count
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
+    # This is the only part that holds a database connection.
+    # Target: ~50-300ms total, returned to pool immediately after.
+    # ═══════════════════════════════════════════════════════════════════════
+    logger.debug(
+        "Hybrid v2 Phase 2: Persisting batch to database",
+        extra={
+            "website_id": str(ctx.website_id),
+            "pages_to_persist": len(prepared_pages),
+            "total_chunks": sum(len(p.chunks) for p in prepared_pages),
+        },
+    )
+
+    try:
+        async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
+            async with sessionmanager.session() as session, session.begin():
+                for prepared in prepared_pages:
+                    # Per-page savepoint for atomic delete+insert
+                    savepoint = await session.begin_nested()
+                    try:
+                        # 1. DEDUPLICATION: Delete existing by (title, website_id)
+                        # This matches the existing _delete_if_same_title() pattern
+                        delete_stmt = sa.delete(InfoBlobs).where(
+                            sa.and_(
+                                InfoBlobs.title == prepared.title,
+                                InfoBlobs.website_id == prepared.website_id,
+                            )
+                        )
+                        await session.execute(delete_stmt)
+
+                        # 2. Insert new InfoBlob
+                        info_blob_values = {
+                            "text": prepared.content,
+                            "title": prepared.title,
+                            "url": prepared.url,
+                            "size": len(prepared.content.encode("utf-8")),
+                            "content_hash": prepared.content_hash,
+                            "user_id": prepared.user_id,
+                            "tenant_id": prepared.tenant_id,
+                            "website_id": prepared.website_id,
+                            "embedding_model_id": prepared.embedding_model_id,
+                            "group_id": None,  # Website crawls don't have group_id
+                            "integration_knowledge_id": None,
+                        }
+
+                        insert_blob_stmt = (
+                            sa.insert(InfoBlobs)
+                            .values(**info_blob_values)
+                            .returning(InfoBlobs.id)
+                        )
+                        result = await session.execute(insert_blob_stmt)
+                        info_blob_id = result.scalar_one()
+
+                        # 3. Bulk insert chunks with embeddings
+                        chunk_values = [
+                            {
+                                "text": chunk_text,
+                                "chunk_no": i,
+                                "size": len(chunk_text.encode("utf-8")),
+                                "embedding": embedding,
+                                "info_blob_id": info_blob_id,
+                                "tenant_id": prepared.tenant_id,
+                            }
+                            for i, (chunk_text, embedding) in enumerate(
+                                zip(prepared.chunks, prepared.embeddings)
+                            )
+                        ]
+
+                        if chunk_values:
+                            insert_chunks_stmt = sa.insert(InfoBlobChunks).values(chunk_values)
+                            await session.execute(insert_chunks_stmt)
+
+                        await savepoint.commit()
+                        success_count += 1
+                        successful_urls.append(prepared.url)  # Track this URL as actually persisted
+
+                    except Exception as e:
+                        await savepoint.rollback()
+                        failed_count += 1
+                        logger.error(
+                            f"Hybrid v2 Phase 2: Failed to persist page {prepared.url}: {e}",
+                            extra={
+                                "website_id": str(ctx.website_id),
+                                "tenant_id": str(ctx.tenant_id),
+                                "url": prepared.url,
+                                "error": str(e),
+                            },
+                        )
+
+        # Connection returned to pool HERE - typically ~50-300ms total
+        logger.debug(
+            "Hybrid v2 Phase 2: Batch persist complete",
+            extra={
+                "website_id": str(ctx.website_id),
+                "success_count": success_count,
+                "failed_count": failed_count,
+            },
+        )
+
+    except asyncio.TimeoutError:
+        logger.error(
+            f"Hybrid v2 Phase 2: Transaction wall-time exceeded ({ctx.max_transaction_wall_time_seconds}s)",
+            extra={
+                "website_id": str(ctx.website_id),
+                "pages_attempted": len(prepared_pages),
+            },
+        )
+        # All pages in this batch failed due to timeout
+        failed_count += len(prepared_pages) - success_count
+
+    except Exception as e:
+        logger.error(
+            f"Hybrid v2 Phase 2: Session error: {e}",
+            extra={
+                "website_id": str(ctx.website_id),
+                "error": str(e),
+            },
+        )
+        # All pages in this batch failed
+        failed_count += len(prepared_pages) - success_count
+
+    return success_count, failed_count, successful_urls
 
 
 def _is_invalid_transaction_error(error: Exception) -> bool:
@@ -1051,6 +1441,50 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     },
                 )
 
+            # ═══════════════════════════════════════════════════════════════════════════
+            # HYBRID V2: Build CrawlContext DTO from ORM objects BEFORE crawl loop
+            # Why: Extract all needed data as primitives to avoid DetachedInstanceError
+            # when sessions close during network I/O (session-per-batch pattern)
+            # ═══════════════════════════════════════════════════════════════════════════
+            crawl_context: CrawlContext | None = None
+            if settings.hybrid_v2_enabled:
+                # Extract embedding model fields (ALL to avoid lazy-load)
+                embedding_model = website.embedding_model
+                crawl_context = CrawlContext(
+                    website_id=website.id,
+                    tenant_id=website.tenant_id,
+                    tenant_slug=tenant.slug if tenant else None,
+                    user_id=container.user().id,
+                    # Embedding model - extract ALL fields to avoid lazy-load
+                    embedding_model_id=embedding_model.id if embedding_model else None,
+                    embedding_model_name=embedding_model.name if embedding_model else None,
+                    embedding_model_open_source=embedding_model.open_source if embedding_model else False,
+                    embedding_model_family=(
+                        embedding_model.family.value if embedding_model and embedding_model.family else None
+                    ),
+                    embedding_model_dimensions=(
+                        embedding_model.dimensions if embedding_model else None
+                    ),
+                    # HTTP Auth - primitives only
+                    http_auth_user=http_user,
+                    http_auth_pass=http_pass,
+                    # Batch settings from tenant config with defaults
+                    batch_size=get_crawler_setting(
+                        "crawl_page_batch_size",
+                        tenant.crawler_settings if tenant else None,
+                        default=settings.crawl_page_batch_size,
+                    ),
+                )
+                logger.info(
+                    "Hybrid v2 enabled: using session-per-batch pattern",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "tenant_id": str(website.tenant_id),
+                        "batch_size": crawl_context.batch_size,
+                        "embedding_model": crawl_context.embedding_model_name,
+                    },
+                )
+
             num_pages = 0
             num_files = 0
             num_failed_pages = 0
@@ -1146,145 +1580,416 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Import for suicide check
                 from intric.main.models import Status as JobStatus
 
-                # Process pages with retry logic
-                for page in crawl.pages:
-                    num_pages += 1
+                # ═══════════════════════════════════════════════════════════════════
+                # HYBRID V2: Session-per-batch page processing
+                # Why: Eliminates hours-long connection holds by using short-lived
+                # sessions ONLY during persist operations (Phase 2).
+                # ═══════════════════════════════════════════════════════════════════
+                if settings.hybrid_v2_enabled and crawl_context:
+                    # CRITICAL: Close the main session BEFORE entering the crawl loop
+                    # Why: The main session at line 1392 was only needed for:
+                    #   1. Auth check query (lines 1496-1501)
+                    #   2. Fetch existing titles query (lines 1521-1524)
+                    # After these complete, holding the session during crawl creates a
+                    # "zombie connection" - held for hours but unused.
+                    # Hybrid v2 uses sessionmanager.session() for all DB operations.
+                    try:
+                        await session.close()
+                        logger.debug(
+                            "Hybrid v2: closed main session before crawl loop",
+                            extra={"website_id": str(params.website_id)},
+                        )
+                    except Exception as close_exc:
+                        logger.warning(
+                            f"Hybrid v2: failed to close main session: {close_exc}",
+                            extra={"website_id": str(params.website_id)},
+                        )
+                    # Get services needed for persist_batch
+                    embedding_model = website.embedding_model
+                    create_embeddings_service = container.create_embeddings_service()
 
-                    # TIME-BASED HEARTBEAT: Update every N seconds (not every N pages)
-                    # This handles slow-loading pages correctly - a 3min/page site won't be preempted
-                    current_time = time.time()
-                    if current_time - last_heartbeat_time >= heartbeat_interval_seconds:
-                        try:
-                            await job_repo.touch_job(job_id)
-                            last_heartbeat_time = current_time
+                    # Page buffer for batching (primitives only, NO ORM objects!)
+                    page_buffer: list[dict] = []
 
-                            # Refresh semaphore TTL to prevent expiry during long crawls
-                            # Why: Semaphore TTL may be close to max crawl time
-                            # Without refresh, counter could expire before job completes
-                            if redis_client and tenant:
-                                try:
-                                    semaphore_ttl = get_crawler_setting(
-                                        "tenant_worker_semaphore_ttl_seconds",
-                                        tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
-                                        default=settings.tenant_worker_semaphore_ttl_seconds,
-                                    )
-                                    concurrency_key = f"tenant:{tenant.id}:active_jobs"
-                                    flag_key = f"job:{job_id}:slot_preacquired"
+                    # Local counter for consecutive heartbeat pipeline failures (per-job scope)
+                    # Tracks persistent Redis issues during this specific crawl job
+                    heartbeat_pipeline_failures: int = 0
 
-                                    # Atomic TTL refresh for both counter and flag using pipeline
-                                    # This prevents inconsistent state if process crashes mid-refresh
-                                    # Flag stores tenant_id for slot release on crash recovery
-                                    pipe = redis_client.pipeline(transaction=True)
-                                    pipe.expire(concurrency_key, semaphore_ttl)
-                                    pipe.expire(flag_key, semaphore_ttl)
-                                    results = await pipe.execute()
+                    for page in crawl.pages:
+                        num_pages += 1
 
-                                    # Check if flag refresh succeeded (returns 1 if key exists, 0 if not)
-                                    if len(results) >= 2 and results[1] == 0:
-                                        logger.warning(
-                                            "Heartbeat: flag key missing during TTL refresh - possible eviction",
-                                            extra={"job_id": str(job_id), "flag_key": flag_key},
+                        # TIME-BASED HEARTBEAT: Use short session for heartbeat
+                        current_time = time.time()
+                        if current_time - last_heartbeat_time >= heartbeat_interval_seconds:
+                            try:
+                                # Heartbeat with fresh short-lived session
+                                from intric.database.database import sessionmanager
+                                async with sessionmanager.session() as hb_session:
+                                    async with hb_session.begin():
+                                        from intric.jobs.job_repo import JobRepository
+                                        hb_job_repo = JobRepository(session=hb_session)
+                                        await hb_job_repo.touch_job(job_id)
+
+                                last_heartbeat_time = current_time
+
+                                # Refresh semaphore TTL (same logic as legacy path)
+                                if redis_client and tenant:
+                                    try:
+                                        semaphore_ttl = get_crawler_setting(
+                                            "tenant_worker_semaphore_ttl_seconds",
+                                            tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                                            default=settings.tenant_worker_semaphore_ttl_seconds,
                                         )
-                                except Exception:
-                                    pass  # Non-fatal: counter still valid, just not refreshed
+                                        concurrency_key = f"tenant:{tenant.id}:active_jobs"
+                                        flag_key = f"job:{job_id}:slot_preacquired"
 
-                            logger.debug(
-                                f"Heartbeat: crawl job still alive after {num_pages} pages",
-                                extra={"job_id": str(job_id), "pages_processed": num_pages},
-                            )
+                                        pipe = redis_client.pipeline(transaction=True)
+                                        pipe.expire(concurrency_key, semaphore_ttl)
+                                        pipe.expire(flag_key, semaphore_ttl)
+                                        results = await pipe.execute()
 
-                            # IN-LOOP SUICIDE CHECK: Detect preemption immediately
-                            # If user triggered recrawl and this job was marked FAILED,
-                            # stop NOW to avoid zombie writer corrupting new crawl's data
-                            current_job = await job_repo.get_job(job_id)
-                            if current_job and current_job.status == JobStatus.FAILED:
-                                logger.warning(
-                                    "Worker detected preemption during heartbeat - stopping immediately",
-                                    extra={
-                                        "job_id": str(job_id),
-                                        "website_id": str(params.website_id),
-                                        "pages_processed": num_pages,
-                                    },
+                                        # Fix 2: Check BOTH TTL refresh results (counter AND flag)
+                                        counter_refreshed = results[0] if len(results) > 0 else 0
+                                        flag_refreshed = results[1] if len(results) > 1 else 0
+
+                                        # Reset consecutive failure counter on success
+                                        heartbeat_pipeline_failures = 0
+
+                                        if counter_refreshed == 0:
+                                            logger.warning(
+                                                "Hybrid v2 heartbeat: counter key missing or expired",
+                                                extra={"job_id": str(job_id), "concurrency_key": concurrency_key},
+                                            )
+                                        if flag_refreshed == 0:
+                                            logger.warning(
+                                                "Hybrid v2 heartbeat: flag key missing or expired",
+                                                extra={"job_id": str(job_id), "flag_key": flag_key},
+                                            )
+                                    except Exception:
+                                        # Fix 3: Track consecutive failures to detect persistent Redis issues
+                                        heartbeat_pipeline_failures += 1
+                                        logger.exception(
+                                            "Hybrid v2 heartbeat pipeline failed",
+                                            extra={
+                                                "consecutive_failures": heartbeat_pipeline_failures,
+                                                "job_id": str(job_id),
+                                            },
+                                        )
+                                        # Continue crawl - will retry next heartbeat cycle
+
+                                logger.debug(
+                                    f"Hybrid v2 heartbeat: crawl alive after {num_pages} pages",
+                                    extra={"job_id": str(job_id), "pages_processed": num_pages},
                                 )
-                                return {"status": "preempted_during_crawl", "pages_crawled": num_pages}
 
-                        except Exception as heartbeat_exc:
-                            # Handle invalid transaction during heartbeat
-                            if _is_invalid_transaction_error(heartbeat_exc):
+                                # IN-LOOP SUICIDE CHECK with short session
+                                async with sessionmanager.session() as check_session:
+                                    async with check_session.begin():
+                                        from intric.jobs.job_repo import JobRepository
+                                        check_job_repo = JobRepository(session=check_session)
+                                        current_job = await check_job_repo.get_job(job_id)
+                                        if current_job and current_job.status == JobStatus.FAILED:
+                                            logger.warning(
+                                                "Hybrid v2: detected preemption during heartbeat",
+                                                extra={
+                                                    "job_id": str(job_id),
+                                                    "website_id": str(params.website_id),
+                                                    "pages_processed": num_pages,
+                                                },
+                                            )
+                                            return {"status": "preempted_during_crawl", "pages_crawled": num_pages}
+
+                            except Exception as hb_exc:
                                 logger.warning(
-                                    "Heartbeat skipped due to invalid transaction - will recover on next page",
-                                    extra={"job_id": str(job_id)}
-                                )
-                            else:
-                                # Non-fatal: Log warning but continue crawling
-                                logger.warning(
-                                    f"Failed to update heartbeat: {heartbeat_exc}",
+                                    f"Hybrid v2 heartbeat failed: {hb_exc}",
                                     extra={"job_id": str(job_id)},
                                 )
 
-                    # Process page with retry logic using session_holder (may be recovered)
-                    try:
-                        success, error_message = await process_page_with_retry(
-                            page=page,
-                            uploader=session_holder["uploader"],
-                            session=session_holder["session"],
-                            params=params,
-                            website=website,
-                            tenant_slug=tenant.slug if tenant else None,
+                        # Buffer page as dict (primitives only!)
+                        page_buffer.append({
+                            "url": page.url,
+                            "content": page.content,
+                        })
+
+                        # Flush when buffer is full
+                        if len(page_buffer) >= crawl_context.batch_size:
+                            success_count, failed_count, successful_urls = await persist_batch(
+                                page_buffer=page_buffer,
+                                ctx=crawl_context,
+                                embedding_model=embedding_model,
+                                create_embeddings_service=create_embeddings_service,
+                            )
+                            # CRITICAL: Only mark URLs that were ACTUALLY persisted
+                            # (fixes data loss bug - previously marked ALL URLs if ANY succeeded)
+                            crawled_titles.update(successful_urls)
+                            num_failed_pages += failed_count
+                            page_buffer.clear()
+
+                            logger.debug(
+                                f"Hybrid v2: flushed batch of {crawl_context.batch_size} pages",
+                                extra={
+                                    "job_id": str(job_id),
+                                    "success": success_count,
+                                    "failed": failed_count,
+                                    "total_pages": num_pages,
+                                },
+                            )
+
+                    # Final flush for remaining pages
+                    if page_buffer:
+                        success_count, failed_count, successful_urls = await persist_batch(
+                            page_buffer=page_buffer,
+                            ctx=crawl_context,
+                            embedding_model=embedding_model,
+                            create_embeddings_service=create_embeddings_service,
+                        )
+                        # CRITICAL: Only mark URLs that were ACTUALLY persisted
+                        crawled_titles.update(successful_urls)
+                        num_failed_pages += failed_count
+
+                        logger.debug(
+                            f"Hybrid v2: final flush of {len(page_buffer)} pages",
+                            extra={
+                                "job_id": str(job_id),
+                                "success": success_count,
+                                "failed": failed_count,
+                                "total_pages": num_pages,
+                            },
                         )
 
-                        if success:
-                            crawled_titles.add(page.url)
-                            pages_since_commit += 1
+                    timings["process_pages"] = time.time() - process_start
 
-                            # Batched commit to bound data loss
-                            if pages_since_commit >= batch_size:
-                                try:
-                                    await session_holder["session"].commit()
-                                    await session_holder["session"].begin()
-                                    pages_since_commit = 0
-                                    logger.debug(
-                                        f"Committed batch of {batch_size} pages",
-                                        extra={
-                                            "batch_size": batch_size,
-                                            "total_pages": num_pages,
-                                            "job_id": str(job_id),
-                                        }
-                                    )
-                                except Exception as commit_exc:
-                                    if _is_invalid_transaction_error(commit_exc):
-                                        # Recover session and continue
-                                        logger.warning(
-                                            "Invalid transaction during batch commit, recovering...",
+                # ═══════════════════════════════════════════════════════════════════
+                # LEGACY PATH: Long-lived session_holder pattern
+                # Kept for safe rollout - disable with HYBRID_V2_ENABLED=true
+                # ═══════════════════════════════════════════════════════════════════
+                else:
+                    # Local counter for consecutive heartbeat pipeline failures (per-job scope)
+                    # Tracks persistent Redis issues during this specific crawl job
+                    heartbeat_pipeline_failures: int = 0
+
+                    # Process pages with retry logic
+                    for page in crawl.pages:
+                        num_pages += 1
+
+                        # TIME-BASED HEARTBEAT: Update every N seconds (not every N pages)
+                        # This handles slow-loading pages correctly - a 3min/page site won't be preempted
+                        current_time = time.time()
+                        if current_time - last_heartbeat_time >= heartbeat_interval_seconds:
+                            try:
+                                await job_repo.touch_job(job_id)
+                                last_heartbeat_time = current_time
+
+                                # Refresh semaphore TTL to prevent expiry during long crawls
+                                # Why: Semaphore TTL may be close to max crawl time
+                                # Without refresh, counter could expire before job completes
+                                if redis_client and tenant:
+                                    try:
+                                        semaphore_ttl = get_crawler_setting(
+                                            "tenant_worker_semaphore_ttl_seconds",
+                                            tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                                            default=settings.tenant_worker_semaphore_ttl_seconds,
+                                        )
+                                        concurrency_key = f"tenant:{tenant.id}:active_jobs"
+                                        flag_key = f"job:{job_id}:slot_preacquired"
+
+                                        # Atomic TTL refresh for both counter and flag using pipeline
+                                        # This prevents inconsistent state if process crashes mid-refresh
+                                        # Flag stores tenant_id for slot release on crash recovery
+                                        pipe = redis_client.pipeline(transaction=True)
+                                        pipe.expire(concurrency_key, semaphore_ttl)
+                                        pipe.expire(flag_key, semaphore_ttl)
+                                        results = await pipe.execute()
+
+                                        # Fix 2: Check BOTH TTL refresh results (counter AND flag)
+                                        # EXPIRE returns 1 if key exists, 0 if not
+                                        counter_refreshed = results[0] if len(results) > 0 else 0
+                                        flag_refreshed = results[1] if len(results) > 1 else 0
+
+                                        # Reset consecutive failure counter on success
+                                        heartbeat_pipeline_failures = 0
+
+                                        if counter_refreshed == 0:
+                                            logger.warning(
+                                                "Heartbeat: counter key missing or expired during TTL refresh",
+                                                extra={"job_id": str(job_id), "concurrency_key": concurrency_key},
+                                            )
+                                        if flag_refreshed == 0:
+                                            logger.warning(
+                                                "Heartbeat: flag key missing or expired during TTL refresh",
+                                                extra={"job_id": str(job_id), "flag_key": flag_key},
+                                            )
+                                    except Exception:
+                                        # Fix 3: Track consecutive failures to detect persistent Redis issues
+                                        heartbeat_pipeline_failures += 1
+                                        logger.exception(
+                                            "Heartbeat pipeline failed",
                                             extra={
+                                                "consecutive_failures": heartbeat_pipeline_failures,
                                                 "job_id": str(job_id),
-                                                "pages_since_commit": pages_since_commit,
+                                            },
+                                        )
+                                        # Continue crawl - will retry next heartbeat cycle
+
+                                logger.debug(
+                                    f"Heartbeat: crawl job still alive after {num_pages} pages",
+                                    extra={"job_id": str(job_id), "pages_processed": num_pages},
+                                )
+
+                                # IN-LOOP SUICIDE CHECK: Detect preemption immediately
+                                # If user triggered recrawl and this job was marked FAILED,
+                                # stop NOW to avoid zombie writer corrupting new crawl's data
+                                current_job = await job_repo.get_job(job_id)
+                                if current_job and current_job.status == JobStatus.FAILED:
+                                    logger.warning(
+                                        "Worker detected preemption during heartbeat - stopping immediately",
+                                        extra={
+                                            "job_id": str(job_id),
+                                            "website_id": str(params.website_id),
+                                            "pages_processed": num_pages,
+                                        },
+                                    )
+                                    return {"status": "preempted_during_crawl", "pages_crawled": num_pages}
+
+                            except Exception as heartbeat_exc:
+                                # Handle invalid transaction during heartbeat
+                                if _is_invalid_transaction_error(heartbeat_exc):
+                                    logger.warning(
+                                        "Heartbeat skipped due to invalid transaction - will recover on next page",
+                                        extra={"job_id": str(job_id)}
+                                    )
+                                else:
+                                    # Non-fatal: Log warning but continue crawling
+                                    logger.warning(
+                                        f"Failed to update heartbeat: {heartbeat_exc}",
+                                        extra={"job_id": str(job_id)},
+                                    )
+
+                        # Process page with retry logic using session_holder (may be recovered)
+                        try:
+                            success, error_message = await process_page_with_retry(
+                                page=page,
+                                uploader=session_holder["uploader"],
+                                session=session_holder["session"],
+                                params=params,
+                                website=website,
+                                tenant_slug=tenant.slug if tenant else None,
+                            )
+
+                            if success:
+                                crawled_titles.add(page.url)
+                                pages_since_commit += 1
+
+                                # Batched commit to bound data loss
+                                if pages_since_commit >= batch_size:
+                                    try:
+                                        await session_holder["session"].commit()
+                                        await session_holder["session"].begin()
+                                        pages_since_commit = 0
+                                        logger.debug(
+                                            f"Committed batch of {batch_size} pages",
+                                            extra={
+                                                "batch_size": batch_size,
+                                                "total_pages": num_pages,
+                                                "job_id": str(job_id),
                                             }
                                         )
-                                        new_session, new_uploader = await _recover_session(
-                                            container,
-                                            session_holder["session"],
-                                            created_sessions,
-                                            logger,
+                                    except Exception as commit_exc:
+                                        if _is_invalid_transaction_error(commit_exc):
+                                            # Recover session and continue
+                                            logger.warning(
+                                                "Invalid transaction during batch commit, recovering...",
+                                                extra={
+                                                    "job_id": str(job_id),
+                                                    "pages_since_commit": pages_since_commit,
+                                                }
+                                            )
+                                            new_session, new_uploader = await _recover_session(
+                                                container,
+                                                session_holder["session"],
+                                                created_sessions,
+                                                logger,
+                                            )
+                                            session_holder["session"] = new_session
+                                            session_holder["uploader"] = new_uploader
+                                            pages_since_commit = 0
+                                        else:
+                                            raise
+                            else:
+                                # CRITICAL: Check if failure is due to invalid transaction
+                                # process_page_with_retry catches exceptions and returns (False, msg)
+                                # We must detect transaction corruption from the message string
+                                if _is_invalid_transaction_error_msg(error_message):
+                                    logger.warning(
+                                        "Invalid transaction detected from page failure, recovering...",
+                                        extra={
+                                            "job_id": str(job_id),
+                                            "page_url": page.url,
+                                            "error": error_message,
+                                        }
+                                    )
+                                    # Recover session
+                                    new_session, new_uploader = await _recover_session(
+                                        container,
+                                        session_holder["session"],
+                                        created_sessions,
+                                        logger,
+                                    )
+                                    session_holder["session"] = new_session
+                                    session_holder["uploader"] = new_uploader
+                                    pages_since_commit = 0
+
+                                    # Retry this page with recovered session
+                                    try:
+                                        retry_success, retry_error = await process_page_with_retry(
+                                            page=page,
+                                            uploader=session_holder["uploader"],
+                                            session=session_holder["session"],
+                                            params=params,
+                                            website=website,
+                                            tenant_slug=tenant.slug if tenant else None,
                                         )
-                                        session_holder["session"] = new_session
-                                        session_holder["uploader"] = new_uploader
-                                        pages_since_commit = 0
-                                    else:
-                                        raise
-                        else:
-                            # CRITICAL: Check if failure is due to invalid transaction
-                            # process_page_with_retry catches exceptions and returns (False, msg)
-                            # We must detect transaction corruption from the message string
-                            if _is_invalid_transaction_error_msg(error_message):
+                                        if retry_success:
+                                            crawled_titles.add(page.url)
+                                            pages_since_commit += 1
+                                        else:
+                                            num_failed_pages += 1
+                                            logger.error(
+                                                f"Page still failed after session recovery: {page.url}",
+                                                extra={"error": retry_error}
+                                            )
+                                    except Exception as recovery_retry_exc:
+                                        num_failed_pages += 1
+                                        logger.error(
+                                            f"Page failed during recovery retry: {page.url}",
+                                            extra={"error": str(recovery_retry_exc)}
+                                        )
+                                else:
+                                    num_failed_pages += 1
+                                    logger.error(
+                                        f"Failed page: {page.url} - {error_message}",
+                                        extra={
+                                            "website_id": str(params.website_id),
+                                            "tenant_id": str(website.tenant_id),
+                                            "tenant_slug": tenant.slug if tenant else None,
+                                            "page_url": page.url,
+                                            "embedding_model": getattr(website.embedding_model, "name", None),
+                                        },
+                                    )
+
+                        except Exception as page_exc:
+                            # Check if this is a recoverable transaction error
+                            if _is_invalid_transaction_error(page_exc):
                                 logger.warning(
-                                    "Invalid transaction detected from page failure, recovering...",
+                                    "Invalid transaction detected during page processing, recovering...",
                                     extra={
                                         "job_id": str(job_id),
                                         "page_url": page.url,
-                                        "error": error_message,
+                                        "pages_since_commit": pages_since_commit,
+                                        "error": str(page_exc),
                                     }
                                 )
+
                                 # Recover session
                                 new_session, new_uploader = await _recover_session(
                                     container,
@@ -1298,7 +2003,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                                 # Retry this page with recovered session
                                 try:
-                                    retry_success, retry_error = await process_page_with_retry(
+                                    success, error_message = await process_page_with_retry(
                                         page=page,
                                         uploader=session_holder["uploader"],
                                         session=session_holder["session"],
@@ -1306,105 +2011,43 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                         website=website,
                                         tenant_slug=tenant.slug if tenant else None,
                                     )
-                                    if retry_success:
+                                    if success:
                                         crawled_titles.add(page.url)
                                         pages_since_commit += 1
                                     else:
                                         num_failed_pages += 1
-                                        logger.error(
-                                            f"Page still failed after session recovery: {page.url}",
-                                            extra={"error": retry_error}
-                                        )
-                                except Exception as recovery_retry_exc:
+                                except Exception as retry_exc:
                                     num_failed_pages += 1
                                     logger.error(
-                                        f"Page failed during recovery retry: {page.url}",
-                                        extra={"error": str(recovery_retry_exc)}
+                                        f"Page failed even after session recovery: {page.url}",
+                                        extra={
+                                            "job_id": str(job_id),
+                                            "error": str(retry_exc),
+                                        }
                                     )
                             else:
+                                # Non-transaction error, just count as failed
                                 num_failed_pages += 1
                                 logger.error(
-                                    f"Failed page: {page.url} - {error_message}",
+                                    f"Unexpected error processing page: {page.url} - {page_exc}",
                                     extra={
                                         "website_id": str(params.website_id),
                                         "tenant_id": str(website.tenant_id),
-                                        "tenant_slug": tenant.slug if tenant else None,
                                         "page_url": page.url,
-                                        "embedding_model": getattr(website.embedding_model, "name", None),
                                     },
                                 )
 
-                    except Exception as page_exc:
-                        # Check if this is a recoverable transaction error
-                        if _is_invalid_transaction_error(page_exc):
-                            logger.warning(
-                                "Invalid transaction detected during page processing, recovering...",
-                                extra={
-                                    "job_id": str(job_id),
-                                    "page_url": page.url,
-                                    "pages_since_commit": pages_since_commit,
-                                    "error": str(page_exc),
-                                }
+                    # Final commit for any remaining uncommitted pages
+                    if pages_since_commit > 0:
+                        try:
+                            await session_holder["session"].commit()
+                            await session_holder["session"].begin()
+                            logger.debug(
+                                f"Final commit of {pages_since_commit} remaining pages",
+                                extra={"pages_since_commit": pages_since_commit, "job_id": str(job_id)}
                             )
-
-                            # Recover session
-                            new_session, new_uploader = await _recover_session(
-                                container,
-                                session_holder["session"],
-                                created_sessions,
-                                logger,
-                            )
-                            session_holder["session"] = new_session
-                            session_holder["uploader"] = new_uploader
-                            pages_since_commit = 0
-
-                            # Retry this page with recovered session
-                            try:
-                                success, error_message = await process_page_with_retry(
-                                    page=page,
-                                    uploader=session_holder["uploader"],
-                                    session=session_holder["session"],
-                                    params=params,
-                                    website=website,
-                                    tenant_slug=tenant.slug if tenant else None,
-                                )
-                                if success:
-                                    crawled_titles.add(page.url)
-                                    pages_since_commit += 1
-                                else:
-                                    num_failed_pages += 1
-                            except Exception as retry_exc:
-                                num_failed_pages += 1
-                                logger.error(
-                                    f"Page failed even after session recovery: {page.url}",
-                                    extra={
-                                        "job_id": str(job_id),
-                                        "error": str(retry_exc),
-                                    }
-                                )
-                        else:
-                            # Non-transaction error, just count as failed
-                            num_failed_pages += 1
-                            logger.error(
-                                f"Unexpected error processing page: {page.url} - {page_exc}",
-                                extra={
-                                    "website_id": str(params.website_id),
-                                    "tenant_id": str(website.tenant_id),
-                                    "page_url": page.url,
-                                },
-                            )
-
-                # Final commit for any remaining uncommitted pages
-                if pages_since_commit > 0:
-                    try:
-                        await session_holder["session"].commit()
-                        await session_holder["session"].begin()
-                        logger.debug(
-                            f"Final commit of {pages_since_commit} remaining pages",
-                            extra={"pages_since_commit": pages_since_commit, "job_id": str(job_id)}
-                        )
-                    except Exception:
-                        pass  # Best effort - pages already processed
+                        except Exception:
+                            pass  # Best effort - pages already processed
 
                 timings["process_pages"] = time.time() - process_start
 

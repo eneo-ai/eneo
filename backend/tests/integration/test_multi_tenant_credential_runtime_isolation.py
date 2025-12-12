@@ -568,7 +568,6 @@ async def test_azure_provider_requires_all_fields_in_strict_mode(
 @pytest.mark.asyncio
 async def test_concurrent_credential_updates_maintain_isolation(
     client: AsyncClient,
-    async_session: AsyncSession,
     super_admin_token: str,
     encryption_service,
     test_settings,
@@ -590,6 +589,8 @@ async def test_concurrent_credential_updates_maintain_isolation(
     - Transaction isolation issues
     - Read-your-own-writes failures
     """
+    from intric.database.database import sessionmanager
+
     tenant_data = await _create_tenant(client, super_admin_token, f"tenant-update-{uuid4().hex[:6]}")
     tenant_id = UUID(tenant_data["id"])
 
@@ -605,22 +606,30 @@ async def test_concurrent_credential_updates_maintain_isolation(
         {"api_key": key_old},
     )
 
-    # Get tenant object
-    repo = TenantRepository(async_session)
-
     results_before = []
     results_after = []
 
+    # Event-based synchronization for reliable test execution
+    # (timing-based sleeps are fragile in CI environments)
+    update_complete = asyncio.Event()
+
     async def resolve_before():
-        """Resolve credential before update."""
-        tenant = await repo.get(tenant_id)
-        resolver = CredentialResolver(
-            tenant=tenant,
-            settings=test_settings,
-            encryption_service=encryption_service,
-        )
-        key = resolver.get_api_key("openai")
-        results_before.append(key)
+        """Resolve credential before update.
+
+        Each concurrent task needs its own session AND transaction to avoid conflicts.
+        Note: sessionmanager uses autobegin=False, so explicit begin() is required.
+        """
+        async with sessionmanager.session() as session:
+            async with session.begin():
+                repo = TenantRepository(session)
+                tenant = await repo.get(tenant_id)
+                resolver = CredentialResolver(
+                    tenant=tenant,
+                    settings=test_settings,
+                    encryption_service=encryption_service,
+                )
+                key = resolver.get_api_key("openai")
+                results_before.append(key)
 
     async def update_credential():
         """Update credential mid-test."""
@@ -632,18 +641,29 @@ async def test_concurrent_credential_updates_maintain_isolation(
             "openai",
             {"api_key": key_new},
         )
+        update_complete.set()  # Signal that update is committed
 
     async def resolve_after():
-        """Resolve credential after update."""
-        await asyncio.sleep(0.2)  # Wait for update to complete
-        tenant = await repo.get(tenant_id)
-        resolver = CredentialResolver(
-            tenant=tenant,
-            settings=test_settings,
-            encryption_service=encryption_service,
-        )
-        key = resolver.get_api_key("openai")
-        results_after.append(key)
+        """Resolve credential after update.
+
+        Each concurrent task needs its own session AND transaction to avoid conflicts.
+        Note: sessionmanager uses autobegin=False, so explicit begin() is required.
+        """
+        # Wait for update to complete (event-based, not timing-based)
+        await update_complete.wait()
+        # Small buffer to ensure transaction visibility across connections
+        await asyncio.sleep(0.05)
+        async with sessionmanager.session() as session:
+            async with session.begin():
+                repo = TenantRepository(session)
+                tenant = await repo.get(tenant_id)
+                resolver = CredentialResolver(
+                    tenant=tenant,
+                    settings=test_settings,
+                    encryption_service=encryption_service,
+                )
+                key = resolver.get_api_key("openai")
+                results_after.append(key)
 
     # Run concurrent operations
     tasks = (

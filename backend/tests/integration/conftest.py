@@ -69,6 +69,10 @@ if not os.getenv("URL_SIGNING_KEY"):
     os.environ["URL_SIGNING_KEY"] = "test_key"
 if not os.getenv("ENCRYPTION_KEY"):
     os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
+# CRITICAL: Set super API key BEFORE any Settings() instantiation
+# This ensures authenticate_super_api_key() works even if Settings is created before set_settings()
+if not os.getenv("INTRIC_SUPER_API_KEY"):
+    os.environ["INTRIC_SUPER_API_KEY"] = "test-super-admin-key-for-integration-tests"
 
 import contextlib
 from typing import AsyncGenerator, Generator

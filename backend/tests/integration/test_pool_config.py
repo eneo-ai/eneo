@@ -13,8 +13,8 @@ Tests cover:
 Run with: pytest tests/integration/test_pool_config.py -v
 
 Tier 2 Readiness Tests:
-- test_current_pattern_holds_connection_during_io: PROVES the problem exists
-- test_tier2_pattern_releases_during_io: SKIPPED until Hybrid v2 implemented
+- test_current_pattern_holds_connection_during_io: PROVES the problem exists (legacy path)
+- test_tier2_pattern_releases_during_io: VALIDATES Hybrid v2 releases connection during I/O
 - test_session_per_batch_pattern_demo: DEMONSTRATES the target pattern works
 """
 
@@ -711,16 +711,14 @@ class TestConnectionHoldDuringNetworkIO:
         await tiny_engine.dispose()
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Tier 2 not implemented - will pass after Hybrid v2")
     async def test_tier2_pattern_releases_during_io(self, test_settings):
         """
         TARGET BEHAVIOR (post-Tier2 / Hybrid v2):
         Connection should be released during network I/O.
 
-        Once Hybrid v2 is implemented:
-        1. Remove @pytest.mark.skip
-        2. This test should PASS
-        3. test_current_pattern_holds_connection_during_io should be removed
+        Hybrid v2 is now implemented! This test validates:
+        - session-per-batch pattern releases connection before network I/O
+        - Feeder queries can succeed during crawl I/O phase
 
         Hybrid v2 pattern:
         - session-per-batch: only hold connection during actual DB writes

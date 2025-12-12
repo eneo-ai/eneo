@@ -219,6 +219,14 @@ class Settings(BaseSettings):
     using_iam: bool = False
     using_image_generation: bool = False
 
+    # Hybrid v2: Session-per-batch pattern (fixes pool exhaustion)
+    # When enabled, crawler uses short-lived DB sessions during persist phase only
+    # instead of holding a single session for the entire crawl duration.
+    # See plans/fuzzy-skipping-cray.md for multi-model consensus analysis.
+    hybrid_v2_enabled: bool = False  # Default OFF for safe rollout
+    # Max concurrent embedding API calls across all crawls (module-level semaphore)
+    hybrid_v2_embedding_concurrency: int = 3
+
     # Security
     api_prefix: str
     api_key_length: int
