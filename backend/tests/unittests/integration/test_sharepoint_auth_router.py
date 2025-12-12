@@ -87,6 +87,8 @@ def mock_tenant_app_integration():
     tenant_app.id = integration.tenant_app_id
     tenant_app.client_id = "azure-client-id"
     tenant_app.tenant_id = tenant_integration.tenant_id
+    tenant_app.auth_method = "tenant_app"
+    tenant_app.is_service_account.return_value = False  # Not a service account
     integration.tenant_app = tenant_app
 
     return integration
@@ -152,6 +154,8 @@ def mock_tenant_app():
     app.client_secret = "azure-client-secret-456"
     app.tenant_domain = "contoso.onmicrosoft.com"
     app.is_active = True
+    app.auth_method = "tenant_app"
+    app.is_service_account.return_value = False  # Not a service account
     return app
 
 async def test_personal_space_always_uses_user_oauth(

@@ -44,6 +44,9 @@ def sample_entity():
         tenant_domain="contoso.onmicrosoft.com",
         is_active=True,
         certificate_path=None,
+        auth_method="tenant_app",
+        service_account_refresh_token=None,
+        service_account_email=None,
         created_by=uuid4(),
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
@@ -61,6 +64,9 @@ def sample_db_model(sample_entity):
     db_model.tenant_domain = sample_entity.tenant_domain
     db_model.is_active = sample_entity.is_active
     db_model.certificate_path = sample_entity.certificate_path
+    db_model.auth_method = "tenant_app"
+    db_model.service_account_refresh_token_encrypted = None  # No service account
+    db_model.service_account_email = None
     db_model.created_by = sample_entity.created_by
     db_model.created_at = sample_entity.created_at
     db_model.updated_at = sample_entity.updated_at
@@ -189,6 +195,9 @@ def test_encryption_decryption_roundtrip(mapper, mock_encryption_service, sample
     db_model.tenant_domain = db_dict["tenant_domain"]
     db_model.is_active = db_dict["is_active"]
     db_model.certificate_path = db_dict["certificate_path"]
+    db_model.auth_method = db_dict["auth_method"]
+    db_model.service_account_refresh_token_encrypted = db_dict["service_account_refresh_token_encrypted"]
+    db_model.service_account_email = db_dict["service_account_email"]
     db_model.created_by = db_dict["created_by"]
     db_model.created_at = db_dict.get("created_at")
     db_model.updated_at = db_dict.get("updated_at")
@@ -215,6 +224,9 @@ def test_empty_string_client_secret_handled(mapper, mock_encryption_service):
         tenant_domain="contoso.onmicrosoft.com",
         is_active=True,
         certificate_path=None,
+        auth_method="tenant_app",
+        service_account_refresh_token=None,
+        service_account_email=None,
         created_by=uuid4(),
         created_at=None,
         updated_at=None,
@@ -236,6 +248,9 @@ def test_certificate_path_preserved(mapper):
         tenant_domain="contoso.onmicrosoft.com",
         is_active=True,
         certificate_path="/path/to/cert.pem",
+        auth_method="tenant_app",
+        service_account_refresh_token=None,
+        service_account_email=None,
         created_by=uuid4(),
         created_at=None,
         updated_at=None,
@@ -256,6 +271,9 @@ def test_inactive_app_preserved(mapper):
         tenant_domain="contoso.onmicrosoft.com",
         is_active=False,  # Inactive
         certificate_path=None,
+        auth_method="tenant_app",
+        service_account_refresh_token=None,
+        service_account_email=None,
         created_by=uuid4(),
         created_at=None,
         updated_at=None,
@@ -278,6 +296,9 @@ def test_to_entities_converts_multiple_models(mapper, sample_db_model):
     db_model_2.tenant_domain = "tenant2.onmicrosoft.com"
     db_model_2.is_active = True
     db_model_2.certificate_path = None
+    db_model_2.auth_method = "tenant_app"
+    db_model_2.service_account_refresh_token_encrypted = None
+    db_model_2.service_account_email = None
     db_model_2.created_by = uuid4()
     db_model_2.created_at = datetime.utcnow()
     db_model_2.updated_at = datetime.utcnow()
