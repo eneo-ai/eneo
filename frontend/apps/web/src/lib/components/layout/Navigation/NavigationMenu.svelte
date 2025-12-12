@@ -2,6 +2,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { IconFeedback } from "@intric/icons/feedback";
   import { m } from "$lib/paraglide/messages";
+  import NavigationVersionInfo from "./NavigationVersionInfo.svelte";
 
   let cls: string = "";
   export { cls as class };
@@ -11,8 +12,8 @@
 
 <nav class="{cls} flex flex-grow flex-col gap-0.5 py-3">
   <slot />
+  <div class="flex-grow"></div>
   {#if featureFlags.showHelpCenter}
-    <div class="flex-grow justify-end"></div>
     <a
       href={environment.helpCenterUrl}
       target="_blank"
@@ -23,4 +24,5 @@
       <IconFeedback />
     </a>
   {/if}
+  <NavigationVersionInfo />
 </nav>
