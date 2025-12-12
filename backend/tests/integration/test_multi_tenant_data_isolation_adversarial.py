@@ -17,13 +17,12 @@ Security Model:
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
@@ -604,40 +603,45 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     results_a = []
     results_b = []
 
+    # Limit concurrent operations to stay within connection pool (20 + 10 overflow = 30)
+    # Using 15 to leave headroom for cleanup and other operations
+    semaphore = asyncio.Semaphore(15)
+
     async def user_a_workflow():
         """User A creates space and verifies tenant info."""
-        # Create space
-        space = await _create_space(client, token_a, f"space-a-{uuid4().hex[:4]}")
+        async with semaphore:
+            # Create space
+            space = await _create_space(client, token_a, f"space-a-{uuid4().hex[:4]}")
 
-        # Get tenant info
-        tenant_info = await client.get(
-            "/api/v1/users/tenant/",
-            headers={"Authorization": f"Bearer {token_a}"},
-        )
+            # Get tenant info
+            tenant_info = await client.get(
+                "/api/v1/users/tenant/",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
 
-        results_a.append({
-            "space_id": space["id"],
-            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-        })
+            results_a.append({
+                "space_id": space["id"],
+                "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
+            })
 
     async def user_b_workflow():
         """User B creates space and verifies tenant info."""
-        # Create space
-        space = await _create_space(client, token_b, f"space-b-{uuid4().hex[:4]}")
+        async with semaphore:
+            # Create space
+            space = await _create_space(client, token_b, f"space-b-{uuid4().hex[:4]}")
 
-        # Get tenant info
-        tenant_info = await client.get(
-            "/api/v1/users/tenant/",
-            headers={"Authorization": f"Bearer {token_b}"},
-        )
+            # Get tenant info
+            tenant_info = await client.get(
+                "/api/v1/users/tenant/",
+                headers={"Authorization": f"Bearer {token_b}"},
+            )
 
-        results_b.append({
-            "space_id": space["id"],
-            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-        })
+            results_b.append({
+                "space_id": space["id"],
+                "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
+            })
 
-    # Fire 100 concurrent requests (50 per tenant, interleaved)
-    import asyncio
+    # Fire 100 concurrent requests (250 per tenant, interleaved)
     tasks = []
     for i in range(100):
         if i % 2 == 0:
