@@ -24,12 +24,12 @@ import pytest
 
 
 class TestPersistBatchReturnType:
-    """Tests for persist_batch returning tuple[int, int, list[str]]."""
+    """Tests for persist_batch returning tuple[int, int, list[str], list[str]]."""
 
     @pytest.mark.asyncio
     async def test_empty_buffer_returns_empty_urls(self):
         """
-        Empty page_buffer should return (0, 0, []).
+        Empty page_buffer should return (0, 0, [], []).
 
         This is the base case - no pages, no URLs.
         """
@@ -61,8 +61,8 @@ class TestPersistBatchReturnType:
             create_embeddings_service=MagicMock(),
         )
 
-        # Should return (0, 0, [])
-        assert result == (0, 0, []), f"Empty buffer should return (0, 0, []), got {result}"
+        # Should return (0, 0, [], [])
+        assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_returns_all_failed(self):
@@ -99,7 +99,7 @@ class TestPersistBatchReturnType:
             create_embeddings_service=MagicMock(),
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # All pages should fail when no embedding model
         assert success_count == 0, f"Expected 0 successes, got {success_count}"

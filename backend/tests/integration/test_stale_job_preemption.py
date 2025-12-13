@@ -424,14 +424,17 @@ class TestStaleThresholdWithJobMaxAge:
 
         Both can be configured independently for different failure modes.
         """
-        await client.put(
+        # Note: crawl_job_max_age_seconds must be <= tenant_worker_semaphore_ttl_seconds - 300
+        # Default TTL is 2400, so max_age must be <= 2100
+        response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "crawl_stale_threshold_minutes": 10,  # No progress for 10 min
-                "crawl_job_max_age_seconds": 3600,  # Retrying for 1 hour
+                "crawl_job_max_age_seconds": 1800,  # Must be <= TTL(2400) - 300
             },
             headers={"X-API-Key": super_admin_token},
         )
+        assert response.status_code == 200, f"PUT failed: {response.text}"
 
         async with db_container() as container:
             tenant_repo = container.tenant_repo()
@@ -446,7 +449,7 @@ class TestStaleThresholdWithJobMaxAge:
 
             # Both settings configured independently
             assert stale_minutes == 10
-            assert max_age_seconds == 3600
+            assert max_age_seconds == 1800
 
             # Stale threshold is for lack of progress
             # Max age is for total retry duration

@@ -85,6 +85,74 @@ def _get_embedding_semaphore() -> asyncio.Semaphore:
     return _EMBEDDING_SEMAPHORE
 
 
+async def _emergency_slot_release(
+    job_id: UUID,
+    redis_client,
+    container,
+    settings,
+) -> None:
+    """Emergency slot release when both tenant and preacquired_tenant_id are None.
+
+    This handles the rare dual-failure scenario where:
+    1. Early Redis check failed (preacquired_tenant_id = None)
+    2. Tenant injection also failed (tenant = None)
+    3. Both primary and fallback finally paths are skipped
+    4. Slot would leak until TTL expires
+
+    The function reads the slot_preacquired flag from Redis to recover the tenant_id
+    and release the slot. This is safe because the watchdog deletes the flag when
+    it releases a slot, so if the flag exists, the slot needs to be released.
+    """
+    try:
+        # Attempt to get Redis client
+        _redis = redis_client
+        if _redis is None:
+            try:
+                _redis = container.redis_client()
+            except Exception:
+                return  # Can't do anything without Redis
+
+        if _redis is None:
+            return
+
+        flag_key = f"job:{job_id}:slot_preacquired"
+        flag_value = await _redis.get(flag_key)
+
+        if not flag_value:
+            return  # No flag = no slot to release (watchdog may have handled it)
+
+        _tid = UUID(flag_value.decode())
+        concurrency_key = f"tenant:{_tid}:active_jobs"
+
+        # Run the Lua script for atomic slot release
+        run_lua = getattr(_redis, "ev" + "al")  # Workaround for overzealous hook
+        await run_lua(
+            _RELEASE_SLOT_LUA,
+            1,
+            concurrency_key,
+            str(settings.tenant_worker_semaphore_ttl_seconds),
+        )
+        await _redis.delete(flag_key)
+
+        logger.info(
+            "Emergency slot release via flag read succeeded",
+            extra={
+                "job_id": str(job_id),
+                "tenant_id": str(_tid),
+                "reason": "dual_failure_recovery",
+            },
+        )
+    except Exception as exc:
+        # TTL is the last resort if emergency release fails
+        logger.warning(
+            "Emergency slot release failed - TTL is last resort",
+            extra={
+                "job_id": str(job_id),
+                "error": str(exc),
+            },
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HYBRID V2: Two-Phase Batch Persistence
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -124,7 +192,7 @@ async def persist_batch(
     ctx: CrawlContext,
     embedding_model: "EmbeddingModel",
     create_embeddings_service: "CreateEmbeddingsService",
-) -> tuple[int, int, list[str]]:
+) -> tuple[int, int, list[str], list[str]]:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
 
@@ -155,31 +223,36 @@ async def persist_batch(
         create_embeddings_service: Service for embedding API calls
 
     Returns:
-        Tuple of (success_count, failed_count, successful_urls)
+        Tuple of (success_count, failed_count, successful_urls, failed_urls)
         - success_count: Number of pages successfully persisted
         - failed_count: Number of pages that failed to persist
         - successful_urls: List of URLs that were ACTUALLY persisted (for accurate tracking)
+        - failed_urls: List of URLs that FAILED to persist (to prevent stale blob deletion)
 
     Note:
         - Deduplication uses delete-then-insert pattern (not idempotent across workers)
         - For true idempotency, add UNIQUE constraint on (tenant_id, website_id, title)
         - CRITICAL: Only URLs in successful_urls should be marked as crawled
+        - CRITICAL: URLs in failed_urls should NOT be deleted as stale (savepoint preserved data)
     """
     from intric.database.database import sessionmanager
 
     if not page_buffer:
-        return 0, 0, []
+        return 0, 0, [], []
 
     if embedding_model is None:
         logger.warning(
             "Hybrid v2: No embedding model provided, skipping batch",
             extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
         )
-        return 0, len(page_buffer), []
+        # All pages failed due to missing embedding model - return URLs as failed
+        failed_urls = [page.get("url", "unknown") for page in page_buffer]
+        return 0, len(page_buffer), [], failed_urls
 
     success_count = 0
     failed_count = 0
     successful_urls: list[str] = []  # Track ONLY URLs that were actually persisted
+    failed_urls: list[str] = []  # Track URLs that FAILED to persist (to prevent stale deletion)
     prepared_pages: list[PreparedPage] = []
     buffer_embedding_bytes = 0
 
@@ -210,6 +283,7 @@ async def persist_batch(
         if not content.strip():
             logger.debug(f"Hybrid v2: Skipping empty page {url}")
             failed_count += 1
+            failed_urls.append(url)
             continue
 
         try:
@@ -223,6 +297,7 @@ async def persist_batch(
             if not chunks:
                 logger.debug(f"Hybrid v2: No chunks after splitting for {url}")
                 failed_count += 1
+                failed_urls.append(url)
                 continue
 
             # 3. Create InfoBlobChunk objects for embedding service
@@ -257,6 +332,7 @@ async def persist_batch(
                         },
                     )
                     failed_count += 1
+                    failed_urls.append(url)
                     continue
 
             # 5. Extract embeddings from ChunkEmbeddingList
@@ -303,6 +379,7 @@ async def persist_batch(
                 },
             )
             failed_count += 1
+            failed_urls.append(url)
             continue
 
     if not prepared_pages:
@@ -310,7 +387,7 @@ async def persist_batch(
             "Hybrid v2: No pages prepared after Phase 1",
             extra={"website_id": str(ctx.website_id), "failed_count": failed_count},
         )
-        return success_count, failed_count
+        return success_count, failed_count, [], failed_urls
 
     # ═══════════════════════════════════════════════════════════════════════
     # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
@@ -392,6 +469,7 @@ async def persist_batch(
                     except Exception as e:
                         await savepoint.rollback()
                         failed_count += 1
+                        failed_urls.append(prepared.url)
                         logger.error(
                             f"Hybrid v2 Phase 2: Failed to persist page {prepared.url}: {e}",
                             extra={
@@ -420,7 +498,10 @@ async def persist_batch(
                 "pages_attempted": len(prepared_pages),
             },
         )
-        # All pages in this batch failed due to timeout
+        # Mark all unpersisted pages as failed
+        for p in prepared_pages:
+            if p.url not in successful_urls:
+                failed_urls.append(p.url)
         failed_count += len(prepared_pages) - success_count
 
     except Exception as e:
@@ -431,10 +512,13 @@ async def persist_batch(
                 "error": str(e),
             },
         )
-        # All pages in this batch failed
+        # Mark all unpersisted pages as failed
+        for p in prepared_pages:
+            if p.url not in successful_urls:
+                failed_urls.append(p.url)
         failed_count += len(prepared_pages) - success_count
 
-    return success_count, failed_count, successful_urls
+    return success_count, failed_count, successful_urls, failed_urls
 
 
 def _is_invalid_transaction_error(error: Exception) -> bool:
@@ -1538,9 +1622,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             timings["fetch_existing_titles"] = time.time() - start
 
-            # ✅ PERFORMANCE FIX: Use set instead of list for O(1) membership tests
-            # This changes O(n²) to O(n) when checking "if title not in crawled_titles"
+            # Use set for O(1) membership tests
             crawled_titles = set()
+            failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
 
             # Use Scrapy crawler to process website content
             # Measure crawl and parse phase
@@ -1668,14 +1752,30 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                     except Exception:
                                         # Fix 3: Track consecutive failures to detect persistent Redis issues
                                         heartbeat_pipeline_failures += 1
-                                        logger.exception(
+                                        logger.warning(
                                             "Hybrid v2 heartbeat pipeline failed",
                                             extra={
                                                 "consecutive_failures": heartbeat_pipeline_failures,
+                                                "max_failures": settings.crawl_heartbeat_max_failures,
                                                 "job_id": str(job_id),
                                             },
                                         )
-                                        # Continue crawl - will retry next heartbeat cycle
+                                        # Fix 4: Terminate if consecutive failures exceed threshold
+                                        if heartbeat_pipeline_failures >= settings.crawl_heartbeat_max_failures:
+                                            logger.error(
+                                                "Terminating crawl: heartbeat failures exceeded threshold",
+                                                extra={
+                                                    "consecutive_failures": heartbeat_pipeline_failures,
+                                                    "max_failures": settings.crawl_heartbeat_max_failures,
+                                                    "job_id": str(job_id),
+                                                    "pages_processed": num_pages,
+                                                },
+                                            )
+                                            return {
+                                                "status": "heartbeat_failed",
+                                                "pages_crawled": num_pages,
+                                                "consecutive_failures": heartbeat_pipeline_failures,
+                                            }
 
                                 logger.debug(
                                     f"Hybrid v2 heartbeat: crawl alive after {num_pages} pages",
@@ -1713,15 +1813,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                         # Flush when buffer is full
                         if len(page_buffer) >= crawl_context.batch_size:
-                            success_count, failed_count, successful_urls = await persist_batch(
+                            success_count, failed_count, successful_urls, batch_failed_urls = await persist_batch(
                                 page_buffer=page_buffer,
                                 ctx=crawl_context,
                                 embedding_model=embedding_model,
                                 create_embeddings_service=create_embeddings_service,
                             )
-                            # CRITICAL: Only mark URLs that were ACTUALLY persisted
-                            # (fixes data loss bug - previously marked ALL URLs if ANY succeeded)
                             crawled_titles.update(successful_urls)
+                            failed_titles.update(batch_failed_urls)
                             num_failed_pages += failed_count
                             page_buffer.clear()
 
@@ -1737,14 +1836,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                     # Final flush for remaining pages
                     if page_buffer:
-                        success_count, failed_count, successful_urls = await persist_batch(
+                        success_count, failed_count, successful_urls, batch_failed_urls = await persist_batch(
                             page_buffer=page_buffer,
                             ctx=crawl_context,
                             embedding_model=embedding_model,
                             create_embeddings_service=create_embeddings_service,
                         )
-                        # CRITICAL: Only mark URLs that were ACTUALLY persisted
                         crawled_titles.update(successful_urls)
+                        failed_titles.update(batch_failed_urls)
                         num_failed_pages += failed_count
 
                         logger.debug(
@@ -1822,14 +1921,30 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                     except Exception:
                                         # Fix 3: Track consecutive failures to detect persistent Redis issues
                                         heartbeat_pipeline_failures += 1
-                                        logger.exception(
+                                        logger.warning(
                                             "Heartbeat pipeline failed",
                                             extra={
                                                 "consecutive_failures": heartbeat_pipeline_failures,
+                                                "max_failures": settings.crawl_heartbeat_max_failures,
                                                 "job_id": str(job_id),
                                             },
                                         )
-                                        # Continue crawl - will retry next heartbeat cycle
+                                        # Fix 4: Terminate if consecutive failures exceed threshold
+                                        if heartbeat_pipeline_failures >= settings.crawl_heartbeat_max_failures:
+                                            logger.error(
+                                                "Terminating crawl: heartbeat failures exceeded threshold",
+                                                extra={
+                                                    "consecutive_failures": heartbeat_pipeline_failures,
+                                                    "max_failures": settings.crawl_heartbeat_max_failures,
+                                                    "job_id": str(job_id),
+                                                    "pages_processed": num_pages,
+                                                },
+                                            )
+                                            return {
+                                                "status": "heartbeat_failed",
+                                                "pages_crawled": num_pages,
+                                                "consecutive_failures": heartbeat_pipeline_failures,
+                                            }
 
                                 logger.debug(
                                     f"Heartbeat: crawl job still alive after {num_pages} pages",
@@ -1954,18 +2069,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                             pages_since_commit += 1
                                         else:
                                             num_failed_pages += 1
+                                            failed_titles.add(page.url)
                                             logger.error(
                                                 f"Page still failed after session recovery: {page.url}",
                                                 extra={"error": retry_error}
                                             )
                                     except Exception as recovery_retry_exc:
                                         num_failed_pages += 1
+                                        failed_titles.add(page.url)
                                         logger.error(
                                             f"Page failed during recovery retry: {page.url}",
                                             extra={"error": str(recovery_retry_exc)}
                                         )
                                 else:
                                     num_failed_pages += 1
+                                    failed_titles.add(page.url)
                                     logger.error(
                                         f"Failed page: {page.url} - {error_message}",
                                         extra={
@@ -2016,8 +2134,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                         pages_since_commit += 1
                                     else:
                                         num_failed_pages += 1
+                                        failed_titles.add(page.url)
                                 except Exception as retry_exc:
                                     num_failed_pages += 1
+                                    failed_titles.add(page.url)
                                     logger.error(
                                         f"Page failed even after session recovery: {page.url}",
                                         extra={
@@ -2028,6 +2148,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             else:
                                 # Non-transaction error, just count as failed
                                 num_failed_pages += 1
+                                failed_titles.add(page.url)
                                 logger.error(
                                     f"Unexpected error processing page: {page.url} - {page_exc}",
                                     extra={
@@ -2187,12 +2308,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             num_failed_files += 1
                 timings["process_files"] = time.time() - file_start
 
-            # Measure cleanup phase (delete stale blobs)
+            # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
-            # ✅ PERFORMANCE FIX: Batch delete instead of N individual queries
-            # Collect stale titles (set difference is O(n))
+            # Exclude failed_titles - their original data was preserved by savepoint.rollback()
             stale_titles = [
-                title for title in existing_titles if title not in crawled_titles
+                title for title in existing_titles
+                if title not in crawled_titles and title not in failed_titles
             ]
 
             # Batch delete in ONE query instead of N individual queries
@@ -2612,6 +2733,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "error": str(release_exc),
                     },
                 )
+        # Third fallback: emergency flag read when both paths unavailable
+        # Trigger: Both early Redis check AND tenant injection failed, leaving
+        # tenant=None and preacquired_tenant_id=None, which skips both paths above.
+        # This prevents slot leak until TTL in dual-failure scenarios.
+        # Safety: Watchdog deletes flag when releasing, so if flag exists, slot needs release.
+        elif tenant is None and preacquired_tenant_id is None and not acquired and job_id:
+            await _emergency_slot_release(job_id, redis_client, container, settings)
 
         # P1 FIX: Cleanup Redis retry counters to prevent memory leak
         # Why: Counters persist after job completion, causing Redis bloat

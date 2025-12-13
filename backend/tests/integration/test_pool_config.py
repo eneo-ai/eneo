@@ -30,6 +30,29 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from intric.main.config import Settings, reset_settings
 
 
+@pytest.fixture(autouse=True)
+def restore_settings_after_test(test_settings):
+    """Restore test settings after each test that modifies global settings.
+
+    Tests in this module call reset_settings() which wipes the test_settings.
+    This fixture ensures settings and auth_svc constants are restored afterward
+    to prevent test pollution affecting other integration tests.
+    """
+    yield
+
+    # Restore test settings
+    from intric.main.config import set_settings
+    set_settings(test_settings)
+
+    # Restore auth_svc module-level constants
+    import intric.authentication.auth_service as auth_svc
+    auth_svc.JWT_ALGORITHM = test_settings.jwt_algorithm
+    auth_svc.JWT_AUDIENCE = test_settings.jwt_audience
+    auth_svc.JWT_SECRET = test_settings.jwt_secret
+    auth_svc.JWT_EXPIRY_TIME_MINUTES = test_settings.jwt_expiry_time
+    auth_svc.OIDC_CLOCK_LEEWAY_SECONDS = test_settings.oidc_clock_leeway_seconds
+
+
 # =============================================================================
 # UNIT TESTS: Settings/env mapping (Category A)
 # =============================================================================
@@ -38,45 +61,36 @@ from intric.main.config import Settings, reset_settings
 class TestSettingsEnvMapping:
     """Test that pool settings are correctly read from environment variables."""
 
-    def test_defaults_match_current_behavior(self, monkeypatch):
+    def test_defaults_match_current_behavior(self):
         """
         Verify default values preserve current production behavior.
 
         CRITICAL: These defaults must NOT change without explicit env var override.
         Changing defaults silently would break production.
+
+        NOTE: This test checks the model field defaults, not runtime values,
+        because the test environment may have .env overrides.
         """
-        # Clear any existing env vars
-        for key in [
-            "DB_POOL_SIZE",
-            "DB_POOL_MAX_OVERFLOW",
-            "DB_POOL_TIMEOUT",
-            "DB_POOL_PRE_PING",
-            "DB_POOL_RECYCLE",
-            "DB_POOL_DEBUG",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        # Force fresh settings
-        reset_settings()
-
-        # Create fresh settings instance
-        settings = Settings(
-            postgres_user="test",
-            postgres_host="localhost",
-            postgres_password="test",
-            postgres_port=5432,
-            postgres_db="test",
-            redis_host="localhost",
-            redis_port=6379,
+        # Check the model field defaults directly (not affected by .env file)
+        # This verifies the code has correct defaults regardless of environment
+        assert Settings.model_fields["db_pool_size"].default == 20, (
+            "Default pool_size must be 20"
         )
-
-        # Assert defaults match documented current behavior
-        assert settings.db_pool_size == 20, "Default pool_size must be 20"
-        assert settings.db_pool_max_overflow == 10, "Default max_overflow must be 10"
-        assert settings.db_pool_timeout == 30, "Default timeout must be 30s"
-        assert settings.db_pool_pre_ping is True, "Default pre_ping must be True"
-        assert settings.db_pool_recycle == -1, "Default recycle must be -1 (disabled)"
-        assert settings.db_pool_debug is False, "Default debug must be False"
+        assert Settings.model_fields["db_pool_max_overflow"].default == 10, (
+            "Default max_overflow must be 10"
+        )
+        assert Settings.model_fields["db_pool_timeout"].default == 30, (
+            "Default timeout must be 30s"
+        )
+        assert Settings.model_fields["db_pool_pre_ping"].default is True, (
+            "Default pre_ping must be True"
+        )
+        assert Settings.model_fields["db_pool_recycle"].default == -1, (
+            "Default recycle must be -1 (disabled)"
+        )
+        assert Settings.model_fields["db_pool_debug"].default is False, (
+            "Default debug must be False"
+        )
 
     def test_env_overrides_are_applied(self, monkeypatch):
         """
@@ -135,6 +149,7 @@ class TestEngineKwargsBuilding:
         Passing None is risky; omitting the kwarg is safest across SQLAlchemy versions.
         """
         monkeypatch.setenv("DB_POOL_RECYCLE", "-1")
+        monkeypatch.setenv("DB_POOL_DEBUG", "false")  # Prevent event listener registration on mock
         reset_settings()
 
         captured_kwargs = {}
@@ -164,6 +179,7 @@ class TestEngineKwargsBuilding:
         When db_pool_recycle > 0, it should be passed to create_async_engine.
         """
         monkeypatch.setenv("DB_POOL_RECYCLE", "3600")
+        monkeypatch.setenv("DB_POOL_DEBUG", "false")  # Prevent event listener registration on mock
         reset_settings()
 
         captured_kwargs = {}
@@ -189,6 +205,7 @@ class TestEngineKwargsBuilding:
         WORKER_NAME env var should be used for application_name in connect_args.
         """
         monkeypatch.setenv("WORKER_NAME", "my-crawler-pod-abc123")
+        monkeypatch.setenv("DB_POOL_DEBUG", "false")  # Prevent event listener registration on mock
         reset_settings()
 
         captured_kwargs = {}
@@ -216,6 +233,7 @@ class TestEngineKwargsBuilding:
         When WORKER_NAME not set, application_name should fallback to intric-{pid}.
         """
         monkeypatch.delenv("WORKER_NAME", raising=False)
+        monkeypatch.setenv("DB_POOL_DEBUG", "false")  # Prevent event listener registration on mock
         reset_settings()
 
         captured_kwargs = {}

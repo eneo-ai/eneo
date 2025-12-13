@@ -21,9 +21,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture(autouse=True)
-def enable_tenant_credentials(test_settings, monkeypatch):
-    """Enable tenant credentials feature for all tests in this module."""
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+def enable_tenant_credentials(test_settings):
+    """Enable tenant credentials feature for all tests in this module.
+
+    Uses the proper set_settings() API to override the global settings singleton,
+    similar to the legacy_credentials_mode fixture pattern.
+    """
+    from dependency_injector import providers
+
+    from intric.main.config import get_settings, set_settings
+    from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
+
+    # Save original settings
+    original_settings = get_settings()
+
+    # Create modified settings with feature enabled
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+
+    # Override global settings
+    set_settings(enabled_settings)
+
+    # Rebuild encryption service to match new settings
+    Container.encryption_service.reset_last_overriding()
+    service = EncryptionService(enabled_settings.encryption_key)
+    Container.encryption_service.override(providers.Object(service))
+
+    yield
+
+    # Restore original settings
+    set_settings(original_settings)
+
+    # Restore original encryption service
+    Container.encryption_service.reset_last_overriding()
+    original_service = EncryptionService(original_settings.encryption_key)
+    Container.encryption_service.override(providers.Object(original_service))
 
 
 @pytest.mark.integration

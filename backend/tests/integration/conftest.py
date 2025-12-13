@@ -298,6 +298,15 @@ def override_settings_for_session(test_settings: Settings):
     auth_defs.OAUTH2_SCHEME = auth_defs._get_oauth2_scheme()
     auth_defs.API_KEY_HEADER = auth_defs._get_api_key_header()
 
+    # Reinitialize auth_service module-level constants
+    # These are captured at import time and need to be updated for tests
+    import intric.authentication.auth_service as auth_svc
+    auth_svc.JWT_ALGORITHM = test_settings.jwt_algorithm
+    auth_svc.JWT_AUDIENCE = test_settings.jwt_audience
+    auth_svc.JWT_SECRET = test_settings.jwt_secret
+    auth_svc.JWT_EXPIRY_TIME_MINUTES = test_settings.jwt_expiry_time
+    auth_svc.OIDC_CLOCK_LEEWAY_SECONDS = test_settings.oidc_clock_leeway_seconds
+
     # Verify settings are correct
     print("\n=== Integration Test Setup Verification ===")
     print("✓ Test settings configured")

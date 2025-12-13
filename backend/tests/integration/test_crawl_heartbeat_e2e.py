@@ -341,15 +341,18 @@ class TestHeartbeatWithOtherSettings:
 
         Heartbeat is for job-level observability, not request-level retries.
         """
-        await client.put(
+        # Note: crawl_job_max_age_seconds must be <= tenant_worker_semaphore_ttl_seconds - 300
+        # Default TTL is 2400, so max_age must be <= 2100
+        response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "crawl_heartbeat_interval_seconds": 120,
                 "retry_times": 5,
-                "crawl_job_max_age_seconds": 3600,
+                "crawl_job_max_age_seconds": 1800,  # Must be <= TTL(2400) - 300
             },
             headers={"X-API-Key": super_admin_token},
         )
+        assert response.status_code == 200, f"PUT failed: {response.text}"
 
         async with db_container() as container:
             tenant_repo = container.tenant_repo()
@@ -366,7 +369,7 @@ class TestHeartbeatWithOtherSettings:
             # Verify all settings configured independently
             assert heartbeat == 120
             assert retries == 5
-            assert max_age == 3600
+            assert max_age == 1800
 
     async def test_heartbeat_with_stale_threshold(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container

@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
     # See validate_worker_settings() which enforces this constraint
     # Configurable per-tenant via crawler_settings API
-    tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
+    tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 11  # 11 hour safety window (10h crawl + 1h buffer)
 
     # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
     crawl_feeder_enabled: bool = False  # Feature flag for gradual rollout
@@ -168,9 +168,10 @@ class Settings(BaseSettings):
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
-    orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
+    orphan_crawl_run_timeout_hours: int = 12  # Must be > crawl_max_length (10h) to avoid killing valid long crawls
     crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
     crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
+    crawl_heartbeat_max_failures: int = 3  # Terminate after N consecutive heartbeat failures (3 * 5min = 15min max)
     crawl_page_batch_size: int = 100  # Commit after every N pages during crawl (bounds data loss)
 
     # Federation per tenant feature flag
@@ -247,7 +248,7 @@ class Settings(BaseSettings):
     # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
     # Otherwise the concurrency slot could expire before crawl completes
     # See validate_worker_settings() which enforces this constraint
-    crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
+    crawl_max_length: int = 60 * 60 * 10  # 10 hour crawls max (large municipal sites)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules

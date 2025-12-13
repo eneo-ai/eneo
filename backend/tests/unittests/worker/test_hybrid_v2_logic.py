@@ -253,7 +253,7 @@ class TestEmbeddingSemaphoreBehavior:
         ), patch("intric.database.database.sessionmanager", mock_sm):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls = await persist_batch(
+            success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
@@ -324,7 +324,7 @@ class TestEmbeddingSemaphoreBehavior:
         ), patch("intric.database.database.sessionmanager", mock_sm):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls = await persist_batch(
+            success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=mock_embedding_model,
@@ -610,7 +610,7 @@ class TestSuccessfulUrlsTracking:
         ), patch("intric.database.database.sessionmanager", mock_sm):
             from intric.worker.crawl_tasks import persist_batch
 
-            success_count, failed_count, successful_urls = await persist_batch(
+            success_count, failed_count, successful_urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
@@ -630,7 +630,7 @@ class TestSuccessfulUrlsTracking:
     @pytest.mark.asyncio
     async def test_empty_buffer_returns_empty_urls(self, crawl_context, mock_embedding_model):
         """
-        INVARIANT: Empty page_buffer should return (0, 0, []).
+        INVARIANT: Empty page_buffer should return (0, 0, [], []).
         """
         from intric.worker.crawl_tasks import persist_batch
 
@@ -641,7 +641,7 @@ class TestSuccessfulUrlsTracking:
             create_embeddings_service=MagicMock(),
         )
 
-        assert result == (0, 0, []), f"Empty buffer should return (0, 0, []), got {result}"
+        assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_fails_all_pages(self, crawl_context):
@@ -655,7 +655,7 @@ class TestSuccessfulUrlsTracking:
             {"url": "https://example.com/page2", "content": "Content 2"},
         ]
 
-        success, failed, urls = await persist_batch(
+        success, failed, urls, _ = await persist_batch(
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
@@ -700,7 +700,7 @@ class TestSuccessfulUrlsTracking:
         ), patch("intric.database.database.sessionmanager", mock_sm):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls = await persist_batch(
+            success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
@@ -864,7 +864,7 @@ class TestTransactionWallTimeGuard:
         ), patch("intric.database.database.sessionmanager", mock_sm):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls = await persist_batch(
+            success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=mock_embedding_model,

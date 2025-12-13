@@ -357,7 +357,7 @@ class TestPoolIsolation:
                 create_embeddings_service=tracked_service,
             )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # Verify the test ran successfully
         assert success_count == 1, f"Expected 1 success, got {success_count}"
@@ -424,7 +424,7 @@ class TestPoolIsolation:
                 create_embeddings_service=create_mock_embeddings_service(),
             )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         assert success_count == 2, f"Expected 2 successes, got {success_count}"
         assert len(checkout_durations) == 1, "Should have exactly one pool checkout"
@@ -494,7 +494,7 @@ class TestSessionLifetime:
                 create_embeddings_service=create_mock_embeddings_service(),
             )
 
-        success_count, _, _ = result
+        success_count, _, _, _ = result
 
         assert success_count == 5, f"Expected 5 successes, got {success_count}"
 
@@ -542,7 +542,7 @@ class TestSessionLifetime:
 
         # The test passes if it completes without hanging
         # In a real slow scenario, asyncio.timeout would kick in
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
         assert success_count + failed_count == 10, "All pages should be accounted for"
 
 
@@ -647,7 +647,7 @@ class TestCancellationSafety:
             create_embeddings_service=create_mock_embeddings_service(),
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # Verify successful URLs match what's actually in the database
         async with sessionmanager.session() as session:
@@ -705,7 +705,7 @@ class TestCrawledTitlesAccuracy:
             create_embeddings_service=create_mock_embeddings_service(),
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         assert success_count == 3, f"Expected 3 successes, got {success_count}"
         assert len(successful_urls) == 3, f"Expected 3 URLs, got {len(successful_urls)}"
@@ -761,7 +761,7 @@ class TestCrawledTitlesAccuracy:
             create_embeddings_service=failing_service,
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # Page 2 should fail
         assert failed_count >= 1, "At least one page should fail"
@@ -826,7 +826,7 @@ class TestSavepointRollback:
             create_embeddings_service=create_mock_embeddings_service(),
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # All should succeed since we're using valid data
         assert success_count == 3, f"Expected 3 successes, got {success_count}"
@@ -976,7 +976,7 @@ class TestEmbeddingTimeout:
             create_embeddings_service=slow_service,
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # Second page should fail due to timeout
         assert failed_count >= 1, "At least one page should fail"
@@ -1011,7 +1011,7 @@ class TestEdgeCases:
             create_embeddings_service=create_mock_embeddings_service(),
         )
 
-        assert result == (0, 0, []), f"Empty buffer should return (0, 0, []), got {result}"
+        assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_fails_all(self, test_settings: Settings):
@@ -1032,7 +1032,7 @@ class TestEdgeCases:
             create_embeddings_service=create_mock_embeddings_service(),
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         assert success_count == 0, f"Expected 0 successes without model, got {success_count}"
         assert failed_count == 2, f"Expected 2 failures without model, got {failed_count}"
@@ -1068,7 +1068,7 @@ class TestEdgeCases:
             create_embeddings_service=create_mock_embeddings_service(),
         )
 
-        success_count, failed_count, successful_urls = result
+        success_count, failed_count, successful_urls, _ = result
 
         # Only valid page should succeed
         assert success_count == 1, f"Expected 1 success, got {success_count}"
