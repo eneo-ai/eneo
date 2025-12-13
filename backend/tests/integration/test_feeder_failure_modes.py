@@ -15,7 +15,9 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.crawl_feeder import CrawlFeeder
+from intric.worker.feeder.capacity import CapacityManager
+from intric.worker.feeder.election import LeaderElection
+from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
 
 
 @pytest.mark.integration
@@ -43,23 +45,23 @@ class TestZombieLeaderScenario:
         # Clean up any existing lock
         await redis_client.delete("crawl_feeder:leader")
 
-        # Create two feeder instances
-        feeder_a = CrawlFeeder()
-        feeder_b = CrawlFeeder()
+        # Create two leader election instances (simulating two feeders)
+        election_a = LeaderElection(redis_client, f"feeder-a-{uuid4().hex[:8]}")
+        election_b = LeaderElection(redis_client, f"feeder-b-{uuid4().hex[:8]}")
 
         # Feeder A acquires lock
-        acquired_a = await feeder_a._try_acquire_leader_lock(redis_client)
+        acquired_a = await election_a.try_acquire()
         assert acquired_a is True, "Feeder A should acquire lock"
 
         # Verify Feeder B cannot acquire while lock is valid
-        acquired_b_before = await feeder_b._try_acquire_leader_lock(redis_client)
+        acquired_b_before = await election_b.try_acquire()
         assert acquired_b_before is False, "Feeder B should NOT acquire while lock valid"
 
         # Simulate lock expiry by deleting it (simulates 30s passing)
         await redis_client.delete("crawl_feeder:leader")
 
         # Now Feeder B can acquire - this is the Zombie Leader scenario
-        acquired_b_after = await feeder_b._try_acquire_leader_lock(redis_client)
+        acquired_b_after = await election_b.try_acquire()
         assert acquired_b_after is True, "Feeder B acquires after lock expires (Zombie Leader)"
 
         # Cleanup
@@ -75,20 +77,23 @@ class TestZombieLeaderScenario:
         """
         await redis_client.delete("crawl_feeder:leader")
 
-        feeder_a = CrawlFeeder()
-        feeder_b = CrawlFeeder()
+        worker_id_a = f"feeder-a-{uuid4().hex[:8]}"
+        worker_id_b = f"feeder-b-{uuid4().hex[:8]}"
+
+        election_a = LeaderElection(redis_client, worker_id_a)
+        election_b = LeaderElection(redis_client, worker_id_b)
 
         # Feeder A acquires and refreshes
-        acquired = await feeder_a._try_acquire_leader_lock(redis_client)
+        acquired = await election_a.try_acquire()
         assert acquired is True, "Lock should be acquired before refresh"
-        await feeder_a._refresh_leader_lock(redis_client)
+        await election_a.refresh()
 
         # Check TTL was refreshed to ~30s
         ttl = await redis_client.ttl("crawl_feeder:leader")
         assert 25 <= ttl <= 30, f"Lock should be refreshed to ~30s TTL, got {ttl}"
 
         # Feeder B still cannot acquire
-        acquired_b = await feeder_b._try_acquire_leader_lock(redis_client)
+        acquired_b = await election_b.try_acquire()
         assert acquired_b is False, "Feeder B should NOT acquire after refresh"
 
         # Cleanup
@@ -123,18 +128,17 @@ class TestEnqueueStateLag:
         # Set active_jobs to 0 (full capacity available)
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "0")
 
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
+        capacity_mgr = CapacityManager(redis_client, test_settings)
 
         # First capacity check - full capacity
-        capacity_1 = await feeder._get_available_capacity(tenant_id, redis_client)
+        capacity_1 = await capacity_mgr.get_available_capacity(tenant_id)
         assert capacity_1 == max_concurrent, "Should see full capacity"
 
         # Simulate: Feeder enqueued jobs but workers haven't updated active_jobs yet
         # (In production, there's a lag between ARQ enqueue and worker pickup)
 
         # Second capacity check WITHOUT updating active_jobs - still sees full capacity
-        capacity_2 = await feeder._get_available_capacity(tenant_id, redis_client)
+        capacity_2 = await capacity_mgr.get_available_capacity(tenant_id)
         assert capacity_2 == max_concurrent, "Still sees full capacity (state lag)"
 
         # This documents the thundering herd risk - both checks returned full capacity
@@ -153,18 +157,17 @@ class TestEnqueueStateLag:
         # Initial state: 0 active jobs
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "0")
 
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
+        capacity_mgr = CapacityManager(redis_client, test_settings)
 
         # Check initial capacity
-        capacity_before = await feeder._get_available_capacity(tenant_id, redis_client)
+        capacity_before = await capacity_mgr.get_available_capacity(tenant_id)
         assert capacity_before == max_concurrent
 
         # Simulate: Workers picked up 3 jobs and updated counter
         await redis_client.set(f"tenant:{tenant_id}:active_jobs", "3")
 
         # Now capacity should be reduced
-        capacity_after = await feeder._get_available_capacity(tenant_id, redis_client)
+        capacity_after = await capacity_mgr.get_available_capacity(tenant_id)
         assert capacity_after == max_concurrent - 3, "Capacity should be reduced by 3"
 
         # Cleanup
@@ -209,16 +212,16 @@ class TestCrashBeforeLremRecovery:
             "crawl_type": "crawl",
         }
 
-        feeder = CrawlFeeder()
+        job_enqueuer = JobEnqueuer()
 
-        # Mock module-level job_manager.enqueue to raise duplicate error
-        with patch("intric.worker.crawl_feeder.job_manager") as mock_job_manager:
+        # Mock job_manager.enqueue to raise duplicate error
+        with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
             mock_job_manager.enqueue = AsyncMock(
                 side_effect=Exception("job_id already exists in queue")
             )
 
             # This should return True (success) despite the exception
-            success, returned_job_id = await feeder._enqueue_crawl_job(job_data, tenant_id)
+            success, returned_job_id = await job_enqueuer.enqueue(job_data, tenant_id)
 
         assert success is True, "Duplicate job_id error should be treated as success"
         assert returned_job_id == job_id, "Should return the job_id"
@@ -244,16 +247,16 @@ class TestCrashBeforeLremRecovery:
             "crawl_type": "crawl",
         }
 
-        feeder = CrawlFeeder()
+        job_enqueuer = JobEnqueuer()
 
-        # Mock module-level job_manager.enqueue to raise a REAL error
-        with patch("intric.worker.crawl_feeder.job_manager") as mock_job_manager:
+        # Mock job_manager.enqueue to raise a REAL error
+        with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
             mock_job_manager.enqueue = AsyncMock(
                 side_effect=Exception("Redis connection timeout")
             )
 
             # This should return False (failure) for real errors
-            success, returned_job_id = await feeder._enqueue_crawl_job(job_data, tenant_id)
+            success, returned_job_id = await job_enqueuer.enqueue(job_data, tenant_id)
 
         assert success is False, "Real errors should NOT be treated as success"
 
@@ -289,13 +292,13 @@ class TestCrashBeforeLremRecovery:
                 "crawl_type": "crawl",
             }
 
-            feeder = CrawlFeeder()
+            job_enqueuer = JobEnqueuer()
 
-            # Mock module-level job_manager.enqueue
-            with patch("intric.worker.crawl_feeder.job_manager") as mock_job_manager:
+            # Mock job_manager.enqueue
+            with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
                 mock_job_manager.enqueue = AsyncMock(side_effect=Exception(error_msg))
 
-                success, _ = await feeder._enqueue_crawl_job(job_data, tenant_id)
+                success, _ = await job_enqueuer.enqueue(job_data, tenant_id)
 
             assert success is True, f"Error '{error_msg}' should be treated as duplicate"
 
@@ -322,17 +325,17 @@ class TestPendingQueueIdempotency:
         raw_bytes = json.dumps(job_data, default=str, sort_keys=True).encode()
         await redis_client.rpush(queue_key, raw_bytes)
 
-        feeder = CrawlFeeder()
+        pending_queue = PendingQueue(redis_client)
 
-        # First removal - should work (now takes raw_bytes instead of job_data)
-        await feeder._remove_from_pending(tenant_id, raw_bytes, redis_client)
+        # First removal - should work
+        await pending_queue.remove(tenant_id, raw_bytes)
 
         # Verify job is removed
         remaining = await redis_client.lrange(queue_key, 0, -1)
         assert len(remaining) == 0, "Job should be removed"
 
         # Second removal - should NOT crash (idempotent)
-        await feeder._remove_from_pending(tenant_id, raw_bytes, redis_client)
+        await pending_queue.remove(tenant_id, raw_bytes)
 
         # Still empty, no crash
         remaining_after = await redis_client.lrange(queue_key, 0, -1)
@@ -357,10 +360,10 @@ class TestPendingQueueIdempotency:
         for job in jobs:
             await redis_client.rpush(queue_key, json.dumps(job))
 
-        feeder = CrawlFeeder()
+        pending_queue = PendingQueue(redis_client)
 
         # Get pending jobs - returns list of (raw_bytes, job_data) tuples
-        pending = await feeder._get_pending_crawls(tenant_id, redis_client, limit=5)
+        pending = await pending_queue.get_pending(tenant_id, limit=5)
 
         # Verify FIFO order - access tuple index 1 for job_data dict
         for i, (raw_bytes, job_data) in enumerate(pending):

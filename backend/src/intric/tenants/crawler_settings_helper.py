@@ -15,6 +15,10 @@ from intric.main.config import get_settings
 
 T = TypeVar("T")
 
+# Buffer time (5 minutes) between semaphore TTL and job max age
+# This ensures the flag doesn't expire before watchdog can kill stale jobs
+TTL_MAX_AGE_BUFFER_SECONDS = 300
+
 # Single source of truth for all crawler settings
 # Used by: get_crawler_setting(), get_all_crawler_settings(), tenant.py validator, router
 CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {

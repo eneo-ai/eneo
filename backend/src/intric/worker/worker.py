@@ -16,7 +16,7 @@ from dependency_injector import providers
 from intric.database.database import AsyncSession, sessionmanager
 from intric.jobs.task_models import ResourceTaskParams
 from intric.main.config import get_settings
-from intric.main.container.container import Container
+from intric.main.container.container import Container, SessionProxy
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType, Status
@@ -266,6 +266,100 @@ class Worker:
 
         return decorator
 
+    def long_running_function(self, with_user: bool = True):
+        """Decorator for long-running tasks (crawls, batch jobs).
+
+        Unlike function(), this does NOT hold a database session for the entire
+        task duration. Instead:
+
+        1. BOOTSTRAP PHASE (~50ms): Short-lived session to look up user
+        2. EXECUTION PHASE: Task runs with sessionless container
+        3. DB OPERATIONS: Task uses Container.session_scope() for each DB op
+
+        This prevents DB pool exhaustion for tasks that run minutes to hours.
+        The task is responsible for managing its own DB sessions via session_scope().
+
+        Example:
+            @worker.long_running_function()
+            async def crawl(job_id, params, container):
+                # NO session held here - use session_scope for DB ops:
+                async with container.session_scope() as session:
+                    repo = container.some_repo(session=session)
+                    await repo.update(...)
+                # Session returned to pool immediately
+        """
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(*args):
+                ctx, params = args[0], args[1]
+                logger.debug(
+                    f"Executing long-running {func.__name__} with context {ctx}"
+                )
+
+                # PHASE 1: Bootstrap - short-lived session for user lookup only
+                # Pattern: Query ORM → Convert to Pydantic INSIDE session → Return pure Python data
+                # Why: Pydantic model is session-independent, safe to use after session closes
+                user = None
+                if with_user and hasattr(params, "user_id") and params.user_id:
+                    async with sessionmanager.session() as session:
+                        async with session.begin():
+                            # Import here to avoid circular imports at module level
+                            from sqlalchemy.orm import selectinload
+                            from intric.database.tables.users_table import Users
+                            from intric.database.tables.tenant_table import Tenants
+                            from intric.users.user import UserInDB
+
+                            # Query with ALL selectinload options (exact match with UsersRepository._get_options())
+                            # CRITICAL: Every relationship field in UserInDB must be loaded here.
+                            # Missing any relationship causes MissingGreenlet/DetachedInstanceError
+                            # when Pydantic tries to validate (triggers lazy load in async context).
+                            stmt = (
+                                sa.select(Users)
+                                .where(Users.id == params.user_id)
+                                .where(Users.deleted_at.is_(None))  # Soft-delete safety
+                                .options(
+                                    selectinload(Users.roles),
+                                    selectinload(Users.predefined_roles),
+                                    selectinload(Users.tenant).selectinload(Tenants.modules),
+                                    selectinload(Users.api_key),
+                                    selectinload(Users.user_groups),
+                                )
+                            )
+                            result = await session.execute(stmt)
+                            user_row = result.scalar_one_or_none()
+                            if user_row:
+                                # Convert ORM → Pydantic INSIDE session (while relationships accessible)
+                                # This creates a pure Python object with no ORM bindings.
+                                # No expunge() needed - we're not using the ORM object after this.
+                                user = UserInDB.model_validate(user_row)
+                    # Session returned to pool HERE (~50ms total)
+                    # `user` is now a Pydantic model - pure Python data, session-independent
+
+                # PHASE 2: Create sessionless container with SessionProxy
+                # Inject SessionProxy() instead of None. This allows dependencies (like JobRepo)
+                # to be instantiated without failing type validation. The proxy delegates to
+                # the ContextVar set by session_scope(), raising a clear error if accessed
+                # outside a scope instead of cryptic "None is not AsyncSession" during DI.
+                container = Container(session=providers.Object(SessionProxy()))
+
+                # Override user if found during bootstrap
+                if user is not None:
+                    from intric.main.container.container_overrides import override_user
+                    override_user(container=container, user=user)
+
+                # PHASE 3: Execute task - NO session held
+                # Task uses Container.session_scope() for DB operations
+                logger.debug(
+                    f"Starting long-running task {func.__name__} (sessionless)",
+                    extra={"job_id": ctx.get("job_id")},
+                )
+                return await func(ctx["job_id"], params, container=container)
+
+            self.functions.append(wrapper)
+            return wrapper
+
+        return decorator
+
     def task(
         self,
         with_user: bool = True,
@@ -309,7 +403,7 @@ class Worker:
             async def wrapper(*args):
                 logger.debug(f"Executing {func.__name__}")
 
-                async with sessionmanager.session() as session:
+                async with sessionmanager.session() as session, session.begin():
                     container = await self._create_container(session)
 
                     return await func(container=container)

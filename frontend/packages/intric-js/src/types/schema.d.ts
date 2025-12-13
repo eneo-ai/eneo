@@ -1092,6 +1092,25 @@ export interface paths {
      */
     get: operations["download_file_signed_api_v1_files__id__download__get"];
   };
+  "/api/v1/icons/{id}/": {
+    /**
+     * Get icon image
+     * @description Returns icon as binary data. Public endpoint for img tags. Cached for 1 year.
+     */
+    get: operations["get_icon_api_v1_icons__id___get"];
+    /**
+     * Delete icon
+     * @description Delete an icon by ID. Requires authentication and ownership.
+     */
+    delete: operations["delete_icon_api_v1_icons__id___delete"];
+  };
+  "/api/v1/icons/": {
+    /**
+     * Upload icon
+     * @description Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.
+     */
+    post: operations["create_icon_api_v1_icons__post"];
+  };
   "/api/v1/limits/": {
     /** Get Limits */
     get: operations["get_limits_api_v1_limits__get"];
@@ -1820,6 +1839,13 @@ export interface paths {
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
   };
+  "/api/v1/auth/federation-status": {
+    /**
+     * Check federation configuration status
+     * @description Returns federation availability status for the system. Used by login page to determine which authentication method to show. No authentication required (public endpoint).
+     */
+    get: operations["get_federation_status_api_v1_auth_federation_status_get"];
+  };
   "/api/v1/auth/tenants": {
     /**
      * List tenants for selector
@@ -2020,6 +2046,11 @@ export interface components {
       transcription_model: components["schemas"]["TranscriptionModelPublic"];
       /** Data Retention Days */
       data_retention_days?: number | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
     };
     /** AppRunInput */
     AppRunInput: {
@@ -2091,6 +2122,11 @@ export interface components {
        * Format: uuid
        */
       user_id: string;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
     };
     /**
      * AppTemplateAdminCreate
@@ -2313,6 +2349,12 @@ export interface components {
        * @default NOT_PROVIDED
        */
       data_retention_days?: number | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       * @default NOT_PROVIDED
+       */
+      icon_id?: string | null;
     };
     /** Applications */
     Applications: {
@@ -2525,6 +2567,11 @@ export interface components {
        */
       description?: string | null;
       /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
+      /**
        * Insight Enabled
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
@@ -2586,6 +2633,11 @@ export interface components {
         [key: string]: unknown;
       } | null;
       type: components["schemas"]["AssistantType"];
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -2821,6 +2873,14 @@ export interface components {
       client_id?: string | null;
       /** Client Secret */
       client_secret?: string | null;
+    };
+    /** Body_create_icon_api_v1_icons__post */
+    Body_create_icon_api_v1_icons__post: {
+      /**
+       * File
+       * Format: binary
+       */
+      file: string;
     };
     /** Body_upload_file_api_v1_files__post */
     Body_upload_file_api_v1_files__post: {
@@ -3286,6 +3346,7 @@ export interface components {
      *         "settings": {
      *             "crawl_max_length": 14400,
      *             "download_timeout": 90,
+     *             "download_max_size": 10485760,
      *             "dns_timeout": 30,
      *             "retry_times": 2,
      *             "closespider_itemcount": 20000,
@@ -3341,6 +3402,7 @@ export interface components {
      *     {
      *         "crawl_max_length": 14400,
      *         "download_timeout": 90,
+     *         "download_max_size": 10485760,
      *         "dns_timeout": 30,
      *         "retry_times": 2,
      *         "closespider_itemcount": 20000,
@@ -3373,6 +3435,11 @@ export interface components {
        */
       download_timeout?: number | null;
       /**
+       * Download Max Size
+       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
+       */
+      download_max_size?: number | null;
+      /**
        * Dns Timeout
        * @description DNS resolution timeout in seconds (5s to 2 min)
        */
@@ -3404,7 +3471,7 @@ export interface components {
       tenant_worker_concurrency_limit?: number | null;
       /**
        * Crawl Stale Threshold Minutes
-       * @description Minutes without activity before job is considered stale (5 min to 24 hours)
+       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
        */
       crawl_stale_threshold_minutes?: number | null;
       /**
@@ -3432,6 +3499,21 @@ export interface components {
        * @description Maximum job retry age before permanent failure (5 min to 2 hours)
        */
       crawl_job_max_age_seconds?: number | null;
+      /**
+       * Tenant Worker Semaphore Ttl Seconds
+       * @description Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h) WARNING: Must be >= crawl_job_max_age_seconds + 300
+       */
+      tenant_worker_semaphore_ttl_seconds?: number | null;
+      /**
+       * Queued Stale Threshold Minutes
+       * @description Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)
+       */
+      queued_stale_threshold_minutes?: number | null;
+      /**
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       */
+      crawl_page_batch_size?: number | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -3612,6 +3694,11 @@ export interface components {
        * @example This is a helpful AI assistant
        */
       description?: string | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       /**
        * Insight Enabled
        * @default false
@@ -4011,7 +4098,11 @@ export interface components {
       | 9023
       | 9024
       | 9025
-      | 9026;
+      | 9026
+      | 9027
+      | 9028
+      | 9029
+      | 9030;
     /**
      * FederationInfo
      * @description Information about configured federation.
@@ -4037,6 +4128,26 @@ export interface components {
        * @enum {string}
        */
       encryption_status: "encrypted" | "plaintext";
+    };
+    /**
+     * FederationStatusResponse
+     * @description Federation configuration status for login page.
+     * @example {
+     *   "has_global_oidc_config": false,
+     *   "has_multi_tenant_federation": false,
+     *   "has_single_tenant_federation": true,
+     *   "tenant_count": 1
+     * }
+     */
+    FederationStatusResponse: {
+      /** Has Single Tenant Federation */
+      has_single_tenant_federation: boolean;
+      /** Has Multi Tenant Federation */
+      has_multi_tenant_federation: boolean;
+      /** Has Global Oidc Config */
+      has_global_oidc_config: boolean;
+      /** Tenant Count */
+      tenant_count: number;
     };
     /** FilePublic */
     FilePublic: {
@@ -4332,6 +4443,18 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
+    };
+    /** IconPublic */
+    IconPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
     };
     /** InfoBlobAddPublic */
     InfoBlobAddPublic: {
@@ -5754,6 +5877,11 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       */
+      icon_id?: string | null;
     };
     /** PartialCompletionModelUpdate */
     PartialCompletionModelUpdate: {
@@ -5856,6 +5984,11 @@ export interface components {
        * @description ID of the security classification to apply to this space. Set to null to remove the security classification. Omit to keep the current security classification unchanged.
        */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       */
+      icon_id?: string | null;
     };
     /**
      * Permission
@@ -6564,7 +6697,13 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       applications: components["schemas"]["Applications"];
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
     };
     /** SpaceMember */
     SpaceMember: {
@@ -6610,7 +6749,13 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       applications: components["schemas"]["Applications"];
+      default_assistant: components["schemas"]["DefaultAssistant"];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Completion Models */
@@ -6619,7 +6764,6 @@ export interface components {
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
-      default_assistant: components["schemas"]["DefaultAssistant"];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
@@ -6659,6 +6803,13 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
+      applications?: components["schemas"]["Applications"] | null;
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
     };
     /**
      * StateFilter
@@ -14110,6 +14261,101 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get icon image
+   * @description Returns icon as binary data. Public endpoint for img tags. Cached for 1 year.
+   */
+  get_icon_api_v1_icons__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "image/png": unknown;
+          "image/jpeg": unknown;
+          "image/webp": unknown;
+        };
+      };
+      /** @description Icon not found */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete icon
+   * @description Delete an icon by ID. Requires authentication and ownership.
+   */
+  delete_icon_api_v1_icons__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted */
+      204: {
+        content: never;
+      };
+      /** @description Not found */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload icon
+   * @description Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.
+   */
+  create_icon_api_v1_icons__post: {
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_create_icon_api_v1_icons__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IconPublic"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Limits */
   get_limits_api_v1_limits__get: {
     responses: {
@@ -14123,11 +14369,25 @@ export interface operations {
   };
   /** Get Spaces */
   get_spaces_api_v1_spaces__get: {
+    parameters: {
+      query?: {
+        /** @description Includes published applications on each space */
+        include_applications?: boolean;
+        /** @description Includes your personal space */
+        include_personal?: boolean;
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["PaginatedResponse_SpaceSparse_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -17372,6 +17632,20 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check federation configuration status
+   * @description Returns federation availability status for the system. Used by login page to determine which authentication method to show. No authentication required (public endpoint).
+   */
+  get_federation_status_api_v1_auth_federation_status_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FederationStatusResponse"];
         };
       };
     };

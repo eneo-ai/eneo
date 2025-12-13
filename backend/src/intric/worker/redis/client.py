@@ -1,3 +1,5 @@
+"""Redis client connection management for worker operations."""
+
 import redis.asyncio as aioredis
 from datetime import datetime, timezone
 from typing import NamedTuple
@@ -36,14 +38,12 @@ class WorkerHealth(NamedTuple):
 
 
 async def get_worker_health() -> WorkerHealth:
-    """
-    Check the health status of the arq worker by looking for its health check key in Redis.
+    """Check the health status of the arq worker via Redis health check key.
 
     Returns:
         WorkerHealth: Contains status, last_heartbeat timestamp, and details
     """
     try:
-        # Check for arq worker health check key
         # Default queue name in arq is "arq:queue", health check key is "{queue_name}:health-check"
         health_key = "arq:queue:health-check"
         worker_health_data = await r.get(health_key)
