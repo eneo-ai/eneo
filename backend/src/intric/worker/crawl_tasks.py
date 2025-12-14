@@ -66,11 +66,9 @@ async def queue_website_crawls(container: Container):
                 "Falling back to direct enqueue mode."
             )
 
-    # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 1: Query due websites with SHORT-LIVED session (~50-200ms)
-    # Why: Release connection immediately after query completes
-    # This prevents "Connection held for 60s" when processing many websites
-    # ═══════════════════════════════════════════════════════════════════════════
+    # Release connection immediately after query completes to prevent
+    # "Connection held for 60s" warnings when processing many websites.
     async with sessionmanager.session() as query_session, query_session.begin():
         crawl_scheduler_service = container.crawl_scheduler_service()
         # Inject the short-lived session for this query only
@@ -90,12 +88,10 @@ async def queue_website_crawls(container: Container):
     successful_crawls = 0
     failed_crawls = 0
 
-    # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 2: Process each website with its OWN short-lived session
-    # Why: Each website operation takes ~100-500ms. Without per-website sessions,
-    # a loop of 100 websites would hold ONE connection for 10-50 seconds.
+    # Each website operation takes ~100-500ms. Without per-website sessions,
+    # 100 websites would hold ONE connection for 10-50 seconds.
     # With per-website sessions, each connection is held for <500ms.
-    # ═══════════════════════════════════════════════════════════════════════════
     for website in websites:
         try:
             # Each website gets its own session scope
@@ -125,8 +121,11 @@ async def queue_website_crawls(container: Container):
 
                     # Step 2: Create job record in database
                     # Why: Pre-create so job_id is deterministic and available for feeder
+                    # CRITICAL: Use website_session, not container's outer cron_job session!
+                    # Bug fix: Job and CrawlRun must commit together for watchdog JOIN to work.
+                    # See: watchdog.py zombie reconciliation query joins Jobs with CrawlRuns
                     job_repo = container.job_repo()
-                    # job_repo uses delegate pattern - session injection handled by container
+                    job_repo.delegate.session = website_session  # Align with crawl_run_repo
                     job = Job(
                         task=Task.CRAWL,
                         name=f"Crawl: {website.name}",
@@ -537,12 +536,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             session_holder["session"] = None
             session_holder["uploader"] = uploader
 
-            # ═══════════════════════════════════════════════════════════════════════════
             # BOOTSTRAP PHASE: Short-lived session for initial queries (~50-100ms)
-            # Why: Extract all needed data as primitives BEFORE the long crawl.
-            # Session is returned to pool immediately after bootstrap completes.
-            # This prevents holding a connection for 5-30 minutes during the crawl.
-            # ═══════════════════════════════════════════════════════════════════════════
+            # Extract all needed data as primitives BEFORE the long crawl so the
+            # session returns to pool immediately. This prevents holding a connection
+            # for 5-30 minutes during the actual crawl operation.
             from intric.database.database import sessionmanager
             from intric.database.tables.websites_table import Websites as WebsitesTable
             from intric.database.tables.info_blobs_table import InfoBlobs
@@ -736,6 +733,31 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawled_titles = set()
             failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
 
+            # Get per-tenant settings for heartbeat BEFORE starting crawl
+            # This ensures heartbeat runs during the entire crawl phase
+            current_tenant = container.tenant()
+            heartbeat_interval_seconds = get_crawler_setting(
+                "crawl_heartbeat_interval_seconds",
+                current_tenant.crawler_settings if current_tenant else None,
+                default=settings.crawl_heartbeat_interval_seconds,
+            )
+            semaphore_ttl_seconds = get_crawler_setting(
+                "tenant_worker_semaphore_ttl_seconds",
+                tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                default=settings.tenant_worker_semaphore_ttl_seconds,
+            )
+
+            # Create heartbeat monitor BEFORE crawl starts
+            # This allows heartbeat to run during the Scrapy crawl phase (which can take 30+ minutes)
+            heartbeat_monitor = HeartbeatMonitor(
+                job_id=job_id,
+                redis_client=redis_client,
+                tenant=tenant,
+                interval_seconds=heartbeat_interval_seconds,
+                max_failures=settings.crawl_heartbeat_max_failures,
+                semaphore_ttl_seconds=semaphore_ttl_seconds,
+            )
+
             # Use Scrapy crawler to process website content
             # Measure crawl and parse phase
             start = time.time()
@@ -747,40 +769,34 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 http_pass=crawl_context.http_auth_pass,  # From bootstrap DTO
                 # Pass tenant settings for tenant-aware Scrapy configuration
                 tenant_crawler_settings=tenant.crawler_settings if tenant else None,
+                # Pass heartbeat callback for liveness during Scrapy crawl phase
+                heartbeat_callback=heartbeat_monitor.tick,
+                heartbeat_interval=float(heartbeat_interval_seconds),
             ) as crawl:
                 timings["crawl_and_parse"] = time.time() - start
+
+                # Track partial completion status for logging
+                crawl_is_partial = crawl.is_partial
+                crawl_termination_reason = crawl.termination_reason
+
+                if crawl_is_partial:
+                    logger.warning(
+                        f"Crawl timed out but has partial results - salvaging {crawl.pages_count} pages",
+                        extra={
+                            "job_id": str(job_id),
+                            "website_id": str(params.website_id),
+                            "url": params.url,
+                            "pages_collected": crawl.pages_count,
+                            "termination_reason": crawl_termination_reason,
+                        },
+                    )
 
                 # Measure page processing time
                 process_start = time.time()
 
-                # Get per-tenant settings for heartbeat
-                current_tenant = container.tenant()
-                heartbeat_interval_seconds = get_crawler_setting(
-                    "crawl_heartbeat_interval_seconds",
-                    current_tenant.crawler_settings if current_tenant else None,
-                    default=settings.crawl_heartbeat_interval_seconds,
-                )
-                semaphore_ttl_seconds = get_crawler_setting(
-                    "tenant_worker_semaphore_ttl_seconds",
-                    tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
-                    default=settings.tenant_worker_semaphore_ttl_seconds,
-                )
-
-                # Create heartbeat monitor for this crawl job
-                heartbeat_monitor = HeartbeatMonitor(
-                    job_id=job_id,
-                    redis_client=redis_client,
-                    tenant=tenant,
-                    interval_seconds=heartbeat_interval_seconds,
-                    max_failures=settings.crawl_heartbeat_max_failures,
-                    semaphore_ttl_seconds=semaphore_ttl_seconds,
-                )
-
-                # ═══════════════════════════════════════════════════════════════════
                 # Session-per-batch page processing (NO main session held)
-                # Why: Bootstrap already returned session to pool. All DB operations
-                # use session_scope() or persist_batch() which manage own sessions.
-                # ═══════════════════════════════════════════════════════════════════
+                # Bootstrap already returned session to pool. All DB operations
+                # use session_scope() or persist_batch() which manage their own sessions.
                 # Get services needed for persist_batch
                 # NOTE: embedding_model was extracted during bootstrap phase
                 create_embeddings_service = container.create_embeddings_service()
@@ -831,7 +847,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         page_buffer.clear()
 
                         logger.debug(
-                            f"Hybrid v2: flushed batch of {crawl_context.batch_size} pages",
+                            f"Flushed batch of {crawl_context.batch_size} pages",
                             extra={
                                 "job_id": str(job_id),
                                 "success": success_count,
@@ -853,7 +869,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     num_failed_pages += failed_count
 
                     logger.debug(
-                        f"Hybrid v2: final flush of {len(page_buffer)} pages",
+                        f"Final flush of {len(page_buffer)} pages",
                         extra={
                             "job_id": str(job_id),
                             "success": success_count,
@@ -1028,15 +1044,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             file_skip_rate = (num_skipped_files / num_files * 100) if num_files > 0 else 0
 
             # Structured crawl summary for easy log scanning
+            status_label = (
+                f"CRAWL PARTIAL ({crawl_termination_reason})"
+                if crawl_is_partial
+                else "CRAWL FINISHED"
+            )
             summary = [
                 "=" * 60,
-                f"CRAWL FINISHED: {params.url}",
+                f"{status_label}: {params.url}",
                 "-" * 60,
                 f"Pages:   {num_pages} crawled, {num_failed_pages} failed",
                 f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
-                "=" * 60,
             ]
+            if crawl_is_partial:
+                summary.append(f"⚠️  Partial completion due to: {crawl_termination_reason}")
+            summary.append("=" * 60)
             logger.info("\n".join(summary))
 
             # Performance breakdown log for analysis

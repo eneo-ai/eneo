@@ -1,5 +1,5 @@
 """
-CrawlContext DTO for Hybrid v2 session-per-batch pattern.
+CrawlContext DTO for session-per-batch pattern.
 
 This dataclass holds all context needed during a crawl operation as primitives.
 NO ORM objects - prevents DetachedInstanceError when sessions close between batches.
@@ -15,16 +15,13 @@ from intric.ai_models.model_enums import ModelFamily
 
 @dataclass(frozen=True)
 class EmbeddingModelSpec:
-    """
-    Immutable specification for embedding models - ALL fields are primitives.
+    """Immutable specification for embedding models - ALL fields are primitives.
 
     This DTO extracts all fields needed by embedding adapters from ORM objects,
     allowing sessions to close without causing DetachedInstanceError.
 
-    Used by:
-    - CreateEmbeddingsService for adapter selection
-    - LiteLLMEmbeddingAdapter, OpenAIEmbeddingAdapter, E5Adapter
-    - persist_batch() for embedding generation
+    The frozen=True ensures immutability during the crawl lifecycle, preventing
+    accidental modification of model configuration mid-operation.
 
     Fields match what adapters actually access on the model object:
     - name: Model display name (used in API calls for OpenAI/E5)
@@ -40,24 +37,28 @@ class EmbeddingModelSpec:
     litellm_model_name: str | None
     family: ModelFamily | None
     max_input: int
-    max_batch_size: int | None  # Optional, adapters default to 32
+    max_batch_size: int | None  # Adapters default to 32 if None
     dimensions: int | None
     open_source: bool = False
 
 
 @dataclass(frozen=True)
 class CrawlContext:
-    """
-    Immutable context for crawl operations - ALL fields are primitives.
+    """Immutable context for crawl operations - ALL fields are primitives.
 
     This DTO extracts all required data from ORM objects at crawl start,
     allowing sessions to be closed during network I/O without causing
     DetachedInstanceError.
 
-    Used by:
-    - persist_batch() for page persistence
-    - crawl loop for settings access
-    - heartbeat for TTL refresh
+    The frozen=True ensures this context cannot be accidentally modified
+    during the crawl lifecycle, making the data flow predictable.
+
+    Contains:
+    - Core identifiers (website, tenant, user)
+    - Embedding model configuration (extracted to avoid ORM access)
+    - HTTP auth credentials (repr=False for password security in logs)
+    - Batch settings for memory control during persist operations
+    - Timeout settings for fail-fast behavior
     """
 
     # Core identifiers

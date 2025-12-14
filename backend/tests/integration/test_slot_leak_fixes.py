@@ -1,8 +1,8 @@
 """
-Integration tests for Hybrid v2 slot leak fixes.
+Integration tests for slot leak fixes.
 
 Tests cover:
-1. Session lifecycle - main session closes before Hybrid v2 loop
+1. Session lifecycle - main session closes before crawl loop
 2. Partial batch failure tracking - successful_urls only includes actually persisted URLs
 3. Embedding API failures - errors don't corrupt successful_urls tracking
 4. Cancellation safety - cleanup on task cancellation
@@ -182,11 +182,11 @@ class TestCrawledTitlesTracking:
 
 
 class TestSessionLifecycle:
-    """Tests for session lifecycle management in Hybrid v2."""
+    """Tests for session lifecycle management in crawl tasks."""
 
     def test_session_close_location_documented(self):
         """
-        Verify that bootstrap_session.close() is called BEFORE the Hybrid v2 loop.
+        Verify that bootstrap_session.close() is called BEFORE the crawl loop.
 
         This is a documentation test - verifies the code structure.
         The bootstrap session is closed before "Session-per-batch page processing"
@@ -308,7 +308,7 @@ class TestZombieJobPrevention:
 
     def test_preemption_check_exists(self):
         """
-        Hybrid v2 should check for job preemption during heartbeat.
+        Crawl task should check for job preemption during heartbeat.
 
         If job status is FAILED, crawl should exit gracefully.
         Note: Preemption logic was extracted to HeartbeatMonitor during refactoring.

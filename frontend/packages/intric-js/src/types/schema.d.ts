@@ -3499,21 +3499,6 @@ export interface components {
        * @description Maximum job retry age before permanent failure (5 min to 2 hours)
        */
       crawl_job_max_age_seconds?: number | null;
-      /**
-       * Tenant Worker Semaphore Ttl Seconds
-       * @description Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h) WARNING: Must be >= crawl_job_max_age_seconds + 300
-       */
-      tenant_worker_semaphore_ttl_seconds?: number | null;
-      /**
-       * Queued Stale Threshold Minutes
-       * @description Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)
-       */
-      queued_stale_threshold_minutes?: number | null;
-      /**
-       * Crawl Page Batch Size
-       * @description Commit after every N pages during crawl (10 to 1000)
-       */
-      crawl_page_batch_size?: number | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -8657,6 +8642,7 @@ export interface operations {
   get_crawl_run_api_v1_crawl_runs__id___get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the crawl run to retrieve */
         id: string;
       };
     };
@@ -15120,6 +15106,7 @@ export interface operations {
   get_websites_api_v1_websites__get: {
     parameters: {
       query?: {
+        /** @description Filter websites by tenant scope */
         for_tenant?: boolean;
       };
     };
@@ -15238,6 +15225,7 @@ export interface operations {
   get_website_api_v1_websites__id___get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
     };
@@ -15266,6 +15254,7 @@ export interface operations {
   update_website_api_v1_websites__id___post: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to update */
         id: string;
       };
     };
@@ -15299,6 +15288,7 @@ export interface operations {
   delete_website_api_v1_websites__id___delete: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to delete */
         id: string;
       };
     };
@@ -15343,6 +15333,7 @@ export interface operations {
   run_crawl_api_v1_websites__id__run__post: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to crawl */
         id: string;
       };
     };
@@ -15377,6 +15368,7 @@ export interface operations {
   get_crawl_runs_api_v1_websites__id__runs__get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
     };
@@ -15399,6 +15391,7 @@ export interface operations {
   transfer_website_to_space_api_v1_websites__id__transfer__post: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to transfer */
         id: string;
       };
     };
@@ -15424,6 +15417,7 @@ export interface operations {
   get_info_blobs_api_v1_websites__id__info_blobs__get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
     };

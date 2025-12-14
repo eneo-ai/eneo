@@ -1,6 +1,6 @@
 """Unit tests for the OrphanWatchdog module.
 
-Tests the 4-phase orphan job cleanup with transaction-safe slot release.
+Tests the 5-phase orphan job cleanup with transaction-safe slot release.
 Following TDD approach - tests define expected behavior before implementation.
 """
 
@@ -332,7 +332,7 @@ class TestWatchdogOrchestration:
 
     @pytest.mark.asyncio
     async def test_runs_all_phases_in_order(self):
-        """Should execute phases 0-3 in order within transaction."""
+        """Should execute phases 0, 1, 2, 3.5, 3 in order within transaction."""
         from intric.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
@@ -362,6 +362,11 @@ class TestWatchdogOrchestration:
             from intric.worker.feeder.watchdog import Phase2Result
             return Phase2Result(jobs_to_requeue=[], rescued_count=0)
 
+        async def mock_phase3_5(*args, **kwargs):
+            execution_order.append("phase3.5")
+            from intric.worker.feeder.watchdog import Phase3_5Result
+            return Phase3_5Result(failed_job_ids=[], slots_to_release=[])
+
         async def mock_phase3(*args, **kwargs):
             execution_order.append("phase3")
             from intric.worker.feeder.watchdog import Phase3Result
@@ -370,6 +375,7 @@ class TestWatchdogOrchestration:
         watchdog._run_phase0_reconciliation = mock_phase0
         watchdog._kill_expired_jobs = mock_phase1
         watchdog._rescue_stuck_jobs = mock_phase2
+        watchdog._fail_stalled_startup_jobs = mock_phase3_5
         watchdog._fail_long_running_jobs = mock_phase3
         watchdog._release_slots_safe = AsyncMock(return_value=0)
 
@@ -387,7 +393,7 @@ class TestWatchdogOrchestration:
 
             await watchdog.run_cleanup()
 
-        assert execution_order == ["phase0", "phase1", "phase2", "phase3"]
+        assert execution_order == ["phase0", "phase1", "phase2", "phase3.5", "phase3"]
 
     @pytest.mark.asyncio
     async def test_slot_release_happens_after_db_commit(self):
@@ -396,6 +402,7 @@ class TestWatchdogOrchestration:
             OrphanWatchdog,
             Phase1Result,
             Phase2Result,
+            Phase3_5Result,
             Phase3Result,
             SlotReleaseJob,
         )
@@ -437,12 +444,16 @@ class TestWatchdogOrchestration:
         async def mock_phase2(*args, **kwargs):
             return Phase2Result(jobs_to_requeue=[], rescued_count=0)
 
+        async def mock_phase3_5(*args, **kwargs):
+            return Phase3_5Result(failed_job_ids=[], slots_to_release=[])
+
         async def mock_phase3(*args, **kwargs):
             return Phase3Result(failed_job_ids=[], slots_to_release=[])
 
         watchdog._run_phase0_reconciliation = mock_phase0
         watchdog._kill_expired_jobs = mock_phase1
         watchdog._rescue_stuck_jobs = mock_phase2
+        watchdog._fail_stalled_startup_jobs = mock_phase3_5
         watchdog._fail_long_running_jobs = mock_phase3
         watchdog._release_slots_safe = track_slot_release
 

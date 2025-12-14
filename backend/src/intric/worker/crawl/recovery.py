@@ -54,29 +54,15 @@ __all__ = [
 ]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TYPE DEFINITIONS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
 class SessionHolder(TypedDict):
     """Mutable container for session reference across recovery.
 
     Used to pass session by reference so recovery can update the caller's
     reference without changing function signatures.
-
-    Attributes:
-        session: The current SQLAlchemy async session
-        uploader: The text processor service (depends on session)
     """
 
     session: Any  # AsyncSession - using Any to avoid import issues
     uploader: Any  # TextProcessor
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TRANSACTION ERROR DETECTION
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def is_invalid_transaction_error(error: Exception) -> bool:
@@ -126,11 +112,6 @@ def is_invalid_transaction_error_msg(message: str | None) -> bool:
         or "autobegin is disabled" in msg_lower  # Session lost transaction state
         or "another operation is in progress" in msg_lower  # asyncpg connection busy
     )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# SESSION RECOVERY
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 async def recover_session(
@@ -206,11 +187,6 @@ async def recover_session(
     )
 
     return new_session, new_uploader
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PUBLIC API: Session Recovery Wrapper (Session-per-Operation Pattern)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 async def execute_with_recovery(
@@ -360,11 +336,6 @@ async def execute_with_recovery(
                 pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PUBLIC API: Exponential Backoff
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
 def calculate_exponential_backoff(
     attempt: int,
     base_delay: float,
@@ -399,11 +370,6 @@ def calculate_exponential_backoff(
     # Full jitter: random between 0 and capped_delay
     # This prevents synchronized retries (thundering herd)
     return random.uniform(0, capped_delay)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PUBLIC API: Redis Retry Statistics
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 async def reset_tenant_retry_delay(

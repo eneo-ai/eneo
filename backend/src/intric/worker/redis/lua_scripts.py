@@ -11,6 +11,7 @@ preventing race conditions in distributed Redis operations.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -30,10 +31,6 @@ class LuaScripts:
         # Or use the helper methods for type-safe execution
         await LuaScripts.acquire_slot(redis, tenant_id, limit, ttl_seconds)
     """
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # SLOT MANAGEMENT: Per-tenant concurrency limiting
-    # ─────────────────────────────────────────────────────────────────────────
 
     ACQUIRE_SLOT: str = (
         # Atomically acquire a slot for a tenant, respecting concurrency limit.
@@ -90,10 +87,6 @@ class LuaScripts:
         "return current\n"
     )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # LEADER ELECTION: Distributed lock ownership
-    # ─────────────────────────────────────────────────────────────────────────
-
     REFRESH_LEADER_LOCK: str = (
         # Safely refresh leader lock TTL, verifying ownership first.
         #
@@ -138,10 +131,6 @@ class LuaScripts:
         "return 0\n"
     )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # WATCHDOG: Zombie counter reconciliation
-    # ─────────────────────────────────────────────────────────────────────────
-
     RECONCILE_COUNTER_CAS: str = (
         # Compare-and-swap for zombie counter correction (Phase 0 watchdog).
         #
@@ -177,19 +166,15 @@ class LuaScripts:
         "return 'ok:set'\n"
     )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Helper methods for type-safe execution
-    # ─────────────────────────────────────────────────────────────────────────
-
     @staticmethod
-    def slot_key(tenant_id) -> str:
+    def slot_key(tenant_id: UUID) -> str:
         """Generate the Redis key for tenant slot counter."""
         return f"tenant:{tenant_id}:active_jobs"
 
     @staticmethod
     async def acquire_slot(
         redis: "Redis",
-        tenant_id,
+        tenant_id: UUID,
         limit: int,
         ttl_seconds: int,
     ) -> int:
@@ -220,7 +205,7 @@ class LuaScripts:
     @staticmethod
     async def release_slot(
         redis: "Redis",
-        tenant_id,
+        tenant_id: UUID,
         ttl_seconds: int,
     ) -> int:
         """Release a slot for a tenant.
@@ -301,7 +286,7 @@ class LuaScripts:
     @staticmethod
     async def reconcile_counter(
         redis: "Redis",
-        tenant_id,
+        tenant_id: UUID,
         observed: int,
         new_value: int,
         ttl_seconds: int,

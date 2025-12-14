@@ -7,7 +7,7 @@ from typing import NamedTuple
 from intric.main.config import get_settings
 
 
-def _get_redis_connection():
+def _get_redis_connection() -> aioredis.Redis:
     """Lazy initialization of Redis connection using current settings."""
     settings = get_settings()
     pool = aioredis.ConnectionPool.from_url(
@@ -17,10 +17,10 @@ def _get_redis_connection():
 
 
 # Initialize on first import
-_redis_client = None
+_redis_client: aioredis.Redis | None = None
 
 
-def get_redis():
+def get_redis() -> aioredis.Redis:
     """Get Redis client, creating it if needed."""
     global _redis_client
     if _redis_client is None:

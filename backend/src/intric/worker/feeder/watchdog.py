@@ -1,10 +1,18 @@
 """Orphan job cleanup with Safe Watchdog pattern.
 
-Provides 4-phase cleanup for stuck/orphaned crawl jobs:
+Provides 5-phase cleanup for stuck/orphaned crawl jobs:
 - Phase 0: Zombie counter reconciliation (Redis vs DB)
 - Phase 1: Kill expired QUEUED jobs (created_at > max_age)
 - Phase 2: Rescue stuck QUEUED jobs (stale updated_at, fresh created_at)
-- Phase 3: Fail long-running IN_PROGRESS jobs
+- Phase 3.5: Fail stalled startup jobs (IN_PROGRESS + no progress + stale, ~15min)
+- Phase 3: Fail long-running IN_PROGRESS jobs (12h timeout for jobs WITH progress)
+
+Phase 3.5 vs Phase 3:
+- Phase 3.5 catches "early zombies" - workers that crashed before any progress.
+  Uses compound condition: IN_PROGRESS + pages_crawled IS NULL/0 + updated_at stale.
+  Timeout aligned with heartbeat config (5min × 3 failures = 15min).
+- Phase 3 catches jobs that made progress but ran too long (>12h).
+  Protects legitimate large crawls that can take up to 10 hours.
 
 Transaction safety: All DB operations happen inside a transaction.
 Slot releases happen AFTER commit (best-effort, won't rollback DB).
@@ -61,12 +69,29 @@ class Phase3Result:
 
 
 @dataclass
+class Phase3_5Result:
+    """Result of Phase 3.5: Fail stalled startup jobs (early zombies).
+
+    Detects jobs that are IN_PROGRESS but never made progress:
+    - pages_crawled IS NULL (no progress persisted)
+    - updated_at stale (no heartbeat within threshold)
+
+    These are "early zombies" - workers that crashed before processing any pages.
+    Uses shorter timeout than Phase 3 to avoid blocking users for 12 hours.
+    """
+
+    failed_job_ids: list[UUID] = field(default_factory=list)
+    slots_to_release: list[SlotReleaseJob] = field(default_factory=list)
+
+
+@dataclass
 class CleanupMetrics:
     """Metrics from a watchdog cleanup run."""
 
     zombies_reconciled: int = 0
     expired_killed: int = 0
     rescued: int = 0
+    early_zombies_failed: int = 0  # Phase 3.5: stalled startup jobs
     long_running_failed: int = 0
     slots_released: int = 0
 
@@ -114,7 +139,13 @@ class OrphanWatchdog:
                 phase2_result = await self._rescue_stuck_jobs(session, now=now)
                 metrics.rescued = phase2_result.rescued_count
 
-                # Phase 3: Fail long-running IN_PROGRESS jobs
+                # Phase 3.5: Fail stalled startup jobs (early zombies)
+                # Runs BEFORE Phase 3 to catch jobs that never made progress
+                phase3_5_result = await self._fail_stalled_startup_jobs(session, now=now)
+                metrics.early_zombies_failed = len(phase3_5_result.failed_job_ids)
+                slots_to_release.extend(phase3_5_result.slots_to_release)
+
+                # Phase 3: Fail long-running IN_PROGRESS jobs (with progress)
                 phase3_result = await self._fail_long_running_jobs(session, now=now)
                 metrics.long_running_failed = len(phase3_result.failed_job_ids)
                 slots_to_release.extend(phase3_result.slots_to_release)
@@ -535,6 +566,94 @@ class OrphanWatchdog:
                 return True
             raise
 
+    async def _fail_stalled_startup_jobs(
+        self, session: AsyncSession, now: datetime
+    ) -> Phase3_5Result:
+        """Phase 3.5: Fail early zombie jobs that never made progress.
+
+        Detects jobs that are IN_PROGRESS but have:
+        - pages_crawled IS NULL (no progress persisted to CrawlRun)
+        - updated_at stale beyond startup threshold
+
+        These are "early zombies" - workers crashed after _on_job_start hook
+        marked the job IN_PROGRESS, but before any actual crawling began.
+
+        Uses compound condition to avoid false positives:
+        - Legitimate slow-starting crawls will have heartbeat updating updated_at
+        - Threshold aligned with heartbeat config (5min × 3 failures = 15min)
+
+        Args:
+            session: Database session.
+            now: Current timestamp.
+
+        Returns:
+            Phase3_5Result with jobs to release slots for.
+        """
+        from sqlalchemy import and_, or_, select, update
+
+        from intric.database.tables.job_table import Jobs
+        from intric.database.tables.websites_table import CrawlRuns
+        from intric.main.models import Status
+
+        # Use heartbeat-aligned threshold: 3 × heartbeat_interval = ~15 minutes
+        # This aligns with crawl_heartbeat_max_failures × crawl_heartbeat_interval_seconds
+        heartbeat_interval = self._settings.crawl_heartbeat_interval_seconds
+        max_failures = self._settings.crawl_heartbeat_max_failures
+        startup_timeout_seconds = heartbeat_interval * max_failures  # 5min × 3 = 15min
+
+        startup_cutoff = now - timedelta(seconds=startup_timeout_seconds)
+
+        result = Phase3_5Result()
+
+        # Find early zombie jobs: IN_PROGRESS with no progress and stale updated_at
+        # Catch both NULL and 0 for pages_crawled (some code paths may initialize to 0)
+        query = (
+            select(Jobs.id.label("job_id"), CrawlRuns.tenant_id, CrawlRuns.id.label("crawl_run_id"))
+            .select_from(Jobs)
+            .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
+            .where(
+                and_(
+                    Jobs.task == "CRAWL",
+                    Jobs.status == Status.IN_PROGRESS,
+                    Jobs.updated_at < startup_cutoff,
+                    # Compound condition: no progress ever made (NULL or 0)
+                    or_(CrawlRuns.pages_crawled.is_(None), CrawlRuns.pages_crawled == 0),
+                )
+            )
+        )
+        query_result = await session.execute(query)
+        stalled_jobs = query_result.fetchall()
+
+        if stalled_jobs:
+            stalled_job_ids = [row.job_id for row in stalled_jobs]
+
+            logger.info(
+                "Phase 3.5: Found stalled startup jobs (early zombies)",
+                extra={
+                    "count": len(stalled_job_ids),
+                    "startup_timeout_seconds": startup_timeout_seconds,
+                    "job_ids": [str(jid) for jid in stalled_job_ids[:5]],  # Log first 5
+                },
+            )
+
+            # Mark as FAILED
+            fail_stmt = (
+                update(Jobs)
+                .where(Jobs.id.in_(stalled_job_ids))
+                .values(status=Status.FAILED, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            await session.execute(fail_stmt)
+
+            # Track for slot release
+            for row in stalled_jobs:
+                result.failed_job_ids.append(row.job_id)
+                result.slots_to_release.append(
+                    SlotReleaseJob(job_id=row.job_id, tenant_id=row.tenant_id)
+                )
+
+        return result
+
     async def _fail_long_running_jobs(
         self, session: AsyncSession, now: datetime
     ) -> Phase3Result:
@@ -652,16 +771,19 @@ class OrphanWatchdog:
             metrics.zombies_reconciled > 0
             or metrics.expired_killed > 0
             or metrics.rescued > 0
+            or metrics.early_zombies_failed > 0
             or metrics.long_running_failed > 0
         ):
             logger.info(
                 f"Safe Watchdog: zombies={metrics.zombies_reconciled}, "
                 f"killed={metrics.expired_killed}, rescued={metrics.rescued}, "
+                f"early_zombies={metrics.early_zombies_failed}, "
                 f"failed_in_progress={metrics.long_running_failed}",
                 extra={
                     "zombies_reconciled": metrics.zombies_reconciled,
                     "expired_killed": metrics.expired_killed,
                     "rescued": metrics.rescued,
+                    "early_zombies_failed": metrics.early_zombies_failed,
                     "long_running_failed": metrics.long_running_failed,
                     "slots_released": metrics.slots_released,
                 },

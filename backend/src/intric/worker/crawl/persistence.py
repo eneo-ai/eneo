@@ -1,6 +1,6 @@
 """Batch persistence for crawled pages using the TWO-PHASE pattern.
 
-This module contains the core persistence logic for Hybrid v2 crawling:
+This module contains the core persistence logic for crawling:
 - Phase 1: Pure compute (embeddings) outside any DB transaction
 - Phase 2: Short-lived DB session (~50-300ms) for persistence
 
@@ -36,9 +36,8 @@ logger = logging.getLogger(__name__)
 _CHUNK_SIZE = 200
 _CHUNK_OVERLAP = 40
 
-# ═══════════════════════════════════════════════════════════════════════════════
 # EMBEDDING SEMAPHORE: Module-level bounded concurrency
-# ═══════════════════════════════════════════════════════════════════════════════
+#
 # This semaphore limits concurrent embedding API calls across ALL crawl tasks
 # in this worker process. Without this, N concurrent crawls could each fire
 # embedding requests simultaneously, overwhelming the embedding API or hitting
@@ -46,7 +45,6 @@ _CHUNK_OVERLAP = 40
 #
 # The semaphore is created lazily on first use to ensure it uses the correct
 # concurrency limit from settings.
-# ═══════════════════════════════════════════════════════════════════════════════
 _EMBEDDING_SEMAPHORE: asyncio.Semaphore | None = None
 
 
@@ -80,8 +78,8 @@ async def persist_batch(
     """
     Persist a batch of pages using the TWO-PHASE pattern.
 
-    This function is the core of Hybrid v2, designed to minimize database
-    connection hold time by separating compute from persistence.
+    This function minimizes database connection hold time by separating
+    compute from persistence using a two-phase pattern.
 
     PHASE 1 (Pure Compute - ZERO DB operations):
         - Compute content_hash via SHA-256
@@ -126,7 +124,7 @@ async def persist_batch(
 
     if embedding_model is None:
         logger.warning(
-            "Hybrid v2: No embedding model provided, skipping batch",
+            "No embedding model provided, skipping batch",
             extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
         )
         # All pages failed due to missing embedding model - return URLs as failed
@@ -147,12 +145,10 @@ async def persist_batch(
         length_function=count_tokens,
     )
 
-    # ═══════════════════════════════════════════════════════════════════════
     # PHASE 1: Pure Compute (ZERO DB OPERATIONS)
     # All embedding API calls happen here, OUTSIDE any database transaction.
-    # ═══════════════════════════════════════════════════════════════════════
     logger.debug(
-        "Hybrid v2 Phase 1: Computing embeddings for batch",
+        "Phase 1: Computing embeddings for batch",
         extra={
             "website_id": str(ctx.website_id),
             "batch_size": len(page_buffer),
@@ -166,7 +162,7 @@ async def persist_batch(
 
         if not content.strip():
             logger.warning(
-                f"Hybrid v2: Skipping empty page {url}",
+                f"Skipping empty page {url}",
                 extra={
                     "website_id": str(ctx.website_id),
                     "url": url,
@@ -188,7 +184,7 @@ async def persist_batch(
 
             if not chunks:
                 logger.warning(
-                    f"Hybrid v2: No chunks after splitting for {url}",
+                    f"No chunks after splitting for {url}",
                     extra={
                         "website_id": str(ctx.website_id),
                         "url": url,
@@ -224,7 +220,7 @@ async def persist_batch(
                         )
                 except asyncio.TimeoutError:
                     logger.warning(
-                        f"Hybrid v2: Embedding timeout for {url} after {ctx.embedding_timeout_seconds}s",
+                        f"Embedding timeout for {url} after {ctx.embedding_timeout_seconds}s",
                         extra={
                             "website_id": str(ctx.website_id),
                             "tenant_id": str(ctx.tenant_id),
@@ -264,14 +260,14 @@ async def persist_batch(
             # Check memory cap for early flush
             if buffer_embedding_bytes >= ctx.max_batch_embedding_bytes:
                 logger.info(
-                    f"Hybrid v2: Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
+                    f"Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
                     extra={"website_id": str(ctx.website_id), "pages_prepared": len(prepared_pages)},
                 )
                 break
 
         except Exception as e:
             logger.error(
-                f"Hybrid v2 Phase 1: Failed to prepare page {url}: {e}",
+                f"Phase 1: Failed to prepare page {url}: {e}",
                 extra={
                     "website_id": str(ctx.website_id),
                     "tenant_id": str(ctx.tenant_id),
@@ -285,18 +281,16 @@ async def persist_batch(
 
     if not prepared_pages:
         logger.warning(
-            "Hybrid v2: No pages prepared after Phase 1",
+            "No pages prepared after Phase 1",
             extra={"website_id": str(ctx.website_id), "failed_count": failed_count},
         )
         return success_count, failed_count, [], failed_urls
 
-    # ═══════════════════════════════════════════════════════════════════════
     # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
     # This is the only part that holds a database connection.
     # Target: ~50-300ms total, returned to pool immediately after.
-    # ═══════════════════════════════════════════════════════════════════════
     logger.debug(
-        "Hybrid v2 Phase 2: Persisting batch to database",
+        "Phase 2: Persisting batch to database",
         extra={
             "website_id": str(ctx.website_id),
             "pages_to_persist": len(prepared_pages),
@@ -372,7 +366,7 @@ async def persist_batch(
                         failed_count += 1
                         failed_urls.append(prepared.url)
                         logger.error(
-                            f"Hybrid v2 Phase 2: Failed to persist page {prepared.url}: {e}",
+                            f"Phase 2: Failed to persist page {prepared.url}: {e}",
                             extra={
                                 "website_id": str(ctx.website_id),
                                 "tenant_id": str(ctx.tenant_id),
@@ -383,7 +377,7 @@ async def persist_batch(
 
         # Connection returned to pool HERE - typically ~50-300ms total
         logger.debug(
-            "Hybrid v2 Phase 2: Batch persist complete",
+            "Phase 2: Batch persist complete",
             extra={
                 "website_id": str(ctx.website_id),
                 "success_count": success_count,
@@ -393,7 +387,7 @@ async def persist_batch(
 
     except asyncio.TimeoutError:
         logger.error(
-            f"Hybrid v2 Phase 2: Transaction wall-time exceeded ({ctx.max_transaction_wall_time_seconds}s)",
+            f"Phase 2: Transaction wall-time exceeded ({ctx.max_transaction_wall_time_seconds}s)",
             extra={
                 "website_id": str(ctx.website_id),
                 "pages_attempted": len(prepared_pages),
@@ -407,7 +401,7 @@ async def persist_batch(
 
     except Exception as e:
         logger.error(
-            f"Hybrid v2 Phase 2: Session error: {e}",
+            f"Phase 2: Session error: {e}",
             extra={
                 "website_id": str(ctx.website_id),
                 "error": str(e),

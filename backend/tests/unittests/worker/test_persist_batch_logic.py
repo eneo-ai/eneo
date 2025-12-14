@@ -1,8 +1,8 @@
 """
-Unit tests for Hybrid v2 persist_batch logic.
+Unit tests for persist_batch two-phase logic.
 
 These tests verify RUNTIME BEHAVIOR of the two-phase pattern, NOT source code structure.
-Each test validates a specific invariant of the Hybrid v2 implementation.
+Each test validates a specific invariant of the implementation.
 
 Core Invariants Tested:
 1. Phase 1 (embedding) completes BEFORE any DB session is opened
@@ -13,7 +13,7 @@ Core Invariants Tested:
 6. Delete and insert happen within the same savepoint (atomic)
 7. successful_urls contains ONLY URLs that committed successfully
 
-Run with: pytest tests/unittests/worker/test_hybrid_v2_logic.py -v
+Run with: pytest tests/unittests/worker/test_persist_batch_logic.py -v
 """
 
 import asyncio
