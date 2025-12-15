@@ -7,7 +7,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
-from intric.database.database import AsyncSession, sessionmanager
+from intric.database.database import sessionmanager
 from intric.database.tables.job_table import Jobs
 from intric.jobs.job_service import JobService
 from intric.main.logging import get_logger
@@ -31,14 +31,25 @@ class TaskManager:
         self,
         user: UserInDB,
         job_id: UUID,
-        session: AsyncSession,
-        job_service: JobService,
+        job_service: JobService | None = None,
         channel_type: ChannelType | None = None,
         resource_id: UUID | None = None,
     ):
+        # NOTE: job_service is now optional for long-running worker tasks.
+        # Why: The "sessionless container" pattern for crawl_task cannot provide
+        # job_service because it triggers a transitive dependency chain:
+        #   task_manager → job_service → job_repo → session
+        # This fails type validation when session=None.
+        #
+        # In crawl_task, job_service is NOT needed because:
+        # 1. _job_already_handled=True skips complete_job/fail_job
+        # 2. Status updates use execute_with_recovery() with own sessions
+        # 3. set_status() is never called in the crawl path
+        #
+        # For non-crawl tasks (using @worker.task decorator), job_service
+        # is still provided via container.task_manager().
         self.user = user
         self.job_id = job_id
-        self.session = session
         self.job_service = job_service
         self.channel_type = channel_type
         self.resource_id = resource_id
@@ -47,9 +58,8 @@ class TaskManager:
         self._result_location = None
         self._cleanup_func = None
         # Flag to skip job completion if already handled by crawl_task
-        # Why: After session recovery, this TaskManager holds stale session references.
-        # crawl_task handles completion using current_session(), then sets this flag
-        # so we don't attempt to use the stale job_service.
+        # Why: crawl_task uses execute_with_recovery() to handle job completion
+        # with its own session management. This flag prevents duplicate updates.
         self._job_already_handled = False
 
         self.additional_data = None
@@ -119,12 +129,32 @@ class TaskManager:
     async def set_status(self, status: Status):
         self._log_status(status)
         await self._publish_status(status=status)
-        await self.job_service.set_status(self.job_id, status)
+
+        # Guard: job_service may be None for long-running worker tasks
+        # that bypass the container (e.g., crawl_task with sessionless container).
+        # In that case, update status directly via fresh session.
+        if self.job_service is not None:
+            await self.job_service.set_status(self.job_id, status)
+        else:
+            # Fallback: Direct SQL update with fresh session (same pattern as complete_job/fail_job)
+            try:
+                async with sessionmanager.session() as session, session.begin():
+                    stmt = (
+                        sa.update(Jobs)
+                        .where(Jobs.id == self.job_id)
+                        .values(status=status.value)
+                    )
+                    await session.execute(stmt)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to update job status in database",
+                    extra={"job_id": str(self.job_id), "status": status.value, "error": str(exc)},
+                )
 
     async def complete_job(self):
         if self._job_already_handled:
-            # Job was already completed by crawl_task using current_session()
-            # Skip to avoid "closed transaction" error from stale session
+            # Job was already completed by crawl_task using execute_with_recovery()
+            # Skip to avoid duplicate status update
             return
         await self._publish_status(status=Status.COMPLETE)
 
@@ -150,8 +180,8 @@ class TaskManager:
 
     async def fail_job(self, message: str | None = None):
         if self._job_already_handled:
-            # Job was already failed by crawl_task using current_session()
-            # Skip to avoid "closed transaction" error from stale session
+            # Job was already failed by crawl_task using execute_with_recovery()
+            # Skip to avoid duplicate status update
             return
         await self._publish_status(status=Status.FAILED)
 

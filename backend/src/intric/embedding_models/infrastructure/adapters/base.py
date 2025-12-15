@@ -1,18 +1,29 @@
 import abc
 import math
 from abc import abstractmethod
+from typing import TYPE_CHECKING
 
-from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.logging import get_logger
+
+if TYPE_CHECKING:
+    from intric.embedding_models.infrastructure.create_embeddings_service import (
+        EmbeddingModelLike,
+    )
 
 
 logger = get_logger(__name__)
 
 
 class EmbeddingModelAdapter(abc.ABC):
-    def __init__(self, model: EmbeddingModel):
+    """Base class for embedding model adapters.
+
+    Adapters accept any object satisfying EmbeddingModelLike protocol,
+    including both ORM EmbeddingModel and frozen EmbeddingModelSpec DTO.
+    """
+
+    def __init__(self, model: "EmbeddingModelLike"):
         self.model = model
 
     def _chunk_chunks(self, chunks: list["InfoBlobChunk"]):

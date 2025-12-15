@@ -12,14 +12,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.worker.crawl_tasks import (
-    _calculate_exponential_backoff,
-    _update_job_retry_stats,
+from intric.worker.crawl.recovery import (
+    calculate_exponential_backoff,
+    update_job_retry_stats,
 )
 
 
 class TestCalculateExponentialBackoff:
-    """Unit tests for _calculate_exponential_backoff function."""
+    """Unit tests for calculate_exponential_backoff function."""
 
     def test_first_attempt_returns_within_base_delay(self):
         """First attempt (attempt=1) should return delay in [0, base_delay]."""
@@ -27,7 +27,7 @@ class TestCalculateExponentialBackoff:
         base_delay = 60.0
         max_delay = 300.0
 
-        delays = [_calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)]
+        delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)]
 
         # All delays should be between 0 and base_delay (with full jitter)
         assert all(0 <= d <= base_delay for d in delays), "First attempt should use base_delay"
@@ -40,7 +40,7 @@ class TestCalculateExponentialBackoff:
         base_delay = 60.0
         max_delay = 300.0
 
-        delays = [_calculate_exponential_backoff(2, base_delay, max_delay) for _ in range(100)]
+        delays = [calculate_exponential_backoff(2, base_delay, max_delay) for _ in range(100)]
 
         # Max possible delay is 2 * base_delay = 120
         assert all(0 <= d <= base_delay * 2 for d in delays), "Second attempt uses 2x base"
@@ -56,15 +56,15 @@ class TestCalculateExponentialBackoff:
         random.seed(123)
 
         # Attempt 3: 10 * 2^2 = 40s max
-        delays_3 = [_calculate_exponential_backoff(3, base_delay, max_delay) for _ in range(50)]
+        delays_3 = [calculate_exponential_backoff(3, base_delay, max_delay) for _ in range(50)]
         assert all(0 <= d <= 40 for d in delays_3), "Attempt 3 max should be 40s"
 
         # Attempt 4: 10 * 2^3 = 80s max
-        delays_4 = [_calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(50)]
+        delays_4 = [calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(50)]
         assert all(0 <= d <= 80 for d in delays_4), "Attempt 4 max should be 80s"
 
         # Attempt 5: 10 * 2^4 = 160s max
-        delays_5 = [_calculate_exponential_backoff(5, base_delay, max_delay) for _ in range(50)]
+        delays_5 = [calculate_exponential_backoff(5, base_delay, max_delay) for _ in range(50)]
         assert all(0 <= d <= 160 for d in delays_5), "Attempt 5 max should be 160s"
 
     def test_max_delay_caps_exponential_growth(self):
@@ -75,7 +75,7 @@ class TestCalculateExponentialBackoff:
         random.seed(42)
 
         # Attempt 4: 60 * 2^3 = 480s, but capped at 100s
-        delays = [_calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(100)]
+        delays = [calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(100)]
 
         assert all(0 <= d <= max_delay for d in delays), "All delays should be capped"
         # Some delays should approach max_delay (since full jitter is [0, capped])
@@ -89,7 +89,7 @@ class TestCalculateExponentialBackoff:
         random.seed(42)
 
         # Attempt 100 would be 60 * 2^99, but should cap at 300
-        delays = [_calculate_exponential_backoff(100, base_delay, max_delay) for _ in range(50)]
+        delays = [calculate_exponential_backoff(100, base_delay, max_delay) for _ in range(50)]
 
         assert all(0 <= d <= max_delay for d in delays), "High attempts should stay capped"
 
@@ -101,7 +101,7 @@ class TestCalculateExponentialBackoff:
         random.seed(42)
 
         for attempt in range(1, 20):
-            delays = [_calculate_exponential_backoff(attempt, base_delay, max_delay) for _ in range(50)]
+            delays = [calculate_exponential_backoff(attempt, base_delay, max_delay) for _ in range(50)]
             assert all(d >= 0 for d in delays), f"Attempt {attempt} had negative delay"
 
     def test_jitter_distribution_covers_range(self):
@@ -110,7 +110,7 @@ class TestCalculateExponentialBackoff:
         base_delay = 100.0
         max_delay = 100.0
 
-        delays = [_calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(1000)]
+        delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(1000)]
 
         # Check distribution covers full range (roughly)
         min_delay = min(delays)
@@ -130,7 +130,7 @@ class TestCalculateExponentialBackoff:
         max_delay = 300.0
 
         # This should NOT crash and should return valid delay
-        delays = [_calculate_exponential_backoff(0, base_delay, max_delay) for _ in range(50)]
+        delays = [calculate_exponential_backoff(0, base_delay, max_delay) for _ in range(50)]
 
         # All delays should be non-negative
         assert all(d >= 0 for d in delays), "Attempt 0 should return non-negative delays"
@@ -150,7 +150,7 @@ class TestCalculateExponentialBackoff:
 
         # This should NOT crash
         try:
-            delays = [_calculate_exponential_backoff(-1, base_delay, max_delay) for _ in range(50)]
+            delays = [calculate_exponential_backoff(-1, base_delay, max_delay) for _ in range(50)]
             # If it doesn't crash, delays should still be non-negative
             assert all(d >= 0 for d in delays), "Negative attempt should return non-negative delays"
         except (ValueError, OverflowError):
@@ -163,7 +163,7 @@ class TestCalculateExponentialBackoff:
         base_delay = 10000.0  # Unreasonably large
         max_delay = 300.0
 
-        delays = [_calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(50)]
+        delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(50)]
 
         # All delays should be capped at max_delay
         assert all(0 <= d <= max_delay for d in delays), "Large base_delay should be capped"
@@ -174,14 +174,14 @@ class TestCalculateExponentialBackoff:
         base_delay = 60.0
         max_delay = 0.0
 
-        delays = [_calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(50)]
+        delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(50)]
 
         # With max_delay=0, all delays should be 0
         assert all(d == 0 for d in delays), "Zero max_delay should return zero delays"
 
 
 class TestUpdateJobRetryStats:
-    """Unit tests for _update_job_retry_stats function."""
+    """Unit tests for update_job_retry_stats function."""
 
     def _create_mock_redis_pipeline(self, execute_results: list):
         """Helper to create properly mocked Redis client with pipeline.
@@ -212,7 +212,7 @@ class TestUpdateJobRetryStats:
         """Graceful degradation: no Redis returns (0, 0.0)."""
         job_id = uuid4()
 
-        retry_count, job_age = await _update_job_retry_stats(
+        retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=None,
             is_actual_failure=True,
@@ -236,7 +236,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1100.0):
-            await _update_job_retry_stats(
+            await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
                 is_actual_failure=True,
@@ -259,7 +259,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1050.0):
-            await _update_job_retry_stats(
+            await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
                 is_actual_failure=False,  # Just busy signal
@@ -279,7 +279,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1100.0):
-            await _update_job_retry_stats(
+            await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
                 is_actual_failure=True,
@@ -303,7 +303,7 @@ class TestUpdateJobRetryStats:
         mock_redis.pipeline.side_effect = Exception("Redis connection failed")
 
         # Should not raise, should return defaults
-        retry_count, job_age = await _update_job_retry_stats(
+        retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=mock_redis,
             is_actual_failure=True,
@@ -324,7 +324,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
-            await _update_job_retry_stats(
+            await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
                 is_actual_failure=True,
@@ -347,7 +347,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
-            await _update_job_retry_stats(
+            await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
                 is_actual_failure=True,
@@ -381,7 +381,7 @@ class TestUpdateJobRetryStats:
         mock_redis.pipeline = MagicMock(return_value=mock_context)
 
         # Should not crash, should return defaults
-        retry_count, job_age = await _update_job_retry_stats(
+        retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=mock_redis,
             is_actual_failure=True,
@@ -407,7 +407,7 @@ class TestUpdateJobRetryStats:
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
             # This should handle incomplete results gracefully
-            retry_count, job_age = await _update_job_retry_stats(
+            retry_count, job_age = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
                 is_actual_failure=True,
@@ -424,7 +424,7 @@ class TestUpdateJobRetryStats:
         """Test that mocked pipeline can handle multiple sequential calls.
 
         This verifies our mock setup is correct for tests that make
-        multiple calls to _update_job_retry_stats.
+        multiple calls to update_job_retry_stats.
         """
         job_id = uuid4()
 
@@ -434,7 +434,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
-            retry_count_1, _ = await _update_job_retry_stats(
+            retry_count_1, _ = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis_1,
                 is_actual_failure=True,
@@ -447,7 +447,7 @@ class TestUpdateJobRetryStats:
         ])
 
         with patch("intric.worker.crawl_tasks.time.time", return_value=1050.0):
-            retry_count_2, _ = await _update_job_retry_stats(
+            retry_count_2, _ = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis_2,
                 is_actual_failure=True,

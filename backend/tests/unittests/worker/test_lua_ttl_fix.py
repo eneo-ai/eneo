@@ -232,55 +232,53 @@ class TestLuaAcquireScript:
 
 
 class TestLuaScriptConsistency:
-    """Test that all three copies of the Lua script are consistent."""
+    """Test that centralized Lua scripts are properly structured."""
 
     @pytest.mark.asyncio
-    async def test_all_lua_scripts_match(self):
-        """Verify crawl_feeder, tenant_concurrency, and crawl_service have identical scripts."""
-        import dataclasses
-        from intric.worker.crawl_feeder import CrawlFeeder
-        from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
-        from intric.websites.domain.crawl_service import CrawlService
+    async def test_centralized_scripts_exist(self):
+        """Verify LuaScripts contains all required centralized scripts."""
+        from intric.worker.redis.lua_scripts import LuaScripts
 
-        feeder_script = CrawlFeeder._acquire_slot_lua
+        # All scripts should be defined as class attributes
+        assert hasattr(LuaScripts, 'ACQUIRE_SLOT'), "Missing ACQUIRE_SLOT script"
+        assert hasattr(LuaScripts, 'RELEASE_SLOT'), "Missing RELEASE_SLOT script"
+        assert hasattr(LuaScripts, 'REFRESH_LEADER_LOCK'), "Missing REFRESH_LEADER_LOCK script"
+        assert hasattr(LuaScripts, 'RECONCILE_COUNTER_CAS'), "Missing RECONCILE_COUNTER_CAS script"
 
-        # TenantConcurrencyLimiter uses dataclass field - access via fields()
-        limiter_fields = {f.name: f for f in dataclasses.fields(TenantConcurrencyLimiter)}
-        limiter_script = limiter_fields['_acquire_lua'].default
-
-        service_script = CrawlService._acquire_slot_lua
-
-        # Normalize whitespace for comparison
-        def normalize(s):
-            return ''.join(s.split())
-
-        assert normalize(feeder_script) == normalize(limiter_script), \
-            "CrawlFeeder and TenantConcurrencyLimiter acquire scripts must match"
-
-        assert normalize(feeder_script) == normalize(service_script), \
-            "CrawlFeeder and CrawlService acquire scripts must match"
+        # Scripts should be non-empty strings
+        assert isinstance(LuaScripts.ACQUIRE_SLOT, str) and len(LuaScripts.ACQUIRE_SLOT) > 0
+        assert isinstance(LuaScripts.RELEASE_SLOT, str) and len(LuaScripts.RELEASE_SLOT) > 0
 
     @pytest.mark.asyncio
-    async def test_all_scripts_have_ttl_fix_comment(self):
-        """Verify all scripts have the fix comment for documentation."""
-        import dataclasses
-        from intric.worker.crawl_feeder import CrawlFeeder
-        from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
-        from intric.websites.domain.crawl_service import CrawlService
+    async def test_acquire_script_has_ttl_fix(self):
+        """Verify centralized acquire script has the TTL fix (only refresh on success)."""
+        from intric.worker.redis.lua_scripts import LuaScripts
 
-        # TenantConcurrencyLimiter uses dataclass field - access via fields()
-        limiter_fields = {f.name: f for f in dataclasses.fields(TenantConcurrencyLimiter)}
-        limiter_script = limiter_fields['_acquire_lua'].default
+        script = LuaScripts.ACQUIRE_SLOT
 
-        scripts = [
-            ("CrawlFeeder", CrawlFeeder._acquire_slot_lua),
-            ("TenantConcurrencyLimiter", limiter_script),
-            ("CrawlService", CrawlService._acquire_slot_lua),
-        ]
+        # Script should have the failure path that does NOT refresh TTL
+        assert "current > limit" in script, "Script should check for over-limit"
+        assert "return 0" in script, "Script should return 0 on failure"
 
-        for name, script in scripts:
-            assert "DO NOT refresh TTL on failure" in script or "Success:" in script, \
-                f"{name} script should have fix documentation comment"
+        # The EXPIRE call should only appear after the failure block
+        lines = script.split('\n')
+        failure_block_start = None
+        failure_return_line = None
+
+        for i, line in enumerate(lines):
+            if 'current > limit' in line:
+                failure_block_start = i
+            if failure_block_start and 'return 0' in line:
+                failure_return_line = i
+                break
+
+        assert failure_block_start is not None, "Should have failure block"
+        assert failure_return_line is not None, "Should have return 0 in failure block"
+
+        # Verify no EXPIRE between failure_block_start and failure_return_line
+        for i in range(failure_block_start, failure_return_line):
+            assert 'EXPIRE' not in lines[i], \
+                f"EXPIRE should not be in failure block (line {i}: {lines[i]})"
 
 
 class TestLuaReleaseScript:
