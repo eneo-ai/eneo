@@ -141,24 +141,37 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
 
+    # Database connection pool configuration
+    # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
+    # See pool exhaustion analysis in plans/fuzzy-skipping-cray.md
+    # NOTE: Defaults preserve current behavior (20/10/30). Change via env vars:
+    #   DB_POOL_SIZE=25 DB_POOL_TIMEOUT=60 DB_POOL_PRE_PING=true DB_POOL_RECYCLE=3600
+    db_pool_size: int = 20  # Base pool size (permanent connections) - default: current behavior
+    db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
+    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
+    db_pool_pre_ping: bool = True  # Verify connections before use - prevents stale connection errors
+    db_pool_recycle: int = -1  # Recycle connections after N seconds (-1 = never) - default: SQLAlchemy default
+    db_pool_debug: bool = False  # Enable checkout duration logging (overhead; use for debugging only)
+
     # Background worker configuration
-    worker_max_jobs: int = 20
+    worker_max_jobs: int = 15
     tenant_worker_concurrency_limit: int = 4
     # IMPORTANT: Must be >= crawl_max_length to prevent semaphore expiry mid-crawl
     # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
     # See validate_worker_settings() which enforces this constraint
     # Configurable per-tenant via crawler_settings API
-    tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 5  # 5 hour safety window
+    tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 11  # 11 hour safety window (10h crawl + 1h buffer)
 
     # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
-    crawl_feeder_enabled: bool = False  # Feature flag for gradual rollout
+    crawl_feeder_enabled: bool = True  # Enabled by default - meters job enqueue rate
     crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
-    orphan_crawl_run_timeout_hours: int = 6  # Mark stuck QUEUED/IN_PROGRESS as FAILED after this
+    orphan_crawl_run_timeout_hours: int = 12  # Must be > crawl_max_length (10h) to avoid killing valid long crawls
     crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
     crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
+    crawl_heartbeat_max_failures: int = 3  # Terminate after N consecutive heartbeat failures (3 * 5min = 15min max)
     crawl_page_batch_size: int = 100  # Commit after every N pages during crawl (bounds data loss)
 
     # Federation per tenant feature flag
@@ -207,6 +220,10 @@ class Settings(BaseSettings):
     using_iam: bool = False
     using_image_generation: bool = False
 
+    # Max concurrent embedding API calls across all crawls (module-level semaphore)
+    # Controls parallelism during page batch persistence to avoid overwhelming embedding APIs
+    crawl_embedding_concurrency: int = 3
+
     # Security
     api_prefix: str
     api_key_length: int
@@ -227,17 +244,13 @@ class Settings(BaseSettings):
     # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
     # Otherwise the concurrency slot could expire before crawl completes
     # See validate_worker_settings() which enforces this constraint
-    crawl_max_length: int = 60 * 60 * 4  # 4 hour crawls max (in seconds)
+    crawl_max_length: int = 60 * 60 * 10  # 10 hour crawls max (large municipal sites)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
 
-    # Worker configuration
-    worker_max_concurrent_jobs: int = (
-        20  # Maximum number of concurrent jobs the worker can process
-    )
 
     # Crawl retry configuration
     crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
@@ -376,6 +389,21 @@ class Settings(BaseSettings):
                 " Increase the TTL to cover the longest crawl duration to avoid leaking slots.",
                 self.tenant_worker_semaphore_ttl_seconds,
                 self.crawl_max_length,
+            )
+            sys.exit(1)
+
+        # Validate TTL vs job max age to prevent flag expiration race condition
+        # The flag stores tenant_id for slot release - if it expires before watchdog
+        # can kill the job, the slot becomes permanently leaked
+        from intric.tenants.crawler_settings_helper import TTL_MAX_AGE_BUFFER_SECONDS
+        min_required_ttl = self.crawl_job_max_age_seconds + TTL_MAX_AGE_BUFFER_SECONDS
+        if self.tenant_worker_semaphore_ttl_seconds < min_required_ttl:
+            logging.error(
+                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS (%s) must be at least 5 minutes greater than "
+                "CRAWL_JOB_MAX_AGE_SECONDS (%s) to prevent slot leaks. Required minimum: %s",
+                self.tenant_worker_semaphore_ttl_seconds,
+                self.crawl_job_max_age_seconds,
+                min_required_ttl,
             )
             sys.exit(1)
 

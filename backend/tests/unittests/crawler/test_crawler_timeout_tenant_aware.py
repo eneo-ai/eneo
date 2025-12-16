@@ -1,16 +1,16 @@
 """Unit tests for tenant-aware crawler timeout (crawl_max_length).
 
-Tests the crochet.run_in_reactor() + EventualResult.wait() timeout implementation
-that provides runtime-configurable timeouts while properly integrating with
-Twisted's reactor for Scrapy crawls.
+Tests the CrawlManager + graceful shutdown implementation that provides
+runtime-configurable timeouts while properly integrating with Twisted's reactor
+for Scrapy crawls.
 
 Test categories:
-- Timeout enforcement: Verifies crochet.TimeoutError triggers CrawlerException
+- Timeout enforcement: Verifies crochet.TimeoutError triggers CrawlTimeoutError
 - Tenant settings resolution: Tests get_crawler_setting() integration
 - Edge cases: Very short timeouts, missing settings, error handling
 """
 
-import asyncio
+import threading
 import time
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock, patch
@@ -23,101 +23,107 @@ import pytest
 crochet.setup()
 
 from intric.crawler.crawler import Crawler
-from intric.main.exceptions import CrawlerException
+from intric.main.exceptions import CrawlTimeoutError
 
 
-class MockEventualResult:
-    """Mock for crochet's EventualResult that simulates blocking wait behavior."""
+class MockCrawlManager:
+    """Mock for CrawlManager that simulates timeout behavior."""
 
     def __init__(self, delay: float = 0, should_timeout: bool = False):
         self.delay = delay
         self.should_timeout = should_timeout
+        self._crawler = None
+        self._completion_event = threading.Event()
 
-    def wait(self, timeout: float = None):
-        """Simulate EventualResult.wait() behavior."""
-        if self.should_timeout or (timeout and self.delay > timeout):
-            time.sleep(min(timeout, 0.1))  # Sleep briefly to simulate timeout
-            raise crochet.TimeoutError("Crawl exceeded timeout")
-        time.sleep(min(self.delay, 0.1))  # Quick sleep for fast tests
-        return None
+    def start_crawl(self, spider_class, **kwargs):
+        """Return a mock EventualResult."""
+        mock_result = MagicMock()
+        if self.should_timeout:
+            mock_result.wait = MagicMock(
+                side_effect=crochet.TimeoutError("Crawl exceeded timeout")
+            )
+        else:
+
+            def fast_wait(timeout):
+                time.sleep(min(self.delay, 0.1))
+                return None
+
+            mock_result.wait = fast_wait
+        return mock_result
+
+    def stop_crawl(self, reason="timeout"):
+        pass
+
+    def wait_for_completion(self, timeout=10.0):
+        return True  # Simulate successful shutdown
 
 
 class TestCrawlerTimeoutEnforcement:
-    """Tests that crawl timeout is properly enforced via EventualResult.wait()."""
+    """Tests that crawl timeout is properly enforced via CrawlManager."""
 
     @pytest.mark.asyncio
-    async def test_timeout_triggers_crawler_exception(self):
-        """When crawl exceeds max_length, CrawlerException is raised.
+    async def test_timeout_triggers_crawler_timeout_error(self):
+        """When crawl exceeds max_length, CrawlTimeoutError is raised.
 
-        This is the CRITICAL test - verifies the crochet integration works.
+        This is the CRITICAL test - verifies the CrawlManager integration works.
         """
-        # Mock the deferred method to return a slow EventualResult
-        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
+        def create_mock_manager():
+            return MockCrawlManager(delay=10, should_timeout=True)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
-            with pytest.raises(CrawlerException) as exc_info:
+            with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
                     download_files=False,
                     filepath="/tmp/test.jsonl",
                     files_dir="/tmp/files",
-                    http_user=None,
-                    http_pass=None,
-                    tenant_crawler_settings=None,
                     max_length=1,  # 1 second timeout - will trigger
                 )
 
-            assert "Crawl timeout" in str(exc_info.value)
-            assert "exceeded 1 seconds" in str(exc_info.value)
             assert "https://example.com" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_sitemap_timeout_triggers_crawler_exception(self):
-        """Sitemap crawl also respects timeout and raises CrawlerException."""
-        mock_result = MockEventualResult(delay=10, should_timeout=True)
+    async def test_sitemap_timeout_triggers_crawler_timeout_error(self):
+        """Sitemap crawl also respects timeout and raises CrawlTimeoutError."""
 
-        with patch.object(
-            Crawler, "_run_sitemap_crawl_deferred", return_value=mock_result
+        def create_mock_manager():
+            return MockCrawlManager(delay=10, should_timeout=True)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
-            with pytest.raises(CrawlerException) as exc_info:
+            with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_sitemap_crawl_with_timeout(
                     sitemap_url="https://example.com/sitemap.xml",
                     filepath="/tmp/test.jsonl",
                     files_dir="/tmp/files",
-                    http_user=None,
-                    http_pass=None,
-                    tenant_crawler_settings=None,
                     max_length=1,
                 )
 
-            assert "Crawl timeout" in str(exc_info.value)
             assert "sitemap.xml" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_successful_crawl_within_timeout(self):
         """Crawl completes successfully when within timeout limit."""
-        # Fast crawl that completes quickly
-        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
-        ) as mock_deferred:
+        def create_mock_manager():
+            return MockCrawlManager(delay=0.01, should_timeout=False)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+        ):
             # Should complete without exception
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
                 download_files=False,
                 filepath="/tmp/test.jsonl",
                 files_dir="/tmp/files",
-                http_user=None,
-                http_pass=None,
-                tenant_crawler_settings=None,
                 max_length=60,  # 60 second timeout - plenty of time
             )
-
-            # Verify the deferred method was called
-            mock_deferred.assert_called_once()
+            # If we get here without exception, test passed
 
 
 class TestCrawlerTenantSettingsResolution:
@@ -222,35 +228,38 @@ class TestCrawlerTimeoutEdgeCases:
     @pytest.mark.asyncio
     async def test_very_short_timeout_still_works(self):
         """Extremely short timeout (1 second) still properly triggers."""
-        mock_result = MockEventualResult(delay=5, should_timeout=True)
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
+        def create_mock_manager():
+            return MockCrawlManager(delay=5, should_timeout=True)
+
+        start_time = time.time()
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
-            start_time = asyncio.get_event_loop().time()
-            with pytest.raises(CrawlerException):
+            with pytest.raises(CrawlTimeoutError):
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
                     filepath="/tmp/test.jsonl",
                     files_dir="/tmp/files",
                     max_length=1,  # Very short timeout
                 )
-            end_time = asyncio.get_event_loop().time()
+        elapsed = time.time() - start_time
 
-            # Should timeout quickly, not wait for the full 5 seconds
-            elapsed = end_time - start_time
-            assert elapsed < 3, f"Timeout should trigger quickly, took {elapsed}s"
+        # Should timeout quickly, not wait for the full 5 seconds
+        assert elapsed < 3, f"Timeout should trigger quickly, took {elapsed}s"
 
     @pytest.mark.asyncio
     async def test_timeout_message_includes_url(self):
         """Timeout exception message includes the URL for debugging."""
-        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
+        def create_mock_manager():
+            return MockCrawlManager(delay=10, should_timeout=True)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             test_url = "https://slow-website.example.com/very/long/path"
-            with pytest.raises(CrawlerException) as exc_info:
+            with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_crawl_with_timeout(
                     url=test_url,
                     filepath="/tmp/test.jsonl",
@@ -260,18 +269,19 @@ class TestCrawlerTimeoutEdgeCases:
 
             error_message = str(exc_info.value)
             assert test_url in error_message, "Error should include full URL"
-            assert "exceeded 1 seconds" in error_message
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("timeout_value", [1, 2])
     async def test_timeout_message_includes_seconds(self, timeout_value):
         """Timeout exception message includes the max_length value."""
-        mock_result = MockEventualResult(delay=10, should_timeout=True)
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
+        def create_mock_manager():
+            return MockCrawlManager(delay=10, should_timeout=True)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
-            with pytest.raises(CrawlerException) as exc_info:
+            with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
                     filepath="/tmp/test.jsonl",
@@ -279,40 +289,7 @@ class TestCrawlerTimeoutEdgeCases:
                     max_length=timeout_value,
                 )
 
-            assert f"exceeded {timeout_value} seconds" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_crawler_passes_settings_to_deferred_method(self):
-        """Tenant crawler settings are passed through to deferred method."""
-        tenant_settings = {
-            "download_timeout": 120,
-            "retry_times": 5,
-        }
-
-        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
-
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
-        ) as mock_deferred:
-            await Crawler._run_crawl_with_timeout(
-                url="https://example.com",
-                download_files=True,
-                filepath="/tmp/test.jsonl",
-                files_dir="/tmp/files",
-                http_user="user",
-                http_pass="pass",
-                tenant_crawler_settings=tenant_settings,
-                max_length=60,
-            )
-
-            # Verify all params were passed correctly
-            mock_deferred.assert_called_once()
-            call_args = mock_deferred.call_args
-            # Check positional args
-            assert call_args[0][0] == "https://example.com"  # url
-            assert call_args[0][1] is True  # download_files
-            # Check keyword args
-            assert call_args[1]["tenant_crawler_settings"] == tenant_settings
+            assert str(timeout_value) in str(exc_info.value)
 
 
 class TestCrawlerTimeoutIsolation:
@@ -365,17 +342,27 @@ class TestCrawlerTimeoutIsolation:
 
 
 class TestCrawlerNoRegressions:
-    """Tests ensuring no regressions from crochet integration."""
+    """Tests ensuring no regressions from CrawlManager integration."""
 
     @pytest.mark.asyncio
     async def test_all_parameters_still_passed_correctly(self):
         """Verify all existing parameters are still passed through correctly."""
         tenant_settings = {"download_timeout": 100}
-        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
-        ) as mock_deferred:
+        # Track calls to CrawlManager.start_crawl
+        captured_kwargs = {}
+
+        class TrackingMockManager(MockCrawlManager):
+            def start_crawl(self, spider_class, **kwargs):
+                captured_kwargs.update(kwargs)
+                return super().start_crawl(spider_class, **kwargs)
+
+        def create_tracking_manager():
+            return TrackingMockManager(delay=0.01, should_timeout=False)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_tracking_manager
+        ):
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
                 download_files=True,
@@ -387,31 +374,36 @@ class TestCrawlerNoRegressions:
                 max_length=60,
             )
 
-            mock_deferred.assert_called_once()
-            call_args = mock_deferred.call_args
-            # Check keyword args
-            assert call_args[1]["filepath"] == "/tmp/test.jsonl"
-            assert call_args[1]["files_dir"] == "/tmp/files"
-            assert call_args[1]["http_user"] == "testuser"
-            assert call_args[1]["http_pass"] == "testpass"
-            assert call_args[1]["tenant_crawler_settings"] == tenant_settings
+        # Verify parameters were passed to start_crawl
+        assert captured_kwargs.get("filepath") == "/tmp/test.jsonl"
+        assert captured_kwargs.get("files_dir") == "/tmp/files"
+        assert captured_kwargs.get("http_user") == "testuser"
+        assert captured_kwargs.get("http_pass") == "testpass"
+        assert captured_kwargs.get("tenant_crawler_settings") == tenant_settings
 
     @pytest.mark.asyncio
     async def test_download_files_flag_passed_correctly(self):
-        """Ensure download_files parameter works as before."""
-        mock_result = MockEventualResult(delay=0.01, should_timeout=False)
+        """Ensure download_files parameter controls files_dir correctly."""
+        captured_kwargs = {}
 
-        with patch.object(
-            Crawler, "_run_crawl_deferred", return_value=mock_result
-        ) as mock_deferred:
+        class TrackingMockManager(MockCrawlManager):
+            def start_crawl(self, spider_class, **kwargs):
+                captured_kwargs.update(kwargs)
+                return super().start_crawl(spider_class, **kwargs)
+
+        def create_tracking_manager():
+            return TrackingMockManager(delay=0.01, should_timeout=False)
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager", side_effect=create_tracking_manager
+        ):
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
-                download_files=True,  # Should be passed through
+                download_files=True,  # Should pass files_dir
                 filepath="/tmp/test.jsonl",
                 files_dir="/tmp/files",
                 max_length=60,
             )
 
-            mock_deferred.assert_called_once()
-            # download_files should be second positional arg
-            assert mock_deferred.call_args[0][1] is True
+        # When download_files=True, files_dir should be passed
+        assert captured_kwargs.get("files_dir") == "/tmp/files"

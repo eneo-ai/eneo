@@ -1,4 +1,8 @@
 import redis.asyncio as aioredis
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from typing import AsyncIterator
+
 from dependency_injector import containers, providers
 from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
@@ -313,6 +317,62 @@ def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimi
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SESSION PROXY PATTERN FOR SESSIONLESS CONTAINERS
+# ═══════════════════════════════════════════════════════════════════════════════
+# Problem: Long-running tasks (crawlers, 5-30 min) exhaust DB pool when holding
+#          sessions for entire duration. Solution: "sessionless" containers that
+#          only acquire sessions during explicit session_scope() blocks.
+#
+# Why ContextVar: Provides async-safe thread-local storage. Each coroutine gets
+#                 its own session context, avoiding race conditions.
+#
+# Why SessionProxy: Allows dependency-injector to instantiate session-dependent
+#                   services (like JobRepo) without failing type validation.
+#                   The proxy delegates to the ContextVar at runtime.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Context variable to hold the active session in a sessionless container environment
+# This allows "Lazy" resolution of sessions only when a scope is active.
+_active_session_ctx: ContextVar[AsyncSession | None] = ContextVar(
+    "active_session_ctx", default=None
+)
+
+
+class SessionProxy:
+    """A proxy that delegates to the active ContextVar session or raises a clear error.
+
+    When injected into a sessionless container, this proxy allows dependencies
+    to be instantiated without errors. Actual session access only happens when
+    code runs inside a session_scope() block.
+
+    Benefits over injecting None:
+    - Services like JobRepo can be instantiated (no "None is not AsyncSession" error)
+    - Clear runtime error if session accessed outside scope
+    - Works transparently with existing service code
+    """
+
+    def __getattr__(self, name: str):
+        session = _active_session_ctx.get()
+        if session is None:
+            raise RuntimeError(
+                "No active session found! You are running in a sessionless container. "
+                "You must wrap this call in 'async with container.session_scope():' "
+                "or pass the session explicitly via container.some_repo(session=session)."
+            )
+        return getattr(session, name)
+
+    def __call__(self, *args, **kwargs):
+        """Allow the proxy to be called if anyone tries to invoke it."""
+        session = _active_session_ctx.get()
+        if session is None:
+            raise RuntimeError(
+                "Cannot call SessionProxy without active session scope. "
+                "Wrap your code in 'async with container.session_scope():'."
+            )
+        return session(*args, **kwargs)
+
+
 class Container(containers.DeclarativeContainer):
     __self__ = providers.Self()
 
@@ -320,7 +380,13 @@ class Container(containers.DeclarativeContainer):
     config = providers.Configuration()
 
     # Objects
-    session = providers.Dependency(instance_of=AsyncSession)
+    # CRITICAL FIX: Removed `instance_of=AsyncSession` strict type check.
+    # In sessionless containers (for long-running tasks), we inject a SessionProxy
+    # which would fail the 'instance_of' validation. Removing the type check allows
+    # the container to instantiate dependencies (like JobRepo) with the Proxy,
+    # and validation happens at runtime when the session is actually used.
+    # This fixes the "None is not an instance of AsyncSession" error in crawl_task.
+    session = providers.Dependency()
     user = providers.Dependency(instance_of=UserInDB)
     tenant = providers.Dependency(instance_of=TenantInDB)
     aiohttp_client = providers.Object(aiohttp_client)
@@ -1107,10 +1173,12 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Worker
+    # NOTE: TaskManager no longer requires session - it creates its own
+    # sessions via sessionmanager.session() for complete_job/fail_job.
+    # This allows TaskManager to work with sessionless containers.
     task_manager = providers.Factory(
         TaskManager,
         user=user,
-        session=session,
         job_service=job_service,
     )
     text_processor = providers.Factory(
@@ -1160,3 +1228,58 @@ class Container(containers.DeclarativeContainer):
         DataRetentionService,
         session=session,
     )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SESSION SCOPE: Unit-of-Work pattern for long-running tasks
+    # ═══════════════════════════════════════════════════════════════════════════
+    # This provides short-lived sessions for DB operations in worker tasks.
+    # Instead of holding a session for the entire task duration (minutes),
+    # tasks should use this to acquire sessions only when needed (~50-300ms).
+    #
+    # Usage in tasks:
+    #     async with container.session_scope() as session:
+    #         repo = container.some_repo(session=session)  # Override default
+    #         await repo.update(...)
+    #     # Session returned to pool immediately
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[AsyncSession]:
+        """Provide a short-lived session for explicit DB operations.
+
+        Use this for Unit-of-Work pattern in long-running tasks (crawlers,
+        background jobs) that shouldn't hold a session for their entire duration.
+
+        The session is automatically committed on successful exit and rolled
+        back on exception.
+
+        IMPORTANT: This also sets the _active_session_ctx ContextVar, which
+        allows SessionProxy to delegate to the real session. This means that
+        inside session_scope(), you can call container.job_repo() without
+        passing session= explicitly - the proxy will find the session.
+
+        Example:
+            async with container.session_scope() as session:
+                # Option 1: Explicit session override (always works)
+                repo = container.crawl_run_repo(session=session)
+                await repo.mark_started(job_id)
+
+                # Option 2: SessionProxy delegation (works in sessionless containers)
+                repo = container.job_repo()  # Proxy finds session via ContextVar
+                await repo.get(job_id)
+            # Session returned to pool immediately (~50-300ms)
+
+        Yields:
+            AsyncSession: A fresh database session with an active transaction.
+        """
+        from intric.database.database import sessionmanager
+
+        async with sessionmanager.session() as session, session.begin():
+            # Set the ContextVar so SessionProxy can find this session
+            token = _active_session_ctx.set(session)
+            try:
+                yield session
+            finally:
+                # Reset ContextVar to avoid leaking session reference
+                _active_session_ctx.reset(token)

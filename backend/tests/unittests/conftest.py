@@ -50,6 +50,10 @@ def test_settings() -> Settings:
         tenant_credentials_enabled=False,
         federation_per_tenant_enabled=False,
 
+        # Crawler settings - ensure TTL > max_length to pass validation
+        crawl_max_length=1800,  # 30 minutes
+        tenant_worker_semaphore_ttl_seconds=3600,  # 1 hour (must be > crawl_max_length)
+
         # Testing mode
         testing=True,
         dev=True,

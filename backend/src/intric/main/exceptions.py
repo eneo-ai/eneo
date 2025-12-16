@@ -115,6 +115,35 @@ class CrawlerException(Exception):
     pass
 
 
+class CrawlTimeoutError(CrawlerException):
+    """Raised when a crawl times out but may have partial results.
+
+    This is a controlled termination, not a failure. The crawler ran for
+    the configured max_length but didn't complete naturally. Partial results
+    in the JSONL spool file should be preserved and persisted.
+
+    Attributes:
+        url: The URL that was being crawled
+        timeout_seconds: The timeout value that was exceeded
+        pages_collected: Number of pages in the spool file (if known)
+    """
+
+    def __init__(
+        self,
+        url: str,
+        timeout_seconds: int,
+        pages_collected: int = 0,
+        message: str | None = None,
+    ):
+        self.url = url
+        self.timeout_seconds = timeout_seconds
+        self.pages_collected = pages_collected
+        msg = message or f"Crawl timeout: exceeded {timeout_seconds}s for {url}"
+        if pages_collected > 0:
+            msg += f" ({pages_collected} pages collected)"
+        super().__init__(msg)
+
+
 class NameCollisionException(Exception):
     pass
 

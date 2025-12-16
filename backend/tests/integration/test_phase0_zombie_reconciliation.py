@@ -1,6 +1,6 @@
 """Integration tests for Phase 0 Zombie Counter Reconciliation.
 
-These tests verify that the Safe Watchdog Phase 0 correctly detects and fixes
+Tests verify that the OrphanWatchdog Phase 0 correctly detects and fixes
 zombie counters - cases where Redis active_jobs counter is higher than actual
 QUEUED/IN_PROGRESS jobs in the database.
 
@@ -29,6 +29,7 @@ import redis.asyncio as aioredis
 
 from intric.main.config import Settings
 from intric.main.models import Status
+from intric.worker.feeder.watchdog import OrphanWatchdog
 
 
 # ============================================================================
@@ -138,8 +139,6 @@ class TestPhase0ZombieCounterReconciliation:
         - Redis key is DELETED (not just set to 0)
         - Feeder can now acquire slots normally
         """
-        from intric.worker.crawl_feeder import CrawlFeeder
-
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
         await clean_redis.set(slot_key, "5")
@@ -147,17 +146,16 @@ class TestPhase0ZombieCounterReconciliation:
         # Verify initial zombie state
         assert await clean_redis.get(slot_key) == b"5"
 
-        # Run cleanup (Phase 0 will reconcile)
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog directly
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        metrics = await watchdog.run_cleanup()
 
         # CRITICAL: Verify zombie counter was DELETED (DB has 0 jobs)
         slot_value = await clean_redis.get(slot_key)
         assert slot_value is None, (
             f"Zombie counter should be DELETED when DB has 0 active jobs, got {slot_value}"
         )
+        assert metrics.zombies_reconciled >= 1, "Should have reconciled at least one zombie"
 
     async def test_zombie_counter_with_some_active_jobs_is_reset(
         self,
@@ -181,7 +179,6 @@ class TestPhase0ZombieCounterReconciliation:
         """
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
 
         # Setup Redis with inflated counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -220,11 +217,9 @@ class TestPhase0ZombieCounterReconciliation:
 
             await session.commit()
 
-        # Run cleanup
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        await watchdog.run_cleanup()
 
         # Verify counter was reset to actual count
         slot_value = await clean_redis.get(slot_key)
@@ -254,7 +249,6 @@ class TestPhase0ZombieCounterReconciliation:
         """
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
 
         # Setup Redis with correct counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -293,11 +287,9 @@ class TestPhase0ZombieCounterReconciliation:
 
             await session.commit()
 
-        # Run cleanup
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        await watchdog.run_cleanup()
 
         # Verify counter unchanged
         slot_value = await clean_redis.get(slot_key)
@@ -330,7 +322,6 @@ class TestPhase0ZombieCounterReconciliation:
         """
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
 
         # Setup Redis with undercount
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -369,11 +360,9 @@ class TestPhase0ZombieCounterReconciliation:
 
             await session.commit()
 
-        # Run cleanup
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        await watchdog.run_cleanup()
 
         # Verify undercount NOT modified (safe state)
         slot_value = await clean_redis.get(slot_key)
@@ -403,23 +392,19 @@ class TestPhase0ZombieCounterReconciliation:
         Expected:
         - Tenant A: DELETED (zombie with no active jobs)
         """
-        from intric.worker.crawl_feeder import CrawlFeeder
-
         # Use only the test_tenant to avoid FK violations
         tenant_a_id = test_tenant.id
 
         # Setup Redis with zombie counter (DB has 0 jobs for this tenant)
         key_a = f"tenant:{tenant_a_id}:active_jobs"
-        await clean_redis.set(key_a, "5")   # Zombie (DB=0)
+        await clean_redis.set(key_a, "5")  # Zombie (DB=0)
 
         # Verify initial state
         assert await clean_redis.get(key_a) == b"5"
 
-        # Run cleanup (Phase 0 will reconcile)
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        await watchdog.run_cleanup()
 
         # Verify zombie counter was DELETED (DB has 0 jobs)
         val_a = await clean_redis.get(key_a)
@@ -446,7 +431,6 @@ class TestPhase0ZombieCounterReconciliation:
         """
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
 
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -510,11 +494,9 @@ class TestPhase0ZombieCounterReconciliation:
 
             await session.commit()
 
-        # Run cleanup
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        await watchdog.run_cleanup()
 
         # Verify counter reset to 3 (1 QUEUED + 2 IN_PROGRESS)
         slot_value = await clean_redis.get(slot_key)
@@ -543,7 +525,6 @@ class TestPhase0ZombieCounterReconciliation:
         """
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
 
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -633,11 +614,9 @@ class TestPhase0ZombieCounterReconciliation:
 
             await session.commit()
 
-        # Run cleanup
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        await watchdog.run_cleanup()
 
         # Verify counter reset to 1 (only QUEUED counted)
         slot_value = await clean_redis.get(slot_key)
@@ -674,7 +653,6 @@ class TestPhase0ZombieCounterReconciliation:
         """
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
         from sqlalchemy import select
 
         # Setup Redis with zombie counter
@@ -721,11 +699,9 @@ class TestPhase0ZombieCounterReconciliation:
         flag_key = f"job:{job_id}:slot_preacquired"
         await clean_redis.set(flag_key, str(test_tenant.id))
 
-        # Run cleanup (both Phase 0 and Phase 1)
-        feeder = CrawlFeeder()
-        feeder.settings = test_settings
-        feeder._redis_client = clean_redis
-        await feeder._cleanup_orphaned_crawl_jobs()
+        # Run cleanup using OrphanWatchdog (runs Phase 0, then Phase 1)
+        watchdog = OrphanWatchdog(clean_redis, test_settings)
+        metrics = await watchdog.run_cleanup()
 
         # Verify job was failed by Phase 1
         async with db_container() as container:
@@ -739,3 +715,6 @@ class TestPhase0ZombieCounterReconciliation:
         assert slot_value is None or int(slot_value) == 0, (
             f"Counter should be 0 or deleted after Phase 0 + Phase 1, got {slot_value}"
         )
+
+        # Verify metrics show both phases ran
+        assert metrics.expired_killed >= 1, "Should have killed at least one expired job"
