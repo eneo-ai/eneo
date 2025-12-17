@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from typing import Callable
 from uuid import UUID
 
-import sqlalchemy as sa
-
-from intric.database.database import sessionmanager
-from intric.database.tables.job_table import Jobs
 from intric.jobs.job_service import JobService
 from intric.main.logging import get_logger
 from intric.main.models import Channel, ChannelType, RedisMessage, Status
@@ -35,19 +30,9 @@ class TaskManager:
         channel_type: ChannelType | None = None,
         resource_id: UUID | None = None,
     ):
-        # NOTE: job_service is now optional for long-running worker tasks.
-        # Why: The "sessionless container" pattern for crawl_task cannot provide
-        # job_service because it triggers a transitive dependency chain:
-        #   task_manager → job_service → job_repo → session
-        # This fails type validation when session=None.
-        #
-        # In crawl_task, job_service is NOT needed because:
-        # 1. _job_already_handled=True skips complete_job/fail_job
-        # 2. Status updates use execute_with_recovery() with own sessions
-        # 3. set_status() is never called in the crawl path
-        #
-        # For non-crawl tasks (using @worker.task decorator), job_service
-        # is still provided via container.task_manager().
+        # job_service is optional for crawl_task which handles its own job status
+        # via execute_with_recovery() and sets _job_already_handled=True.
+        # All other tasks (upload, transcription) provide job_service via container.
         self.user = user
         self.job_id = job_id
         self.job_service = job_service
@@ -57,12 +42,9 @@ class TaskManager:
         self.success = None
         self._result_location = None
         self._cleanup_func = None
-        # Flag to skip job completion if already handled by crawl_task
-        # Why: crawl_task uses execute_with_recovery() to handle job completion
-        # with its own session management. This flag prevents duplicate updates.
-        self._job_already_handled = False
-
         self.additional_data = None
+        # Flag for crawl_task to skip complete_job/fail_job (it handles them itself)
+        self._job_already_handled = False
 
     @property
     def result_location(self):
@@ -129,87 +111,38 @@ class TaskManager:
     async def set_status(self, status: Status):
         self._log_status(status)
         await self._publish_status(status=status)
-
-        # Guard: job_service may be None for long-running worker tasks
-        # that bypass the container (e.g., crawl_task with sessionless container).
-        # In that case, update status directly via fresh session.
         if self.job_service is not None:
             await self.job_service.set_status(self.job_id, status)
-        else:
-            # Fallback: Direct SQL update with fresh session (same pattern as complete_job/fail_job)
-            try:
-                async with sessionmanager.session() as session, session.begin():
-                    stmt = (
-                        sa.update(Jobs)
-                        .where(Jobs.id == self.job_id)
-                        .values(status=status.value)
-                    )
-                    await session.execute(stmt)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to update job status in database",
-                    extra={"job_id": str(self.job_id), "status": status.value, "error": str(exc)},
-                )
 
     async def complete_job(self):
         if self._job_already_handled:
-            # Job was already completed by crawl_task using execute_with_recovery()
-            # Skip to avoid duplicate status update
             return
         await self._publish_status(status=Status.COMPLETE)
-
-        # FIX: Use fresh session instead of potentially stale self.job_service
-        # Why: Consistency with fail_job() - always use fresh session for job status updates
-        try:
-            async with sessionmanager.session() as session, session.begin():
-                stmt = (
-                    sa.update(Jobs)
-                    .where(Jobs.id == self.job_id)
-                    .values(
-                        status=Status.COMPLETE.value,
-                        finished_at=datetime.now(timezone.utc),
-                        result_location=self._result_location,
-                    )
+        if self.job_service is not None:
+            try:
+                await self.job_service.complete_job(self.job_id, self._result_location)
+            except Exception as exc:
+                logger.error(
+                    "Failed to mark job as complete",
+                    extra={"job_id": str(self.job_id), "error": str(exc)},
                 )
-                await session.execute(stmt)
-        except Exception as exc:
-            logger.error(
-                "Failed to mark job as complete in database",
-                extra={"job_id": str(self.job_id), "error": str(exc)},
-            )
 
     async def fail_job(self, message: str | None = None):
         if self._job_already_handled:
-            # Job was already failed by crawl_task using execute_with_recovery()
-            # Skip to avoid duplicate status update
             return
         await self._publish_status(status=Status.FAILED)
 
-        # FIX: Use fresh session instead of potentially stale self.job_service
-        # Why: After session recovery or transaction errors, the injected job_service
-        # holds a reference to a stale/closed session. Using sessionmanager.session()
-        # ensures we always have a working session for this critical operation.
-        # NOTE: Jobs table doesn't have error_message column - message is logged only
         if message:
             logger.warning(
                 "Job failed with error",
                 extra={"job_id": str(self.job_id), "error_message": message[:512]},
             )
-        try:
-            async with sessionmanager.session() as session, session.begin():
-                stmt = (
-                    sa.update(Jobs)
-                    .where(Jobs.id == self.job_id)
-                    .values(
-                        status=Status.FAILED.value,
-                        finished_at=datetime.now(timezone.utc),
-                    )
+
+        if self.job_service is not None:
+            try:
+                await self.job_service.fail_job(self.job_id, message)
+            except Exception as exc:
+                logger.error(
+                    "Failed to mark job as failed",
+                    extra={"job_id": str(self.job_id), "error": str(exc)},
                 )
-                await session.execute(stmt)
-        except Exception as exc:
-            # Log but don't raise - we've already published the failure status
-            # The job will be caught by Safe Watchdog if DB update fails
-            logger.error(
-                "Failed to mark job as failed in database",
-                extra={"job_id": str(self.job_id), "error": str(exc)},
-            )
