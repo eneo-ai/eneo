@@ -3,9 +3,13 @@ FROM oven/bun:1.3.0-slim AS builder
 
 WORKDIR /app
 
-# Copy workspace root files (context should be /workspace/frontend)
+# Copy all workspace package.json files for bun to resolve dependencies
 COPY bun.lock package.json ./
+COPY apps/web/package.json ./apps/web/
 COPY apps/docs-site/package.json ./apps/docs-site/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/intric-js/package.json ./packages/intric-js/
+COPY packages/eslint-plugin/package.json ./packages/eslint-plugin/
 
 # Install dependencies with Bun
 RUN bun install --frozen-lockfile
