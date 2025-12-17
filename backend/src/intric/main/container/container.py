@@ -1058,9 +1058,6 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Worker
-    # NOTE: TaskManager no longer requires session - it creates its own
-    # sessions via sessionmanager.session() for complete_job/fail_job.
-    # This allows TaskManager to work with sessionless containers.
     task_manager = providers.Factory(
         TaskManager,
         user=user,
