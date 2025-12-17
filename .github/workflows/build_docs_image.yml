@@ -1,0 +1,74 @@
+name: Build and Push Docs Image
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'frontend/apps/docs-site/**'
+  pull_request:
+    paths:
+      - 'frontend/apps/docs-site/**'
+
+env:
+  REGISTRY: ghcr.io
+  DOCS_IMAGE_NAME: eneo-ai/eneo-docs
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract docs metadata
+        id: meta-docs
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build docs Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/apps/docs-site/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta-docs.outputs.tags }}
+          labels: ${{ steps.meta-docs.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Summary
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "## 📚 Docs Image Build Verified" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Build succeeded (not pushed - PR validation only)" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "## 📚 Docs Image Built and Pushed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 📚 Docs Image Built and Pushed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
+          fi

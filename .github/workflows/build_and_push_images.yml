@@ -31,7 +31,6 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
-  DOCS_IMAGE_NAME: eneo-ai/eneo-docs
 
 jobs:
   build-and-push:
@@ -175,30 +174,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Docs site build and push (for develop and main branches)
-      - name: Extract docs metadata
-        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
-        id: meta-docs
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}
-          tags: |
-            # Branch-based tags
-            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push docs Docker image
-        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/apps/docs-site/Dockerfile
-          push: true
-          tags: ${{ steps.meta-docs.outputs.tags }}
-          labels: ${{ steps.meta-docs.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       # Summary of what was built
       - name: Build Summary
         run: |
@@ -223,7 +198,6 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🧪 Images will be deployed to testing environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
@@ -231,7 +205,6 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Docs:** \`${{ env.REGISTRY }}/${{ env.DOCS_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.ref }}" == "refs/heads/feature/"* ]]; then
