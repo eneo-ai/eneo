@@ -6,7 +6,7 @@ const withNextra = nextra({
 })
 
 const nextConfig: NextConfig = withNextra({
-  /* config options here */
+  output: 'standalone',
 });
 
 export default nextConfig;
