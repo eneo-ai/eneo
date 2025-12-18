@@ -492,6 +492,7 @@
   "include_follow_up_questions": "Inkludera uppföljningsfrågor",
   "incorrect_credentials": "Felaktiga uppgifter. Ange ett giltigt användarnamn och lösenord.",
   "input_data_required_tooltip": "Indata krävs för att köra denna app",
+  "input_files": "Indatafiler",
   "input_description_description": "En etikett som talar om för denna apps användare vilken data de ska tillhandahålla via denna inmatning.",
   "input_type_description": "Välj vilken typ av media denna inmatning accepterar och vilken typ av gränssnitt som ska visas.",
   "insights_description": "Samla insikter om denna assistents användning och låt ytans redigerare och administratörer komma åt hela historiken av användarfrågor.",
