@@ -954,7 +954,6 @@
   "set_as_default_template": "Ange som standardmall",
   "disable_model": "Inaktivera modell",
   "enable_model": "Aktivera modell",
-  "model_available_on_request": "Denna modell är tillgänglig på begäran.",
   "api_credentials_required_for_provider": "API-uppgifter krävs för denna leverantör",
   "provider_credentials_configured": "Uppgifter konfigurerade",
   "provider_credentials_missing": "Saknar uppgifter",

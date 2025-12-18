@@ -219,45 +219,6 @@ class TestModelCredentialLocking:
         assert model.is_locked is False
         assert model.lock_reason is None
 
-    def test_module_lock_takes_precedence_over_credential_lock(self, monkeypatch):
-        """
-        Module-based locks (SWE, EU hosting) should be reported before credential locks.
-        """
-        # Arrange
-        settings = MockSettings(tenant_credentials_enabled=True)
-        tenant = MockTenant(api_credentials={})  # No credentials
-        user = MockUser(tenant=tenant, modules=[])  # No SWE module
-
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
-
-        model = CompletionModel(
-            user=user,
-            id=uuid4(),
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            nickname="GPT-4",
-            name="gpt-4",
-            token_limit=8000,
-            vision=False,
-            family=ModelFamily.OPEN_AI,
-            hosting=ModelHostingLocation.SWE,  # SWE hosting requires module
-            org=ModelOrg.OPENAI,
-            stability=ModelStability.STABLE,
-            open_source=False,
-            description="OpenAI GPT-4 SWE",
-            nr_billion_parameters=None,
-            hf_link=None,
-            is_deprecated=False,
-            deployment_name=None,
-            is_org_enabled=False,
-            is_org_default=False,
-            reasoning=False,
-        )
-
-        # Assert - module lock takes precedence
-        assert model.is_locked is True
-        assert model.lock_reason == "module"  # Not "credentials"
-
     def test_azure_model_shows_warning_without_azure_credentials(self, monkeypatch):
         """
         Azure models should check for 'azure' credentials and report via lock_reason.

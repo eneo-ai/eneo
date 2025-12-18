@@ -10,9 +10,7 @@ class Modules(str, Enum):
     Any change to these enums will result in database changes
     """
 
-    EU_HOSTING = "eu_hosting"
     INTRIC_APPLICATIONS = "intric-applications"
-    SWE_HOSTING = "SWE Models"
 
 
 class ModuleBase(BaseModel):
