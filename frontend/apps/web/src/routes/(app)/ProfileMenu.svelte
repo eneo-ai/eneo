@@ -8,6 +8,7 @@
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import SelectLanguage from "$lib/components/SelectLanguage.svelte";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
@@ -76,7 +77,7 @@
     <Button
       unstyled
       is={[$item]}
-      href="/account"
+      href={localizeHref("/account")}
       padding="icon-leading"
       class="group border-default text-primary hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[3.5rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
     >
@@ -85,7 +86,7 @@
     ><Button
       is={[$item]}
       unstyled
-      href="/account/api-keys"
+      href={localizeHref("/account/api-keys")}
       padding="icon-leading"
       class="group border-default text-primary hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[3.5rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
     >
@@ -109,7 +110,7 @@
     <Button
       variant="destructive"
       is={[$item]}
-      href="/logout"
+      href={localizeHref("/logout")}
       class="mt-3 flex !justify-center !gap-2 rounded-lg !py-2 focus:ring-offset-4 focus:outline-offset-4"
     >
       <IconLogout />

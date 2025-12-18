@@ -16,6 +16,7 @@
   import { Navigation } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   // TODO
   const {
     state: { currentSpace }
@@ -29,7 +30,7 @@
 <Navigation.Menu>
   {#if !isOrgSpace && $currentSpace.hasPermission("read", "default_assistant") && $currentSpace.personal}
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/chat?tab=chat"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/chat?tab=chat`)}
       isActive={section === "chat" && !chatPartnerIsDefined}
       icon={IconSpeechBubble}
       label={m.chat()}
@@ -39,7 +40,7 @@
 
   {#if !isOrgSpace}
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/overview"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/overview`)}
       isActive={section === "overview"}
       icon={IconOverview}
       label={m.overview()}
@@ -48,7 +49,7 @@
 
   {#if !isOrgSpace && $currentSpace.hasPermission("read", "assistant")}
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/assistants"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/assistants`)}
       isActive={section === "assistants" || (section === "chat" && chatPartnerIsDefined)}
       icon={IconSpeechBubble}
       label={m.assistants()}
@@ -56,7 +57,7 @@
   {/if}
   {#if !isOrgSpace && $currentSpace.hasPermission("read", "app")}
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/apps"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/apps`)}
       isActive={section === "apps"}
       icon={IconApp}
       label={m.apps()}
@@ -64,7 +65,7 @@
   {/if}
   {#if $currentSpace.hasPermission("read", "website") || $currentSpace.hasPermission("read", "collection")}
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/knowledge"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/knowledge`)}
       isActive={section === "knowledge"}
       icon={IconKnowledge}
       label={m.knowledge()}
@@ -74,7 +75,7 @@
       class="border-default my-2 border-b-[0.5px]"
     ></div>
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/services"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/services`)}
       isActive={section === "services"}
       icon={IconServices}
       label={m.services()}
@@ -83,7 +84,7 @@
   {#if !isOrgSpace && $currentSpace.hasPermission("read", "member")}
     <div class="border-default my-2 border-b-[0.5px]"></div>
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/members"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/members`)}
       isActive={section === "members"}
       icon={IconAssistants}
       label={m.members()}
@@ -91,7 +92,7 @@
   {/if}
   {#if $currentSpace.hasPermission("edit", "space")}
     <Navigation.Link
-      href="/spaces/{$currentSpace.routeId}/settings"
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/settings`)}
       isActive={section === "settings"}
       icon={IconCog}
       label={m.settings()}

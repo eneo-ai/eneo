@@ -8,6 +8,7 @@
   import IntegrationVendorIcon from "../IntegrationVendorIcon.svelte";
   import { integrationData } from "../../IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   const contextIntegrations = getAvailableIntegrations();
   const { state: { currentSpace } } = getSpacesManager();
@@ -101,10 +102,10 @@
         <p class="text-secondary max-w-[60ch] pr-48 pl-4">
           {#if isPersonalSpace}
             {m.import_knowledge_from_third_party()}
-            <a href="/account/integrations?tab=providers" class="underline">{m.personal_account()}</a>.
+            <a href={localizeHref("/account/integrations?tab=providers")} class="underline">{m.personal_account()}</a>.
           {:else}
             Import knowledge from organization-wide integrations. Configure them in
-            <a href="/admin/integrations?tab=providers" class="underline">admin settings</a>.
+            <a href={localizeHref("/admin/integrations?tab=providers")} class="underline">admin settings</a>.
           {/if}
         </p>
         <!-- <div class="h-8"></div> -->
