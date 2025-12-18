@@ -16,7 +16,8 @@
   const { user } = getAppContext();
 
   let integrations = $derived.by(() => {
-    let integrations = $state(data.myIntegrations);
+    // Filter out integrations that are not yet ready (e.g., Confluence)
+    let integrations = $state(data.myIntegrations.filter(i => i.integration_type === "sharepoint"));
     return integrations;
   });
 

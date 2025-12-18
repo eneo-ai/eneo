@@ -15,7 +15,8 @@
   const { data }: PageProps = $props();
 
   let tenantIntegrations = $derived.by(() => {
-    let integrations = $state(data.tenantIntegrations);
+    // Filter out integrations that are not yet ready (e.g., Confluence)
+    let integrations = $state(data.tenantIntegrations.filter(i => i.integration_type === "sharepoint"));
     return integrations;
   });
 
