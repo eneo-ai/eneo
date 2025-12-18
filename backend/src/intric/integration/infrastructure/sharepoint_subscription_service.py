@@ -38,6 +38,8 @@ class SharePointSubscriptionService:
         self.oauth_token_service = oauth_token_service
         settings = get_settings()
         self.notification_url = settings.sharepoint_webhook_notification_url
+        if not self.notification_url and settings.server_url:
+            self.notification_url = f"{settings.server_url}/api/v1/integrations/sharepoint/webhook/"
         self.client_state = settings.sharepoint_webhook_client_state
         # Microsoft Graph allows up to 42,300 minutes (29.375 days) for driveItem subscriptions
         # We use 42,000 minutes (~29 days) to stay safely under the limit
@@ -321,7 +323,7 @@ class SharePointSubscriptionService:
             return True
 
         # No references - safe to delete
-        subscription = await self.subscription_repo.get(subscription_id)
+        subscription = await self.subscription_repo.one_or_none(id=subscription_id)
         if not subscription:
             logger.warning(f"Subscription {subscription_id} not found in database")
             return True  # Already deleted
@@ -334,7 +336,7 @@ class SharePointSubscriptionService:
 
         if deleted:
             # Delete from database
-            await self.subscription_repo.remove(id=subscription_id)
+            await self.subscription_repo.delete(id=subscription_id)
             logger.info(
                 f"Deleted subscription {subscription.subscription_id} "
                 f"for site {subscription.site_id[:30]}... (no more references)"

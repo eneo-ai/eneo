@@ -41,7 +41,6 @@ function createJobManager(data: { intric: Intric }) {
     let jobs: Job[] = [];
     try {
       jobs = await intric.jobs.list();
-      console.log("JobManager: Fetched jobs from server:", jobs.map(j => ({ id: j.id, name: j.name, status: j.status })));
       // Reset errors on success
       jobUpdateErrors = 0;
     } catch (error) {
@@ -71,7 +70,6 @@ function createJobManager(data: { intric: Intric }) {
       if (oldJob &&
           (oldJob.status === "in progress" || oldJob.status === "queued") &&
           newJob.status === "complete") {
-        console.log(`JobManager: Job completed - ${newJob.name} (${id}), old status: ${oldJob.status}, new status: ${newJob.status}`);
         jobsCompleted = true;
         break;
       }
@@ -82,13 +80,11 @@ function createJobManager(data: { intric: Intric }) {
 
     if (jobsCompleted || jobsRemoved) {
       // Some jobs have finished: refresh related data
-      console.log("JobManager: Jobs completed or removed, refreshing space and blobs");
       if (browser) {
         // Invalidate data dependencies to trigger SvelteKit page data refresh
         invalidate("blobs:list");
         // Emit job completion event that components can subscribe to
         jobCompletionEvents.set({ timestamp: Date.now(), jobId: "any" });
-        console.log("JobManager: Emitted job completion event");
       }
     }
     currentJobs = updatedJobs;

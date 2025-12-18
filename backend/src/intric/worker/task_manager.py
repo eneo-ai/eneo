@@ -104,11 +104,23 @@ class TaskManager:
                 Used when mark_job_started() has already atomically set the status
                 to prevent worker resurrection race condition.
         """
+        import asyncio
+
         if not status_already_set:
             await self.set_status(Status.IN_PROGRESS)
 
         try:
             yield
+        except asyncio.CancelledError:
+            # CancelledError inherits from BaseException (not Exception) in Python 3.8+
+            # Must handle explicitly to mark job as failed when worker shuts down
+            logger.warning(
+                "Job cancelled (worker shutdown or timeout)",
+                extra={"job_id": str(self.job_id)},
+            )
+            await self.fail_job("Job cancelled")
+            self.success = False
+            raise  # Re-raise to let ARQ know the job was cancelled
         except Exception as exc:
             logger.exception("Error on worker:")
             message = str(exc).strip()
@@ -130,26 +142,26 @@ class TaskManager:
         self._log_status(status)
         await self._publish_status(status=status)
 
-        # Guard: job_service may be None for long-running worker tasks
-        # that bypass the container (e.g., crawl_task with sessionless container).
-        # In that case, update status directly via fresh session.
-        if self.job_service is not None:
-            await self.job_service.set_status(self.job_id, status)
-        else:
-            # Fallback: Direct SQL update with fresh session (same pattern as complete_job/fail_job)
-            try:
-                async with sessionmanager.session() as session, session.begin():
-                    stmt = (
-                        sa.update(Jobs)
-                        .where(Jobs.id == self.job_id)
-                        .values(status=status.value)
-                    )
-                    await session.execute(stmt)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to update job status in database",
-                    extra={"job_id": str(self.job_id), "status": status.value, "error": str(exc)},
+        # ALWAYS use fresh session to avoid deadlock with task session.
+        # Why: The task session holds a transaction open. If we update job status
+        # via task session (job_service.set_status), then complete_job() tries to
+        # update the same row with a fresh session, causing a deadlock:
+        # - Fresh session waits for task session to release row lock
+        # - Task session waits for complete_job() to return before committing
+        # Using fresh sessions for ALL job status updates avoids this.
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                stmt = (
+                    sa.update(Jobs)
+                    .where(Jobs.id == self.job_id)
+                    .values(status=status.value)
                 )
+                await session.execute(stmt)
+        except Exception as exc:
+            logger.warning(
+                "Failed to update job status in database",
+                extra={"job_id": str(self.job_id), "status": status.value, "error": str(exc)},
+            )
 
     async def complete_job(self):
         if self._job_already_handled:
@@ -158,8 +170,7 @@ class TaskManager:
             return
         await self._publish_status(status=Status.COMPLETE)
 
-        # FIX: Use fresh session instead of potentially stale self.job_service
-        # Why: Consistency with fail_job() - always use fresh session for job status updates
+        # Use fresh session to avoid deadlock with task session
         try:
             async with sessionmanager.session() as session, session.begin():
                 stmt = (

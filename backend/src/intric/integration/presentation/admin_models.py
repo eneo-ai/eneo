@@ -121,6 +121,14 @@ class SharePointSubscriptionPublic(BaseModel):
         ...,
         description="Hours until expiration (0 if already expired)"
     )
+    owner_email: Optional[str] = Field(
+        None,
+        description="Email of subscription owner (None for organization integrations)"
+    )
+    owner_type: str = Field(
+        ...,
+        description="Type of owner: 'user' or 'organization'"
+    )
 
     class Config:
         from_attributes = True

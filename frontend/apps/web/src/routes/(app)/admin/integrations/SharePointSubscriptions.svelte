@@ -14,6 +14,8 @@
     created_at: string;
     is_expired: boolean;
     expires_in_hours: number;
+    owner_email: string | null;
+    owner_type: "user" | "organization";
   }
 
   interface SubscriptionRenewalResult {
@@ -198,23 +200,26 @@
     </div>
   {:else}
     <!-- Subscriptions table -->
-    <div class="overflow-hidden rounded-lg border border-border">
-      <table class="min-w-full divide-y divide-border">
+    <div class="overflow-x-auto rounded-lg border border-border">
+      <table class="w-full divide-y divide-border">
         <thead class="bg-muted">
           <tr>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
               {m.sharepoint_subscription_status()}
             </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+              {m.sharepoint_subscription_owner()}
+            </th>
+            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
               {m.sharepoint_subscription_site()}
             </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
               {m.sharepoint_subscription_expires()}
             </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
               {m.sharepoint_subscription_created()}
             </th>
-            <th scope="col" class="relative px-6 py-3">
+            <th scope="col" class="sticky right-0 bg-muted px-3 py-2">
               <span class="sr-only">{m.actions()}</span>
             </th>
           </tr>
@@ -222,9 +227,9 @@
         <tbody class="divide-y divide-border bg-background">
           {#each subscriptions as subscription (subscription.id)}
             <tr class="hover:bg-muted/50 transition-colors">
-              <td class="whitespace-nowrap px-6 py-4">
-                <div class="flex items-center gap-2">
-                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {getStatusBadgeClass(subscription)}">
+              <td class="whitespace-nowrap px-3 py-3">
+                <div class="flex items-center gap-1">
+                  <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {getStatusBadgeClass(subscription)}">
                     {getStatusLabel(subscription)}
                   </span>
                   <span class="text-xs text-secondary">
@@ -232,21 +237,32 @@
                   </span>
                 </div>
               </td>
-              <td class="px-6 py-4">
-                <div class="max-w-xs truncate text-sm text-foreground" title={subscription.site_id}>
+              <td class="whitespace-nowrap px-3 py-3">
+                {#if subscription.owner_type === "organization"}
+                  <span class="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                    {m.sharepoint_subscription_owner_organization()}
+                  </span>
+                {:else}
+                  <span class="max-w-[150px] truncate text-sm text-foreground block" title={subscription.owner_email || ""}>
+                    {subscription.owner_email || m.sharepoint_subscription_owner_unknown()}
+                  </span>
+                {/if}
+              </td>
+              <td class="px-3 py-3">
+                <div class="max-w-[200px] truncate text-sm text-foreground" title={subscription.site_id}>
                   {subscription.site_id}
                 </div>
-                <div class="max-w-xs truncate text-xs text-secondary" title={subscription.drive_id}>
+                <div class="max-w-[200px] truncate text-xs text-secondary" title={subscription.drive_id}>
                   Drive: {subscription.drive_id}
                 </div>
               </td>
-              <td class="whitespace-nowrap px-6 py-4 text-sm text-secondary">
+              <td class="whitespace-nowrap px-3 py-3 text-xs text-secondary">
                 {formatDate(subscription.expires_at)}
               </td>
-              <td class="whitespace-nowrap px-6 py-4 text-sm text-secondary">
+              <td class="whitespace-nowrap px-3 py-3 text-xs text-secondary">
                 {formatDate(subscription.created_at)}
               </td>
-              <td class="whitespace-nowrap px-6 py-4 text-right text-sm">
+              <td class="sticky right-0 bg-background whitespace-nowrap px-3 py-3 text-right">
                 <Button
                   variant="secondary"
                   size="sm"

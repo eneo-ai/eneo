@@ -16,11 +16,6 @@
 
   let isConfirmed = $derived(confirmationText.trim().toUpperCase() === CONFIRMATION_WORD);
 
-  // Debug: Watch open state changes
-  $effect(() => {
-    console.log("SharePointAppDeleteDialog open state changed:", $openController);
-  });
-
   async function handleDelete() {
     console.log("handleDelete called, isConfirmed:", isConfirmed);
     if (!isConfirmed) {
@@ -39,8 +34,6 @@
         params: {}
       });
       console.log("API call successful");
-
-      alert(m.sharepoint_app_deleted_successfully());
       $openController = false;
       // Reload page to refresh state
       window.location.reload();

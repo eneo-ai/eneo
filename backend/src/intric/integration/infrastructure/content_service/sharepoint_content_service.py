@@ -20,6 +20,19 @@ from intric.integration.infrastructure.office_change_key_service import (
 )
 from intric.main.logging import get_logger
 
+
+def sanitize_text_for_db(text: str) -> str:
+    """Remove null bytes and other invalid characters that PostgreSQL doesn't accept.
+
+    PostgreSQL TEXT columns cannot contain null bytes (0x00) in UTF-8 encoding.
+    This commonly happens when PDF extraction fails or returns binary data.
+    """
+    if not text:
+        return text
+    # Remove null bytes which cause "invalid byte sequence for encoding UTF8: 0x00"
+    return text.replace("\x00", "")
+
+
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
     from intric.info_blobs.info_blob_service import InfoBlobService
@@ -703,7 +716,7 @@ class SharePointContentService:
         info_blob_add = InfoBlobAdd(
             title=title,
             user_id=self.user.id,
-            text=text,
+            text=sanitize_text_for_db(text),
             group_id=None,
             url=url,
             website_id=None,
@@ -823,7 +836,7 @@ class SharePointContentService:
                     info_blob_add = InfoBlobAdd(
                         title=item_name,
                         user_id=self.user.id,
-                        text=content,
+                        text=sanitize_text_for_db(content),
                         group_id=None,
                         url=web_url,
                         website_id=None,

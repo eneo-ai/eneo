@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -304,9 +305,11 @@ class IntegrationKnowledgeService:
         )
 
         space = await self.space_repo.one(id=space_id)
+
         knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
+
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_integration_knowledge_list():
@@ -328,6 +331,9 @@ class IntegrationKnowledgeService:
                 )
             )
 
+        # Prepare subscription cleanup info BEFORE database delete
+        # We need to get the token while the transaction is still open
+        subscription_cleanup_info = None
         subscription_id = knowledge.sharepoint_subscription_id
         if subscription_id and knowledge.integration_type == "sharepoint":
             try:
@@ -351,23 +357,60 @@ class IntegrationKnowledgeService:
                         user_integration_id=knowledge.user_integration.id
                     )
 
-                await self.sharepoint_subscription_service.delete_subscription_if_unused(
-                    subscription_id=subscription_id,
-                    token=token
-                )
-                logger.info(
-                    "Cleaned up subscription %s (if no longer referenced)",
-                    subscription_id
-                )
+                subscription_cleanup_info = {
+                    "subscription_id": subscription_id,
+                    "token": token,
+                }
             except Exception as exc:
                 logger.warning(
-                    "Failed to cleanup subscription %s: %s",
+                    "Failed to prepare subscription cleanup for %s: %s",
                     subscription_id,
                     exc,
                     exc_info=True
                 )
 
+        # Delete from database FIRST (within transaction)
         await self.integration_knowledge_repo.remove(id=knowledge.id)
+
+        # Cleanup Microsoft Graph subscription AFTER the database transaction completes
+        # Using fire-and-forget to avoid blocking the HTTP response
+        if subscription_cleanup_info:
+            asyncio.create_task(
+                self._cleanup_subscription_async(
+                    subscription_id=subscription_cleanup_info["subscription_id"],
+                    token=subscription_cleanup_info["token"],
+                )
+            )
+
+    async def _cleanup_subscription_async(
+        self,
+        subscription_id: UUID,
+        token,
+    ) -> None:
+        """Clean up Microsoft Graph subscription asynchronously.
+
+        This runs as a fire-and-forget task AFTER the database transaction
+        has completed. This prevents HTTP calls to Microsoft Graph from
+        blocking the database connection pool.
+        """
+        try:
+            await self.sharepoint_subscription_service.delete_subscription_if_unused(
+                subscription_id=subscription_id,
+                token=token,
+            )
+            logger.info(
+                "Cleaned up subscription %s (if no longer referenced)",
+                subscription_id,
+            )
+        except Exception as exc:
+            # Log but don't raise - this is fire-and-forget
+            # The subscription will be cleaned up by the orphan cleanup cron job if needed
+            logger.warning(
+                "Failed to cleanup subscription %s: %s",
+                subscription_id,
+                exc,
+                exc_info=True,
+            )
 
     async def update_knowledge_name(
         self,

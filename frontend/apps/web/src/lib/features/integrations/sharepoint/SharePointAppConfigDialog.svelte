@@ -5,7 +5,9 @@
   import { IntricError } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import type { Writable } from "svelte/store";
+  import { writable, type Writable } from "svelte/store";
+  import { AlertTriangle } from "lucide-svelte";
+  import SharePointAppDeleteDialog from "./SharePointAppDeleteDialog.svelte";
 
   // Types for SharePoint app configuration (until OpenAPI types are regenerated)
   type TenantSharePointAppCreate = {
@@ -56,6 +58,9 @@
   let testResult = $state<TenantAppTestResult | null>(null);
   let oauthState = $state<string | null>(null);
   let isOAuthInProgress = $state(false);
+  const deleteDialogOpen = writable(false);
+  let isUpdatingSecret = $state(false);
+  let newClientSecret = $state("");
 
   // Load existing configuration
   const loadConfig = createAsyncState(async () => {
@@ -142,9 +147,39 @@
       }) as TenantSharePointAppPublic;
 
       existingConfig = result;
-
-      alert(m.sharepoint_app_configured_successfully());
       $openController = false;
+    } catch (error) {
+      const errorMessage =
+        error instanceof IntricError ? error.getReadableMessage() : String(error);
+      alert(m.failed_to_save_configuration({ message: errorMessage }));
+    }
+  });
+
+  // Update client secret only
+  const updateSecret = createAsyncState(async () => {
+    if (!existingConfig || !newClientSecret) {
+      alert(m.fill_required_fields());
+      return;
+    }
+
+    try {
+      const payload: TenantSharePointAppCreate = {
+        client_id: existingConfig.client_id,
+        client_secret: newClientSecret,
+        tenant_domain: existingConfig.tenant_domain,
+      };
+
+      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+        method: "post",
+        params: {},
+        requestBody: {
+          "application/json": payload
+        }
+      }) as TenantSharePointAppPublic;
+
+      existingConfig = result;
+      isUpdatingSecret = false;
+      newClientSecret = "";
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
@@ -197,8 +232,22 @@
 
   // Load config when dialog opens
   $effect(() => {
-    if ($openController && existingConfig === null) {
+    if ($openController) {
       loadConfig();
+    }
+  });
+
+  // Reset state when dialog closes
+  $effect(() => {
+    if (!$openController) {
+      existingConfig = null;
+      clientId = "";
+      clientSecret = "";
+      tenantDomain = "";
+      testResult = null;
+      authMethod = "service_account";
+      isUpdatingSecret = false;
+      newClientSecret = "";
     }
   });
 </script>
@@ -207,13 +256,79 @@
   <Dialog.Content width="medium">
     <Dialog.Title>{m.configure_sharepoint_app_title()}</Dialog.Title>
 
-    <Dialog.Section scrollable={false}>
+    <Dialog.Section scrollable={true}>
       {#if loadConfig.isLoading}
         <div class="flex items-center justify-center gap-2 p-8">
           <IconLoadingSpinner class="animate-spin" />
           <span class="text-secondary">{m.loading_configuration()}</span>
         </div>
+      {:else if existingConfig}
+        <!-- Read-only view when integration exists -->
+        <div class="space-y-4 p-4">
+          <div class="rounded-md border border-default bg-secondary p-4">
+            <div class="text-sm font-medium text-primary mb-3">{m.current_configuration()}</div>
+            <div class="space-y-2 text-sm text-secondary">
+              <div>
+                <span class="font-medium">{m.auth_method()}:</span>
+                {existingConfig.auth_method === "service_account"
+                  ? m.service_account_option()
+                  : m.tenant_app_option()}
+              </div>
+              <div>
+                <span class="font-medium">{m.client_id()}:</span>
+                {existingConfig.client_id}
+              </div>
+              <div>
+                <span class="font-medium">{m.secret()}:</span>
+                {existingConfig.client_secret_masked}
+              </div>
+              <div>
+                <span class="font-medium">{m.domain()}:</span>
+                {existingConfig.tenant_domain}
+              </div>
+              {#if existingConfig.service_account_email}
+                <div>
+                  <span class="font-medium">{m.service_account_email()}:</span>
+                  {existingConfig.service_account_email}
+                </div>
+              {/if}
+              <div>
+                <span class="font-medium">{m.status()}:</span>
+                <span class={existingConfig.is_active ? "text-green-600" : "text-red-600"}>
+                  {existingConfig.is_active ? m.active() : m.inactive()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {#if isUpdatingSecret}
+            <!-- Update secret form -->
+            <div class="rounded-md border border-blue-500 bg-blue-50 p-4">
+              <div class="text-sm font-medium text-blue-800 mb-3">{m.update_client_secret()}</div>
+              <Input.Text
+                label={m.new_client_secret()}
+                bind:value={newClientSecret}
+                required
+                type="password"
+                placeholder="Enter new client secret"
+                description={m.new_client_secret_description()}
+                autocomplete="off"
+              />
+            </div>
+          {:else}
+            <!-- Warning about changing auth method -->
+            <div class="rounded-lg border border-amber-500 bg-amber-50 px-4 py-3">
+              <div class="flex items-start gap-3">
+                <AlertTriangle class="text-amber-600 shrink-0 mt-0.5" size={18} />
+                <p class="text-sm text-amber-800">
+                  {m.sharepoint_change_auth_warning()}
+                </p>
+              </div>
+            </div>
+          {/if}
+        </div>
       {:else}
+        <!-- Configuration form for new setup -->
         <div class="space-y-4 p-4">
           <!-- Auth Method Selector -->
           <div class="space-y-3">
@@ -288,6 +403,7 @@
             required
             placeholder="12345678-1234-1234-1234-123456789012"
             description={m.client_id_description()}
+            autocomplete="off"
           />
 
           <Input.Text
@@ -296,9 +412,8 @@
             required
             type="password"
             placeholder="Enter client secret"
-            description={existingConfig
-              ? m.client_secret_keep_existing()
-              : m.client_secret_description()}
+            description={m.client_secret_description()}
+            autocomplete="off"
           />
 
           <Input.Text
@@ -307,42 +422,8 @@
             required
             placeholder="contoso.onmicrosoft.com"
             description={m.tenant_id_or_domain_description()}
+            autocomplete="off"
           />
-
-          {#if existingConfig}
-            <div class="rounded-md border border-default bg-secondary p-3">
-              <div class="text-sm">
-                <div class="font-medium text-primary">{m.current_configuration()}</div>
-                <div class="mt-2 space-y-1 text-secondary">
-                  <div>{m.client_id()}: {existingConfig.client_id}</div>
-                  <div>{m.secret()}: {existingConfig.client_secret_masked}</div>
-                  <div>{m.domain()}: {existingConfig.tenant_domain}</div>
-                  <div>
-                    {m.auth_method()}:
-                    <span class="font-medium">
-                      {existingConfig.auth_method === "service_account"
-                        ? m.service_account_option()
-                        : m.tenant_app_option()}
-                    </span>
-                  </div>
-                  {#if existingConfig.service_account_email}
-                    <div>
-                      {m.service_account_email()}:
-                      {existingConfig.service_account_email}
-                    </div>
-                  {/if}
-                  <div>
-                    {m.status()}: <span
-                      class={existingConfig.is_active
-                        ? "text-green-600"
-                        : "text-red-600"}
-                      >{existingConfig.is_active ? m.active() : m.inactive()}</span
-                    >
-                  </div>
-                </div>
-              </div>
-            </div>
-          {/if}
 
           {#if testResult}
             <div
@@ -372,7 +453,43 @@
         }}>{m.cancel()}</Button
       >
 
-      {#if authMethod === "tenant_app"}
+      {#if existingConfig && isUpdatingSecret}
+        <!-- Update secret mode buttons -->
+        <Button
+          variant="secondary"
+          onclick={() => {
+            isUpdatingSecret = false;
+            newClientSecret = "";
+          }}
+        >
+          {m.back()}
+        </Button>
+        <Button
+          variant="primary"
+          disabled={updateSecret.isLoading || !newClientSecret}
+          onclick={updateSecret}
+        >
+          {updateSecret.isLoading ? m.saving() : m.save()}
+        </Button>
+      {:else if existingConfig}
+        <!-- Normal view buttons when config exists -->
+        <Button
+          variant="secondary"
+          onclick={() => {
+            isUpdatingSecret = true;
+          }}
+        >
+          {m.update_secret()}
+        </Button>
+        <Button
+          variant="destructive"
+          onclick={() => {
+            $deleteDialogOpen = true;
+          }}
+        >
+          {m.delete_sharepoint_app()}
+        </Button>
+      {:else if authMethod === "tenant_app"}
         <!-- Tenant App: Test + Save flow -->
         <Button
           variant="secondary"
@@ -412,3 +529,5 @@
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
+
+<SharePointAppDeleteDialog openController={deleteDialogOpen} />

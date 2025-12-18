@@ -117,7 +117,7 @@ export class IntegrationAuthService {
 
   receiveMessageHandler = async (event: MessageEvent) => {
     const { origin, data } = event;
-    const allowedOrigins = ["https://integrations.intric.ai"];
+    const allowedOrigins: string[] = [];
     if (browser) {
       allowedOrigins.push(window.location.origin);
     }

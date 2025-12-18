@@ -409,17 +409,52 @@ async def list_sharepoint_subscriptions(
         validate_permission(user, Permission.ADMIN)
 
         subscription_repo = container.sharepoint_subscription_repo()
+        user_integration_repo = container.user_integration_repo()
+        user_repo = container.user_repo()
 
         # Get all subscriptions
         all_subscriptions = await subscription_repo.list_all()
 
         from datetime import datetime, timezone
 
+        # Build a cache of user_integrations and users for efficiency
+        user_integration_ids = [sub.user_integration_id for sub in all_subscriptions]
+        user_integrations_map = {}
+        users_map = {}
+
+        # Fetch all user_integrations
+        for ui_id in user_integration_ids:
+            try:
+                ui = await user_integration_repo.one_or_none(id=ui_id)
+                if ui:
+                    user_integrations_map[ui_id] = ui
+                    # Fetch user if user_id exists
+                    if ui.user_id and ui.user_id not in users_map:
+                        user_obj = await user_repo.get_user_by_id(ui.user_id)
+                        if user_obj:
+                            users_map[ui.user_id] = user_obj
+            except Exception as e:
+                logger.warning(f"Could not fetch user_integration {ui_id}: {e}")
+
         # Convert to public models with computed fields
         result = []
         for sub in all_subscriptions:
             now = datetime.now(timezone.utc)
             expires_in_hours = max(0, int((sub.expires_at - now).total_seconds() / 3600))
+
+            # Determine owner info
+            owner_email = None
+            owner_type = "organization"
+
+            ui = user_integrations_map.get(sub.user_integration_id)
+            if ui:
+                if ui.user_id:
+                    owner_type = "user"
+                    user_obj = users_map.get(ui.user_id)
+                    if user_obj:
+                        owner_email = user_obj.email
+                else:
+                    owner_type = "organization"
 
             result.append(SharePointSubscriptionPublic(
                 id=sub.id,
@@ -431,6 +466,8 @@ async def list_sharepoint_subscriptions(
                 created_at=sub.created_at,
                 is_expired=sub.is_expired(),
                 expires_in_hours=expires_in_hours,
+                owner_email=owner_email,
+                owner_type=owner_type,
             ))
 
         return result
@@ -595,6 +632,7 @@ async def recreate_subscription(
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
         oauth_token_service = container.oauth_token_service()
+        user_integration_repo = container.user_integration_repo()
 
         # Get subscription
         subscription = await subscription_repo.one_or_none(id=subscription_id)
@@ -605,34 +643,89 @@ async def recreate_subscription(
                 detail=f"Subscription {subscription_id} not found"
             )
 
-        # Get token
-        token = await oauth_token_service.get_oauth_token_by_user_integration(
-            user_integration_id=subscription.user_integration_id
+        # Get user_integration to check auth type
+        user_integration = await user_integration_repo.one_or_none(
+            id=subscription.user_integration_id
         )
 
-        if not token:
+        if not user_integration:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No OAuth token found for user_integration {subscription.user_integration_id}"
+                detail=f"User integration {subscription.user_integration_id} not found"
             )
 
-        # Ensure it's a SharePoint token
-        if not token.token_type.is_sharepoint:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Token for user_integration {subscription.user_integration_id} is not a SharePoint token"
+        # Handle different auth types
+        token = None
+
+        if user_integration.tenant_app_id:
+            # Tenant app authentication - get token from TenantSharePointApp
+            logger.info(f"Subscription {subscription_id} uses tenant_app_id: {user_integration.tenant_app_id}")
+            tenant_app_repo = container.tenant_sharepoint_app_repo()
+
+            tenant_app = await tenant_app_repo.get_by_id(user_integration.tenant_app_id)
+            if not tenant_app:
+                logger.error(f"TenantSharePointApp {user_integration.tenant_app_id} not found")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"TenantSharePointApp {user_integration.tenant_app_id} not found"
+                )
+
+            logger.info(f"TenantSharePointApp found: auth_method={tenant_app.auth_method}")
+
+            # Create a simple token-like object for the subscription service
+            class SimpleToken:
+                def __init__(self, access_token: str):
+                    self.access_token = access_token
+                    self.base_url = "https://graph.microsoft.com"
+
+            try:
+                if tenant_app.is_service_account():
+                    # Service account uses delegated permissions with refresh token
+                    service_account_auth = container.service_account_auth_service()
+                    token_result = await service_account_auth.refresh_access_token(tenant_app)
+                    logger.info(f"Refreshed service account token for subscription {subscription_id}")
+                    token = SimpleToken(token_result["access_token"])
+                else:
+                    # Tenant app uses client credentials flow (application permissions)
+                    tenant_app_auth = container.tenant_app_auth_service()
+                    access_token = await tenant_app_auth.get_access_token(tenant_app)
+                    logger.info(f"Got tenant app token for subscription {subscription_id}")
+                    token = SimpleToken(access_token)
+            except Exception as auth_error:
+                logger.error(f"Failed to get token for subscription {subscription_id}: {auth_error}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to get access token: {str(auth_error)}"
+                )
+        else:
+            # Personal OAuth token authentication
+            token = await oauth_token_service.get_oauth_token_by_user_integration(
+                user_integration_id=subscription.user_integration_id
             )
 
-        # Refresh token if needed (expired tokens can't be used)
-        try:
-            token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-            logger.info(f"Refreshed OAuth token for subscription {subscription_id}")
-        except Exception as refresh_error:
-            logger.error(f"Failed to refresh token for subscription {subscription_id}: {refresh_error}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to refresh OAuth token: {str(refresh_error)}"
-            )
+            if not token:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No OAuth token found for user_integration {subscription.user_integration_id}"
+                )
+
+            # Ensure it's a SharePoint token
+            if not token.token_type.is_sharepoint:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Token for user_integration {subscription.user_integration_id} is not a SharePoint token"
+                )
+
+            # Refresh token if needed (expired tokens can't be used)
+            try:
+                token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
+                logger.info(f"Refreshed OAuth token for subscription {subscription_id}")
+            except Exception as refresh_error:
+                logger.error(f"Failed to refresh token for subscription {subscription_id}: {refresh_error}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to refresh OAuth token: {str(refresh_error)}"
+                )
 
         # Recreate subscription
         success = await subscription_service.recreate_expired_subscription(
@@ -653,6 +746,16 @@ async def recreate_subscription(
         now = datetime.now(timezone.utc)
         expires_in_hours = max(0, int((subscription.expires_at - now).total_seconds() / 3600))
 
+        # Determine owner info (user_integration already fetched above)
+        owner_email = None
+        owner_type = "organization"
+        if user_integration.user_id:
+            owner_type = "user"
+            user_repo = container.user_repo()
+            owner_user = await user_repo.get_user_by_id(user_integration.user_id)
+            if owner_user:
+                owner_email = owner_user.email
+
         return SharePointSubscriptionPublic(
             id=subscription.id,
             user_integration_id=subscription.user_integration_id,
@@ -663,6 +766,8 @@ async def recreate_subscription(
             created_at=subscription.created_at,
             is_expired=subscription.is_expired(),
             expires_in_hours=expires_in_hours,
+            owner_email=owner_email,
+            owner_type=owner_type,
         )
 
     except HTTPException:
