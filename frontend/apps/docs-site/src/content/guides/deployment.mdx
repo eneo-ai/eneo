@@ -1,0 +1,570 @@
+# Deployment Guide
+
+This guide covers production deployment of Eneo using Docker Compose with Traefik as a reverse proxy.
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- **Linux server** (Ubuntu 20.04+ recommended)
+- **Docker** and **Docker Compose** installed
+- **Domain name** with DNS pointing to your server
+- **Email address** for Let's Encrypt SSL certificates
+- **At least one AI provider API key** ([see AI Provider guide](/guides/ai-providers))
+- **Firewall** allowing ports 80 (HTTP) and 443 (HTTPS)
+
+### System Requirements
+
+**Minimum:**
+- 2 CPU cores
+- 4GB RAM
+- 20GB disk space
+
+**Recommended:**
+- 4+ CPU cores
+- 8GB+ RAM
+- 50GB+ disk space (for documents and databases)
+
+---
+
+## Quick Deployment
+
+The fastest way to deploy Eneo in production:
+
+### Step 1: Get Deployment Files
+
+```bash
+# Option A: Clone the repository
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo/docs/deployment/
+
+# Option B: Download files directly
+mkdir eneo-deployment && cd eneo-deployment
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/docker-compose.yml
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_backend.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_frontend.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_db.template
+```
+
+### Step 2: Create Environment Files
+
+```bash
+cp env_backend.template env_backend.env
+cp env_frontend.template env_frontend.env
+cp env_db.template env_db.env
+```
+
+### Step 3: Configure Your Deployment
+
+#### A. Update `docker-compose.yml`
+
+Replace placeholders with your actual values:
+
+```bash
+# Replace email for SSL certificate notifications
+sed -i 's/your-email@domain.com/ops@your-company.com/g' docker-compose.yml
+
+# Replace domain name (appears in 4 places)
+sed -i 's/your-domain.com/eneo.your-company.com/g' docker-compose.yml
+```
+
+Or manually edit the file:
+- `your-email@domain.com` → your email
+- `your-domain.com` → your domain (all 4 occurrences)
+
+#### B. Configure Database (`env_db.env`)
+
+Generate a secure database password:
+
+```bash
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> env_db.env
+```
+
+#### C. Configure Backend (`env_backend.env`)
+
+**Required settings:**
+
+```bash
+# Generate JWT secret for session management
+echo "JWT_SECRET=$(openssl rand -hex 32)" >> env_backend.env
+
+# Database connection (use the password from env_db.env)
+echo "DATABASE_URL=postgresql://eneo:YOUR_DB_PASSWORD@db:5432/eneo" >> env_backend.env
+
+# Redis connection
+echo "REDIS_URL=redis://redis:6379/0" >> env_backend.env
+
+# Add at least one AI provider API key
+echo "OPENAI_API_KEY=sk-..." >> env_backend.env
+```
+
+**Optional settings:**
+
+```bash
+# OIDC authentication (see Authentication guide)
+OIDC_ENABLED=false
+
+# Email configuration (for notifications)
+SMTP_HOST=smtp.your-company.com
+SMTP_PORT=587
+SMTP_USER=noreply@your-company.com
+SMTP_PASSWORD=your-smtp-password
+
+# File upload limits
+MAX_UPLOAD_SIZE_MB=50
+
+# Rate limiting
+RATE_LIMIT_PER_MINUTE=60
+```
+
+#### D. Configure Frontend (`env_frontend.env`)
+
+```bash
+# API endpoint (internal Docker network)
+NEXT_PUBLIC_API_URL=https://your-domain.com/api
+
+# Public URL
+NEXT_PUBLIC_APP_URL=https://your-domain.com
+```
+
+### Step 4: Deploy
+
+```bash
+# Create Docker network for Traefik
+docker network create proxy_tier
+
+# Start all services
+docker compose up -d
+
+# Check status
+docker compose ps
+```
+
+### Step 5: Access Your Instance
+
+Navigate to `https://your-domain.com`
+
+**Default credentials:**
+- Email: `user@example.com`
+- Password: `Password1!`
+
+**⚠️ Important:** Change the default password immediately after first login!
+
+---
+
+## Service Architecture
+
+The deployment includes these services:
+
+### Traefik
+- **Role**: Reverse proxy and load balancer
+- **Handles**: SSL/TLS certificates, routing
+- **Port**: 80 (HTTP), 443 (HTTPS)
+- **Dashboard**: https://your-domain.com:8080 (disabled in production by default)
+
+### Frontend
+- **Technology**: Next.js (SvelteKit alternative)
+- **Role**: Web interface
+- **Internal Port**: 3000
+
+### Backend
+- **Technology**: FastAPI (Python)
+- **Role**: API server
+- **Internal Port**: 8123
+- **API Docs**: https://your-domain.com/api/docs
+
+### Worker
+- **Technology**: ARQ (async task queue)
+- **Role**: Background processing
+- **Handles**: Document processing, web crawling
+
+### Database
+- **Technology**: PostgreSQL 13 with pgvector
+- **Role**: Data storage and vector search
+- **Internal Port**: 5432
+- **Volume**: Persistent storage for data
+
+### Redis
+- **Technology**: Redis 7
+- **Role**: Caching and task queue
+- **Internal Port**: 6379
+
+---
+
+## Advanced Configuration
+
+### Custom Domain Configuration
+
+If you have multiple domains or subdomains:
+
+```yaml
+# In docker-compose.yml, update the backend service labels:
+labels:
+  - "traefik.http.routers.backend.rule=Host(`eneo.company.com`) || Host(`ai.company.com`)"
+```
+
+### SSL Certificate Configuration
+
+**Use Let's Encrypt Staging** for testing:
+
+```yaml
+# In docker-compose.yml, traefik service:
+command:
+  - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+```
+
+**Use Custom Certificates:**
+
+```yaml
+# Mount your certificates
+volumes:
+  - ./certs:/certs:ro
+
+# Configure Traefik to use them
+command:
+  - "--providers.file.filename=/certs/config.yml"
+```
+
+### Database Backups
+
+**Automated daily backups:**
+
+```bash
+# Create backup script
+cat > backup.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+docker compose exec -T db pg_dump -U eneo eneo | gzip > "$BACKUP_DIR/eneo_$DATE.sql.gz"
+# Keep only last 7 days
+find $BACKUP_DIR -name "eneo_*.sql.gz" -mtime +7 -delete
+EOF
+
+chmod +x backup.sh
+
+# Add to crontab (daily at 2 AM)
+crontab -e
+# Add: 0 2 * * * /path/to/backup.sh
+```
+
+**Restore from backup:**
+
+```bash
+gunzip -c backup.sql.gz | docker compose exec -T db psql -U eneo eneo
+```
+
+### Resource Limits
+
+**Limit container resources:**
+
+```yaml
+# In docker-compose.yml
+services:
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          memory: 1G
+```
+
+### Environment-Specific Configuration
+
+**Development vs Production:**
+
+```bash
+# env_backend.env
+ENVIRONMENT=production  # or development
+DEBUG=false
+LOG_LEVEL=INFO  # or DEBUG for development
+```
+
+---
+
+## Monitoring & Logs
+
+### View Logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f backend
+
+# Last 100 lines
+docker compose logs --tail=100 backend
+```
+
+### Monitor Resource Usage
+
+```bash
+# Container stats
+docker stats
+
+# Disk usage
+docker system df
+```
+
+### Health Checks
+
+```bash
+# Check service health
+docker compose ps
+
+# Test backend API
+curl https://your-domain.com/api/health
+
+# Test database connection
+docker compose exec db psql -U eneo -c "SELECT 1"
+```
+
+---
+
+## Maintenance
+
+### Update Eneo
+
+```bash
+# Pull latest images
+docker compose pull
+
+# Restart with new images
+docker compose up -d
+
+# Remove old images
+docker image prune -a
+```
+
+### Restart Services
+
+```bash
+# All services
+docker compose restart
+
+# Single service
+docker compose restart backend
+```
+
+### Scale Services
+
+```bash
+# Run multiple backend instances
+docker compose up -d --scale backend=3
+```
+
+---
+
+## Kubernetes Deployment
+
+For larger deployments, use Kubernetes:
+
+### Prerequisites
+
+- Kubernetes cluster (1.24+)
+- kubectl configured
+- Helm 3 installed
+
+### Deployment Steps
+
+```bash
+# Add Eneo Helm repository (when available)
+helm repo add eneo https://charts.eneo.ai
+helm repo update
+
+# Create namespace
+kubectl create namespace eneo
+
+# Create secrets
+kubectl create secret generic eneo-secrets \
+  --from-literal=jwt-secret=$(openssl rand -hex 32) \
+  --from-literal=db-password=$(openssl rand -base64 32) \
+  --from-literal=openai-api-key=sk-... \
+  -n eneo
+
+# Install Eneo
+helm install eneo eneo/eneo \
+  --namespace eneo \
+  --set domain=eneo.your-company.com \
+  --set ingress.enabled=true \
+  --set postgresql.enabled=true \
+  --set redis.enabled=true
+```
+
+**Note**: Kubernetes Helm charts are in development. Check the [GitHub repository](https://github.com/eneo-ai/eneo) for updates.
+
+---
+
+## Security Hardening
+
+### Change Default Credentials
+
+1. Log in with default credentials
+2. Go to **Settings** → **Profile**
+3. Change password
+4. Update email address
+5. Enable two-factor authentication (if available)
+
+### Firewall Configuration
+
+```bash
+# Ubuntu/Debian with ufw
+sudo ufw allow 22/tcp   # SSH
+sudo ufw allow 80/tcp   # HTTP
+sudo ufw allow 443/tcp  # HTTPS
+sudo ufw enable
+```
+
+### Secure Docker Socket
+
+```bash
+# Don't expose Docker socket
+# Remove this from docker-compose.yml if present:
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+```
+
+### Regular Updates
+
+```bash
+# Update system packages
+sudo apt update && sudo apt upgrade -y
+
+# Update Docker images
+docker compose pull
+docker compose up -d
+
+# Update Docker itself
+sudo apt update && sudo apt install docker-ce docker-ce-cli containerd.io
+```
+
+### Enable Fail2ban
+
+```bash
+# Install fail2ban
+sudo apt install fail2ban
+
+# Configure for SSH
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+```
+
+---
+
+## Troubleshooting
+
+### Services Won't Start
+
+**Check logs:**
+```bash
+docker compose logs
+```
+
+**Common issues:**
+- Port conflicts (80, 443 already in use)
+- Missing environment variables
+- Insufficient disk space
+- Memory constraints
+
+### SSL Certificate Issues
+
+**Check Traefik logs:**
+```bash
+docker compose logs traefik
+```
+
+**Common issues:**
+- DNS not pointing to server
+- Firewall blocking ports 80/443
+- Let's Encrypt rate limits (use staging for testing)
+
+### Database Connection Errors
+
+**Test database:**
+```bash
+docker compose exec db psql -U eneo -c "SELECT version()"
+```
+
+**Check credentials:**
+- Ensure `DATABASE_URL` in `env_backend.env` matches `POSTGRES_PASSWORD` in `env_db.env`
+
+### Performance Issues
+
+**Check resources:**
+```bash
+docker stats
+```
+
+**Solutions:**
+- Increase server resources
+- Add resource limits to docker-compose.yml
+- Scale backend service
+- Optimize database (vacuum, indexes)
+
+### File Upload Failures
+
+**Ensure worker is running:**
+```bash
+docker compose ps worker
+docker compose logs worker
+```
+
+**Check disk space:**
+```bash
+df -h
+```
+
+---
+
+## Alternative Deployment Methods
+
+### Without Traefik
+
+If you prefer using your own reverse proxy (Nginx, Caddy):
+
+```bash
+# Remove Traefik from docker-compose.yml
+# Expose backend and frontend ports directly
+services:
+  frontend:
+    ports:
+      - "3000:3000"
+  backend:
+    ports:
+      - "8123:8123"
+```
+
+Then configure your reverse proxy to forward:
+- `https://your-domain.com/*` → `http://localhost:3000`
+- `https://your-domain.com/api/*` → `http://localhost:8123`
+
+### Cloud Platforms
+
+**AWS:**
+- Use ECS or EKS
+- RDS for PostgreSQL
+- ElastiCache for Redis
+- S3 for file storage
+
+**Azure:**
+- Use Azure Container Instances or AKS
+- Azure Database for PostgreSQL
+- Azure Cache for Redis
+- Azure Blob Storage
+
+**Google Cloud:**
+- Use Cloud Run or GKE
+- Cloud SQL for PostgreSQL
+- Memorystore for Redis
+- Cloud Storage
+
+---
+
+## Need Help?
+
+- **Documentation**: [GitHub docs](https://github.com/eneo-ai/eneo/tree/main/docs)
+- **Deployment Guide**: [DEPLOYMENT.md](https://github.com/eneo-ai/eneo/blob/main/docs/DEPLOYMENT.md)
+- **Issues**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+- **Email**: digitalisering@sundsvall.se (public sector organizations)
