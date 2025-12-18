@@ -2,7 +2,7 @@
 
 """add delta_token to integration_knowledge
 Revision ID: 202510231400
-Revises: 202502201330
+Revises: 5b8d3d2c51ae
 Create Date: 2025-10-23 14:00:00.000000
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic
 revision = "202510231400"
-down_revision = "202502201330"
+down_revision = "5b8d3d2c51ae"
 branch_labels = None
 depends_on = None
 
