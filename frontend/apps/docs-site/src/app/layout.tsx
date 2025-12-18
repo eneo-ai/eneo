@@ -27,7 +27,6 @@ export const metadata = {
 const navbar = (
   <Navbar
     logo={<EneoLogo className="h-6" />}
-    // ... Your additional navbar options
   />
 )
 const footer = (

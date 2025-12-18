@@ -1,11 +1,11 @@
 <script lang="ts">
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconKey } from "@intric/icons/key";
+  import { IconLink } from "@intric/icons/link";
   import { page } from "$app/stores";
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  // import { IconIntegrations } from "@intric/icons/integrations";
 
   let currentRoute = "";
   $: currentRoute = $page.url.pathname;
@@ -20,11 +20,11 @@
       label: m.my_account(),
       url: "/account"
     },
-    // {
-    //   icon: IconIntegrations,
-    //   label: "My integrations",
-    //   url: "/account/integrations"
-    // },
+    {
+      icon: IconLink,
+      label: m.integrations(),
+      url: "/account/integrations"
+    },
     {
       icon: IconKey,
       label: m.api_keys(),

@@ -3,6 +3,9 @@ from intric.data_retention.infrastructure.data_retention_worker import (
     worker as data_retention_worker,
 )
 from intric.integration.tasks.integration_task import worker as integration_worker
+from intric.integration.infrastructure.sharepoint_subscription_worker import (
+    worker as sharepoint_subscription_worker,
+)
 from intric.worker.routes import worker as sub_worker
 from intric.worker.worker import Worker
 
@@ -11,6 +14,7 @@ worker.include_subworker(sub_worker)
 worker.include_subworker(app_worker)
 worker.include_subworker(integration_worker)
 worker.include_subworker(data_retention_worker)
+worker.include_subworker(sharepoint_subscription_worker)
 
 
 class WorkerSettings:
@@ -23,3 +27,13 @@ class WorkerSettings:
     job_timeout = worker.job_timeout
     max_jobs = worker.max_jobs
     expires_extra_ms = worker.expires_extra_ms
+
+    # ARQ lifecycle hooks for job status tracking
+    # These update job status in database when jobs start/end
+    on_job_start = worker.on_job_start
+    after_job_end = worker.after_job_end
+
+    # ARQ v0.26+ features
+    allow_abort_jobs = worker.allow_abort_jobs
+    health_check_interval = worker.health_check_interval
+    job_completion_wait = worker.job_completion_wait
