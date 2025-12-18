@@ -12,6 +12,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let groupChat: GroupChatSparse;
 
@@ -52,7 +53,7 @@
       {#if groupChat.permissions?.includes("edit")}
         <Button
           is={item}
-          href="/spaces/{$currentSpace.routeId}/group-chats/{groupChat.id}/edit"
+          href={localizeHref(`/spaces/${$currentSpace.routeId}/group-chats/${groupChat.id}/edit`)}
           padding="icon-leading"
         >
           <IconEdit size="sm" />

@@ -7,6 +7,7 @@
   import IntegrationVendorIcon from "../IntegrationVendorIcon.svelte";
   import { integrationData } from "../../IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   const availableIntegrations = getAvailableIntegrations();
 
@@ -57,7 +58,7 @@
         <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.import_knowledge()}</h3>
         <p class="text-secondary max-w-[60ch] pr-48 pl-4">
           {m.import_knowledge_from_third_party()}
-          <a href="/account/integrations" class="underline">{m.personal_account()}</a>.
+          <a href={localizeHref("/account/integrations")} class="underline">{m.personal_account()}</a>.
         </p>
         <!-- <div class="h-8"></div> -->
         <div class=" border-dimmer mt-14 mb-6 border-t"></div>

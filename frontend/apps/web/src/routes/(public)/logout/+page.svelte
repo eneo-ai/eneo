@@ -2,6 +2,7 @@
   import { Button } from "@intric/ui";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let data;
 
@@ -32,7 +33,7 @@
     </div>
 
     <div class="shadowed border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href="/login" variant="primary">{m.login_again()}</Button>
+      <Button href={localizeHref("/login")} variant="primary">{m.login_again()}</Button>
     </div>
   </div>
 </div>

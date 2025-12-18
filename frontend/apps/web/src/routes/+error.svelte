@@ -5,6 +5,7 @@
   import { page } from "$app/stores";
   import type { IntricErrorCode } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   type Error = {
     message: string;
@@ -55,7 +56,7 @@
       <div class="flex items-center justify-center gap-2 text-lg">
         <p>{m.if_error_persists()}</p>
         <Button
-          href="/login?clear_cookies=true"
+          href={localizeHref("/login?clear_cookies=true")}
           unstyled
           class="hover:text-hover-on-fill hover:bg-accent-stronger underline"
           >{m.delete_cookies()}</Button

@@ -10,6 +10,7 @@
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { Button, Dropdown } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let space: SpaceSparse;
 </script>
@@ -22,7 +23,7 @@
       </Button>
     </Dropdown.Trigger>
     <Dropdown.Menu let:item>
-      <Button is={item} href="/spaces/{space.id}/settings" padding="icon-leading">
+      <Button is={item} href={localizeHref(`/spaces/${space.id}/settings`)} padding="icon-leading">
         <IconEdit size="sm" />
         {m.edit()}</Button
       >

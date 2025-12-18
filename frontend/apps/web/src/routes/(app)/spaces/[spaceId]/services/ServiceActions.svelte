@@ -9,6 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let service: ServiceSparse;
 
@@ -84,7 +85,7 @@
       {#if service.permissions?.includes("edit")}
         <Button
           is={item}
-          href="/spaces/{$currentSpace.routeId}/services/{service.id}?tab=edit"
+          href={localizeHref(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`)}
           padding="icon-leading"
         >
           <IconEdit size="sm" />

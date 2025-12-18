@@ -16,6 +16,7 @@
   import { getIntric } from "$lib/core/Intric.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
 
@@ -138,7 +139,7 @@
     in:fade={{ duration: 50 }}
   >
     <a
-      href="/dashboard/app/{data.app.id}"
+      href={localizeHref(`/dashboard/app/${data.app.id}`)}
       class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg"
     >
       <span
@@ -157,7 +158,7 @@
         {resultTitle}
       </h1>
     </a>
-    <Button variant="primary" href="/dashboard/app/{data.app.id}" class="!rounded-lg !px-5 !py-1">
+    <Button variant="primary" href={localizeHref(`/dashboard/app/${data.app.id}`)} class="!rounded-lg !px-5 !py-1">
       {m.new_run()}
     </Button>
   </div>

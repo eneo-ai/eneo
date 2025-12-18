@@ -11,6 +11,7 @@
   import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
   import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   type TenantInfo = {
     slug: string;
@@ -745,14 +746,14 @@
         <Button
           variant="outlined"
           class="bg-primary text-primary border-default hover:bg-hover-default"
-          href="/login">
+          href={localizeHref("/login")}>
           {m.hide_login_fields()}
         </Button>
       {:else if data.mobilityguardLink || data.singleTenantOidcLink || oidcErrorCode}
         <Button
           variant="outlined"
           class="bg-primary text-primary border-default hover:bg-hover-default"
-          href="/login?showUsernameAndPassword=true">
+          href={localizeHref("/login?showUsernameAndPassword=true")}>
           {m.show_login_fields()}
         </Button>
       {/if}

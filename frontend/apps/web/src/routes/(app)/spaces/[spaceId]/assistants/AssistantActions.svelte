@@ -12,6 +12,7 @@
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let assistant: AssistantSparse;
 
@@ -84,7 +85,7 @@
       {#if assistant.permissions?.includes("edit")}
         <Button
           is={item}
-          href="/spaces/{$currentSpace.routeId}/assistants/{assistant.id}/edit"
+          href={localizeHref(`/spaces/${$currentSpace.routeId}/assistants/${assistant.id}/edit`)}
           padding="icon-leading"
         >
           <IconEdit size="sm" />
