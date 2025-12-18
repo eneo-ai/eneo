@@ -15,6 +15,7 @@
   import SpaceChip from "./SpaceChip.svelte";
   import CreateSpaceDialog from "./CreateSpaceDialog.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let showSelectPrompt = false;
 
@@ -94,7 +95,7 @@
     <div
       class="border-default text-secondary flex items-baseline justify-between gap-4 border-b pt-1 pr-3 pb-2.5 pl-6 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
-      <a href="/spaces/list" class="hover:underline">{m.your_spaces()}</a>
+      <a href={localizeHref("/spaces/list")} class="hover:underline">{m.your_spaces()}</a>
     </div>
 
    <div class="relative max-h-[50vh] overflow-y-auto">
@@ -102,7 +103,7 @@
         <Button
           unstyled
           is={[$item]}
-          href="/spaces/{space.id}/overview"
+          href={localizeHref(`/spaces/${space.id}/overview`)}
           class="group border-default hover:bg-accent-dimmer hover:text-accent-stronger relative flex h-[4.25rem] w-full items-center justify-start gap-3 border-b pr-4 pl-5 last-of-type:border-b-0"
         >
           <SpaceChip {space} />

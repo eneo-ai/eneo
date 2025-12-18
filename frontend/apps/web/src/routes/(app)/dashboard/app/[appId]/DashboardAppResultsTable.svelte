@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { App, AppRunSparse } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
 
   export let results: AppRunSparse[];
@@ -22,7 +23,7 @@
   <div class="flex flex-col">
     {#each results as result (result.id)}
       <a
-        href="/dashboard/app/{app.id}/results/{result.id}"
+        href={localizeHref(`/dashboard/app/${app.id}/results/${result.id}`)}
         class="border-default hover:bg-hover-dimmer flex items-center justify-between border-b px-3 py-3"
       >
         <span class="text-secondary text-sm">{formatDate(result.created_at)}</span>

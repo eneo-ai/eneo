@@ -7,6 +7,7 @@
   import { getIntric } from "$lib/core/Intric";
   import type { AppRunSparse } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import DashboardAppRunView from "./DashboardAppRunView.svelte";
   import DashboardAppResultsTable from "./DashboardAppResultsTable.svelte";
 
@@ -42,7 +43,7 @@
     class="bg-primary sticky top-0 z-10 flex items-center justify-between px-3.5 py-3 backdrop-blur-md"
     in:fade={{ duration: 50 }}
   >
-    <a href="/dashboard" class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg">
+    <a href={localizeHref("/dashboard")} class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg">
       <span
         class="border-default hover:bg-hover-dimmer flex h-8 w-8 items-center justify-center rounded-lg border"
         >←</span

@@ -17,6 +17,7 @@
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   const { data } = $props();
 
@@ -90,7 +91,7 @@
       {#if chat.partner.type === "default-assistant"}
         <DefaultAssistantModelSwitcher></DefaultAssistantModelSwitcher>
       {:else if chat.partner.permissions?.includes("edit")}
-        <Button href="/spaces/{$currentSpace.routeId}/{chat.partner.type}s/{chat.partner.id}/edit"
+        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`)}
           >{m.edit()}</Button
         >
       {/if}
