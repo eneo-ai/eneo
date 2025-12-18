@@ -44,9 +44,22 @@ def mock_tenant_app_not_service_account():
 
 
 @pytest.fixture
-def service():
-    """Create ServiceAccountAuthService instance."""
-    return ServiceAccountAuthService()
+def mock_settings():
+    """Mock settings with oauth_callback_url configured."""
+    settings = MagicMock()
+    settings.oauth_callback_url = "https://test.example.com/integrations/callback/token/"
+    settings.public_origin = "https://test.example.com"
+    return settings
+
+
+@pytest.fixture
+def service(mock_settings):
+    """Create ServiceAccountAuthService instance with mocked settings."""
+    with patch(
+        "intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings",
+        return_value=mock_settings
+    ):
+        yield ServiceAccountAuthService()
 
 
 @pytest.fixture
@@ -104,14 +117,12 @@ class TestGenAuthUrl:
         assert "Sites.Read.All" in auth_url
         assert "User.Read" in auth_url
 
-    def test_gen_auth_url_uses_correct_redirect_uri(self, service):
+    def test_gen_auth_url_uses_correct_redirect_uri(self, mock_settings):
         """Uses correct redirect URI from settings."""
-        with patch("intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.oauth_callback_url = "https://myapp.com/callback"
-            settings.server_url = "https://myapp.com"
-            mock_settings.return_value = settings
+        mock_settings.oauth_callback_url = "https://myapp.com/callback"
 
+        with patch("intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings", return_value=mock_settings):
+            service = ServiceAccountAuthService()
             result = service.gen_auth_url(
                 state="state",
                 client_id="client-123",

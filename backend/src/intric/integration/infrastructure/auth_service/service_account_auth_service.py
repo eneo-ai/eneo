@@ -62,8 +62,12 @@ class ServiceAccountAuthService:
         settings = get_settings()
         redirect_uri = settings.oauth_callback_url
         if not redirect_uri:
-            logger.warning("OAUTH_CALLBACK_URL not set in .env, using default")
-            redirect_uri = f"{settings.server_url}/integrations/callback/token/"
+            if settings.public_origin:
+                redirect_uri = f"{settings.public_origin}/integrations/callback/token/"
+            else:
+                raise ValueError(
+                    "OAUTH_CALLBACK_URL or PUBLIC_ORIGIN must be set for service account authentication"
+                )
         return redirect_uri
 
     def _build_credentials(
