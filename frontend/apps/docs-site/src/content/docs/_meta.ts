@@ -5,10 +5,6 @@ const meta: MetaRecord = {
     title: 'Getting Started',
     type: 'page',
   },
-  architecture: {
-    title: 'Architecture',
-    type: 'page',
-  },
   api: {
     title: 'API Reference',
     type: 'page',
