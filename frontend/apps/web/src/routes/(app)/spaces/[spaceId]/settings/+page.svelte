@@ -18,6 +18,7 @@
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import { m } from "$lib/paraglide/messages";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import IconGenerator from "$lib/features/icons/IconGenerator.svelte";
 
   const intric = getIntric();
 
@@ -88,6 +89,26 @@
     }
   }
 
+  async function handleIconGenerated(event: CustomEvent<File>) {
+    const file = event.detail;
+    iconUploading = true;
+    iconError = null;
+    try {
+      const newIcon = await intric.icons.upload({ file });
+      await intric.spaces.update({
+        space: { id: $currentSpace.id },
+        update: { icon_id: newIcon.id }
+      });
+      currentIconId = newIcon.id;
+      await spaces.refreshCurrentSpace();
+    } catch (error) {
+      console.error("Failed to save generated icon:", error);
+      iconError = m.avatar_upload_failed();
+    } finally {
+      iconUploading = false;
+    }
+  }
+
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
     if (deleteConfirmation !== $currentSpace.name) {
@@ -125,13 +146,23 @@
       <Settings.Group title={m.general()}>
         <EditNameAndDescription></EditNameAndDescription>
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
-          <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
-          />
+          <div class="flex flex-col gap-2">
+            <IconUpload
+              {iconUrl}
+              uploading={iconUploading}
+              error={iconError}
+              on:upload={handleIconUpload}
+              on:delete={handleIconDelete}
+            />
+            {#if !iconUrl && !iconUploading}
+              <IconGenerator
+                {intric}
+                resourceName={$currentSpace.name}
+                resourceDescription={$currentSpace.description}
+                on:select={handleIconGenerated}
+              />
+            {/if}
+          </div>
         </Settings.Row>
         <SpaceStorageOverview></SpaceStorageOverview>
       </Settings.Group>
