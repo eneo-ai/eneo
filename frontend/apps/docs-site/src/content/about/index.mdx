@@ -1,0 +1,311 @@
+---
+title: About Eneo
+---
+
+import EneoLogo from '@/components/EneoLogo'
+
+<div align="center">
+  <EneoLogo className="h-16 mb-8" />
+</div>
+
+# About Eneo
+
+Eneo is an open-source AI platform specifically designed for Swedish public sector organizations to deploy and manage AI assistants while maintaining complete control over data, security, and algorithms.
+
+## Our Mission
+
+> **"Generative AI must not be a technology for the few, but a technology for everyone."**
+
+We believe that access to AI technology should be democratic, transparent, and serve the public interest. Eneo embodies this principle by providing an open-source platform that organizations can fully control and customize.
+
+---
+
+## Origin Story
+
+Eneo was originally developed by **Sundsvall Municipality** and **Ånge Municipality** in Sweden to address a critical need: enabling public sector organizations to leverage AI technology while maintaining data sovereignty and regulatory compliance.
+
+Faced with the challenge of using commercial AI platforms that raised concerns about:
+- Data privacy and sovereignty
+- Vendor lock-in
+- Lack of transparency
+- High costs
+- Compliance complexity
+
+These municipalities decided to build a solution that would be:
+- **Open source** for transparency and community ownership
+- **Self-hosted** for complete data control
+- **Model agnostic** to avoid vendor lock-in
+- **Compliance-ready** with GDPR and EU AI Act built-in
+- **Collaborative** allowing municipalities to share improvements
+
+### Building on Success
+
+Eneo draws inspiration from **[Open ePlatform](https://www.openeplatform.org/)**, another successful Swedish municipal open-source project that has been used by over 200 municipalities since 2010. We're applying those same principles of democratic collaboration to AI technology.
+
+---
+
+## Governance Model
+
+### Democratic Control
+
+Eneo is governed by a **user association of public sector organizations**, ensuring that development priorities align with public interest rather than commercial goals.
+
+**How it works:**
+1. Member organizations contribute to development
+2. Feature priorities are decided democratically
+3. Improvements are shared with all members
+4. Costs and resources are shared collectively
+
+### User Association Benefits
+
+- **Influence Development**: Vote on feature priorities
+- **Share Knowledge**: Learn from other organizations' experiences
+- **Reduce Costs**: Pool resources for development
+- **Collaborative Learning**: Access to best practices
+- **Collective Bargaining**: Better rates with service providers
+
+**Join the User Association:**
+Contact digitalisering@sundsvall.se (public sector organizations only)
+
+---
+
+## Technology Philosophy
+
+### Open Source First
+
+Eneo is licensed under **AGPL v3**, ensuring:
+- Complete source code transparency
+- Right to modify and extend
+- Obligation to share improvements
+- Community ownership
+- No proprietary lock-in
+
+### Data Sovereignty
+
+**Your data, your control:**
+- Self-hosted deployment options
+- No data transmission to third parties (except your chosen AI providers)
+- Complete control over data retention and deletion
+- Compliance with local regulations
+
+### Model Agnostic
+
+**Freedom to choose:**
+- Support for multiple AI providers (OpenAI, Anthropic, Azure, Google)
+- Ability to use local models (Ollama, LM Studio)
+- Easy switching between providers
+- No vendor lock-in
+
+### Standards Compliant
+
+**Built for compliance:**
+- GDPR-compliant by design
+- EU AI Act ready
+- Comprehensive audit trails
+- Security classifications
+- Access control and permissions
+
+---
+
+## Key Features
+
+### 🤖 AI Assistant Management
+Create and customize AI assistants for specific organizational needs with support for multiple AI providers and customizable system prompts.
+
+### 🏢 Collaborative Spaces
+Team collaboration within organizations with role-based access control and production management capabilities.
+
+### 📚 Knowledge Management
+Process documents (PDF, Word, PowerPoint, Excel), crawl websites, and enable semantic search using PostgreSQL with pgvector.
+
+### ⚡ Real-time Capabilities
+Streaming chat with Server-Sent Events, WebSocket updates, and background processing for document ingestion and web crawling.
+
+### 🌍 Multi-language Support
+Swedish and English interface with seamless language switching and type-safe translations.
+
+### 🔒 Security & Compliance
+GDPR and EU AI Act compliance built-in with audit trails, data sovereignty, and security classifications.
+
+---
+
+## Technology Stack
+
+### Backend
+- **Framework**: FastAPI (Python 3.11+)
+- **ORM**: SQLAlchemy
+- **API**: RESTful with OpenAPI documentation
+- **Task Queue**: ARQ (async Redis queue)
+
+### Frontend
+- **Framework**: SvelteKit
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **State Management**: Svelte stores
+
+### Database
+- **Primary**: PostgreSQL 13+
+- **Vector Extension**: pgvector for semantic search
+- **Migrations**: Alembic
+
+### Infrastructure
+- **Containerization**: Docker
+- **Orchestration**: Docker Compose (Kubernetes support planned)
+- **Reverse Proxy**: Traefik (Nginx/Caddy also supported)
+- **Cache/Queue**: Redis 7
+
+### AI Integration
+- **OpenAI**: GPT-4, GPT-3.5
+- **Anthropic**: Claude 3 (Opus, Sonnet, Haiku)
+- **Azure OpenAI**: Enterprise deployment
+- **Google**: Gemini models
+- **Local**: Ollama, LM Studio
+
+---
+
+## Use Cases
+
+### Municipal Applications
+
+**Citizen Services**
+- AI assistants for municipal websites
+- Automated responses to common inquiries
+- Multi-language support for diverse populations
+
+**Internal Operations**
+- Administrative support and automation
+- Document processing and analysis
+- Knowledge management systems
+
+**Cross-municipal Collaboration**
+- Share AI applications between municipalities
+- Collective knowledge bases
+- Joint development of features
+
+**Compliance Management**
+- Built-in GDPR compliance tools
+- EU AI Act adherence
+- Audit trails for transparency
+
+### Beyond Government
+
+While designed for the public sector, Eneo is suitable for any organization that values:
+- Data sovereignty and privacy
+- Open-source transparency
+- Regulatory compliance
+- Cost-effective AI deployment
+- Collaborative development
+
+---
+
+## Community & Support
+
+### Get Involved
+
+**For Public Sector Organizations:**
+- **Join User Association**: digitalisering@sundsvall.se
+- **Collaboration Space**: Access to shared knowledge and experiences
+- **Priority Support**: Assistance from other municipalities
+
+**For Developers:**
+- **GitHub**: [github.com/eneo-ai/eneo](https://github.com/eneo-ai/eneo)
+- **Issues**: Report bugs and request features
+- **Pull Requests**: Contribute code improvements
+- **Discussions**: Ask questions and share ideas
+
+**For Everyone:**
+- **Website**: [eneo.ai](https://eneo.ai)
+- **Documentation**: Comprehensive guides and tutorials
+- **Forum**: [forum.eneo.ai](https://forum.eneo.ai) (requires government/municipality email)
+- **Chat**: [chat.eneo.ai](https://chat.eneo.ai) (requires government/municipality email)
+
+### Support Channels
+
+**Community Support:**
+- GitHub Issues and Discussions
+- Community forum
+- Public documentation
+
+**Professional Support:**
+Available for public sector organizations through the user association.
+
+---
+
+## Acknowledgments
+
+### Original Development
+**Sundsvall Municipality** & **Ånge Municipality**, Sweden 🇸🇪
+
+### Special Thanks
+**InooLabs AB** (now Intric AB) for their foundational contributions to Intric (now Eneo).
+
+### Inspired By
+**[Open ePlatform](https://www.openeplatform.org/)** - Demonstrating that municipal collaboration on open-source software can succeed at scale.
+
+### Contributors
+Thanks to all the developers, municipalities, and organizations contributing to Eneo's development.
+
+[View all contributors →](https://github.com/eneo-ai/eneo/graphs/contributors)
+
+---
+
+## License
+
+```
+Eneo - Democratic AI Platform for the Public Sector
+Copyright (C) 2023-2025 Sundsvall Municipality & Ånge Municipality
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+```
+
+[Read full license →](https://github.com/eneo-ai/eneo/blob/main/LICENSE)
+
+---
+
+## Roadmap
+
+### Current Development
+- Enhanced multi-organization support
+- Improved knowledge base management
+- Additional AI provider integrations
+- Kubernetes Helm charts
+
+### Planned Features
+- Mobile application
+- Advanced workflow automation
+- Plugin system for extensibility
+- Enhanced analytics and reporting
+
+See the [GitHub project board](https://github.com/eneo-ai/eneo/projects) for detailed roadmap.
+
+---
+
+## Contact
+
+**Email**: digitalisering@sundsvall.se (public sector organizations)
+
+**GitHub**: [github.com/eneo-ai/eneo](https://github.com/eneo-ai/eneo)
+
+**Website**: [eneo.ai](https://eneo.ai)
+
+**Forum**: [forum.eneo.ai](https://forum.eneo.ai) (requires government/municipality email)
+
+**Chat**: [chat.eneo.ai](https://chat.eneo.ai) (requires government/municipality email)
+
+---
+
+<div style={{ marginTop: '3rem', padding: '2rem', borderTop: '1px solid var(--nextra-border-color)', textAlign: 'center' }}>
+  <strong>Made with ❤️ by the Swedish Public Sector for the Global Community</strong>
+
+  *Empowering democratic access to AI technology*
+
+  [Get Started →](/docs/getting-started) | [View on GitHub →](https://github.com/eneo-ai/eneo)
+</div>
