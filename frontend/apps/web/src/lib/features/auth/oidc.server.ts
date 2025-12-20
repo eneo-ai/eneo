@@ -7,7 +7,7 @@ import { env } from "$env/dynamic/private";
 import { setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
 
-export async function loginWithOidc(code: string, state: string): Promise<boolean> {
+export async function loginWithOidc(code: string, state: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
   if (!env.INTRIC_BACKEND_URL) {
     console.error("[OIDC] Missing INTRIC_BACKEND_URL configuration");
     return false;
@@ -22,7 +22,7 @@ export async function loginWithOidc(code: string, state: string): Promise<boolea
   });
 
   try {
-    const response = await fetch(backendUrl, {
+    const response = await fetchFn(backendUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

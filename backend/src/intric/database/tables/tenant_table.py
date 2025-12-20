@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import BigInteger, Column, ForeignKey, String, Table
 from sqlalchemy.dialects.postgresql import JSONB
@@ -7,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from intric.database.tables.base_class import Base, BasePublic
 from intric.database.tables.module_table import Modules
 from intric.tenants.tenant import TenantState
+
+if TYPE_CHECKING:
+    from intric.database.tables.tenant_sharepoint_app_table import TenantSharePointApp
 
 
 class Tenants(BasePublic):
@@ -26,9 +29,14 @@ class Tenants(BasePublic):
     federation_config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    crawler_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
 
-    # relationships
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
+    sharepoint_app: Mapped[Optional["TenantSharePointApp"]] = relationship(
+        "TenantSharePointApp", back_populates="tenant", uselist=False
+    )
 
 
 tenants_modules_table = Table(

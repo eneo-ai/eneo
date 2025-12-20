@@ -21,6 +21,12 @@ const authHandle: Handle = async ({ event, resolve }) => {
     clearFrontendCookies(event);
   }
 
+  // Load feature flags and environment BEFORE authentication check
+  // This ensures login page has access to federation configuration flags
+  // Pass event.fetch so URL rewriting in handleFetch works correctly
+  event.locals.featureFlags = await getFeatureFlags(event.fetch);
+  event.locals.environment = getEnvironmentConfig();
+
   const tokens = authenticateUser(event);
   const isLoggedIn = tokens.id_token != undefined;
 
@@ -43,8 +49,6 @@ const authHandle: Handle = async ({ event, resolve }) => {
 
   event.locals.id_token = tokens.id_token ?? null;
   event.locals.access_token = tokens.access_token ?? null;
-  event.locals.featureFlags = getFeatureFlags();
-  event.locals.environment = getEnvironmentConfig();
 
   return resolve(event);
 };
@@ -59,7 +63,14 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
     });
   });
 
-export const handle = sequence(paraglideHandle, authHandle);
+const headerFilterHandle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event, {
+    preload: () => false,
+  });
+  return response;
+};
+
+export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;

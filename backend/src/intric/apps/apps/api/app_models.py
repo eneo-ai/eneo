@@ -1,7 +1,8 @@
 from enum import Enum
 from typing import Optional, Union
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from intric.ai_models.completion_models.completion_model import (
     CompletionModelSparse,
@@ -54,6 +55,10 @@ class AppPublic(AppCreateRequest, InDB, ResourcePermissionsMixin):
     published: bool
     transcription_model: TranscriptionModelPublic
     data_retention_days: Optional[int] = None
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
+    )
 
 
 class AppUpdateRequest(BaseModel):
@@ -66,3 +71,7 @@ class AppUpdateRequest(BaseModel):
     completion_model_kwargs: Optional[ModelKwargs] = None
     transcription_model: Optional[ModelId] = None
     data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED
+    icon_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Icon ID referencing an uploaded icon. Set to null to remove.",
+    )

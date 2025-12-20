@@ -153,6 +153,11 @@ async def update_assistant(
     if "metadata_json" not in request_dict:
         metadata_json = NOT_PROVIDED
 
+    # Handle icon_id: check if it was provided in the request
+    icon_id = NOT_PROVIDED
+    if "icon_id" in request_dict:
+        icon_id = assistant.icon_id
+
     assistant, permissions = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -168,6 +173,7 @@ async def update_assistant(
         insight_enabled=assistant.insight_enabled,
         data_retention_days=assistant.data_retention_days,
         metadata_json=metadata_json,
+        icon_id=icon_id,
     )
 
     return assembler.from_assistant_to_model(assistant, permissions=permissions)

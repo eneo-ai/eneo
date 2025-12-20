@@ -63,6 +63,21 @@ class DatabaseSessionManager:
         self._sessionmaker = None
         logger.debug("DatabaseSessionManager closed")
 
+    def create_session(self) -> AsyncSession:
+        """Create a raw AsyncSession without context manager wrapper.
+
+        WARNING: The caller is responsible for closing this session!
+        Useful for manual recovery workflows where context managers are not viable.
+
+        This avoids the orphaned async generator bug that occurs when using
+        `await sessionmanager.session().__aenter__()` - that pattern creates
+        an unreferenced context manager that GC may finalize at arbitrary times,
+        causing spurious session.close() calls during active operations.
+        """
+        if self._sessionmaker is None:
+            raise Exception("DatabaseSessionManager is not initialized")
+        return self._sessionmaker()
+
     @contextlib.asynccontextmanager
     async def connect(self) -> AsyncIterator[AsyncConnection]:
         if self._engine is None:

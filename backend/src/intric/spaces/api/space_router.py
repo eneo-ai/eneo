@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 from intric.apps.apps.api.app_models import AppPublic
 from intric.assistants.api.assistant_models import AssistantPublic
 from intric.authentication.auth_dependencies import require_permission
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse
 from intric.server import protocol
@@ -26,9 +27,14 @@ from intric.spaces.api.space_models import (
     SpaceMember,
     SpacePublic,
     SpaceSparse,
+    UpdateIntegrationKnowledgeRequest,
     UpdateSpaceDryRunResponse,
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
+)
+from intric.integration.presentation.models import IntegrationKnowledgePublic
+from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
+    IntegrationKnowledgeAssembler,
 )
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
@@ -104,6 +110,11 @@ async def update_space(
     else:
         security_classification = update_space_req.security_classification
 
+    # Handle icon_id: check if it was provided in the request
+    icon_id = NOT_PROVIDED
+    if "icon_id" in original_request:
+        icon_id = update_space_req.icon_id
+
     space = await service.update_space(
         id=id,
         name=update_space_req.name,
@@ -112,6 +123,7 @@ async def update_space(
         completion_model_ids=_get_model_ids_or_none(update_space_req.completion_models),
         transcription_model_ids=_get_model_ids_or_none(update_space_req.transcription_models),
         security_classification=security_classification,
+        icon_id=icon_id,
     )
 
     return assembler.from_space_to_model(space)
@@ -160,16 +172,17 @@ async def delete_space(
     status_code=200,
 )
 async def get_spaces(
+    include_applications: bool = Query(default=False, description="Includes published applications on each space"),
+    include_personal: bool = Query(default=False,  description="Includes your personal space"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces()
-    spaces = [assembler.from_space_to_sparse_model(space) for space in spaces]
+    spaces = await service.get_spaces(include_personal=include_personal)
+    spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)
-
 
 @router.get(
     "/{id}/applications/",
@@ -373,7 +386,8 @@ async def create_space_websites(
 
 @router.post(
     "/{id}/knowledge/integrations/{user_integration_id}/",
-    status_code=200,
+    response_model=JobPublic,
+    status_code=202,  # Changed to 202 Accepted since job is queued
 )
 async def create_space_integration_knowledge(
     id: UUID,
@@ -382,17 +396,22 @@ async def create_space_integration_knowledge(
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.integration_knowledge_service()
-    assembler = container.integration_knowledge_assembler()
 
-    knowledge = await service.create_space_integration_knowledge(
+    knowledge, job = await service.create_space_integration_knowledge(
         user_integration_id=user_integration_id,
         name=data.name,
         space_id=id,
         embedding_model_id=data.embedding_model.id,
         url=data.url,
         key=data.key,
+        folder_id=data.folder_id,
+        folder_path=data.folder_path,
+        selected_item_type=data.selected_item_type,
+        resource_type=data.resource_type or "site",
     )
-    return assembler.to_space_knowledge_model(item=knowledge)
+    # Return job for frontend to track progress (like file upload does)
+    # FastAPI automatically converts JobInDb -> JobPublic via response_model
+    return job
 
 
 @router.delete(
@@ -406,6 +425,25 @@ async def delete_space_integration_knowledge(
 ):
     service = container.integration_knowledge_service()
     await service.remove_knowledge(space_id=id, integration_knowledge_id=integration_knowledge_id)
+
+
+@router.patch(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/",
+    response_model=IntegrationKnowledgePublic,
+)
+async def update_integration_knowledge(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    data: UpdateIntegrationKnowledgeRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.update_knowledge_name(
+        space_id=id,
+        integration_knowledge_id=integration_knowledge_id,
+        name=data.name,
+    )
+    return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 
 
 @router.post(

@@ -13,7 +13,7 @@ from intric.main.config import get_settings
 from intric.main.exceptions import FileTooLargeException
 
 
-def bytes_extractor(filepath: Path, _: str):
+def bytes_extractor(filepath: Path, _mimetype: str, _filename: str | None = None):
     with open(filepath, "rb") as file:
         return file.read()
 
@@ -34,7 +34,7 @@ class FileProtocol:
         upload_file: UploadFile,
         file_type: FileType,
         max_size: int,
-        extractor: Callable[[Path, str], str | bytes],
+        extractor: Callable[[Path, str, str | None], str | bytes],
     ):
         if self.file_size_service.is_too_large(upload_file.file, max_size=max_size):
             raise FileTooLargeException()
@@ -43,7 +43,7 @@ class FileProtocol:
         filepath = Path(filepath)
 
         try:
-            content = extractor(filepath, upload_file.content_type)
+            content = extractor(filepath, upload_file.content_type, upload_file.filename)
             checksum = self.file_size_service.get_file_checksum(filepath)
 
             if isinstance(content, str):

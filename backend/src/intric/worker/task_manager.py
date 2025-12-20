@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from typing import Callable
 from uuid import UUID
 
-from intric.database.database import AsyncSession
 from intric.jobs.job_service import JobService
 from intric.main.logging import get_logger
 from intric.main.models import Channel, ChannelType, RedisMessage, Status
@@ -27,14 +26,15 @@ class TaskManager:
         self,
         user: UserInDB,
         job_id: UUID,
-        session: AsyncSession,
-        job_service: JobService,
+        job_service: JobService | None = None,
         channel_type: ChannelType | None = None,
         resource_id: UUID | None = None,
     ):
+        # job_service is optional for crawl_task which handles its own job status
+        # via execute_with_recovery() and sets _job_already_handled=True.
+        # All other tasks (upload, transcription) provide job_service via container.
         self.user = user
         self.job_id = job_id
-        self.session = session
         self.job_service = job_service
         self.channel_type = channel_type
         self.resource_id = resource_id
@@ -42,8 +42,9 @@ class TaskManager:
         self.success = None
         self._result_location = None
         self._cleanup_func = None
-
         self.additional_data = None
+        # Flag for crawl_task to skip complete_job/fail_job (it handles them itself)
+        self._job_already_handled = False
 
     @property
     def result_location(self):
@@ -77,11 +78,31 @@ class TaskManager:
             )
 
     @asynccontextmanager
-    async def set_status_on_exception(self):
-        await self.set_status(Status.IN_PROGRESS)
+    async def set_status_on_exception(self, *, status_already_set: bool = False):
+        """Context manager that handles job status updates and exception handling.
+
+        Args:
+            status_already_set: If True, skip the initial IN_PROGRESS status update.
+                Used when mark_job_started() has already atomically set the status
+                to prevent worker resurrection race condition.
+        """
+        import asyncio
+
+        if not status_already_set:
+            await self.set_status(Status.IN_PROGRESS)
 
         try:
             yield
+        except asyncio.CancelledError:
+            # CancelledError inherits from BaseException (not Exception) in Python 3.8+
+            # Must handle explicitly to mark job as failed when worker shuts down
+            logger.warning(
+                "Job cancelled (worker shutdown or timeout)",
+                extra={"job_id": str(self.job_id)},
+            )
+            await self.fail_job("Job cancelled")
+            self.success = False
+            raise  # Re-raise to let ARQ know the job was cancelled
         except Exception as exc:
             logger.exception("Error on worker:")
             message = str(exc).strip()
@@ -102,12 +123,38 @@ class TaskManager:
     async def set_status(self, status: Status):
         self._log_status(status)
         await self._publish_status(status=status)
-        await self.job_service.set_status(self.job_id, status)
+        if self.job_service is not None:
+            await self.job_service.set_status(self.job_id, status)
 
     async def complete_job(self):
+        if self._job_already_handled:
+            return
         await self._publish_status(status=Status.COMPLETE)
-        await self.job_service.complete_job(self.job_id, self.result_location)
+        if self.job_service is not None:
+            try:
+                await self.job_service.complete_job(self.job_id, self._result_location)
+            except Exception as exc:
+                logger.error(
+                    "Failed to mark job as complete",
+                    extra={"job_id": str(self.job_id), "error": str(exc)},
+                )
 
     async def fail_job(self, message: str | None = None):
+        if self._job_already_handled:
+            return
         await self._publish_status(status=Status.FAILED)
-        await self.job_service.fail_job(self.job_id, message)
+
+        if message:
+            logger.warning(
+                "Job failed with error",
+                extra={"job_id": str(self.job_id), "error_message": message[:512]},
+            )
+
+        if self.job_service is not None:
+            try:
+                await self.job_service.fail_job(self.job_id, message)
+            except Exception as exc:
+                logger.error(
+                    "Failed to mark job as failed",
+                    extra={"job_id": str(self.job_id), "error": str(exc)},
+                )

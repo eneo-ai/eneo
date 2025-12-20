@@ -5,7 +5,10 @@ import type { Intric, Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
 
 import { m } from "$lib/paraglide/messages";
-export { getJobManager, initJobManager };
+export { getJobManager, initJobManager, jobCompletionEvents };
+
+// Global store for job completion events (can be subscribed to from any component)
+const jobCompletionEvents = writable<{ timestamp: number; jobId: string } | null>(null);
 
 const [getJobManager, setJobManager] =
   createContext<ReturnType<typeof createJobManager>>("Handles jobs");
@@ -53,15 +56,35 @@ function createJobManager(data: { intric: Intric }) {
       return [];
     }
     const updatedJobs = new Map(
-      // Keep failed jobs so that we can show their messages in the UI
+      // Keep failed and completed jobs so we can show their status in the UI
+      // Backend returns completed jobs for 5 minutes to allow UI to detect completion
       jobs
-        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed")
+        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed" || job.status === "complete")
         .map((job) => [job.id, job])
     );
-    if (updatedJobs.size < currentJobs.size) {
-      // TODO: Some jobs have finished, for now we just blanket invalidate
+
+    // Detect if any jobs changed from active to complete
+    let jobsCompleted = false;
+    for (const [id, newJob] of updatedJobs) {
+      const oldJob = currentJobs.get(id);
+      if (oldJob &&
+          (oldJob.status === "in progress" || oldJob.status === "queued") &&
+          newJob.status === "complete") {
+        jobsCompleted = true;
+        break;
+      }
+    }
+
+    // Also check if jobs were removed (size decreased)
+    const jobsRemoved = updatedJobs.size < currentJobs.size;
+
+    if (jobsCompleted || jobsRemoved) {
+      // Some jobs have finished: refresh related data
       if (browser) {
+        // Invalidate data dependencies to trigger SvelteKit page data refresh
         invalidate("blobs:list");
+        // Emit job completion event that components can subscribe to
+        jobCompletionEvents.set({ timestamp: Date.now(), jobId: "any" });
       }
     }
     currentJobs = updatedJobs;
@@ -70,8 +93,12 @@ function createJobManager(data: { intric: Intric }) {
   }
 
   const updateJobsFrequency_ms = 30 * 1000;
+  const updateJobsFrequency_fast_ms = 2 * 1000; // Check every 2 seconds for faster feedback
+  const fastPollDuration_ms = 15 * 1000; // Use fast polling for 15 seconds after job starts
   let updateJobsInterval: ReturnType<typeof setInterval>;
   let updateJobsRunning = false;
+  let lastJobAddedTime = 0;
+
   async function startUpdatePolling() {
     if (updateJobsRunning === false) {
       updateJobsRunning = true;
@@ -84,6 +111,41 @@ function createJobManager(data: { intric: Intric }) {
         }
       }, updateJobsFrequency_ms);
     }
+  }
+
+  async function startFastUpdatePolling() {
+    // Use fast polling for recently added jobs
+    // Stop any existing polling to allow fast polling to take over
+    if (updateJobsRunning) {
+      clearInterval(updateJobsInterval);
+    }
+
+    updateJobsRunning = true;
+    lastJobAddedTime = Date.now();
+    await updateJobs();
+
+    updateJobsInterval = setInterval(async () => {
+      const jobs = await updateJobs();
+      const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+      const timeSinceJobAdded = Date.now() - lastJobAddedTime;
+
+      // Switch to slow polling after 15 seconds or if no active jobs
+      if (!hasActiveJobs || timeSinceJobAdded > fastPollDuration_ms) {
+        if (!hasActiveJobs) {
+          stopUpdatePolling();
+        } else {
+          // Switch to slow polling
+          clearInterval(updateJobsInterval);
+          updateJobsInterval = setInterval(async () => {
+            const jobs = await updateJobs();
+            const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+            if (!hasActiveJobs) {
+              stopUpdatePolling();
+            }
+          }, updateJobsFrequency_ms);
+        }
+      }
+    }, updateJobsFrequency_fast_ms);
   }
 
   // Entry point
@@ -234,9 +296,11 @@ function createJobManager(data: { intric: Intric }) {
       currentlyRunningJobs,
       showJobManagerPanel
     },
+    addJob,
     queueUploads,
     clearFinishedUploads,
     updateJobs,
-    startUpdatePolling
+    startUpdatePolling,
+    startFastUpdatePolling
   };
 }

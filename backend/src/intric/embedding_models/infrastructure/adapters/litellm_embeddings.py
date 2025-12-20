@@ -18,7 +18,9 @@ from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.embedding_models.infrastructure.create_embeddings_service import (
+        EmbeddingModelLike,
+    )
     from intric.info_blobs.info_blob import InfoBlobChunk
     from intric.settings.credential_resolver import CredentialResolver
 
@@ -37,7 +39,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
     def __init__(
         self,
-        model: "EmbeddingModel",
+        model: "EmbeddingModelLike",
         credential_resolver: Optional["CredentialResolver"] = None
     ):
         super().__init__(model)

@@ -101,7 +101,7 @@ export const load = async (event) => {
       // Generic OIDC flow (single-tenant or new backend-first flow)
       // loginMethod is undefined when using backend-generated state JWT
       console.debug("[OIDC Callback] Using generic OIDC flow (backend-first)");
-      success = await loginWithOidc(code, state);
+      success = await loginWithOidc(code, state, event.fetch);
 
       if (!success) {
         errorInfo = "oidc_callback_failed";

@@ -1,3 +1,5 @@
+"""Redis client connection management for worker operations."""
+
 import redis.asyncio as aioredis
 from datetime import datetime, timezone
 from typing import NamedTuple
@@ -5,7 +7,7 @@ from typing import NamedTuple
 from intric.main.config import get_settings
 
 
-def _get_redis_connection():
+def _get_redis_connection() -> aioredis.Redis:
     """Lazy initialization of Redis connection using current settings."""
     settings = get_settings()
     pool = aioredis.ConnectionPool.from_url(
@@ -15,10 +17,10 @@ def _get_redis_connection():
 
 
 # Initialize on first import
-_redis_client = None
+_redis_client: aioredis.Redis | None = None
 
 
-def get_redis():
+def get_redis() -> aioredis.Redis:
     """Get Redis client, creating it if needed."""
     global _redis_client
     if _redis_client is None:
@@ -36,14 +38,12 @@ class WorkerHealth(NamedTuple):
 
 
 async def get_worker_health() -> WorkerHealth:
-    """
-    Check the health status of the arq worker by looking for its health check key in Redis.
+    """Check the health status of the arq worker via Redis health check key.
 
     Returns:
         WorkerHealth: Contains status, last_heartbeat timestamp, and details
     """
     try:
-        # Check for arq worker health check key
         # Default queue name in arq is "arq:queue", health check key is "{queue_name}:health-check"
         health_key = "arq:queue:health-check"
         worker_health_data = await r.get(health_key)

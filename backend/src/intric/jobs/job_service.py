@@ -20,12 +20,13 @@ class JobService:
         self.job_repo = job_repo
 
     async def queue_job(
-        self, task: Task, *, name: str, task_params: TaskParams
+        self, task: Task, *, name: str, task_params: TaskParams, enqueue: bool = True
     ) -> JobInDb:
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
         job_in_db = await self.job_repo.add_job(job=job)
 
-        await job_manager.enqueue(task, job_in_db.id, task_params)
+        if enqueue:
+            await job_manager.enqueue(task, job_in_db.id, task_params)
 
         return job_in_db
 

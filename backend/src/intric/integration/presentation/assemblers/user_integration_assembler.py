@@ -19,6 +19,8 @@ class UserIntegrationAssembler:
             name=item.tenant_integration.integration.name,
             integration_type=item.tenant_integration.integration.integration_type,
             description=item.tenant_integration.integration.description,
+            auth_type=item.auth_type,
+            tenant_app_id=item.tenant_app_id,
         )
 
     @classmethod

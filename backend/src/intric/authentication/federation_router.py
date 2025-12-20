@@ -192,6 +192,107 @@ class CallbackRequest(BaseModel):
     }
 
 
+class FederationStatusResponse(BaseModel):
+    """Federation configuration status for login page."""
+
+    has_single_tenant_federation: bool
+    has_multi_tenant_federation: bool
+    has_global_oidc_config: bool
+    tenant_count: int
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "has_single_tenant_federation": True,
+                "has_multi_tenant_federation": False,
+                "has_global_oidc_config": False,
+                "tenant_count": 1,
+            }
+        }
+    }
+
+
+@router.get(
+    "/federation-status",
+    response_model=FederationStatusResponse,
+    summary="Check federation configuration status",
+    description=(
+        "Returns federation availability status for the system. "
+        "Used by login page to determine which authentication method to show. "
+        "No authentication required (public endpoint)."
+    ),
+)
+async def get_federation_status(
+    container: Container = Depends(get_container()),
+) -> FederationStatusResponse:
+    """
+    Determine federation configuration status.
+
+    This endpoint helps the login page decide which authentication UI to show:
+    - Single-tenant API federation: Exactly 1 active tenant with API-configured federation
+    - Multi-tenant federation: Federation per tenant is enabled
+    - Global OIDC: Environment-based OIDC (federation_per_tenant_enabled=false)
+    - No federation: Fall back to username/password
+
+    Returns:
+        FederationStatusResponse with:
+        - has_single_tenant_federation: True if exactly 1 active tenant with API federation config
+        - has_multi_tenant_federation: True if federation_per_tenant_enabled with >1 tenants
+        - has_global_oidc_config: True if OIDC_* env vars are configured
+        - tenant_count: Number of active tenants
+    """
+    settings = get_settings()
+    tenant_repo = container.tenant_repo()
+
+    # Get all active tenants
+    tenants = await tenant_repo.get_all_active()
+    tenant_count = len(tenants)
+
+    # Check if global OIDC env vars are configured (used when federation_per_tenant_enabled=false)
+    has_global_oidc = bool(
+        settings.oidc_discovery_endpoint and settings.oidc_client_secret
+    )
+
+    # Multi-tenant mode: federation per tenant is enabled with multiple tenants
+    if settings.federation_per_tenant_enabled and tenant_count > 1:
+        return FederationStatusResponse(
+            has_single_tenant_federation=False,
+            has_multi_tenant_federation=True,
+            has_global_oidc_config=has_global_oidc,
+            tenant_count=tenant_count,
+        )
+
+    # Single-tenant federation detection (API-configured federation in database):
+    # - Exactly 1 active tenant
+    # - Has API-configured federation (non-empty federation_config JSONB)
+    # - Federation config has required fields
+    # - Only applies when federation_per_tenant_enabled=true
+    has_single_federation = False
+    if settings.federation_per_tenant_enabled and tenant_count == 1:
+        tenant = tenants[0]
+        # Check if tenant has API-configured federation (non-empty federation_config JSONB)
+        if tenant.federation_config and len(tenant.federation_config) > 0:
+            # Verify it has the required fields (avoid empty dicts)
+            required_fields = {"client_id", "discovery_endpoint"}
+            if required_fields.issubset(tenant.federation_config.keys()):
+                has_single_federation = True
+                logger.info(
+                    "Single-tenant API federation detected",
+                    extra={
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": tenant.name,
+                        "provider": tenant.federation_config.get("provider", "unknown"),
+                    },
+                )
+
+    return FederationStatusResponse(
+        has_single_tenant_federation=has_single_federation,
+        has_multi_tenant_federation=False,
+        has_global_oidc_config=has_global_oidc,
+        tenant_count=tenant_count,
+    )
+
+
 @router.get(
     "/tenants",
     response_model=TenantListResponse,
@@ -290,52 +391,55 @@ async def initiate_auth(
 
     # Handle single-tenant mode (no tenant slug needed)
     if tenant is None:
-        # Validate: tenant parameter required in multi-tenant mode
-        if settings.federation_per_tenant_enabled:
-            logger.error(
-                "Tenant parameter missing in multi-tenant mode",
-                extra={"federation_per_tenant_enabled": True},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant parameter required when multi-tenant federation is enabled",
-            )
-
-        # Single-tenant mode: use first active tenant with global OIDC config
+        # Get all active tenants to determine if single-tenant flow is applicable
         tenants = await tenant_repo.get_all_active()
+
         if not tenants:
-            logger.error("No active tenant found for single-tenant OIDC")
+            logger.error("No active tenant found")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="No active tenant found",
             )
 
-        # SAFETY: Prevent silent misconfiguration - require explicit multi-tenant mode
-        if len(tenants) > 1:
-            logger.error(
-                f"Cannot use single-tenant OIDC with {len(tenants)} active tenants",
+        # Handle multi-tenant mode with federation_per_tenant_enabled=true
+        if settings.federation_per_tenant_enabled:
+            # Allow single-tenant flow if exactly 1 active tenant exists
+            if len(tenants) != 1:
+                logger.error(
+                    "Tenant parameter missing in multi-tenant mode with multiple tenants",
+                    extra={
+                        "federation_per_tenant_enabled": True,
+                        "tenant_count": len(tenants),
+                    },
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tenant parameter required when multiple tenants exist",
+                )
+            # Single tenant exists: allow auto-selection
+            tenant_obj = tenants[0]
+            logger.info(
+                f"Single-tenant federation: auto-selected tenant {tenant_obj.name}",
                 extra={
-                    "tenant_count": len(tenants),
-                    "recommendation": "Set FEDERATION_PER_TENANT_ENABLED=true for multi-tenant support",
+                    "tenant_id": str(tenant_obj.id),
+                    "tenant_name": tenant_obj.name,
+                    "federation_per_tenant_enabled": True,
                 },
             )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=(
-                    f"Single-tenant OIDC mode requires exactly one tenant, but {len(tenants)} active tenants found. "
-                    "To enable multi-tenant federation, set FEDERATION_PER_TENANT_ENABLED=true in your backend configuration. "
-                    "Alternatively, deactivate extra tenants if you only need one."
-                ),
+        else:
+            # Global OIDC mode (federation_per_tenant_enabled=false):
+            # Use first active tenant with global OIDC_* env vars
+            # All tenants share the same IdP configuration (no per-tenant routing)
+            tenant_obj = tenants[0]
+            logger.info(
+                f"Global OIDC mode: using tenant {tenant_obj.name} with shared OIDC config",
+                extra={
+                    "tenant_id": str(tenant_obj.id),
+                    "tenant_name": tenant_obj.name,
+                    "tenant_count": len(tenants),
+                    "federation_per_tenant_enabled": False,
+                },
             )
-
-        tenant_obj = tenants[0]  # Use the single active tenant
-        logger.info(
-            f"Single-tenant OIDC: using tenant {tenant_obj.name}",
-            extra={
-                "tenant_id": str(tenant_obj.id),
-                "tenant_name": tenant_obj.name,
-            },
-        )
     else:
         # Multi-tenant mode: lookup tenant by slug
         tenant_obj = await tenant_repo.get_by_slug(tenant)

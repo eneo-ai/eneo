@@ -122,7 +122,7 @@ function isConfigured(value: unknown): boolean {
   return value.trim().length > 0;
 }
 
-export function getFeatureFlags() {
+export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   // UI Features (enabled by default)
   const showWebSearch = getFlagFromEnv("SHOW_WEB_SEARCH", false);
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
@@ -132,20 +132,42 @@ export function getFeatureFlags() {
     isConfigured(env.ZITADEL_INSTANCE_URL) && isConfigured(env.ZITADEL_PROJECT_CLIENT_ID);
   const forceLegacyAuth = getFlagFromEnv("FORCE_LEGACY_AUTH", false);
   const useNewAuth = zitadelConfigured && !forceLegacyAuth;
-  const tenantFederationEnabled = getFlagFromEnv("FEDERATION_PER_TENANT_ENABLED", false);
 
-  // Single-tenant OIDC: OIDC configured but federation per tenant is disabled
-  const singleTenantOidcConfigured =
-    !tenantFederationEnabled &&
-    isConfigured(env.OIDC_DISCOVERY_ENDPOINT) &&
-    isConfigured(env.OIDC_CLIENT_ID) &&
-    isConfigured(env.OIDC_CLIENT_SECRET);
+  // Federation status - always check backend to determine what's available
+  // Backend handles all the logic about federation_per_tenant_enabled, DB config, env vars, etc.
+  let federationStatus = {
+    has_single_tenant_federation: false,
+    has_multi_tenant_federation: false,
+    has_global_oidc_config: false,
+    tenant_count: 0
+  };
+
+  try {
+    const backendUrl = env.INTRIC_BACKEND_URL || "http://localhost:8123";
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+    const response = await fetchFn(`${backendUrl}/api/v1/auth/federation-status`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      federationStatus = await response.json();
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn("[FeatureFlags] Federation status check timed out after 3s");
+    } else {
+      console.error("[FeatureFlags] Failed to check federation status:", error);
+    }
+    // Fail gracefully - fall back to username/password
+  }
 
   return Object.freeze({
     newAuth: useNewAuth,
     showWebSearch,
     showHelpCenter,
-    tenantFederationEnabled,
-    singleTenantOidcConfigured
+    federationStatus
   });
 }

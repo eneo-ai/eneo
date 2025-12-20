@@ -72,7 +72,7 @@
   let isSubmittingUPLogin = $state(false);
 
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
-  let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.tenantFederationEnabled));
+  let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation));
 
   // Check if user explicitly wants to see login form (e.g., after logout)
   const hasQueryParams = $derived(

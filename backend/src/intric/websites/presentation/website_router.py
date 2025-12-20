@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from intric.info_blobs import info_blob_protocol
 from intric.info_blobs.info_blob import InfoBlobPublicNoText
@@ -24,7 +24,7 @@ router = APIRouter()
 
 @router.get("/", response_model=PaginatedResponse[WebsitePublic], deprecated=True)
 async def get_websites(
-    for_tenant: bool = False,
+    for_tenant: bool = Query(default=False, description="Filter websites by tenant scope"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     return HTTPException(status_code=410, detail="This endpoint is deprecated")
@@ -114,7 +114,10 @@ async def bulk_run_crawl(
 
 
 @router.get("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
-async def get_website(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def get_website(
+    id: UUID = Path(description="Unique identifier of the website"),
+    container: Container = Depends(get_container(with_user=True)),
+):
     service = container.website_crud_service()
     website = await service.get_website(id)
 
@@ -123,8 +126,8 @@ async def get_website(id: UUID, container: Container = Depends(get_container(wit
 
 @router.post("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
 async def update_website(
-    id: UUID,
-    website_update: WebsiteUpdate,
+    id: UUID = Path(description="Unique identifier of the website to update"),
+    website_update: WebsiteUpdate = ...,
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.website_crud_service()
@@ -144,7 +147,10 @@ async def update_website(
 
 
 @router.delete("/{id}/", status_code=200, responses=responses.get_responses([404]))
-async def delete_website(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def delete_website(
+    id: UUID = Path(description="Unique identifier of the website to delete"),
+    container: Container = Depends(get_container(with_user=True)),
+):
     service = container.website_crud_service()
     await service.delete_website(id)
     return {"id": id, "deletion_info": {"success": True}}
@@ -171,7 +177,10 @@ async def delete_website(id: UUID, container: Container = Depends(get_container(
     Returns the new crawl run with status information.
     """,
 )
-async def run_crawl(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def run_crawl(
+    id: UUID = Path(description="Unique identifier of the website to crawl"),
+    container: Container = Depends(get_container(with_user=True)),
+):
     # MIT License
 
     service = container.website_crud_service()
@@ -181,7 +190,10 @@ async def run_crawl(id: UUID, container: Container = Depends(get_container(with_
 
 
 @router.get("/{id}/runs/", response_model=PaginatedResponse[CrawlRunPublic])
-async def get_crawl_runs(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def get_crawl_runs(
+    id: UUID = Path(description="Unique identifier of the website"),
+    container: Container = Depends(get_container(with_user=True)),
+):
     service = container.website_crud_service()
     crawl_runs = await service.get_crawl_runs(id)
 
@@ -192,8 +204,8 @@ async def get_crawl_runs(id: UUID, container: Container = Depends(get_container(
 
 @router.post("/{id}/transfer/", status_code=204)
 async def transfer_website_to_space(
-    id: UUID,
-    transfer_req: TransferRequest,
+    id: UUID = Path(description="Unique identifier of the website to transfer"),
+    transfer_req: TransferRequest = ...,
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.resource_mover_service()
@@ -206,7 +218,7 @@ async def transfer_website_to_space(
     responses=responses.get_responses([400, 404]),
 )
 async def get_info_blobs(
-    id: UUID,
+    id: UUID = Path(description="Unique identifier of the website"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.info_blob_service()
