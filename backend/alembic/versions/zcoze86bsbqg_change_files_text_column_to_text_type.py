@@ -1,7 +1,7 @@
 """change files text column to text type
 
 Revision ID: zcoze86bsbqg
-Revises: 20251121_set_embedding_org
+Revises: 8d909e51b83b
 Create Date: 2025-11-25 13:00:00.000000
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy import Text
 
 # revision identifiers, used by Alembic
 revision = 'zcoze86bsbqg'
-down_revision = '20251121_set_embedding_org'
+down_revision = '8d909e51b83b'
 branch_labels = None
 depends_on = None
 
