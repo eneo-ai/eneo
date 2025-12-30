@@ -20,9 +20,15 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
 
+  interface ImageModel {
+    id: string;
+    name: string;
+    security_classification?: any;
+  }
+
   type Props = {
-    model: CompletionModel | EmbeddingModel | TranscriptionModel;
-    type: "completionModel" | "embeddingModel" | "transcriptionModel";
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+    type: "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
     openController: Writable<boolean>;
   };
 
@@ -35,13 +41,20 @@
 
   const update = createAsyncState(async () => {
     try {
-      await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
+      if (type === "imageModel") {
+        await intric.imageModels.update({
+          imageModel: { id: model.id },
           update: { security_classification: value }
-        }
-      );
+        });
+      } else {
+        await intric.models.update(
+          //@ts-expect-error ts doesn't understand this
+          {
+            [type]: model,
+            update: { security_classification: value }
+          }
+        );
+      }
       invalidate("admin:models:load");
       $openController = false;
     } catch (error) {

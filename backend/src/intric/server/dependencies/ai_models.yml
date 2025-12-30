@@ -466,3 +466,64 @@ embedding_models:
     hosting: 'swe'
     description: Microsoft Azure's hosted version of OpenAI's text-embedding-3-large model, offering high-dimensional embeddings via Azure.
     org: Microsoft
+
+
+image_models:
+  # Image generation models for creating images from text prompts
+  # Also used for generating icons for assistants, apps, and spaces
+  #
+  # ⚠️ The 'name' field is used to SYNC with database - DO NOT CHANGE existing names
+  # Use 'nickname' for display purposes
+
+  - name: 'dall-e-3'
+    nickname: 'DALL-E 3'
+    family: 'openai'
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    description: OpenAI's latest image generation model with high quality and detailed output.
+    org: OpenAI
+    max_resolution: '1024x1024'
+    supported_sizes: ['1024x1024', '1792x1024', '1024x1792']
+    supported_qualities: ['standard', 'hd']
+    max_images_per_request: 1
+
+  - name: 'dall-e-2'
+    nickname: 'DALL-E 2'
+    family: 'openai'
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    description: OpenAI's efficient image generation model with faster processing.
+    org: OpenAI
+    max_resolution: '1024x1024'
+    supported_sizes: ['256x256', '512x512', '1024x1024']
+    supported_qualities: ['standard']
+    max_images_per_request: 4
+
+  - name: 'dall-e-3-azure'
+    nickname: 'DALL-E 3 (Azure)'
+    family: 'azure'
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'swe'
+    litellm_model_name: 'azure/dall-e-3'
+    description: Microsoft Azure's hosted version of DALL-E 3 for Swedish data sovereignty.
+    org: Microsoft
+    max_resolution: '1024x1024'
+    supported_sizes: ['1024x1024', '1792x1024', '1024x1792']
+    supported_qualities: ['standard', 'hd']
+    max_images_per_request: 1
+
+  - name: 'gpt-image-1'
+    nickname: 'GPT Image'
+    family: 'openai'
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    description: OpenAI's latest multimodal image generation model with enhanced capabilities.
+    org: OpenAI
+    max_resolution: '1536x1024'
+    supported_sizes: ['1024x1024', '1536x1024', '1024x1536', 'auto']
+    supported_qualities: ['auto', 'high', 'medium', 'low']
+    max_images_per_request: 4
