@@ -66,8 +66,12 @@ OIDC_CLIENT_SECRET=
 # Must match the IdP redirect_uri configuration
 PUBLIC_ORIGIN=https://your-domain.com
 
-# MULTI-TENANT FEDERATION MODE (Enterprise Only)
-# Enable per-tenant identity providers (each tenant configures their own IdP)
+# FEDERATION MODE
+# ----------------------------------------------------------------------------
+# Must match backend setting. Controls how OIDC/IdP configuration is managed:
+#   FALSE (default): Single-tenant via OIDC_* environment variables
+#   TRUE: Federation via sysadmin API (multi-tenant or single-tenant with API management)
+# See backend env_backend.template for detailed documentation.
 # ----------------------------------------------------------------------------
 FEDERATION_PER_TENANT_ENABLED=false
 

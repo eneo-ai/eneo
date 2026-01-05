@@ -81,9 +81,23 @@ OIDC_CLIENT_SECRET=
 # [OPTIONAL] OIDC tenant ID (for backward compatibility with user creation)
 OIDC_TENANT_ID=
 
-# MULTI-TENANT FEDERATION MODE (Enterprise Only)
-# Enable per-tenant identity providers (each tenant configures their own IdP)
-# Requires ENCRYPTION_KEY and tenant configuration via sysadmin API
+# FEDERATION MODE
+# ----------------------------------------------------------------------------
+# Controls how OIDC/IdP configuration is managed:
+#
+# FALSE (default) - Single-Tenant via Environment Variables:
+#   - Uses OIDC_* variables above (OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, etc.)
+#   - Requires backend restart to change OIDC settings
+#   - Simplest setup for single-organization deployments
+#
+# TRUE - Federation via Sysadmin API:
+#   - Configure IdP settings via PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+#   - Changes take effect immediately (no restart required)
+#   - Requires ENCRYPTION_KEY (secrets are encrypted at rest)
+#   - Use cases:
+#     a) Multi-tenant: Each tenant has their own IdP (Entra ID, Okta, Auth0, etc.)
+#     b) Single-tenant with API management: One tenant, but manage OIDC via API
+#        instead of environment variables (useful for dynamic configuration)
 # ----------------------------------------------------------------------------
 FEDERATION_PER_TENANT_ENABLED=false
 

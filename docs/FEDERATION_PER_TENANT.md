@@ -6,11 +6,23 @@
 
 ---
 
-## 1. Why it Matters
-- Each municipality can bring its own IdP (Entra ID, Okta, Auth0, MobilityGuard, …)
+## 1. When to Use This Feature
+
+### Multi-Tenant Deployments
+- Each municipality/organization can bring its own IdP (Entra ID, Okta, Auth0, MobilityGuard, …)
 - Secrets stay tenant-scoped and encrypted at rest (`tenants.federation_config` JSONB)
 - Frontend automatically powers a tenant selector when multi-tenant mode is on
-- Backward compatible: no changes for single-tenant installs
+
+### Single-Tenant with API Management
+Even with a single tenant, you may want `FEDERATION_PER_TENANT_ENABLED=true` if you prefer to:
+- Manage OIDC settings via the sysadmin API instead of environment variables
+- Change IdP configuration without restarting the backend
+- Use the same API-based workflow as multi-tenant deployments
+
+### Single-Tenant via Environment Variables (Default)
+If you don't need the above, keep `FEDERATION_PER_TENANT_ENABLED=false` and use:
+- `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` in your `.env`
+- Simpler setup, but requires backend restart to change OIDC settings
 
 ---
 
