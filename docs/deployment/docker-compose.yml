@@ -4,8 +4,8 @@
 # Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
 #
 # BEFORE DEPLOYING:
-#   1. Replace "your-email@domain.com" (line 23) with your email
-#   2. Replace "your-domain.com" (lines 47, 50, 73, 76) with your domain
+#   1. Replace "your-email@domain.com" (line 38) with your email
+#   2. Replace "your-domain.com" (lines 65, 68, 91, 94) with your domain
 #   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
 #   4. Create external network: docker network create proxy_tier
 #
