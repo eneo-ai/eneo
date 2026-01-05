@@ -81,9 +81,23 @@ OIDC_CLIENT_SECRET=
 # [OPTIONAL] OIDC tenant ID (for backward compatibility with user creation)
 OIDC_TENANT_ID=
 
-# MULTI-TENANT FEDERATION MODE (Enterprise Only)
-# Enable per-tenant identity providers (each tenant configures their own IdP)
-# Requires ENCRYPTION_KEY and tenant configuration via sysadmin API
+# FEDERATION MODE
+# ----------------------------------------------------------------------------
+# Controls how OIDC/IdP configuration is managed:
+#
+# FALSE (default) - Single-Tenant via Environment Variables:
+#   - Uses OIDC_* variables above (OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, etc.)
+#   - Requires backend restart to change OIDC settings
+#   - Simplest setup for single-organization deployments
+#
+# TRUE - Federation via Sysadmin API:
+#   - Configure IdP settings via PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+#   - Changes take effect immediately (no restart required)
+#   - Requires ENCRYPTION_KEY (secrets are encrypted at rest)
+#   - Use cases:
+#     a) Multi-tenant: Each tenant has their own IdP (Entra ID, Okta, Auth0, etc.)
+#     b) Single-tenant with API management: One tenant, but manage OIDC via API
+#        instead of environment variables (useful for dynamic configuration)
 # ----------------------------------------------------------------------------
 FEDERATION_PER_TENANT_ENABLED=false
 
@@ -339,17 +353,20 @@ SHAREPOINT_CLIENT_ID=
 SHAREPOINT_CLIENT_SECRET=
 
 # ----------------------------------------------------------------------------
-# Default Tenant & User (OPTIONAL - First-time Bootstrap Only)
+# Default Tenant & User (First-time Bootstrap)
 # ----------------------------------------------------------------------------
-# Uncomment these ONLY for initial deployment to create a default tenant/user
-# After first deployment, comment them out or remove them
-# WARNING: If left enabled, uses these values on every init_db run (but skips if already exists)
+# These credentials are used by init_db.py to create the initial tenant and user.
+# The default credentials below match the DEPLOYMENT.md guide.
+#
+# IMPORTANT: Change the password after first login!
+#
+# If tenant/user already exist, init_db.py will skip creation (safe to re-run).
 # ----------------------------------------------------------------------------
-# DEFAULT_TENANT_NAME=YourOrganization
-# DEFAULT_TENANT_QUOTA_LIMIT=10737418240
-# DEFAULT_USER_NAME=Admin
-# DEFAULT_USER_EMAIL=admin@yourdomain.com
-# DEFAULT_USER_PASSWORD=ChangeMe123!
+DEFAULT_TENANT_NAME=ExampleTenant
+DEFAULT_TENANT_QUOTA_LIMIT=10737418240
+DEFAULT_USER_NAME=ExampleUser
+DEFAULT_USER_EMAIL=user@example.com
+DEFAULT_USER_PASSWORD=Password1!
 
 # ----------------------------------------------------------------------------
 # Migration & Maintenance

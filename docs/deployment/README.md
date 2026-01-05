@@ -19,22 +19,35 @@ cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 
-# 2. Edit these 4 locations in docker-compose.yml:
-#    - Line 15: your-email@domain.com (Let's Encrypt email)
-#    - Lines 39, 42, 65, 68: your-domain.com (replace all 4)
+# 2. Edit docker-compose.yml (replace your-domain.com with your actual domain):
+#    - Line 38: your-email@domain.com (Let's Encrypt email)
+#    - Lines 65, 68, 91, 94: your-domain.com (4 locations)
 
-# 3. Configure environment files:
-#    - env_backend.env: Add OPENAI_API_KEY or ANTHROPIC_API_KEY
-#    - env_backend.env: Generate JWT_SECRET (openssl rand -hex 32)
-#    - env_frontend.env: Copy same JWT_SECRET from backend
-#    - env_frontend.env: Update domain URLs
-#    - env_db.env: Set POSTGRES_PASSWORD
+# 3. Configure env_db.env:
+#    - POSTGRES_PASSWORD=your-secure-password
 
-# 4. Deploy
+# 4. Configure env_backend.env:
+#    - JWT_SECRET=$(openssl rand -hex 32)
+#    - PUBLIC_ORIGIN=https://your-domain.com
+#    - Add at least one LLM key: OPENAI_API_KEY or ANTHROPIC_API_KEY
+#    - Set initial user credentials (creates login user):
+#        DEFAULT_TENANT_NAME=ExampleTenant
+#        DEFAULT_USER_EMAIL=user@example.com
+#        DEFAULT_USER_PASSWORD=Password1!
+
+# 5. Configure env_frontend.env:
+#    - JWT_SECRET=<same as backend>
+#    - INTRIC_BACKEND_URL=https://your-domain.com
+#    - INTRIC_BACKEND_SERVER_URL=http://backend:8000
+#    - PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
+#    - ORIGIN=https://your-domain.com
+#    - PUBLIC_ORIGIN=https://your-domain.com
+
+# 6. Deploy
 docker network create proxy_tier
 docker compose up -d
 
-# 5. Login: user@example.com / Password1! (change password immediately!)
+# 7. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
 ```
 
 ## Full Documentation
