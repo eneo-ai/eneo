@@ -41,6 +41,9 @@ services:
     networks:
       - proxy_tier
     labels:
+      # IMPORTANT: traefik.enable=true is required for Traefik to read these labels
+      # (because exposedbydefault=false is set above)
+      - "traefik.enable=true"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 

@@ -7,16 +7,30 @@
 # ----------------------------------------------------------------------------
 # Backend Connection (REQUIRED)
 # ----------------------------------------------------------------------------
-# SSR backend URL (server-side rendering within Docker network)
-INTRIC_BACKEND_URL=http://backend:8000
+# These URLs control how the frontend connects to the backend API.
+#
+# IMPORTANT: Replace "your-domain.com" with your actual domain!
+#
+# Example for domain "eneo.example.com":
+#   INTRIC_BACKEND_URL=https://eneo.example.com
+#   INTRIC_BACKEND_SERVER_URL=http://backend:8000
+#   PUBLIC_INTRIC_BACKEND_URL=https://eneo.example.com
+#   ORIGIN=https://eneo.example.com
+# ----------------------------------------------------------------------------
 
-# Client-side backend URL (browser - must start with PUBLIC_)
-# For production with Traefik: use your public domain
-# Example: https://eneo.yourdomain.com
+# Server-side backend URL (used by frontend SSR for API calls)
+INTRIC_BACKEND_URL=https://your-domain.com
+
+# Internal backend URL (server-to-server within Docker network)
+# This connects directly to the backend container, skipping Traefik (faster for SSR)
+INTRIC_BACKEND_SERVER_URL=http://backend:8000
+
+# Client-side backend URL (used by browser for API calls)
+# The PUBLIC_ prefix exposes this to the browser (SvelteKit convention)
 PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
 
-# [OPTIONAL] Server-to-server override (usually not needed in Docker Compose)
-INTRIC_BACKEND_SERVER_URL=
+# Public origin (used for cookies and CORS)
+ORIGIN=https://your-domain.com
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)
@@ -49,9 +63,7 @@ OIDC_CLIENT_SECRET=
 
 # PUBLIC_ORIGIN (REQUIRED for OIDC authentication)
 # The externally-reachable URL where users access Eneo
-# Must match the backend PUBLIC_ORIGIN and IdP redirect_uri configuration
-# Examples:
-#   Production: https://eneo.yourcompany.com
+# Must match the IdP redirect_uri configuration
 PUBLIC_ORIGIN=https://your-domain.com
 
 # MULTI-TENANT FEDERATION MODE (Enterprise Only)
