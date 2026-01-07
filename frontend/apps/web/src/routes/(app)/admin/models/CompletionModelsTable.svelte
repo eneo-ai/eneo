@@ -63,42 +63,6 @@
       }
     }),
 
-    // Provider column - always shown for tenant models
-    table.column({
-      accessor: (model) => model,
-      header: "Provider",
-      cell: (item) => {
-        const model = item.value;
-        // Tenant models have provider_id
-        if (model.provider_id) {
-          const provider = providers.find((p) => p.id === model.provider_id);
-          return provider?.name || "Unknown";
-        }
-        // Global models show org
-        return model.org || "-";
-      },
-      plugins: {
-        sort: {
-          getSortValue(value) {
-            if (value.provider_id) {
-              const provider = providers.find((p) => p.id === value.provider_id);
-              return provider?.name || "";
-            }
-            return value.org || "";
-          }
-        },
-        tableFilter: {
-          getFilterValue(value) {
-            if (value.provider_id) {
-              const provider = providers.find((p) => p.id === value.provider_id);
-              return provider?.name || "";
-            }
-            return value.org || "";
-          }
-        }
-      }
-    }),
-
     table.column({
       accessor: (model) => model,
       header: m.enabled(),
