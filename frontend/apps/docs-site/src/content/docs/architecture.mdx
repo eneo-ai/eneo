@@ -21,12 +21,12 @@ Eneo follows a modern microservices architecture with clean separation of concer
         ┌────────┴────────┐
         ▼                 ▼
 ┌──────────────┐  ┌──────────────────────────────────┐
-│   Frontend   │  │          Backend API             │
-│  (SvelteKit) │  │         (FastAPI)                │
-│              │  │                                   │
-│  - UI/UX     │  │  - Business Logic                │
-│  - Routing   │  │  - Authentication                │
-│  - State     │  │  - API Endpoints                 │
+│  Frontends   │  │          Backend API             │
+│              │  │         (FastAPI)                │
+│ - Web App    │  │                                   │
+│  (SvelteKit) │  │  - Business Logic                │
+│ - Docs Site  │  │  - Authentication                │
+│  (Next.js)   │  │  - API Endpoints                 │
 └──────────────┘  └───────┬──────────────────────────┘
                           │
             ┌─────────────┼─────────────┐
@@ -52,7 +52,13 @@ Eneo follows a modern microservices architecture with clean separation of concer
 
 ## Core Components
 
-### Frontend (SvelteKit)
+### Frontend Applications
+
+Eneo's frontend consists of multiple applications, each using the framework best suited for its purpose.
+
+#### Main Web Application (SvelteKit)
+
+The primary user-facing application is built with SvelteKit.
 
 **Technology Stack:**
 - **Framework**: SvelteKit with TypeScript
@@ -76,7 +82,7 @@ Eneo follows a modern microservices architecture with clean separation of concer
 
 **Directory Structure:**
 ```
-frontend/apps/client/
+frontend/apps/web/
 ├── src/
 │   ├── routes/          # SvelteKit routes
 │   ├── lib/             # Shared utilities
@@ -84,6 +90,35 @@ frontend/apps/client/
 │   │   ├── stores/      # State stores
 │   │   └── components/  # Reusable components
 │   └── app.html         # HTML template
+└── package.json
+```
+
+#### Documentation Site (Next.js + Nextra)
+
+The documentation site uses Next.js with Nextra for optimized static documentation generation.
+
+**Technology Stack:**
+- **Framework**: Next.js 15 with React 19
+- **Documentation Framework**: Nextra 4.x with nextra-theme-docs
+- **Styling**: Tailwind CSS
+- **Search**: Pagefind for static search
+
+**Key Features:**
+- Static site generation for fast loading
+- MDX support for rich documentation
+- Built-in search functionality
+- Dark mode support
+- Automatic sidebar navigation
+
+**Directory Structure:**
+```
+frontend/apps/docs-site/
+├── src/
+│   ├── content/         # MDX documentation files
+│   │   ├── docs/        # Main documentation
+│   │   └── guides/      # How-to guides
+│   ├── app/             # Next.js app router
+│   └── components/      # Custom components
 └── package.json
 ```
 
@@ -504,12 +539,21 @@ Fully orchestrated with K8s:
 
 ## Technology Decisions
 
-### Why SvelteKit?
+### Why SvelteKit for the Main Application?
 
 - Lightweight and fast
 - Excellent developer experience
 - Built-in SSR and routing
 - Smaller bundle sizes than React
+- Reactive state management without boilerplate
+
+### Why Next.js + Nextra for Documentation?
+
+- Purpose-built for documentation sites
+- MDX support for rich content with components
+- Static site generation for optimal performance
+- Built-in search, navigation, and theming
+- Large ecosystem and community support
 
 ### Why FastAPI?
 

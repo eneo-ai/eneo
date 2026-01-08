@@ -2,7 +2,7 @@ import type { MetaRecord } from 'nextra';
 
 const meta: MetaRecord = {
   index: 'Overview',
-  authentication: 'Authentication & OIDC',
+  'oidc-federation': 'OIDC Federation',
   'ai-providers': 'AI Provider Configuration',
   deployment: 'Deployment',
   'document-processing': 'Document Processing',
