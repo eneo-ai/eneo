@@ -62,12 +62,12 @@ The worker service will process files in the background. You'll see:
 
 ### File Size Limits
 
-Default maximum file size: **50MB per file**
+Default maximum file size: **10MB per file**
 
 To increase limits, add to `env_backend.env`:
 
 ```bash
-MAX_UPLOAD_SIZE_MB=100
+UPLOAD_MAX_FILE_SIZE=20971520  # 20MB in bytes
 ```
 
 Then restart:

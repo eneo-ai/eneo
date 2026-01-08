@@ -248,6 +248,202 @@ docker compose exec -T db pg_dump -U eneo eneo | \
   gzip > backup.sql.gpg.gz
 ```
 
+---
+
+## Encryption Key Management
+
+Eneo uses **Fernet encryption** (AES-128-CBC with HMAC) for encrypting sensitive data at rest. This includes API keys, client secrets, and HTTP authentication credentials.
+
+### What Gets Encrypted
+
+The following sensitive data is encrypted before storage in the database:
+
+- **Tenant API credentials** - OpenAI, Anthropic, Azure, and other provider API keys
+- **OIDC client secrets** - Federation identity provider credentials
+- **HTTP authentication passwords** - Credentials for crawling password-protected websites
+
+### Encryption Format
+
+Encrypted values use a versioned format for future-proofing:
+
+```
+enc:fernet:v1:<base64-encoded-ciphertext>
+```
+
+This format enables:
+- Detection of encrypted vs plaintext values
+- Algorithm versioning for future migrations
+- Clear audit trail of encryption status
+
+### Generating an Encryption Key
+
+Generate a secure Fernet key using the built-in CLI tool:
+
+```bash
+# Generate a new encryption key
+uv run python -m intric.cli.generate_encryption_key
+
+# Output example:
+# Generated Fernet Encryption Key
+# ================================
+# ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+#
+# Important:
+# - Backup this key (cannot decrypt without it)
+# - Losing this key = losing all encrypted credentials
+```
+
+### Configuration
+
+Add the encryption key to your backend environment:
+
+```bash
+# env_backend.env
+
+# Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
+ENCRYPTION_KEY=<your-generated-fernet-key>
+
+# Enable tenant-specific credentials (multi-tenant mode)
+TENANT_CREDENTIALS_ENABLED=true
+```
+
+### Key Management Best Practices
+
+1. **Never commit the encryption key** - Store it securely outside version control
+2. **Backup the key separately** - Loss of the key means permanent loss of encrypted credentials
+3. **Use different keys per environment** - Development, staging, and production should each have unique keys
+4. **Rotate keys periodically** - Re-encrypt credentials with new keys according to your security policy
+
+### Encryption Status Auditing
+
+The API provides visibility into encryption status for security auditing:
+
+```bash
+# List credentials with encryption status
+curl -X GET "https://your-eneo-instance.com/api/v1/sysadmin/tenants/{tenant_id}/credentials" \
+  -H "Authorization: Bearer admin-token"
+
+# Response includes encryption status for each credential:
+# {
+#   "credentials": [
+#     {
+#       "provider": "openai",
+#       "masked_key": "...xyz9",
+#       "encryption_status": "encrypted",  # or "plaintext"
+#       "configured_at": "2025-01-08T10:30:00Z"
+#     }
+#   ]
+# }
+```
+
+---
+
+## Tenant Isolation
+
+Eneo implements strict multi-tenant isolation to ensure complete data separation between organizations.
+
+### Database-Level Isolation
+
+All database queries enforce tenant boundaries through mandatory `tenant_id` filtering:
+
+- **Users**: Each user belongs to exactly one tenant
+- **Spaces and Assistants**: Scoped to the owning tenant
+- **Documents and Knowledge**: Isolated per tenant
+- **API Credentials**: Stored and encrypted per tenant
+- **Audit Logs**: Tenant-scoped for compliance
+
+### Credential Isolation (Strict Mode)
+
+When `TENANT_CREDENTIALS_ENABLED=true`, Eneo operates in **strict mode** with no credential fallback:
+
+```bash
+# env_backend.env
+TENANT_CREDENTIALS_ENABLED=true  # Enable strict multi-tenant mode
+```
+
+**Strict mode behavior:**
+1. Each tenant **must** configure their own API credentials
+2. No fallback to global/shared credentials
+3. Missing credentials result in clear error messages
+4. Prevents billing confusion and accidental credential sharing
+
+**Credential resolution order:**
+```
+Tenant credential exists? → Use it (decrypt if encrypted)
+No tenant credential? → ERROR (no fallback in strict mode)
+```
+
+### Single-Tenant Mode
+
+For single-organization deployments, global credentials can be used:
+
+```bash
+# env_backend.env
+TENANT_CREDENTIALS_ENABLED=false  # Single-tenant mode
+
+# Global API keys used as fallback
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Single-tenant mode behavior:**
+1. Tenant credentials checked first (if configured)
+2. Falls back to global environment variables
+3. Suitable for single-organization deployments
+
+### Federation Isolation
+
+Per-tenant OIDC federation ensures authentication isolation:
+
+```bash
+# env_backend.env
+FEDERATION_PER_TENANT_ENABLED=true  # Each tenant uses their own IdP
+```
+
+Each tenant configures their own:
+- Identity Provider (IdP) discovery endpoint
+- Client ID and client secret (encrypted at rest)
+- Redirect URIs and scopes
+
+### Worker Task Isolation
+
+Background tasks (crawling, embedding, etc.) enforce tenant boundaries:
+
+- Tasks are scoped to specific tenants
+- Tenant ID verification before processing
+- Concurrency limits per tenant prevent resource monopolization
+- Isolation violation detection with error logging
+
+### API-Level Isolation
+
+All API endpoints enforce tenant context:
+
+- User authentication determines tenant scope
+- Cross-tenant access is prevented at the API layer
+- Role-based permissions within tenant boundaries
+- Audit logging includes tenant context
+
+### Verifying Tenant Isolation
+
+Monitor logs for isolation verification:
+
+```bash
+# Check for tenant isolation in worker logs
+docker compose logs backend | grep "tenant_id"
+
+# Verify credential resolution sources
+docker compose logs backend | grep "credential_source"
+```
+
+### Configuration Summary
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `TENANT_CREDENTIALS_ENABLED` | `true` | Strict mode - no credential fallback |
+| `TENANT_CREDENTIALS_ENABLED` | `false` | Single-tenant mode - global fallback allowed |
+| `FEDERATION_PER_TENANT_ENABLED` | `true` | Per-tenant IdP configuration required |
+| `ENCRYPTION_KEY` | (required) | Fernet key for credential encryption |
+
 ### Secrets Management
 
 **Never commit secrets:**
@@ -526,6 +722,16 @@ For security incidents:
 - [ ] Backups scheduled
 - [ ] Logs monitored
 - [ ] Incident response plan documented
+- [ ] Encryption key generated and secured
+- [ ] Sensitive credentials encrypted at rest
+
+### Multi-Tenant Security (if applicable)
+- [ ] `TENANT_CREDENTIALS_ENABLED=true` configured
+- [ ] `FEDERATION_PER_TENANT_ENABLED=true` configured
+- [ ] Each tenant has own API credentials
+- [ ] Each tenant has own IdP configuration
+- [ ] Tenant isolation verified in logs
+- [ ] Encryption key backed up securely
 
 ### Operational Security
 - [ ] Regular security updates scheduled
