@@ -1,6 +1,12 @@
 # Deployment Guide
 
-This guide covers production deployment of Eneo using Docker Compose with Traefik as a reverse proxy.
+import { Callout, Tabs, Steps } from 'nextra/components'
+
+This guide covers production deployment of Eneo using Docker Compose. The provided configuration uses Traefik as a reverse proxy, but you can adapt it for nginx, haproxy, or other reverse proxies.
+
+<Callout type="info">
+The Docker Compose file provided is a **reference configuration**, not a one-size-fits-all solution. Customize it for your organization's security requirements, network topology, and infrastructure needs.
+</Callout>
 
 ## Prerequisites
 
@@ -9,7 +15,6 @@ Before deploying, ensure you have:
 - **Linux server** (Ubuntu 20.04+ recommended)
 - **Docker** and **Docker Compose** installed
 - **Domain name** with DNS pointing to your server
-- **Email address** for Let's Encrypt SSL certificates
 - **At least one AI provider API key** ([see AI Provider guide](/guides/ai-providers))
 - **Firewall** allowing ports 80 (HTTP) and 443 (HTTPS)
 
@@ -25,13 +30,30 @@ Before deploying, ensure you have:
 - 8GB+ RAM
 - 50GB+ disk space (for documents and databases)
 
+<Callout type="info">
+**Container Management Tip:** For improved quality of life and maintainability, consider using a container management UI instead of CLI-only administration. Popular options include [Portainer](https://github.com/portainer/portainer) and [Komodo](https://github.com/moghtech/komodo). These tools provide visual dashboards for monitoring containers, viewing logs, managing updates, and troubleshooting - significantly simplifying day-to-day operations.
+</Callout>
+
+### Deployment Decisions
+
+Before starting, decide on these configuration options:
+
+| Decision | Options | Default |
+|----------|---------|---------|
+| SSL/TLS | Let's Encrypt (automatic) or Custom PKI | Let's Encrypt |
+| Reverse Proxy | Traefik, nginx, or haproxy | Traefik |
+| Authentication | Single-tenant OIDC or Multi-tenant Federation | Single-tenant |
+| User Management | Local accounts or OIDC-only | OIDC |
+
 ---
 
-## Quick Deployment
+## Quick Start
 
 The fastest way to deploy Eneo in production:
 
-### Step 1: Get Deployment Files
+<Steps>
+
+### Get Deployment Files
 
 ```bash
 # Option A: Clone the repository
@@ -46,7 +68,7 @@ curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_
 curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_db.template
 ```
 
-### Step 2: Create Environment Files
+### Create Environment Files
 
 ```bash
 cp env_backend.template env_backend.env
@@ -54,11 +76,9 @@ cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 ```
 
-### Step 3: Configure Your Deployment
+### Configure Your Deployment
 
-#### A. Update `docker-compose.yml`
-
-Replace placeholders with your actual values:
+**Update `docker-compose.yml`** - Replace placeholders with your values:
 
 ```bash
 # Replace email for SSL certificate notifications
@@ -68,66 +88,24 @@ sed -i 's/your-email@domain.com/ops@your-company.com/g' docker-compose.yml
 sed -i 's/your-domain.com/eneo.your-company.com/g' docker-compose.yml
 ```
 
-Or manually edit the file:
-- `your-email@domain.com` → your email
-- `your-domain.com` → your domain (all 4 occurrences)
-
-#### B. Configure Database (`env_db.env`)
-
-Generate a secure database password:
+**Configure Database (`env_db.env`)**:
 
 ```bash
+# Generate a secure database password
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> env_db.env
 ```
 
-#### C. Configure Backend (`env_backend.env`)
-
-**Required settings:**
+**Configure Backend (`env_backend.env`)**:
 
 ```bash
 # Generate JWT secret for session management
 echo "JWT_SECRET=$(openssl rand -hex 32)" >> env_backend.env
 
-# Database connection (use the password from env_db.env)
-echo "DATABASE_URL=postgresql://eneo:YOUR_DB_PASSWORD@db:5432/eneo" >> env_backend.env
-
-# Redis connection
-echo "REDIS_URL=redis://redis:6379/0" >> env_backend.env
-
 # Add at least one AI provider API key
 echo "OPENAI_API_KEY=sk-..." >> env_backend.env
 ```
 
-**Optional settings:**
-
-```bash
-# OIDC authentication (see Authentication guide)
-OIDC_ENABLED=false
-
-# Email configuration (for notifications)
-SMTP_HOST=smtp.your-company.com
-SMTP_PORT=587
-SMTP_USER=noreply@your-company.com
-SMTP_PASSWORD=your-smtp-password
-
-# File upload limits
-MAX_UPLOAD_SIZE_MB=50
-
-# Rate limiting
-RATE_LIMIT_PER_MINUTE=60
-```
-
-#### D. Configure Frontend (`env_frontend.env`)
-
-```bash
-# API endpoint (internal Docker network)
-NEXT_PUBLIC_API_URL=https://your-domain.com/api
-
-# Public URL
-NEXT_PUBLIC_APP_URL=https://your-domain.com
-```
-
-### Step 4: Deploy
+### Deploy
 
 ```bash
 # Create Docker network for Traefik
@@ -140,15 +118,543 @@ docker compose up -d
 docker compose ps
 ```
 
-### Step 5: Access Your Instance
+### First Login
 
 Navigate to `https://your-domain.com`
 
-**Default credentials:**
-- Email: `user@example.com`
-- Password: `Password1!`
+<Callout type="warning">
+**Bootstrap Credentials:** By default, no user is created. You must either:
+1. Uncomment the `DEFAULT_USER_*` variables in `env_backend.env` for first-time setup
+2. Configure OIDC authentication before deploying
 
-**⚠️ Important:** Change the default password immediately after first login!
+See [Bootstrap Credentials](#bootstrap-credentials) for details.
+</Callout>
+
+</Steps>
+
+---
+
+## Initial Setup
+
+### Bootstrap Credentials
+
+For first-time deployment, you can create a default tenant and user by uncommenting these variables in `env_backend.env`:
+
+```bash
+# Uncomment ONLY for initial deployment, then comment out after first login
+DEFAULT_TENANT_NAME=YourOrganization
+DEFAULT_TENANT_QUOTA_LIMIT=10737418240  # 10GB in bytes
+DEFAULT_USER_NAME=Admin User
+DEFAULT_USER_EMAIL=admin@yourdomain.com
+DEFAULT_USER_PASSWORD=ChangeMe123!
+```
+
+<Callout type="warning">
+**Security Warning:**
+- Change the default password immediately after first login
+- Comment out or remove these variables after initial setup
+- The `db-init` container runs `init_db.py` which uses these variables only if they are set
+</Callout>
+
+The bootstrap process:
+1. `db-init` container runs migrations via Alembic
+2. If all `DEFAULT_*` variables are set, creates the tenant and user
+3. Assigns the user as Owner of the tenant
+4. The `db-init` container exits after completing
+
+### Frontend URL Configuration
+
+The frontend requires proper URL configuration for server-side rendering (SSR) and client-side requests:
+
+```bash
+# env_frontend.env
+
+# SSR backend URL (server-side rendering within Docker network)
+# Used by the frontend server to communicate with backend
+INTRIC_BACKEND_URL=http://backend:8000
+
+# Client-side backend URL (browser requests)
+# Must be your public domain - what users see in their browser
+PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
+
+# [OPTIONAL] Server-to-server override
+# Usually not needed in Docker Compose deployments
+INTRIC_BACKEND_SERVER_URL=
+
+# Must match backend PUBLIC_ORIGIN and IdP redirect_uri configuration
+PUBLIC_ORIGIN=https://your-domain.com
+```
+
+<Callout type="info">
+**Why two URLs?** The frontend runs both on the server (SSR) and in the browser. Server-side code uses `INTRIC_BACKEND_URL` to communicate within the Docker network, while browser code uses `PUBLIC_INTRIC_BACKEND_URL` to reach the public API.
+</Callout>
+
+---
+
+## Network & Ingress
+
+### Reverse Proxy Options
+
+<Tabs items={['Traefik', 'nginx', 'haproxy', 'None']}>
+  <Tabs.Tab>
+  **Traefik (Default)**
+
+  <Callout type="warning">
+  **Example Configuration:** The Docker Compose and Traefik configuration provided is a reference starting point. Adjust domains, email addresses, resource limits, and security settings for your specific deployment environment.
+  </Callout>
+
+  The provided `docker-compose.yml` includes Traefik with automatic Let's Encrypt certificates:
+
+  ```yaml
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=your-email@domain.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik_letsencrypt:/letsencrypt"
+  ```
+
+  Services are exposed via labels:
+  ```yaml
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.eneo-frontend.rule=Host(`your-domain.com`)"
+    - "traefik.http.routers.eneo-frontend-secure.tls.certresolver=letsencrypt"
+  ```
+  </Tabs.Tab>
+
+  <Tabs.Tab>
+  **nginx**
+
+  <Callout type="warning">
+  **Example Configuration:** The nginx configuration below is a starting point only. Adjust paths, domains, SSL settings, and performance tuning for your specific environment. Do not copy-paste without reviewing and testing.
+  </Callout>
+
+  Remove Traefik from `docker-compose.yml` and expose ports directly:
+
+  ```yaml
+  frontend:
+    ports:
+      - "3000:3000"
+  backend:
+    ports:
+      - "8000:8000"
+  ```
+
+  Create `/etc/nginx/sites-available/eneo`:
+
+  ```nginx
+  upstream frontend {
+      server localhost:3000;
+  }
+
+  upstream backend {
+      server localhost:8000;
+  }
+
+  server {
+      listen 80;
+      server_name your-domain.com;
+      return 301 https://$server_name$request_uri;
+  }
+
+  server {
+      listen 443 ssl http2;
+      server_name your-domain.com;
+
+      ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+      # API routes
+      location /api/ {
+          proxy_pass http://backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          client_max_body_size 50M;
+      }
+
+      # OpenAPI docs
+      location /docs {
+          proxy_pass http://backend;
+          proxy_set_header Host $host;
+      }
+
+      # Frontend (everything else)
+      location / {
+          proxy_pass http://frontend;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection 'upgrade';
+          proxy_set_header Host $host;
+          proxy_cache_bypass $http_upgrade;
+      }
+  }
+  ```
+
+  Enable the site:
+  ```bash
+  sudo ln -s /etc/nginx/sites-available/eneo /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+  ```
+  </Tabs.Tab>
+
+  <Tabs.Tab>
+  **haproxy**
+
+  <Callout type="warning">
+  **Example Configuration:** The haproxy configuration below is a reference example. Adjust SSL paths, backend addresses, timeouts, and health check settings based on your infrastructure requirements.
+  </Callout>
+
+  Remove Traefik and expose ports. Create `/etc/haproxy/haproxy.cfg`:
+
+  ```haproxy
+  global
+      log /dev/log local0
+      chroot /var/lib/haproxy
+      stats socket /run/haproxy/admin.sock mode 660 level admin
+      stats timeout 30s
+      user haproxy
+      group haproxy
+      daemon
+
+  defaults
+      log     global
+      mode    http
+      option  httplog
+      option  dontlognull
+      timeout connect 5000
+      timeout client  50000
+      timeout server  50000
+
+  frontend https_front
+      bind *:443 ssl crt /etc/haproxy/certs/your-domain.pem
+      http-request redirect scheme https unless { ssl_fc }
+
+      # Route API requests to backend
+      acl is_api path_beg /api /docs /openapi.json /version
+      use_backend backend_servers if is_api
+      default_backend frontend_servers
+
+  frontend http_front
+      bind *:80
+      redirect scheme https code 301
+
+  backend frontend_servers
+      balance roundrobin
+      server frontend1 localhost:3000 check
+
+  backend backend_servers
+      balance roundrobin
+      option httpchk GET /api/v1/health
+      server backend1 localhost:8000 check
+  ```
+  </Tabs.Tab>
+
+  <Tabs.Tab>
+  **No Reverse Proxy (Development Only)**
+
+  For local development without a reverse proxy:
+
+  ```yaml
+  frontend:
+    ports:
+      - "3000:3000"
+  backend:
+    ports:
+      - "8000:8000"
+  ```
+
+  Access directly:
+  - Frontend: `http://localhost:3000`
+  - Backend API: `http://localhost:8000/api/v1`
+
+  <Callout type="warning">
+  Not recommended for production. You lose SSL/TLS, load balancing, and proper routing.
+  </Callout>
+  </Tabs.Tab>
+</Tabs>
+
+### SSL/TLS Configuration
+
+<Tabs items={["Let's Encrypt", 'Custom PKI']}>
+  <Tabs.Tab>
+  **Let's Encrypt (Automatic)**
+
+  The default configuration automatically obtains and renews certificates:
+
+  ```yaml
+  # In docker-compose.yml, traefik service
+  command:
+    - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+    - "--certificatesresolvers.letsencrypt.acme.email=your-email@domain.com"
+    - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+  ```
+
+  **For testing**, use the Let's Encrypt staging server to avoid rate limits:
+
+  ```yaml
+  command:
+    - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+  ```
+  </Tabs.Tab>
+
+  <Tabs.Tab>
+  **Custom Certificates / PKI**
+
+  <Callout type="warning">
+  **Example Configuration:** The PKI setup below shows the general approach. Certificate paths, formats, and Traefik configuration will vary based on your CA infrastructure and security requirements. Consult your security team for proper certificate management.
+  </Callout>
+
+  For organizations with their own Certificate Authority:
+
+  ```yaml
+  # Mount your certificates
+  traefik:
+    volumes:
+      - ./certs:/certs:ro
+    command:
+      - "--providers.file.directory=/certs"
+  ```
+
+  Create `/certs/dynamic.yml`:
+  ```yaml
+  tls:
+    certificates:
+      - certFile: /certs/your-domain.crt
+        keyFile: /certs/your-domain.key
+    stores:
+      default:
+        defaultCertificate:
+          certFile: /certs/your-domain.crt
+          keyFile: /certs/your-domain.key
+  ```
+
+  For nginx, update the ssl paths in your configuration:
+  ```nginx
+  ssl_certificate /path/to/your/certificate.crt;
+  ssl_certificate_key /path/to/your/private.key;
+  ssl_trusted_certificate /path/to/your/ca-chain.crt;
+  ```
+  </Tabs.Tab>
+</Tabs>
+
+---
+
+## Authentication & Security
+
+### OIDC Configuration
+
+Eneo supports two authentication modes:
+
+**Single-Tenant OIDC** (Default) - All users authenticate against one identity provider:
+
+```bash
+# env_backend.env
+OIDC_DISCOVERY_ENDPOINT=https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+PUBLIC_ORIGIN=https://your-domain.com
+```
+
+**Multi-Tenant Federation** - Each tenant has their own identity provider:
+
+```bash
+# env_backend.env
+FEDERATION_PER_TENANT_ENABLED=true
+ENCRYPTION_KEY=your-fernet-encryption-key  # Required!
+```
+
+<Callout type="info">
+For detailed OIDC setup, see the [OIDC Federation Guide](/guides/oidc-federation).
+</Callout>
+
+### Encryption Key Management
+
+The `ENCRYPTION_KEY` is used to encrypt sensitive data at rest:
+- Tenant API credentials (when `TENANT_CREDENTIALS_ENABLED=true`)
+- OIDC client secrets (when `FEDERATION_PER_TENANT_ENABLED=true`)
+- HTTP authentication passwords for web crawling
+
+**Generate an encryption key:**
+
+```bash
+# Using Python (recommended)
+python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+
+# Or using the CLI tool
+docker compose run --rm backend python -m intric.cli.generate_encryption_key
+```
+
+**When is it required?**
+
+| Feature Flag | ENCRYPTION_KEY Required |
+|--------------|------------------------|
+| `TENANT_CREDENTIALS_ENABLED=true` | Yes |
+| `FEDERATION_PER_TENANT_ENABLED=true` | Yes |
+| `USING_CRAWL=true` (for HTTP auth) | Recommended |
+
+<Callout type="warning">
+**Backup your encryption key!** Data encrypted with this key cannot be recovered if the key is lost. Store it securely (e.g., in a secrets manager or HSM).
+</Callout>
+
+### Admin API Access
+
+Two API keys provide administrative access:
+
+**INTRIC_SUPER_API_KEY** - Sysadmin operations:
+- Tenant management (create, update, delete)
+- User management
+- Model configuration
+- Usage statistics
+- OIDC debug logging
+
+**INTRIC_SUPER_DUPER_API_KEY** - Module management:
+- System-wide module operations
+- Assigning modules to tenants
+
+```bash
+# env_backend.env
+INTRIC_SUPER_API_KEY=$(openssl rand -hex 32)
+INTRIC_SUPER_DUPER_API_KEY=$(openssl rand -hex 32)
+```
+
+Usage example:
+```bash
+curl -X GET "https://your-domain.com/api/v1/sysadmin/tenants" \
+  -H "X-API-Key: $INTRIC_SUPER_API_KEY"
+```
+
+### Access Management
+
+Control user management with the `USING_ACCESS_MANAGEMENT` flag:
+
+```bash
+# env_backend.env
+USING_ACCESS_MANAGEMENT=True  # Enable roles API endpoints
+```
+
+When enabled:
+- `/api/v1/roles` endpoints are available
+- Role-based access control (RBAC) is active
+- Users can be assigned roles within tenants
+
+---
+
+## Configuration Reference
+
+### File Upload Limits
+
+Configure maximum file sizes in bytes:
+
+```bash
+# env_backend.env
+
+# General file uploads (default: 10MB)
+UPLOAD_MAX_FILE_SIZE=10485760
+
+# Files attached to chat sessions (default: 10MB)
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
+
+# Images attached to chat sessions (default: 10MB)
+UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
+
+# Audio files for transcription (default: 10MB)
+TRANSCRIPTION_MAX_FILE_SIZE=10485760
+```
+
+<Callout type="info">
+If using nginx, also update `client_max_body_size` in your nginx configuration to match or exceed these limits.
+</Callout>
+
+### Crawler Configuration
+
+Control web crawling behavior:
+
+```bash
+# env_backend.env
+
+# Max crawl duration in seconds (default: 14400 = 4 hours)
+CRAWL_MAX_LENGTH=14400
+
+# Max pages to crawl before stopping (default: 20000)
+CLOSESPIDER_ITEMCOUNT=20000
+
+# Respect robots.txt directives (default: True)
+OBEY_ROBOTS=True
+
+# Enable auto-throttling to prevent overloading target sites (default: True)
+AUTOTHROTTLE_ENABLED=True
+
+# Enable/disable crawling feature globally (default: True)
+USING_CRAWL=True
+```
+
+**Worker concurrency** controls how many crawl jobs run simultaneously:
+
+```bash
+# Max concurrent background jobs across all tenants (default: 20)
+# Memory impact: Each job uses 100-500MB depending on task type
+WORKER_MAX_CONCURRENT_JOBS=20
+
+# Max concurrent jobs per tenant (default: 4)
+# Prevents one tenant from monopolizing worker resources
+TENANT_WORKER_CONCURRENCY_LIMIT=4
+```
+
+### Logging Configuration
+
+Set the logging verbosity level:
+
+```bash
+# env_backend.env
+# Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOGLEVEL=INFO
+```
+
+| Level | Use Case |
+|-------|----------|
+| `DEBUG` | Development, troubleshooting |
+| `INFO` | Production (recommended) |
+| `WARNING` | Production (quieter) |
+| `ERROR` | Only errors and critical issues |
+| `CRITICAL` | Only critical failures |
+
+### Feature Flags
+
+Enable or disable features:
+
+```bash
+# env_backend.env
+
+# Enable role-based access control
+USING_ACCESS_MANAGEMENT=True
+
+# Enable web crawling feature
+USING_CRAWL=True
+
+# Enable image generation (requires Flux API key)
+USING_IMAGE_GENERATION=False
+
+# Enable Azure-specific model features
+USING_AZURE_MODELS=False
+
+# Development/testing modes
+DEV=False
+TESTING=False
+```
 
 ---
 
@@ -159,73 +665,93 @@ The deployment includes these services:
 ### Traefik
 - **Role**: Reverse proxy and load balancer
 - **Handles**: SSL/TLS certificates, routing
-- **Port**: 80 (HTTP), 443 (HTTPS)
-- **Dashboard**: https://your-domain.com:8080 (disabled in production by default)
+- **Ports**: 80 (HTTP), 443 (HTTPS)
 
 ### Frontend
-- **Technology**: Next.js (SvelteKit alternative)
+- **Technology**: SvelteKit
 - **Role**: Web interface
 - **Internal Port**: 3000
 
 ### Backend
 - **Technology**: FastAPI (Python)
 - **Role**: API server
-- **Internal Port**: 8123
-- **API Docs**: https://your-domain.com/api/docs
+- **Internal Port**: 8000
+- **API Docs**: `https://your-domain.com/docs`
 
 ### Worker
 - **Technology**: ARQ (async task queue)
 - **Role**: Background processing
-- **Handles**: Document processing, web crawling
+- **Handles**: Document processing, web crawling, integrations
 
 ### Database
-- **Technology**: PostgreSQL 13 with pgvector
+- **Technology**: PostgreSQL 16 with pgvector
 - **Role**: Data storage and vector search
 - **Internal Port**: 5432
-- **Volume**: Persistent storage for data
 
 ### Redis
 - **Technology**: Redis 7
-- **Role**: Caching and task queue
+- **Role**: Caching, task queue, OIDC state storage
 - **Internal Port**: 6379
+
+### db-init
+- **Role**: Database initialization
+- **Runs**: Alembic migrations and optional user bootstrap
+- **Exits**: After completion
 
 ---
 
-## Advanced Configuration
+## Monitoring & Operations
 
-### Custom Domain Configuration
+### View Logs
 
-If you have multiple domains or subdomains:
+```bash
+# All services
+docker compose logs -f
 
-```yaml
-# In docker-compose.yml, update the backend service labels:
-labels:
-  - "traefik.http.routers.backend.rule=Host(`eneo.company.com`) || Host(`ai.company.com`)"
+# Specific service
+docker compose logs -f backend
+
+# Last 100 lines
+docker compose logs --tail=100 backend
+
+# Filter by pattern
+docker compose logs backend 2>&1 | grep ERROR
 ```
 
-### SSL Certificate Configuration
+### Monitor Resource Usage
 
-**Use Let's Encrypt Staging** for testing:
+```bash
+# Container stats
+docker stats
 
-```yaml
-# In docker-compose.yml, traefik service:
-command:
-  - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+# Disk usage
+docker system df
+
+# Database size
+docker compose exec db psql -U eneo -c "SELECT pg_size_pretty(pg_database_size('eneo'))"
 ```
 
-**Use Custom Certificates:**
+### Health Checks
 
-```yaml
-# Mount your certificates
-volumes:
-  - ./certs:/certs:ro
+```bash
+# Check service health
+docker compose ps
 
-# Configure Traefik to use them
-command:
-  - "--providers.file.filename=/certs/config.yml"
+# Test backend API
+curl https://your-domain.com/api/v1/health
+
+# Test database connection
+docker compose exec db psql -U eneo -c "SELECT 1"
+
+# Check Redis
+docker compose exec redis redis-cli ping
 ```
 
 ### Database Backups
+
+<Callout type="warning">
+**Example Script:** The backup script below is a basic example. For production environments, consider using dedicated backup tools (pg_basebackup, pgBackRest, or cloud-native solutions), testing restore procedures regularly, and implementing off-site backup storage.
+</Callout>
 
 **Automated daily backups:**
 
@@ -251,103 +777,6 @@ crontab -e
 
 ```bash
 gunzip -c backup.sql.gz | docker compose exec -T db psql -U eneo eneo
-```
-
-### Resource Limits
-
-**Limit container resources:**
-
-```yaml
-# In docker-compose.yml
-services:
-  backend:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          memory: 1G
-```
-
-### Environment-Specific Configuration
-
-**Development vs Production:**
-
-```bash
-# env_backend.env
-ENVIRONMENT=production  # or development
-DEBUG=false
-LOG_LEVEL=INFO  # or DEBUG for development
-```
-
-### Crawler Configuration
-
-Control web crawling behavior with these environment variables in `env_backend.env`:
-
-```bash
-# Max crawl duration in seconds (default: 14400 = 4 hours)
-CRAWL_MAX_LENGTH=14400
-
-# Max pages to crawl before stopping (default: 20000)
-CLOSESPIDER_ITEMCOUNT=20000
-
-# Respect robots.txt directives (default: True)
-OBEY_ROBOTS=True
-
-# Enable auto-throttling to prevent overloading target sites (default: True)
-AUTOTHROTTLE_ENABLED=True
-```
-
-**Worker concurrency** can also be tuned to control how many crawl jobs run simultaneously:
-
-```bash
-# Max concurrent background jobs across all tenants (default: 20)
-WORKER_MAX_CONCURRENT_JOBS=20
-
-# Max concurrent jobs per tenant (default: 4)
-# Prevents one tenant from monopolizing worker resources
-TENANT_WORKER_CONCURRENCY_LIMIT=4
-```
-
----
-
-## Monitoring & Logs
-
-### View Logs
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f backend
-
-# Last 100 lines
-docker compose logs --tail=100 backend
-```
-
-### Monitor Resource Usage
-
-```bash
-# Container stats
-docker stats
-
-# Disk usage
-docker system df
-```
-
-### Health Checks
-
-```bash
-# Check service health
-docker compose ps
-
-# Test backend API
-curl https://your-domain.com/api/health
-
-# Test database connection
-docker compose exec db psql -U eneo -c "SELECT 1"
 ```
 
 ---
@@ -380,9 +809,273 @@ docker compose restart backend
 ### Scale Services
 
 ```bash
-# Run multiple backend instances
+# Run multiple backend instances (requires load balancer configuration)
 docker compose up -d --scale backend=3
 ```
+
+---
+
+## Troubleshooting
+
+### Quick Diagnosis
+
+Run these commands to gather diagnostic information:
+
+```bash
+# Service status
+docker compose ps
+
+# Recent logs (all services)
+docker compose logs --tail=50
+
+# Check disk space
+df -h
+
+# Check memory
+free -h
+
+# Test API health
+curl -s https://your-domain.com/api/v1/health | jq .
+```
+
+### Common Issues
+
+#### Services Won't Start
+
+**Symptoms:** Containers exit immediately or stay in "Restarting" state.
+
+**Diagnosis:**
+```bash
+docker compose logs
+docker compose ps
+```
+
+**Common causes:**
+- Port conflicts (80, 443 already in use): `sudo lsof -i :80`
+- Missing environment variables: Check `env_*.env` files
+- Insufficient disk space: `df -h`
+- Memory constraints: `free -h`
+
+---
+
+#### SSL Certificate Errors
+
+**Symptoms:** Browser shows certificate warning, HTTPS not working.
+
+**Diagnosis:**
+```bash
+docker compose logs traefik
+```
+
+**Common causes:**
+- DNS not pointing to server: `dig your-domain.com`
+- Firewall blocking ports 80/443: `sudo ufw status`
+- Let's Encrypt rate limits: Use staging for testing
+
+**Fix:** For rate limits, add staging server temporarily:
+```yaml
+- "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+```
+
+---
+
+#### Login Redirect Loop
+
+**Symptoms:** Login page keeps redirecting, never completes.
+
+**Diagnosis:**
+```bash
+docker compose logs backend | grep -i oidc
+docker compose logs frontend | grep -i auth
+```
+
+**Common causes:**
+- `PUBLIC_ORIGIN` mismatch between frontend and backend
+- OIDC redirect URI not registered in IdP
+- Frontend/backend URL configuration incorrect
+
+**Fix:** Ensure these match:
+- `PUBLIC_ORIGIN` in `env_backend.env`
+- `PUBLIC_ORIGIN` in `env_frontend.env`
+- Redirect URI in your IdP: `https://your-domain.com/login/callback`
+
+---
+
+#### OIDC Authentication Fails
+
+**Symptoms:** Error after IdP login, "Invalid state" or "Token error".
+
+**Diagnosis:**
+```bash
+docker compose logs backend | grep -i "oidc\|auth\|token"
+```
+
+**Common causes:**
+- Clock skew between server and IdP: Check `OIDC_CLOCK_LEEWAY_SECONDS`
+- Redis not running (state lost): `docker compose ps redis`
+- OIDC client secret incorrect
+
+**Fix:** Increase clock leeway if needed:
+```bash
+OIDC_CLOCK_LEEWAY_SECONDS=300
+```
+
+---
+
+#### Database Connection Errors
+
+**Symptoms:** "Connection refused" or "Database not found".
+
+**Diagnosis:**
+```bash
+docker compose exec db psql -U eneo -c "SELECT version()"
+docker compose logs db
+```
+
+**Common causes:**
+- Database not yet initialized
+- Password mismatch between `env_db.env` and `env_backend.env`
+- Volume permissions
+
+**Fix:** Verify credentials match and restart:
+```bash
+docker compose restart db backend
+```
+
+---
+
+#### File Uploads Fail
+
+**Symptoms:** Upload errors, timeouts, or 413 errors.
+
+**Diagnosis:**
+```bash
+docker compose ps worker
+docker compose logs worker
+df -h
+```
+
+**Common causes:**
+- Worker not running
+- Disk space exhausted
+- File size exceeds limits (default: 10MB)
+- Reverse proxy body size limit
+
+**Fix:** For nginx, increase body size:
+```nginx
+client_max_body_size 50M;
+```
+
+---
+
+#### Crawler Not Working
+
+**Symptoms:** Websites not being crawled, jobs stuck.
+
+**Diagnosis:**
+```bash
+docker compose logs worker | grep -i crawl
+docker compose exec redis redis-cli LLEN arq:queue
+```
+
+**Common causes:**
+- `USING_CRAWL=False`
+- Worker concurrency exhausted
+- Target site blocking requests
+
+**Fix:** Check feature flag and worker capacity:
+```bash
+USING_CRAWL=True
+WORKER_MAX_CONCURRENT_JOBS=20
+```
+
+---
+
+#### Mixed Content Warnings
+
+**Symptoms:** Browser console shows "Mixed Content" errors.
+
+**Diagnosis:** Check browser developer console (F12).
+
+**Common causes:**
+- `PUBLIC_INTRIC_BACKEND_URL` using HTTP instead of HTTPS
+- Hardcoded HTTP URLs in configuration
+
+**Fix:** Ensure all public URLs use HTTPS:
+```bash
+PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
+PUBLIC_ORIGIN=https://your-domain.com
+```
+
+---
+
+#### 502/504 Gateway Errors
+
+**Symptoms:** Intermittent gateway errors, especially on large requests.
+
+**Diagnosis:**
+```bash
+docker compose logs traefik
+docker compose logs backend
+docker stats
+```
+
+**Common causes:**
+- Backend overloaded or crashed
+- Timeout too short for long operations
+- Memory exhaustion
+
+**Fix:** Increase timeouts and resources:
+```yaml
+# docker-compose.yml
+backend:
+  deploy:
+    resources:
+      limits:
+        memory: 4G
+```
+
+---
+
+### Log Analysis
+
+**Where to find logs:**
+
+| Service | Log Command | Key Patterns |
+|---------|-------------|--------------|
+| Backend | `docker compose logs backend` | `ERROR`, `Exception`, `Traceback` |
+| Frontend | `docker compose logs frontend` | `error`, `failed`, `ECONNREFUSED` |
+| Worker | `docker compose logs worker` | `crawl`, `task`, `failed` |
+| Traefik | `docker compose logs traefik` | `error`, `certificate`, `routing` |
+| Database | `docker compose logs db` | `FATAL`, `ERROR`, `connection` |
+
+**Export logs for analysis:**
+
+```bash
+docker compose logs --no-color > eneo-logs.txt
+```
+
+---
+
+## Cloud Deployment
+
+### AWS
+- Use ECS or EKS
+- RDS for PostgreSQL
+- ElastiCache for Redis
+- S3 for file storage
+
+### Azure
+- Use Azure Container Instances or AKS
+- Azure Database for PostgreSQL
+- Azure Cache for Redis
+- Azure Blob Storage
+
+### Google Cloud
+- Use Cloud Run or GKE
+- Cloud SQL for PostgreSQL
+- Memorystore for Redis
+- Cloud Storage
 
 ---
 
@@ -390,19 +1083,7 @@ docker compose up -d --scale backend=3
 
 For larger deployments, use Kubernetes:
 
-### Prerequisites
-
-- Kubernetes cluster (1.24+)
-- kubectl configured
-- Helm 3 installed
-
-### Deployment Steps
-
 ```bash
-# Add Eneo Helm repository (when available)
-helm repo add eneo https://charts.eneo.ai
-helm repo update
-
 # Create namespace
 kubectl create namespace eneo
 
@@ -412,29 +1093,15 @@ kubectl create secret generic eneo-secrets \
   --from-literal=db-password=$(openssl rand -base64 32) \
   --from-literal=openai-api-key=sk-... \
   -n eneo
-
-# Install Eneo
-helm install eneo eneo/eneo \
-  --namespace eneo \
-  --set domain=eneo.your-company.com \
-  --set ingress.enabled=true \
-  --set postgresql.enabled=true \
-  --set redis.enabled=true
 ```
 
-**Note**: Kubernetes Helm charts are in development. Check the [GitHub repository](https://github.com/eneo-ai/eneo) for updates.
+<Callout type="info">
+Kubernetes Helm charts are in development. Check the [GitHub repository](https://github.com/eneo-ai/eneo) for updates.
+</Callout>
 
 ---
 
 ## Security Hardening
-
-### Change Default Credentials
-
-1. Log in with default credentials
-2. Go to **Settings** → **Profile**
-3. Change password
-4. Update email address
-5. Enable two-factor authentication (if available)
 
 ### Firewall Configuration
 
@@ -444,15 +1111,6 @@ sudo ufw allow 22/tcp   # SSH
 sudo ufw allow 80/tcp   # HTTP
 sudo ufw allow 443/tcp  # HTTPS
 sudo ufw enable
-```
-
-### Secure Docker Socket
-
-```bash
-# Don't expose Docker socket
-# Remove this from docker-compose.yml if present:
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
 ```
 
 ### Regular Updates
@@ -472,128 +1130,17 @@ sudo apt update && sudo apt install docker-ce docker-ce-cli containerd.io
 ### Enable Fail2ban
 
 ```bash
-# Install fail2ban
 sudo apt install fail2ban
-
-# Configure for SSH
 sudo systemctl enable fail2ban
 sudo systemctl start fail2ban
 ```
 
 ---
 
-## Troubleshooting
-
-### Services Won't Start
-
-**Check logs:**
-```bash
-docker compose logs
-```
-
-**Common issues:**
-- Port conflicts (80, 443 already in use)
-- Missing environment variables
-- Insufficient disk space
-- Memory constraints
-
-### SSL Certificate Issues
-
-**Check Traefik logs:**
-```bash
-docker compose logs traefik
-```
-
-**Common issues:**
-- DNS not pointing to server
-- Firewall blocking ports 80/443
-- Let's Encrypt rate limits (use staging for testing)
-
-### Database Connection Errors
-
-**Test database:**
-```bash
-docker compose exec db psql -U eneo -c "SELECT version()"
-```
-
-**Check credentials:**
-- Ensure `DATABASE_URL` in `env_backend.env` matches `POSTGRES_PASSWORD` in `env_db.env`
-
-### Performance Issues
-
-**Check resources:**
-```bash
-docker stats
-```
-
-**Solutions:**
-- Increase server resources
-- Add resource limits to docker-compose.yml
-- Scale backend service
-- Optimize database (vacuum, indexes)
-
-### File Upload Failures
-
-**Ensure worker is running:**
-```bash
-docker compose ps worker
-docker compose logs worker
-```
-
-**Check disk space:**
-```bash
-df -h
-```
-
----
-
-## Alternative Deployment Methods
-
-### Without Traefik
-
-If you prefer using your own reverse proxy (Nginx, Caddy):
-
-```bash
-# Remove Traefik from docker-compose.yml
-# Expose backend and frontend ports directly
-services:
-  frontend:
-    ports:
-      - "3000:3000"
-  backend:
-    ports:
-      - "8123:8123"
-```
-
-Then configure your reverse proxy to forward:
-- `https://your-domain.com/*` → `http://localhost:3000`
-- `https://your-domain.com/api/*` → `http://localhost:8123`
-
-### Cloud Platforms
-
-**AWS:**
-- Use ECS or EKS
-- RDS for PostgreSQL
-- ElastiCache for Redis
-- S3 for file storage
-
-**Azure:**
-- Use Azure Container Instances or AKS
-- Azure Database for PostgreSQL
-- Azure Cache for Redis
-- Azure Blob Storage
-
-**Google Cloud:**
-- Use Cloud Run or GKE
-- Cloud SQL for PostgreSQL
-- Memorystore for Redis
-- Cloud Storage
-
----
-
 ## Need Help?
 
 - **Documentation**: [GitHub docs](https://github.com/eneo-ai/eneo/tree/main/docs)
-- **Deployment Guide**: [DEPLOYMENT.md](https://github.com/eneo-ai/eneo/blob/main/docs/DEPLOYMENT.md)
 - **Issues**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
-- **Email**: digitalisering@sundsvall.se (public sector organizations)
+- **Security Guide**: [Security & Compliance](/guides/security-compliance)
+- **OIDC Setup**: [OIDC Federation Guide](/guides/oidc-federation)
+- **AI Providers**: [AI Provider Configuration](/guides/ai-providers)
