@@ -53,6 +53,7 @@ jobs:
           path: ./frontend/apps/docs-site/out
 
   deploy:
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
