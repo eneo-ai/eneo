@@ -4,49 +4,13 @@ Eneo follows a modern microservices architecture with clean separation of concer
 
 ## High-Level Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Client Layer                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │  Web Browser │  │  Mobile App  │  │  API Client  │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└────────────────┬────────────────────────────────────────────┘
-                 │ HTTPS
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Reverse Proxy (Traefik)                  │
-│              SSL Termination, Load Balancing                 │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-        ┌────────┴────────┐
-        ▼                 ▼
-┌──────────────┐  ┌──────────────────────────────────┐
-│   Frontend   │  │          Backend API             │
-│  (SvelteKit) │  │         (FastAPI)                │
-│              │  │                                   │
-│  - UI/UX     │  │  - Business Logic                │
-│  - Routing   │  │  - Authentication                │
-│  - State     │  │  - API Endpoints                 │
-└──────────────┘  └───────┬──────────────────────────┘
-                          │
-            ┌─────────────┼─────────────┐
-            ▼             ▼             ▼
-      ┌──────────┐  ┌──────────┐  ┌──────────┐
-      │ Database │  │  Redis   │  │  Worker  │
-      │(Postgres)│  │  Cache   │  │  (ARQ)   │
-      │          │  │  Queue   │  │          │
-      │- Data    │  │- Session │  │- Files   │
-      │- Vectors │  │- Tasks   │  │- Crawl   │
-      └──────────┘  └──────────┘  └──────────┘
-                                        │
-                                        ▼
-                              ┌──────────────────┐
-                              │   AI Providers   │
-                              │  - OpenAI        │
-                              │  - Anthropic     │
-                              │  - Azure/Local   │
-                              └──────────────────┘
-```
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/eneo-architecture.svg"
+    alt="Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers (OpenAI, Anthropic, Azure, Local models)"
+    className="w-full max-w-5xl mx-auto"
+  />
+</div>
 
 ---
 

@@ -1,0 +1,483 @@
+# Authentication Architecture
+
+Technical reference for Eneo's OIDC authentication system, including protocol details, security mechanisms, and internal components.
+
+import { Callout, Tabs, Steps } from 'nextra/components'
+
+<Callout type="info">
+  Looking to set up authentication? See the [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) guide.
+</Callout>
+
+---
+
+## OIDC Protocol Flow
+
+Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Multi-tenant federation uses server-signed state JWTs (HS256) for security.
+
+### Overview
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/oidc-flow-simple.svg"
+    alt="OIDC Authentication Flow showing User, Eneo, and Identity Provider interaction"
+    className="w-full max-w-3xl mx-auto"
+  />
+</div>
+
+### Flow Steps Explained
+
+<Steps>
+### Authorization Request
+User clicks "Sign In". Backend generates security tokens:
+- `state` - JWT signed with HS256, contains tenant context
+- `nonce` - 32 hex characters (`secrets.token_hex(16)`)
+- `correlation_id` - 16 hex characters (`secrets.token_hex(8)`) for request tracing
+
+State cached in Redis with key `oidc:state:{nonce}`.
+
+### User Authentication
+User authenticates with their Identity Provider.
+
+### Authorization Response
+IdP redirects to callback URL with:
+- `code` - Authorization code (single-use)
+- `state` - Original state JWT for validation
+
+### Token Exchange
+Backend validates state JWT signature (HS256), retrieves cached data from Redis, exchanges code for tokens.
+
+### ID Token Validation
+JWT signature verified against IdP's JWKS. Claims validated: `aud` (audience), `exp` (expiration).
+
+### Session Creation
+User matched in Eneo by email, session JWT issued.
+</Steps>
+
+---
+
+## Security Mechanisms
+
+### State Token (CSRF Protection)
+
+The `state` parameter is a JWT signed with HS256:
+
+```python
+# federation_router.py
+state_payload = {
+    "tenant_id": str(tenant_obj.id),
+    "tenant_slug": tenant_obj.slug or tenant_obj.name,
+    "frontend_state": state or "",
+    "nonce": secrets.token_hex(16),        # 32 hex chars
+    "redirect_uri": redirect_uri,
+    "correlation_id": correlation_id,      # 16 hex chars
+    "exp": int(time.time()) + 600,         # 10 minute TTL
+    "iat": int(time.time()),
+    "config_version": tenant_config_version,
+}
+signed_state = pyjwt.encode(state_payload, settings.jwt_secret, algorithm="HS256")
+```
+
+**Key parameters:**
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Algorithm | HS256 | `config.py` |
+| TTL | 600 seconds (10 minutes) | `oidc_state_ttl_seconds` |
+| Nonce length | 32 hex chars (16 bytes) | `secrets.token_hex(16)` |
+| Correlation ID | 16 hex chars (8 bytes) | `secrets.token_hex(8)` |
+
+### Redis State Cache
+
+```python
+# Cache key format
+state_cache_key = f"oidc:state:{nonce}"
+
+# Cached payload (5 fields)
+state_cache_payload = {
+    "tenant_id": str(tenant_obj.id),
+    "tenant_slug": tenant_obj.slug or tenant_obj.name,
+    "redirect_uri": redirect_uri,
+    "config_version": tenant_config_version,
+    "iat": state_payload["iat"],
+}
+
+# Storage with TTL
+await redis_client.setex(
+    state_cache_key,
+    settings.oidc_state_ttl_seconds,  # 600 seconds
+    json.dumps(state_cache_payload)
+)
+```
+
+### Redirect URI Grace Period
+
+When tenant federation configuration changes (e.g., updating `canonical_public_origin`), users mid-authentication could encounter redirect URI mismatches. The grace period mechanism prevents failed logins during configuration updates.
+
+**How it works:**
+
+```python
+# federation_router.py
+grace_period = min(
+    settings.oidc_redirect_grace_period_seconds,  # 900 seconds (15 min)
+    settings.oidc_state_ttl_seconds,               # 600 seconds (10 min)
+)
+```
+
+The system accepts the old redirect URI from the state token if **all** conditions are met:
+
+| Condition | Check |
+|-----------|-------|
+| Strict validation disabled | `strict_oidc_redirect_validation = false` |
+| Config version changed | `current_config_version != state_config_version` |
+| State issued within grace period | `seconds_since_issue <= grace_period` |
+| Config updated within grace period | `seconds_since_update <= grace_period` |
+| Config changed after state issued | `tenant_updated_at > state_config_dt` |
+| State redirect matches cached | `cached_state.redirect_uri == redirect_uri` |
+
+<Callout type="info">
+  The grace period defaults to 15 minutes but is capped at the state TTL (10 minutes), effectively making it 10 minutes maximum.
+</Callout>
+
+### Token Auth Method Selection
+
+The backend automatically selects the token endpoint authentication method from IdP discovery:
+
+```python
+# federation_router.py
+def _select_auth_method(methods: list[str] | None) -> str | None:
+    if not methods:
+        return None
+    normalized = [str(m).lower() for m in methods if m]
+    if "client_secret_post" in normalized:
+        return "client_secret_post"
+    if "client_secret_basic" in normalized:
+        return "client_secret_basic"
+    return normalized[0]
+```
+
+**Selection priority:**
+
+| Priority | Method | Description |
+|----------|--------|-------------|
+| 1 | Explicit config | `token_endpoint_auth_method` in federation config |
+| 2 | `client_secret_post` | Credentials in request body |
+| 3 | `client_secret_basic` | HTTP Basic Authentication header |
+| 4 | First supported | First method from discovery |
+| 5 | Default | Falls back to `client_secret_post` |
+
+### Tenant State Validation
+
+Authentication is blocked for non-active tenants at both initiate and callback stages:
+
+```python
+# federation_router.py
+if tenant_obj.state != TenantState.ACTIVE:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Authentication unavailable - tenant is not active",
+    )
+```
+
+| Tenant State | Authentication Allowed |
+|--------------|------------------------|
+| `ACTIVE` | Yes |
+| `SUSPENDED` | No |
+
+<Callout type="warning">
+  If a tenant becomes suspended during a user's authentication flow, the callback will fail even if initiate succeeded.
+</Callout>
+
+### State Tamper Detection
+
+The callback validates that the tenant context in the state token matches the cached state to detect tampering:
+
+```python
+# federation_router.py
+# Check tenant_id matches
+if expected_tenant_id and expected_tenant_id != str(tenant_id):
+    # Event: callback.state_tampered, reason: tenant_id_mismatch
+    raise HTTPException(403, "Invalid state - security validation failed")
+
+# Check tenant_slug matches (case-insensitive)
+if expected_tenant_slug and expected_tenant_slug != tenant_slug.lower():
+    # Event: callback.state_tampered, reason: tenant_slug_mismatch
+    raise HTTPException(403, "Invalid state - security validation failed")
+```
+
+**Validation checks:**
+
+| Field | Comparison | Purpose |
+|-------|------------|---------|
+| `tenant_id` | Exact match | Prevents tenant ID substitution |
+| `tenant_slug` | Case-insensitive | Prevents tenant slug substitution |
+
+Both checks are logged as `callback.state_tampered` debug events with specific `reason` fields for diagnostics.
+
+---
+
+## Multi-Tenant Federation Architecture
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/federation-overview.svg"
+    alt="Multi-Tenant Federation Architecture showing tenant resolution and IdP routing"
+    className="w-full max-w-4xl mx-auto"
+  />
+</div>
+
+### Tenant Resolution
+
+When federation is enabled (`FEDERATION_PER_TENANT_ENABLED=true`):
+
+| Priority | Method | Example |
+|----------|--------|---------|
+| 1 | Subdomain | `sundsvall.eneo.local` → tenant "sundsvall" |
+| 2 | Tenant Selector UI | User selects from list |
+
+### Federation Config Storage
+
+Federation config is stored as **JSONB** in the `tenants` table:
+
+```sql
+-- tenant_table.py
+ALTER TABLE tenants ADD COLUMN federation_config JSONB NOT NULL DEFAULT '{}';
+```
+
+**Stored fields:**
+```python
+federation_config = {
+    "provider": "entra_id",                    # Identity provider label
+    "client_id": "...",                        # OAuth client ID
+    "client_secret": "enc:fernet:v1:...",      # Encrypted with Fernet
+    "discovery_endpoint": "https://...",       # OIDC discovery URL
+    "issuer": "...",                           # From discovery
+    "authorization_endpoint": "...",           # From discovery
+    "token_endpoint": "...",                   # From discovery
+    "jwks_uri": "...",                         # From discovery
+    "scopes": ["openid", "email", "profile"],  # Default scopes
+    "allowed_domains": ["example.com"],        # Email domain whitelist
+    "canonical_public_origin": "https://...",  # Tenant's access URL
+    "redirect_path": "/login/callback",        # Callback path
+    "encrypted_at": "2025-01-07T12:00:00Z",    # When secret was encrypted
+}
+```
+
+### Secret Encryption
+
+Client secrets are encrypted using **Fernet** (AES-128-CBC + HMAC-SHA256):
+
+| Aspect | Details |
+|--------|---------|
+| Algorithm | Fernet |
+| Env Variable | `ENCRYPTION_KEY` |
+| Key Format | Base64-encoded Fernet key |
+| Encrypted Format | `enc:fernet:v1:<ciphertext>` |
+
+**Key generation:**
+```bash
+uv run python -m intric.cli.generate_encryption_key
+```
+
+<Callout type="warning">
+  `ENCRYPTION_KEY` is required when `FEDERATION_PER_TENANT_ENABLED=true`. Back up securely - loss means re-registering all tenant IdPs.
+</Callout>
+
+---
+
+## ID Token Validation
+
+### Claims Validated
+
+The backend validates these claims (`auth_service.py`):
+
+| Claim | Validated? | Details |
+|-------|------------|---------|
+| `aud` | **Yes** | Must match `client_id` |
+| `exp` | **Yes** | Automatic PyJWT validation |
+| `iss` | Implicit | Validated via JWKS signature |
+| `iat` | Logged only | Extracted but not enforced |
+| `nonce` | **No** | Not validated in ID token |
+| `at_hash` | Conditional | If present, must match access token hash |
+
+**Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
+
+### User Claims Extracted
+
+| ID Token Claim | User Field | Notes |
+|----------------|------------|-------|
+| `email` | `email` | Via configurable `claims_mapping` |
+| `sub` | `oidc_subject` | Subject identifier |
+
+**Email claim mapping:**
+```python
+claims_mapping = federation_config.get("claims_mapping", {"email": "email"})
+email_claim = claims_mapping.get("email", "email")
+email = payload.get(email_claim)
+```
+
+### Domain Validation
+
+When `allowed_domains` is configured:
+
+```python
+email = id_token.get("email")
+domain = email.split("@")[1].lower()  # Case-insensitive
+if domain not in [d.lower() for d in allowed_domains]:
+    raise HTTPException(403, "Domain not allowed")
+```
+
+---
+
+## JWKS Handling
+
+JWKS is fetched using PyJWT's built-in `PyJWKClient`:
+
+```python
+# federation_router.py
+jwk_client = PyJWKClient(jwks_uri)
+signing_key = jwk_client.get_signing_key_from_jwt(id_token).key
+```
+
+**Caching:**
+- PyJWT provides built-in per-process in-memory cache
+- No Redis/persistent caching for JWKS keys
+- Fresh discovery fetch on each callback
+
+---
+
+## Configuration Parameters
+
+From `config.py`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `oidc_state_ttl_seconds` | 600 | State token TTL (10 minutes) |
+| `oidc_redirect_grace_period_seconds` | 900 | Config change grace period (15 min) |
+| `oidc_clock_leeway_seconds` | 120 | Clock skew tolerance (2 minutes) |
+| `strict_oidc_redirect_validation` | true | Enforce exact redirect_uri match |
+
+---
+
+## Federation Admin API
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `PUT` | `/tenants/{tenant_id}/federation` | Create/update config |
+| `GET` | `/tenants/{tenant_id}/federation` | View config (secrets masked) |
+| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config |
+| `POST` | `/tenants/{tenant_id}/federation/test` | Test IdP connectivity |
+
+**Authentication:** `X-API-Key` header with super admin API key.
+
+### Test Endpoint Behavior
+
+`POST /tenants/{tenant_id}/federation/test` performs:
+
+- Fetches discovery document
+- Validates HTTP 200 response
+- Verifies required OIDC endpoints present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
+- Does NOT attempt authentication
+- Does NOT validate client credentials
+
+---
+
+## Observability
+
+### Correlation IDs
+
+Generated with `secrets.token_hex(8)` → 16 hex characters.
+
+- Created in `/auth/initiate`
+- Embedded in state JWT
+- Reused in `/auth/callback`
+- Included in all log entries
+
+### OIDC Debug Events
+
+Enable debug logging via observability API. Events follow pattern `[OIDC DEBUG] {event}`:
+
+**Initiate phase:**
+- `initiate.state_cached`
+- `initiate.state_cache_failed`
+- `initiate.authorization_ready`
+
+**Callback phase:**
+- `callback.state_decoded`
+- `callback.state_cache_hit` / `callback.state_cache_miss`
+- `callback.state_cache_error`
+- `callback.state_tampered` (with `reason`: `tenant_id_mismatch` or `tenant_slug_mismatch`)
+- `callback.tenant_loaded`
+- `callback.tenant_inactive`
+- `callback.domain_rejected` / `callback.domain_allowed`
+- `callback.email_extracted`
+- `callback.user_missing`
+- `callback.user_tenant_mismatch`
+- `callback.success`
+
+---
+
+## Troubleshooting Flow
+
+<div className="my-8">
+  <img
+    src="/diagrams/oidc-decision-flow.svg"
+    alt="OIDC Troubleshooting Flow"
+    className="w-full max-w-2xl mx-auto rounded-lg border"
+  />
+</div>
+
+---
+
+## Provider-Specific Notes
+
+<Tabs items={['Azure Entra ID', 'Keycloak', 'Auth0']}>
+  <Tabs.Tab>
+    **Discovery URL:**
+    ```
+    https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+    ```
+
+    **Required permissions:** `openid`, `profile`, `email`, `User.Read`
+
+    **Common issues:**
+    - Multi-tenant apps: Use `organizations` or `common` instead of specific tenant ID
+    - Missing email: Ensure `email` scope and user has email set in Azure AD
+  </Tabs.Tab>
+
+  <Tabs.Tab>
+    **Discovery URL:**
+    ```
+    https://keycloak.example.com/realms/{realm}/.well-known/openid-configuration
+    ```
+
+    **Client configuration:**
+    - Client type: OpenID Connect
+    - Client authentication: ON (confidential)
+    - Standard flow: Enabled
+  </Tabs.Tab>
+
+  <Tabs.Tab>
+    **Discovery URL:**
+    ```
+    https://{tenant}.auth0.com/.well-known/openid-configuration
+    ```
+
+    **Application settings:**
+    - Application Type: Regular Web Application
+    - Token Endpoint Auth: POST
+    - OIDC Conformant: ON
+  </Tabs.Tab>
+</Tabs>
+
+---
+
+## Public OIDC Endpoints
+
+These endpoints do NOT require authentication:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/auth/tenants` | List tenants for selector |
+| `GET` | `/auth/initiate` | Initiate OIDC authentication |
+| `POST` | `/auth/callback` | Handle OIDC callback |
