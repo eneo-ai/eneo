@@ -11,6 +11,14 @@ Eneo uses a two-tier routing system for AI models:
 
 All model configuration is managed through a single YAML file that syncs with the database.
 
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/litellm-overview.svg"
+    alt="LiteLLM Architecture Overview showing how Eneo routes AI requests through the unified LiteLLM abstraction layer to various providers"
+    className="w-full max-w-4xl mx-auto"
+  />
+</div>
+
 > **Important: Deprecated Adapters**
 >
 > The family-based adapters (`OpenAIModelAdapter`, `ClaudeModelAdapter`, `AzureOpenAIModelAdapter`, etc.) are **deprecated** and will not be maintained. All new model integrations should use the `litellm_model_name` field to route through LiteLLM instead of writing custom adapters.
@@ -288,6 +296,16 @@ docker compose restart backend
 ---
 
 ## LiteLLM Provider Prefixes
+
+The provider registry detects custom providers based on the `litellm_model_name` prefix and applies the appropriate configuration.
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/litellm-routing.svg"
+    alt="LiteLLM Provider Routing showing how model name prefixes are detected and routed to the appropriate provider"
+    className="w-full max-w-4xl mx-auto"
+  />
+</div>
 
 When using `litellm_model_name`, use these prefixes:
 

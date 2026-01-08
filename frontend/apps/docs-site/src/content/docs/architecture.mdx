@@ -4,49 +4,13 @@ Eneo follows a modern microservices architecture with clean separation of concer
 
 ## High-Level Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Client Layer                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │  Web Browser │  │  Mobile App  │  │  API Client  │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└────────────────┬────────────────────────────────────────────┘
-                 │ HTTPS
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Reverse Proxy (Traefik)                  │
-│              SSL Termination, Load Balancing                 │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-        ┌────────┴────────┐
-        ▼                 ▼
-┌──────────────┐  ┌──────────────────────────────────┐
-│  Frontends   │  │          Backend API             │
-│              │  │         (FastAPI)                │
-│ - Web App    │  │                                   │
-│  (SvelteKit) │  │  - Business Logic                │
-│ - Docs Site  │  │  - Authentication                │
-│  (Next.js)   │  │  - API Endpoints                 │
-└──────────────┘  └───────┬──────────────────────────┘
-                          │
-            ┌─────────────┼─────────────┐
-            ▼             ▼             ▼
-      ┌──────────┐  ┌──────────┐  ┌──────────┐
-      │ Database │  │  Redis   │  │  Worker  │
-      │(Postgres)│  │  Cache   │  │  (ARQ)   │
-      │          │  │  Queue   │  │          │
-      │- Data    │  │- Session │  │- Files   │
-      │- Vectors │  │- Tasks   │  │- Crawl   │
-      └──────────┘  └──────────┘  └──────────┘
-                                        │
-                                        ▼
-                              ┌──────────────────┐
-                              │   AI Providers   │
-                              │  - OpenAI        │
-                              │  - Anthropic     │
-                              │  - Azure/Local   │
-                              └──────────────────┘
-```
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/eneo-architecture.svg"
+    alt="Eneo System Architecture showing Client, Reverse Proxy, Eneo Platform (Compute and Data layers), and AI Models (External and Self-hosted)"
+    className="w-full max-w-5xl mx-auto"
+  />
+</div>
 
 ---
 
@@ -373,25 +337,21 @@ Save conversation to database
 
 ### Document Upload Flow
 
-```
-User uploads file
-    ↓
-Frontend uploads to /api/documents
-    ↓
-Backend saves metadata to database
-    ↓
-Enqueue processing task in Redis
-    ↓
-Worker picks up task
-    ↓
-Extract text → Chunk → Generate embeddings
-    ↓
-Store chunks & embeddings in PostgreSQL
-    ↓
-Update document status
-    ↓
-Frontend polls or receives WebSocket update
-```
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/document-processing-pipeline.svg"
+    alt="Document Processing Pipeline showing User uploading to Backend API, which queues jobs in Redis for the Worker to process. The Worker runs the Processing Pipeline (Text Extractor, Text Chunker, Embedding Model, Vector Store) and stores results in PostgreSQL with pgvector (InfoBlobs for raw text, InfoBlobChunks for embeddings with HNSW index, Jobs for status tracking)."
+    className="w-full max-w-5xl mx-auto"
+  />
+</div>
+
+1. User uploads file via `POST /api/v1/files/`
+2. Backend saves metadata to `InfoBlobs` table and enqueues processing task
+3. Worker picks up task from Redis (ARQ)
+4. Processing pipeline: extract text → chunk (200 tokens) → generate embeddings
+5. Store chunks and vectors in `InfoBlobChunks` (pgvector)
+6. Update job status to `COMPLETE` or `FAILED`
+7. Frontend polls or receives WebSocket notification
 
 ---
 

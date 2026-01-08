@@ -16,11 +16,11 @@ Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. S
 
 ### Overview
 
-<div className="my-8">
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
   <img
-    src="/diagrams/oidc-flow.svg"
-    alt="OIDC Authentication Flow"
-    className="w-full max-w-3xl mx-auto rounded-lg border"
+    src="/diagrams/oidc-flow-simple.svg"
+    alt="OIDC Authentication Flow showing User, Eneo, and Identity Provider interaction"
+    className="w-full max-w-3xl mx-auto"
   />
 </div>
 
@@ -258,11 +258,11 @@ Both checks are logged as `callback.state_tampered` debug events with specific `
 
 ## Multi-Tenant Federation Architecture
 
-<div className="my-8">
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
   <img
-    src="/diagrams/federation-architecture.svg"
-    alt="Multi-Tenant Federation Architecture"
-    className="w-full max-w-4xl mx-auto rounded-lg border"
+    src="/diagrams/federation-overview.svg"
+    alt="Multi-Tenant Federation Architecture showing tenant resolution and IdP routing"
+    className="w-full max-w-4xl mx-auto"
   />
 </div>
 
