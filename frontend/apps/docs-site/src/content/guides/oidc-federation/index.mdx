@@ -1,0 +1,107 @@
+# OIDC Federation Setup Guide
+
+Connect Eneo to your identity provider using OpenID Connect. This guide helps you set up single sign-on for your organization.
+
+import { Callout, Cards } from 'nextra/components'
+
+---
+
+## Which Setup Do You Need?
+
+<Cards>
+  <Cards.Card
+    title="Single-Tenant"
+    href="/guides/oidc-federation/single-tenant"
+  >
+    **One organization, one identity provider.**
+
+    All users authenticate against the same IdP (Azure AD, MobilityGuard, etc.). Choose between static configuration via environment variables or dynamic configuration via API.
+  </Cards.Card>
+  <Cards.Card
+    title="Multi-Tenant Federation"
+    href="/guides/oidc-federation/multi-tenant"
+  >
+    **Multiple organizations, each with their own IdP.**
+
+    Each tenant (municipality, company) uses their own identity provider. Configuration managed via API - no restarts needed.
+  </Cards.Card>
+</Cards>
+
+---
+
+## Quick Decision Guide
+
+Use this flowchart to determine which setup is right for you:
+
+<div className="my-8">
+  <img
+    src="/diagrams/oidc-decision-flow.svg"
+    alt="OIDC Setup Decision Flow"
+    className="w-full max-w-3xl mx-auto rounded-lg border"
+  />
+</div>
+
+| Scenario | Recommended Setup |
+|----------|-------------------|
+| Single company deployment | [Single-Tenant](/guides/oidc-federation/single-tenant) |
+| Want to change OIDC settings without restarting | [Single-Tenant with API](/guides/oidc-federation/single-tenant#dynamic-configuration) |
+| SaaS platform with multiple customers | [Multi-Tenant](/guides/oidc-federation/multi-tenant) |
+| Each organization brings their own IdP | [Multi-Tenant](/guides/oidc-federation/multi-tenant) |
+
+---
+
+## Supported Identity Providers
+
+Eneo works with any OIDC-compliant identity provider. Common examples:
+
+- **Azure Entra ID** (formerly Azure AD)
+- **MobilityGuard**
+- **Keycloak**
+- **Auth0**
+- **Okta**
+
+<Callout type="info">
+  This guide focuses on Azure Entra ID and MobilityGuard as examples. The same principles apply to other OIDC providers.
+</Callout>
+
+---
+
+## Before You Begin
+
+Make sure you have:
+
+- Admin access to your Identity Provider
+- HTTPS enabled on your Eneo domain
+- Access to Eneo backend configuration (environment variables or API)
+
+**For Multi-Tenant only:**
+- Wildcard DNS or per-tenant DNS records
+- Wildcard TLS certificate (or per-tenant certificates)
+- Redis running (required for auth state caching)
+- Super Admin API key (`SUPER_API_KEY`)
+
+---
+
+## How OIDC Works with Eneo
+
+Eneo uses the **OAuth 2.0 Authorization Code Flow** with OpenID Connect:
+
+1. User clicks "Sign In" in Eneo
+2. Eneo redirects to your Identity Provider
+3. User authenticates with their credentials
+4. IdP redirects back to Eneo with an authorization code
+5. Eneo exchanges the code for tokens
+6. User is logged in
+
+For technical details, see [Authentication Architecture](/docs/authentication-architecture).
+
+---
+
+## Next Steps
+
+Choose your setup path:
+
+<Cards>
+  <Cards.Card title="Single-Tenant Setup" href="/guides/oidc-federation/single-tenant" />
+  <Cards.Card title="Multi-Tenant Federation" href="/guides/oidc-federation/multi-tenant" />
+</Cards>

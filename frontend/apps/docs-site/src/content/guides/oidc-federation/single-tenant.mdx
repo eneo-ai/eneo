@@ -1,0 +1,376 @@
+# Single-Tenant OIDC Setup
+
+Set up OIDC authentication when all your users authenticate against a single identity provider.
+
+import { Callout, Steps, Tabs, Cards } from 'nextra/components'
+
+---
+
+## Choose Your Configuration Method
+
+<Cards>
+  <Cards.Card title="Static Configuration" href="#static-configuration">
+    Configure via environment variables. Simple setup, but requires a backend restart to change settings.
+  </Cards.Card>
+  <Cards.Card title="Dynamic Configuration" href="#dynamic-configuration">
+    Configure via API endpoint. Update OIDC settings at runtime without restarting the backend.
+  </Cards.Card>
+</Cards>
+
+<Callout type="info">
+  Not sure which to choose? Start with **Static Configuration** - it's simpler. Switch to Dynamic later if you need runtime updates.
+</Callout>
+
+---
+
+## Static Configuration
+
+Use environment variables to configure OIDC. This is the simplest approach for single-tenant deployments.
+
+### Prerequisites
+
+- Admin access to your Identity Provider (Azure AD or MobilityGuard)
+- Access to your Eneo backend `.env` file
+- HTTPS enabled on your Eneo domain
+
+<Steps>
+### Register your application in the IdP
+
+<Tabs items={['Azure Entra ID', 'MobilityGuard']}>
+  <Tabs.Tab>
+    1. Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations**
+    2. Click **New registration**
+    3. Enter a name (e.g., "Eneo SSO")
+    4. Set **Redirect URI** to:
+       ```
+       https://your-domain.com/login/callback
+       ```
+    5. Click **Register**
+    6. Note your **Application (client) ID** and **Directory (tenant) ID**
+    7. Go to **Certificates & secrets** → **New client secret**
+    8. Copy the secret value immediately (you won't see it again)
+    9. Go to **API permissions** → **Add a permission** → **Microsoft Graph**
+    10. Add: `openid`, `profile`, `email`, `User.Read`
+    11. Click **Grant admin consent**
+  </Tabs.Tab>
+  <Tabs.Tab>
+    1. Log in to your MobilityGuard admin console
+    2. Navigate to **Applications** → **Add Application**
+    3. Select **OpenID Connect** as the protocol
+    4. Enter the application name (e.g., "Eneo")
+    5. Set **Redirect URI** to:
+       ```
+       https://your-domain.com/login/callback
+       ```
+    6. Save and note your **Client ID** and **Client Secret**
+    7. Note your MobilityGuard discovery URL:
+       ```
+       https://your-mobilityguard.com/.well-known/openid-configuration
+       ```
+  </Tabs.Tab>
+</Tabs>
+
+### Configure backend environment variables
+
+Add to your backend `.env` file:
+
+<Tabs items={['Azure Entra ID', 'MobilityGuard']}>
+  <Tabs.Tab>
+    ```bash
+    # Enable OIDC authentication
+    OIDC_ENABLED=true
+
+    # Azure Entra ID configuration
+    OIDC_DISCOVERY_ENDPOINT=https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+    OIDC_CLIENT_ID=your-application-client-id
+    OIDC_CLIENT_SECRET=your-client-secret-value
+
+    # Your Eneo domain (used to construct redirect URI)
+    PUBLIC_ORIGIN=https://your-domain.com
+    ```
+
+    Replace `{tenant-id}` with your Azure Directory (tenant) ID.
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    # Enable OIDC authentication
+    OIDC_ENABLED=true
+
+    # MobilityGuard configuration
+    OIDC_DISCOVERY_ENDPOINT=https://your-mobilityguard.com/.well-known/openid-configuration
+    OIDC_CLIENT_ID=your-client-id
+    OIDC_CLIENT_SECRET=your-client-secret
+
+    # Your Eneo domain (used to construct redirect URI)
+    PUBLIC_ORIGIN=https://your-domain.com
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+<Callout type="warning">
+  The `PUBLIC_ORIGIN` is used to compute the redirect URI server-side. Make sure it matches what you registered in your IdP exactly (including `https://`).
+</Callout>
+
+### Restart and test
+
+```bash
+docker compose restart backend
+```
+
+Visit your Eneo instance and click **Sign In**. You should be redirected to your IdP.
+
+</Steps>
+
+### Changing Static Configuration
+
+To update your OIDC settings with static configuration:
+
+1. Edit the environment variables in your `.env` file
+2. Restart the backend: `docker compose restart backend`
+
+If you need to change settings without restarting, use [Dynamic Configuration](#dynamic-configuration) instead.
+
+---
+
+## Dynamic Configuration
+
+Configure OIDC via API for runtime updates without restarting the backend.
+
+### When to Use Dynamic Configuration
+
+- You want to update OIDC settings without downtime
+- You're managing configuration through automation
+- You need to rotate client secrets without a restart
+
+### Prerequisites
+
+- All prerequisites from Static Configuration
+- Super Admin API key (`SUPER_API_KEY` environment variable set)
+- Your tenant ID (find it in the database or via API)
+
+<Steps>
+### Enable federation mode
+
+Add to your backend `.env` file:
+
+```bash
+# Enable federation (allows API-based OIDC configuration)
+FEDERATION_PER_TENANT_ENABLED=true
+
+# Required for encrypting client secrets in database
+ENCRYPTION_KEY=your-fernet-encryption-key
+
+# Super admin API key for management endpoints
+SUPER_API_KEY=your-super-admin-api-key
+```
+
+Generate an encryption key:
+
+```bash
+uv run python -m intric.cli.generate_encryption_key
+```
+
+Restart the backend after setting these variables.
+
+### Register your application in the IdP
+
+Follow the same steps as [Static Configuration](#register-your-application-in-the-idp).
+
+### Configure via API
+
+Use the federation API endpoint to set your OIDC configuration:
+
+<Tabs items={['Azure Entra ID', 'MobilityGuard']}>
+  <Tabs.Tab>
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "entra_id",
+        "canonical_public_origin": "https://your-domain.com",
+        "discovery_endpoint": "https://login.microsoftonline.com/{azure-tenant-id}/v2.0/.well-known/openid-configuration",
+        "client_id": "your-application-client-id",
+        "client_secret": "your-client-secret",
+        "scopes": ["openid", "email", "profile"],
+        "allowed_domains": ["your-company.com"]
+      }'
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "mobilityguard",
+        "canonical_public_origin": "https://your-domain.com",
+        "discovery_endpoint": "https://your-mobilityguard.com/.well-known/openid-configuration",
+        "client_id": "your-client-id",
+        "client_secret": "your-client-secret",
+        "scopes": ["openid", "email", "profile"],
+        "allowed_domains": ["your-company.com"]
+      }'
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+### Test the configuration
+
+Verify your setup works before users try to log in:
+
+```bash
+curl -X POST "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation/test" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+This checks connectivity to your IdP's discovery endpoint and JWKS.
+
+### Test login
+
+Visit your Eneo instance and click **Sign In**.
+
+</Steps>
+
+### Updating Dynamic Configuration
+
+To change your OIDC settings, simply call the PUT endpoint again with the new values. Changes take effect immediately - no restart needed.
+
+```bash
+# Example: Update allowed domains
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allowed_domains": ["company.com", "subsidiary.com"]
+  }'
+```
+
+### View Current Configuration
+
+```bash
+curl "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+<Callout type="info">
+  Client secrets are never returned in GET responses - they're masked for security.
+</Callout>
+
+---
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OIDC_ENABLED` | Yes (static) | Set to `true` to enable OIDC |
+| `OIDC_DISCOVERY_ENDPOINT` | Yes (static) | IdP's OIDC discovery URL |
+| `OIDC_CLIENT_ID` | Yes (static) | OAuth client ID |
+| `OIDC_CLIENT_SECRET` | Yes (static) | OAuth client secret |
+| `PUBLIC_ORIGIN` | Yes | Your Eneo's public URL |
+| `FEDERATION_PER_TENANT_ENABLED` | Yes (dynamic) | Set to `true` for API-based config |
+| `ENCRYPTION_KEY` | Yes (dynamic) | Fernet key for encrypting secrets |
+| `SUPER_API_KEY` | Yes (dynamic) | API key for admin endpoints |
+
+### API Configuration Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `provider` | Yes | Label for the IdP (e.g., `entra_id`, `mobilityguard`) |
+| `canonical_public_origin` | Yes | Your tenant's public URL |
+| `discovery_endpoint` | Yes | IdP's OIDC discovery URL |
+| `client_id` | Yes | OAuth client ID |
+| `client_secret` | Yes | OAuth client secret |
+| `scopes` | No | Scopes to request (default: `["openid", "email", "profile"]`) |
+| `allowed_domains` | No | Email domains allowed to authenticate |
+| `redirect_path` | No | Callback path (default: `/login/callback`) |
+| `claims_mapping` | No | Custom mapping of IdP claims to Eneo fields (see below) |
+
+### Claims Mapping
+
+The `claims_mapping` field allows you to customize how Eneo extracts user information from your IdP's ID token. This is useful when your IdP uses non-standard claim names.
+
+**Default mapping:**
+
+```json
+{
+  "email": "email",
+  "username": "sub",
+  "name": "name"
+}
+```
+
+**Customization example:**
+
+If your IdP uses different claim names (e.g., `preferred_username` instead of `sub`, or `mail` instead of `email`):
+
+```bash
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "claims_mapping": {
+      "email": "mail",
+      "username": "preferred_username",
+      "name": "displayName"
+    }
+  }'
+```
+
+| Eneo Field | Description | Common IdP Claim Names |
+|------------|-------------|------------------------|
+| `email` | User's email address (required) | `email`, `mail`, `upn` |
+| `username` | Unique user identifier | `sub`, `preferred_username`, `oid` |
+| `name` | Display name | `name`, `displayName`, `given_name` |
+
+<Callout type="warning">
+  The `email` claim is required for authentication. If Eneo cannot find the email in the configured claim, authentication will fail with an "Email claim not found" error.
+</Callout>
+
+---
+
+## Troubleshooting
+
+### "Redirect URI mismatch" error
+
+The redirect URI in Eneo doesn't match what's registered in your IdP.
+
+**Fix:** Ensure both match exactly:
+- **In IdP:** `https://your-domain.com/login/callback`
+- **In Eneo:** Set `PUBLIC_ORIGIN=https://your-domain.com` (no trailing slash)
+
+### "Domain rejected" error
+
+The user's email domain isn't in `allowed_domains`.
+
+**Fix:** Update the configuration to include the domain:
+```bash
+curl -X PUT "...federation" -d '{"allowed_domains": ["domain1.com", "domain2.com"]}'
+```
+
+### "User not found" error
+
+The user authenticated successfully but doesn't exist in Eneo.
+
+**Fix:** Invite the user to Eneo first, or enable auto-provisioning if available.
+
+### Debug mode
+
+For complex issues, enable OIDC debug logging:
+
+```bash
+curl -X POST "https://api.your-domain.com/api/v1/sysadmin/observability/oidc-debug/" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -d '{"enabled": true, "duration_minutes": 10, "reason": "Debugging login issue"}'
+```
+
+Then check logs for entries with `[OIDC DEBUG]`.
+
+---
+
+## Next Steps
+
+- [Multi-Tenant Federation](/guides/oidc-federation/multi-tenant) - If you need each tenant to use their own IdP
+- [Authentication Architecture](/docs/authentication-architecture) - Technical details on the OIDC implementation

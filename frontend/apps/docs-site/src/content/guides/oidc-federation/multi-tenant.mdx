@@ -1,0 +1,462 @@
+# Multi-Tenant OIDC Federation
+
+Set up OIDC authentication where each tenant (organization, municipality, company) uses their own identity provider.
+
+import { Callout, Steps, Tabs } from 'nextra/components'
+
+---
+
+## Overview
+
+Multi-tenant federation allows each tenant in your Eneo deployment to authenticate against their own IdP. This is ideal for:
+
+- **SaaS platforms** serving multiple customers
+- **Municipal deployments** where each municipality has their own Azure AD
+- **Enterprise deployments** with subsidiary companies
+
+<div className="my-8">
+  <img
+    src="/diagrams/federation-architecture.svg"
+    alt="Multi-Tenant Federation Architecture"
+    className="w-full max-w-4xl mx-auto rounded-lg border"
+  />
+</div>
+
+---
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- [ ] Eneo backend deployed and running
+- [ ] Redis running (required for auth state caching)
+- [ ] Super Admin API key (`SUPER_API_KEY` configured)
+- [ ] HTTPS enabled on your domain
+- [ ] **One of the following DNS setups:**
+  - Wildcard DNS (`*.your-domain.com`) pointing to Eneo
+  - Per-tenant DNS records (e.g., `tenant1.your-domain.com`)
+- [ ] Matching TLS certificate (wildcard or per-tenant)
+
+<Callout type="warning">
+  Multi-tenant federation **requires** `FEDERATION_PER_TENANT_ENABLED=true`. Configuration is managed via API only - environment variables are not used for individual tenant IdPs.
+</Callout>
+
+---
+
+## Setup
+
+<Steps>
+### Enable federation mode
+
+Add these environment variables to your backend `.env`:
+
+```bash
+# Enable multi-tenant federation
+FEDERATION_PER_TENANT_ENABLED=true
+
+# Encryption key for storing client secrets securely
+ENCRYPTION_KEY=your-fernet-encryption-key
+
+# Super admin API key for management endpoints
+SUPER_API_KEY=your-super-admin-api-key
+```
+
+Generate an encryption key:
+
+```bash
+uv run python -m intric.cli.generate_encryption_key
+```
+
+Restart the backend:
+
+```bash
+docker compose restart backend
+```
+
+### Prepare tenants
+
+Each tenant needs a URL-safe slug for their subdomain. If you have existing tenants without slugs, run:
+
+```bash
+cd backend
+uv run python -m intric.cli.backfill_tenant_slugs
+```
+
+This generates slugs from tenant names (e.g., "Sundsvall Municipality" → `sundsvall-municipality`).
+
+### Configure DNS
+
+Set up DNS for each tenant to point to your Eneo deployment:
+
+**Option A: Wildcard DNS (recommended)**
+```
+*.your-domain.com → your-eneo-server-ip
+```
+
+**Option B: Per-tenant DNS**
+```
+tenant1.your-domain.com → your-eneo-server-ip
+tenant2.your-domain.com → your-eneo-server-ip
+```
+
+### Register the application in each tenant's IdP
+
+For each tenant, register Eneo as an application in their IdP:
+
+<Tabs items={['Azure Entra ID', 'MobilityGuard']}>
+  <Tabs.Tab>
+    1. Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations**
+    2. Click **New registration**
+    3. Enter a name (e.g., "Eneo SSO")
+    4. Set **Redirect URI** to the tenant's specific callback:
+       ```
+       https://{tenant-slug}.your-domain.com/login/callback
+       ```
+    5. Click **Register**
+    6. Note the **Application (client) ID** and **Directory (tenant) ID**
+    7. Go to **Certificates & secrets** → **New client secret**
+    8. Copy the secret value immediately
+    9. Go to **API permissions** → Add `openid`, `profile`, `email`, `User.Read`
+    10. Click **Grant admin consent**
+
+    **Discovery URL for Azure:**
+    ```
+    https://login.microsoftonline.com/{directory-tenant-id}/v2.0/.well-known/openid-configuration
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    1. Log in to the tenant's MobilityGuard admin console
+    2. Navigate to **Applications** → **Add Application**
+    3. Select **OpenID Connect**
+    4. Set **Redirect URI** to:
+       ```
+       https://{tenant-slug}.your-domain.com/login/callback
+       ```
+    5. Save and note the **Client ID** and **Client Secret**
+
+    **Discovery URL for MobilityGuard:**
+    ```
+    https://tenant-mobilityguard.com/.well-known/openid-configuration
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+### Configure the tenant via API
+
+Use the federation API to set up the tenant's OIDC configuration:
+
+<Tabs items={['Azure Entra ID', 'MobilityGuard']}>
+  <Tabs.Tab>
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "entra_id",
+        "canonical_public_origin": "https://sundsvall.your-domain.com",
+        "discovery_endpoint": "https://login.microsoftonline.com/{azure-tenant-id}/v2.0/.well-known/openid-configuration",
+        "client_id": "azure-application-id",
+        "client_secret": "azure-client-secret",
+        "scopes": ["openid", "email", "profile"],
+        "allowed_domains": ["sundsvall.se"]
+      }'
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "mobilityguard",
+        "canonical_public_origin": "https://sundsvall.your-domain.com",
+        "discovery_endpoint": "https://sundsvall-mg.com/.well-known/openid-configuration",
+        "client_id": "mg-client-id",
+        "client_secret": "mg-client-secret",
+        "scopes": ["openid", "email", "profile"],
+        "allowed_domains": ["sundsvall.se"]
+      }'
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+**Important fields:**
+| Field | Description |
+|-------|-------------|
+| `canonical_public_origin` | The URL where this tenant's users access Eneo (their subdomain) |
+| `allowed_domains` | Email domains allowed to authenticate - restricts who can log in |
+
+### Test the configuration
+
+Verify the IdP connection before users try to log in:
+
+```bash
+curl -X POST "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation/test" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+This test:
+- Fetches the IdP's discovery document
+- Verifies required OIDC endpoints are present
+- Fetches JWKS and verifies signing keys exist
+
+<Callout type="info">
+  The test does **not** attempt actual authentication or validate client credentials - it only checks that the IdP is reachable and properly configured.
+</Callout>
+
+### Test login
+
+Navigate to the tenant's URL and test the login flow:
+
+```
+https://sundsvall.your-domain.com
+```
+
+Click **Sign In** and authenticate with a user from the tenant's IdP.
+
+</Steps>
+
+---
+
+## Tenant Resolution
+
+When a user visits Eneo, the system determines which tenant's IdP to use through a priority-based resolution:
+
+| Priority | Method | Description |
+|----------|--------|-------------|
+| 1 (Primary) | **Subdomain** | Extract tenant slug from subdomain (e.g., `sundsvall.your-domain.com` resolves to tenant "sundsvall") |
+| 2 (Secondary) | **Tenant Slug Parameter** | Explicit `tenant` query parameter or path segment in the authentication URL |
+| 3 (Fallback) | **Tenant Selector UI** | Interactive selector shown when no tenant can be determined automatically |
+
+### Subdomain Resolution (Primary)
+
+The frontend extracts the subdomain from the current URL and passes it as the `tenant` parameter to the `/api/v1/auth/initiate` endpoint. This is the recommended approach for multi-tenant deployments.
+
+### Tenant Slug Parameter (Secondary)
+
+If the subdomain doesn't resolve to a valid tenant, the system checks for an explicit tenant slug in the request. This is useful for:
+- Development environments without wildcard DNS
+- Direct links to specific tenant login flows
+
+### Tenant Selector UI (Fallback)
+
+If a user visits the main domain without a tenant subdomain and no tenant parameter is provided, they'll see a tenant selector to choose their organization. The selector only displays tenants that have:
+- A configured slug
+- Active federation configuration
+
+---
+
+## Managing Tenants
+
+### View tenant configuration
+
+```bash
+curl "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+<Callout type="info">
+  Client secrets are always masked in responses for security.
+</Callout>
+
+### Update tenant configuration
+
+Use the PUT endpoint to update any field. Changes take effect immediately - no restart needed.
+
+```bash
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allowed_domains": ["sundsvall.se", "new-domain.se"]
+  }'
+```
+
+### Remove tenant federation
+
+To disable OIDC for a tenant:
+
+```bash
+curl -X DELETE "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+---
+
+## Adding a New Tenant
+
+To onboard a new organization:
+
+1. **Create the tenant** in Eneo (via admin UI or API)
+2. **Ensure the tenant has a slug** for their subdomain
+3. **Set up DNS** for their subdomain
+4. **Register Eneo** in their IdP with their callback URL
+5. **Configure via API** with their IdP details
+6. **Test** the configuration
+7. **Invite users** or enable auto-provisioning
+
+---
+
+## Troubleshooting
+
+### "Domain rejected" error
+
+The user's email domain isn't in the tenant's `allowed_domains` list.
+
+**Fix:** Update the tenant configuration:
+```bash
+curl -X PUT "...federation" -d '{"allowed_domains": ["domain1.com", "domain2.com"]}'
+```
+
+### "User not found" error
+
+The user authenticated successfully with the IdP but doesn't exist in Eneo.
+
+**Fix:** Either:
+- Invite the user to the tenant in Eneo first
+- Enable auto-provisioning for the tenant (if supported)
+
+### "State cache error"
+
+Redis connectivity issue - auth state couldn't be stored or retrieved.
+
+**Fix:** Verify Redis is running and accessible:
+```bash
+redis-cli ping
+```
+
+### Debug mode
+
+For complex issues across multiple tenants:
+
+```bash
+curl -X POST "https://api.your-domain.com/api/v1/sysadmin/observability/oidc-debug/" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -d '{"enabled": true, "duration_minutes": 10, "reason": "Multi-tenant debug"}'
+```
+
+Then search logs for the user's **correlation ID** (shown on error screens):
+
+```bash
+docker compose logs backend | grep "correlation_id.*abc123"
+```
+
+Remember to disable debug mode after:
+```bash
+curl -X POST "...oidc-debug/" -d '{"enabled": false}'
+```
+
+---
+
+## Correlation ID Tracking
+
+Every authentication request is assigned a unique **correlation ID** for end-to-end tracing. This ID follows the request through the entire OIDC flow and appears in all related log entries.
+
+### Format
+
+The correlation ID is a 16-character hexadecimal string generated using `secrets.token_hex(8)`:
+
+```
+Example: a1b2c3d4e5f67890
+```
+
+### Using Correlation IDs for Debugging
+
+1. **User-facing errors** display the correlation ID on error screens
+2. **Search logs** using the correlation ID to trace the complete flow:
+
+```bash
+docker compose logs backend | grep "correlation_id.*a1b2c3d4e5f67890"
+```
+
+3. **All OIDC events** are logged with the correlation ID, including:
+   - Authentication initiation
+   - State token creation
+   - Callback processing
+   - Token exchange
+   - User resolution
+
+<Callout type="info">
+  When users report authentication issues, ask them for the correlation ID shown on the error screen. This allows you to quickly locate all related log entries.
+</Callout>
+
+---
+
+## Redis State Cache
+
+Authentication state is cached in Redis to validate callbacks and prevent replay attacks. This ensures the callback request matches the original authentication initiation.
+
+### Cache Key Format
+
+State is stored using the nonce as the key identifier:
+
+```
+oidc:state:{nonce}
+```
+
+Where `{nonce}` is a 32-character hexadecimal string generated per authentication request.
+
+### Cached Data
+
+Each state entry contains:
+
+| Field | Description |
+|-------|-------------|
+| `tenant_id` | UUID of the tenant initiating authentication |
+| `tenant_slug` | Tenant slug for validation on callback |
+| `redirect_uri` | Server-computed redirect URI |
+| `config_version` | Tenant configuration version (for stale config detection) |
+| `iat` | Issued-at timestamp |
+
+### TTL Configuration
+
+State tokens expire after 10 minutes by default (controlled by `oidc_state_ttl_seconds`). After expiration:
+- The Redis key is automatically deleted
+- Callback attempts with expired state will fail
+- Users must restart the authentication flow
+
+### Debugging State Issues
+
+To inspect cached state (requires Redis CLI access):
+
+```bash
+# List all active OIDC states
+redis-cli KEYS "oidc:state:*"
+
+# Inspect a specific state entry
+redis-cli GET "oidc:state:{nonce}"
+
+# Check TTL remaining
+redis-cli TTL "oidc:state:{nonce}"
+```
+
+<Callout type="warning">
+  Never manually delete or modify state entries in production. This could cause active authentication flows to fail.
+</Callout>
+
+---
+
+## Security Considerations
+
+### Client Secret Encryption
+
+Client secrets are encrypted using **Fernet** (AES-128-CBC + HMAC-SHA256) before being stored in the database.
+
+<Callout type="warning">
+  **Back up your `ENCRYPTION_KEY`** securely. If you lose it, you'll need to re-register all tenant IdPs and reconfigure their client secrets.
+</Callout>
+
+### Domain Restrictions
+
+Always configure `allowed_domains` for each tenant. This ensures only users from authorized email domains can authenticate - even if they have valid credentials in the IdP.
+
+### State Token Protection
+
+Authentication requests use signed state tokens (JWT with HS256) to prevent CSRF attacks. Tokens expire after 10 minutes.
+
+---
+
+## Next Steps
+
+- [Single-Tenant Setup](/guides/oidc-federation/single-tenant) - Simpler setup for single-organization deployments
+- [Authentication Architecture](/docs/authentication-architecture) - Technical details on the OIDC implementation

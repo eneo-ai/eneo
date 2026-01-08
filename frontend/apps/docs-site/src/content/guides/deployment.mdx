@@ -281,6 +281,35 @@ DEBUG=false
 LOG_LEVEL=INFO  # or DEBUG for development
 ```
 
+### Crawler Configuration
+
+Control web crawling behavior with these environment variables in `env_backend.env`:
+
+```bash
+# Max crawl duration in seconds (default: 14400 = 4 hours)
+CRAWL_MAX_LENGTH=14400
+
+# Max pages to crawl before stopping (default: 20000)
+CLOSESPIDER_ITEMCOUNT=20000
+
+# Respect robots.txt directives (default: True)
+OBEY_ROBOTS=True
+
+# Enable auto-throttling to prevent overloading target sites (default: True)
+AUTOTHROTTLE_ENABLED=True
+```
+
+**Worker concurrency** can also be tuned to control how many crawl jobs run simultaneously:
+
+```bash
+# Max concurrent background jobs across all tenants (default: 20)
+WORKER_MAX_CONCURRENT_JOBS=20
+
+# Max concurrent jobs per tenant (default: 4)
+# Prevents one tenant from monopolizing worker resources
+TENANT_WORKER_CONCURRENCY_LIMIT=4
+```
+
 ---
 
 ## Monitoring & Logs
