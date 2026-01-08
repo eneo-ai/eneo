@@ -6,7 +6,8 @@ const withNextra = nextra({
 })
 
 const nextConfig: NextConfig = withNextra({
-  output: 'standalone',
+  output: 'export',
+  basePath: process.env.PAGES_BASE_PATH
 });
 
 export default nextConfig;

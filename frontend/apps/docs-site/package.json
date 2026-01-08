@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port=3001",
-    "build": "next build && pagefind --site .next/server/app --output-path public/_pagefind",
+    "build": "next build && pagefind --site out --output-path out/_pagefind",
     "start": "next start",
     "lint": "next lint"
   },
