@@ -1,37 +1,79 @@
 # Deployment Guide
 
-This guide covers production deployment of Eneo using Docker Compose with Traefik as a reverse proxy.
+Deploy Eneo in production using Docker Compose. This guide covers configuration, deployment, and troubleshooting.
+
+import { Callout, Steps, Tabs } from 'nextra/components'
+
+<Callout type="warning">
+  **This is an example configuration.** You MUST customize all values before deployment.
+  Search for `your-domain.com`, `changeme`, and `CHANGEME` and replace with your actual values.
+  Copy-paste without modification will NOT work.
+</Callout>
+
+---
+
+## Architecture Overview
+
+Eneo uses a microservices architecture with six core services.
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/eneo-architecture.svg"
+    alt="Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers"
+    className="w-full max-w-5xl mx-auto"
+  />
+</div>
+
+| Service | Technology | Port | Role |
+|---------|------------|------|------|
+| **Frontend** | SvelteKit | 3000 | Web interface, SSR |
+| **Backend** | FastAPI (Python) | 8000 | API server, authentication |
+| **Worker** | ARQ | - | Background processing, document indexing |
+| **Database** | PostgreSQL 16 + pgvector | 5432 | Data storage, vector search |
+| **Redis** | Redis 7 | 6379 | Cache, task queue |
+| **db-init** | Python | - | One-time database initialization |
+
+<Callout type="info">
+  **Traefik is provided as an example reverse proxy**, not a requirement. You can use nginx, HAProxy, Caddy, or any reverse proxy that supports the [routing requirements](#reverse-proxy-requirements) below.
+</Callout>
+
+---
 
 ## Prerequisites
 
 Before deploying, ensure you have:
 
-- **Linux server** (Ubuntu 20.04+ recommended)
-- **Docker** and **Docker Compose** installed
+- **Docker** and **Docker Compose v2+** installed
 - **Domain name** with DNS pointing to your server
-- **Email address** for Let's Encrypt SSL certificates
-- **At least one AI provider API key** ([see AI Provider guide](/guides/ai-providers))
-- **Firewall** allowing ports 80 (HTTP) and 443 (HTTPS)
+- **SSL certificate** (Let's Encrypt via Traefik, or your own PKI/CA)
+- **At least one AI provider API key** ([see AI Provider Configuration](/guides/ai-providers))
 
 ### System Requirements
 
-**Minimum:**
-- 2 CPU cores
-- 4GB RAM
-- 20GB disk space
-
-**Recommended:**
-- 4+ CPU cores
-- 8GB+ RAM
-- 50GB+ disk space (for documents and databases)
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| CPU | 2 cores | 4+ cores |
+| RAM | 4GB | 8GB+ |
+| Disk | 20GB | 50GB+ |
+| Network | Ports 80, 443 open | - |
 
 ---
 
-## Quick Deployment
+## Quick Start
 
-The fastest way to deploy Eneo in production:
+<Callout type="info">
+  **Preflight Checklist** - Before running `docker compose up`:
+  - [ ] Set domain in docker-compose.yml (4 locations)
+  - [ ] Set `POSTGRES_PASSWORD` (not "changeme")
+  - [ ] Generate and set `JWT_SECRET` (32+ chars)
+  - [ ] Set `PUBLIC_ORIGIN` in both backend and frontend env files
+  - [ ] Configure at least ONE AI provider key
+  - [ ] Run `docker network create proxy_tier`
+  - [ ] **Production:** Pin image versions instead of `latest` (see [Version Pinning](#version-pinning-recommended))
+</Callout>
 
-### Step 1: Get Deployment Files
+<Steps>
+### Get deployment files
 
 ```bash
 # Option A: Clone the repository
@@ -46,7 +88,7 @@ curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_
 curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_db.template
 ```
 
-### Step 2: Create Environment Files
+### Create environment files
 
 ```bash
 cp env_backend.template env_backend.env
@@ -54,83 +96,43 @@ cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 ```
 
-### Step 3: Configure Your Deployment
+### Configure required values
 
-#### A. Update `docker-compose.yml`
-
-Replace placeholders with your actual values:
+Generate secrets and update environment files:
 
 ```bash
-# Replace email for SSL certificate notifications
-sed -i 's/your-email@domain.com/ops@your-company.com/g' docker-compose.yml
+# Generate JWT_SECRET (MUST match in backend AND frontend)
+JWT_SECRET=$(openssl rand -hex 32)
+echo "JWT_SECRET=$JWT_SECRET"
 
-# Replace domain name (appears in 4 places)
-sed -i 's/your-domain.com/eneo.your-company.com/g' docker-compose.yml
+# Generate URL_SIGNING_KEY
+echo "URL_SIGNING_KEY=$(openssl rand -hex 32)"
+
+# Generate database password
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
 ```
 
-Or manually edit the file:
-- `your-email@domain.com` → your email
-- `your-domain.com` → your domain (all 4 occurrences)
+Edit `env_backend.env` with your values:
+- `JWT_SECRET` - paste the generated value
+- `URL_SIGNING_KEY` - paste the generated value
+- `PUBLIC_ORIGIN` - your external URL (e.g., `https://eneo.example.com`)
+- At least one AI provider key (e.g., `OPENAI_API_KEY`)
 
-#### B. Configure Database (`env_db.env`)
+Edit `env_frontend.env`:
+- `JWT_SECRET` - **MUST match backend value**
+- `INTRIC_BACKEND_URL` - backend URL for SSR (e.g., `http://backend:8000`)
+- `PUBLIC_INTRIC_BACKEND_URL` - external API URL (e.g., `https://eneo.example.com/api`)
+- `PUBLIC_ORIGIN` - your external URL (e.g., `https://eneo.example.com`)
+- `ORIGIN` - same as PUBLIC_ORIGIN
 
-Generate a secure database password:
+Edit `docker-compose.yml`:
+- Replace `your-domain.com` with your actual domain (4 locations)
+- Replace `your-email@domain.com` with your email for Let's Encrypt
 
-```bash
-echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> env_db.env
-```
-
-#### C. Configure Backend (`env_backend.env`)
-
-**Required settings:**
-
-```bash
-# Generate JWT secret for session management
-echo "JWT_SECRET=$(openssl rand -hex 32)" >> env_backend.env
-
-# Database connection (use the password from env_db.env)
-echo "DATABASE_URL=postgresql://eneo:YOUR_DB_PASSWORD@db:5432/eneo" >> env_backend.env
-
-# Redis connection
-echo "REDIS_URL=redis://redis:6379/0" >> env_backend.env
-
-# Add at least one AI provider API key
-echo "OPENAI_API_KEY=sk-..." >> env_backend.env
-```
-
-**Optional settings:**
+### Create Docker network and deploy
 
 ```bash
-# OIDC authentication (see Authentication guide)
-OIDC_ENABLED=false
-
-# Email configuration (for notifications)
-SMTP_HOST=smtp.your-company.com
-SMTP_PORT=587
-SMTP_USER=noreply@your-company.com
-SMTP_PASSWORD=your-smtp-password
-
-# File upload limits
-MAX_UPLOAD_SIZE_MB=50
-
-# Rate limiting
-RATE_LIMIT_PER_MINUTE=60
-```
-
-#### D. Configure Frontend (`env_frontend.env`)
-
-```bash
-# API endpoint (internal Docker network)
-NEXT_PUBLIC_API_URL=https://your-domain.com/api
-
-# Public URL
-NEXT_PUBLIC_APP_URL=https://your-domain.com
-```
-
-### Step 4: Deploy
-
-```bash
-# Create Docker network for Traefik
+# Create external network for Traefik
 docker network create proxy_tier
 
 # Start all services
@@ -138,154 +140,457 @@ docker compose up -d
 
 # Check status
 docker compose ps
+
+# View logs
+docker compose logs -f
 ```
 
-### Step 5: Access Your Instance
+### Verify and login
 
 Navigate to `https://your-domain.com`
 
-**Default credentials:**
-- Email: `user@example.com`
-- Password: `Password1!`
+<Callout type="warning">
+  **Default credentials:** `user@example.com` / `Password1!`
 
-**⚠️ Important:** Change the default password immediately after first login!
+  Change this password immediately after first login.
+</Callout>
 
----
-
-## Service Architecture
-
-The deployment includes these services:
-
-### Traefik
-- **Role**: Reverse proxy and load balancer
-- **Handles**: SSL/TLS certificates, routing
-- **Port**: 80 (HTTP), 443 (HTTPS)
-- **Dashboard**: https://your-domain.com:8080 (disabled in production by default)
-
-### Frontend
-- **Technology**: Next.js (SvelteKit alternative)
-- **Role**: Web interface
-- **Internal Port**: 3000
-
-### Backend
-- **Technology**: FastAPI (Python)
-- **Role**: API server
-- **Internal Port**: 8123
-- **API Docs**: https://your-domain.com/api/docs
-
-### Worker
-- **Technology**: ARQ (async task queue)
-- **Role**: Background processing
-- **Handles**: Document processing, web crawling
-
-### Database
-- **Technology**: PostgreSQL 13 with pgvector
-- **Role**: Data storage and vector search
-- **Internal Port**: 5432
-- **Volume**: Persistent storage for data
-
-### Redis
-- **Technology**: Redis 7
-- **Role**: Caching and task queue
-- **Internal Port**: 6379
+</Steps>
 
 ---
 
-## Advanced Configuration
+## Environment Configuration
 
-### Custom Domain Configuration
+<Tabs items={['Backend', 'Frontend', 'Database']}>
+  <Tabs.Tab>
+    ### Backend Environment Variables
 
-If you have multiple domains or subdomains:
+    **Required:**
 
-```yaml
-# In docker-compose.yml, update the backend service labels:
-labels:
-  - "traefik.http.routers.backend.rule=Host(`eneo.company.com`) || Host(`ai.company.com`)"
-```
+    | Variable | Description | Example |
+    |----------|-------------|---------|
+    | `JWT_SECRET` | Token signing key (32+ chars). Generate: `openssl rand -hex 32` | `a1b2c3d4...` |
+    | `URL_SIGNING_KEY` | URL signing key. Generate: `openssl rand -hex 32` | `e5f6g7h8...` |
+    | `PUBLIC_ORIGIN` | External URL for callbacks | `https://eneo.example.com` |
+    | `DATABASE_URL` | PostgreSQL connection string | `postgresql://eneo:password@db:5432/eneo` |
+    | `REDIS_URL` | Redis connection string | `redis://redis:6379/0` |
 
-### SSL Certificate Configuration
+    **Default User Setup:**
 
-**Use Let's Encrypt Staging** for testing:
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `DEFAULT_TENANT_NAME` | - | Name for initial tenant |
+    | `DEFAULT_USER_EMAIL` | - | Email for initial admin user |
+    | `DEFAULT_USER_PASSWORD` | - | Password for initial admin user |
+    | `USING_ACCESS_MANAGEMENT` | `false` | Enable Users page in Admin panel |
 
-```yaml
-# In docker-compose.yml, traefik service:
-command:
-  - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
-```
+    **OIDC Authentication (Enterprise SSO):**
 
-**Use Custom Certificates:**
+    <Callout type="info">
+      **Glossary:** IdP = Identity Provider (Entra ID, MobilityGuard, Auth0). OIDC = OpenID Connect protocol.
 
-```yaml
-# Mount your certificates
-volumes:
-  - ./certs:/certs:ro
+      **Choose one mode:**
+      - **Single-Tenant via env vars** (`FEDERATION_PER_TENANT_ENABLED=false`): Configure OIDC in frontend env. Requires restart to change settings. Simplest for single-organization deployments.
+      - **Federation via API** (`FEDERATION_PER_TENANT_ENABLED=true`): Configure IdP via sysadmin API. Changes take effect immediately (no restart). Use for multi-tenant deployments OR single-tenant with dynamic configuration.
+    </Callout>
 
-# Configure Traefik to use them
-command:
-  - "--providers.file.filename=/certs/config.yml"
-```
+    **Multi-Tenant Federation (API-managed OIDC):**
 
-### Database Backups
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FEDERATION_PER_TENANT_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
+    | `ENCRYPTION_KEY` | - | 44-char base64 Fernet key (required for credentials & federation) |
+    | `INTRIC_SUPER_API_KEY` | - | Super admin API access |
 
-**Automated daily backups:**
+    **Generating ENCRYPTION_KEY:**
 
-```bash
-# Create backup script
-cat > backup.sh << 'EOF'
-#!/bin/bash
-BACKUP_DIR="/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-docker compose exec -T db pg_dump -U eneo eneo | gzip > "$BACKUP_DIR/eneo_$DATE.sql.gz"
-# Keep only last 7 days
-find $BACKUP_DIR -name "eneo_*.sql.gz" -mtime +7 -delete
-EOF
+    `ENCRYPTION_KEY` is **required** when enabling `TENANT_CREDENTIALS_ENABLED=true` or `FEDERATION_PER_TENANT_ENABLED=true`.
 
-chmod +x backup.sh
+    ```bash
+    # Development (with uv)
+    uv run python -m intric.cli.generate_encryption_key
 
-# Add to crontab (daily at 2 AM)
-crontab -e
-# Add: 0 2 * * * /path/to/backup.sh
-```
+    # Production (Docker)
+    docker compose run --rm backend python -m intric.cli.generate_encryption_key
 
-**Restore from backup:**
+    # Alternative (Python)
+    python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+    ```
 
-```bash
-gunzip -c backup.sql.gz | docker compose exec -T db psql -U eneo eneo
-```
+    <Callout type="error">
+      **Backup your ENCRYPTION_KEY securely.** Without it, encrypted credentials and federation secrets cannot be decrypted. If lost, you must re-enter all tenant API keys and reconfigure all IdP settings.
+    </Callout>
 
-### Resource Limits
+    **Upload Limits:**
 
-**Limit container resources:**
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `UPLOAD_MAX_FILE_SIZE` | `10485760` | Max file size in bytes (10MB) |
+    | `MAX_IN_QUESTION` | `1` | Max files per chat message |
+    | `TRANSCRIPTION_MAX_FILE_SIZE` | `10485760` | Max audio file size (10MB) |
 
-```yaml
-# In docker-compose.yml
-services:
-  backend:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          memory: 1G
-```
+    <Callout type="info">
+      **Can't upload multiple files?** Increase `MAX_IN_QUESTION` in backend env.
+    </Callout>
 
-### Environment-Specific Configuration
+    **Crawler Settings:**
 
-**Development vs Production:**
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `CRAWL_FEEDER_ENABLED` | `true` | Enable optimized crawling (keep `true`) |
+    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (~10 hours) |
+    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages per crawl |
 
-```bash
-# env_backend.env
-ENVIRONMENT=production  # or development
-DEBUG=false
-LOG_LEVEL=INFO  # or DEBUG for development
+    **Background Worker:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `WORKER_MAX_JOBS` | `15` | Max concurrent background jobs (should be ≤60% of DB pool size) |
+    | `TENANT_WORKER_CONCURRENCY_LIMIT` | `4` | Max concurrent jobs per tenant (prevents one tenant monopolizing workers) |
+
+    <Callout type="info">
+      **High CPU usage on worker?** Reduce `WORKER_MAX_JOBS` to limit concurrent document processing.
+    </Callout>
+
+    **Dynamic Credential Management:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `TENANT_CREDENTIALS_ENABLED` | `false` | Enable API-based credential management (Fernet encrypted) |
+
+    <Callout type="info">
+      **Recommended even for single-tenant deployments.** When `TENANT_CREDENTIALS_ENABLED=true`, you can add, update, or rotate AI provider API keys via the [Credentials API](#credentials-api) without restarting the backend. Credentials are encrypted with Fernet (AES-128-CBC + HMAC). Requires `ENCRYPTION_KEY` to be set.
+    </Callout>
+
+    **Integrations:**
+
+    <Callout type="info">
+      **Setting up SharePoint?** SharePoint integration requires `SHAREPOINT_WEBHOOK_CLIENT_STATE` for webhook validation. See the [SharePoint Integration Guide](/guides/sharepoint-integration) for complete setup instructions including Azure AD app registration.
+    </Callout>
+
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ### Frontend Environment Variables
+
+    <Callout type="warning">
+      **Important:** Eneo frontend uses **SvelteKit**, NOT Next.js. Use `INTRIC_*` variables, not `NEXT_PUBLIC_*`.
+    </Callout>
+
+    **Required:**
+
+    | Variable | Description | Example |
+    |----------|-------------|---------|
+    | `INTRIC_BACKEND_URL` | Backend URL for server-side rendering | `http://backend:8000` |
+    | `PUBLIC_INTRIC_BACKEND_URL` | Backend URL for client-side (browser) | `https://eneo.example.com/api` |
+    | `PUBLIC_ORIGIN` | External URL | `https://eneo.example.com` |
+    | `ORIGIN` | Cookie/CORS origin (same as PUBLIC_ORIGIN) | `https://eneo.example.com` |
+    | `JWT_SECRET` | **MUST match backend JWT_SECRET** | `a1b2c3d4...` |
+
+    **Optional:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `INTRIC_BACKEND_SERVER_URL` | - | Docker internal URL override (e.g., `http://backend:8000`) |
+    | `FEDERATION_PER_TENANT_ENABLED` | `false` | Enable multi-tenant IdP |
+
+    **Single-Tenant OIDC (if not using federation):**
+
+    | Variable | Description |
+    |----------|-------------|
+    | `OIDC_DISCOVERY_ENDPOINT` | OIDC provider discovery URL |
+    | `OIDC_CLIENT_ID` | OIDC client ID |
+    | `OIDC_CLIENT_SECRET` | OIDC client secret |
+
+    <Callout type="info">
+      **Docker networking tip:** In Docker, `localhost` means "this container" - not your host machine. Use the Docker service name `backend` for container-to-container communication:
+      - `INTRIC_BACKEND_SERVER_URL=http://backend:8000` (correct - uses service name)
+      - `INTRIC_BACKEND_SERVER_URL=http://localhost:8000` (wrong - will fail)
+    </Callout>
+
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ### Database Environment Variables
+
+    | Variable | Description | Example |
+    |----------|-------------|---------|
+    | `POSTGRES_USER` | Database user | `eneo` |
+    | `POSTGRES_PASSWORD` | Database password (**change from default**) | Generated value |
+    | `POSTGRES_DB` | Database name | `eneo` |
+
+    <Callout type="warning">
+      **Never use the default password in production.** Generate a secure password:
+      ```bash
+      openssl rand -base64 24
+      ```
+    </Callout>
+
+  </Tabs.Tab>
+</Tabs>
+
+---
+
+## Reverse Proxy Requirements
+
+Any reverse proxy (Traefik, nginx, HAProxy, Caddy) must meet these requirements:
+
+**Routing:**
+
+| Path | Target | Description |
+|------|--------|-------------|
+| `/*` | Frontend (port 3000) | All requests except API |
+| `/api/*` | Backend (port 8000) | API endpoints |
+| `/docs` | Backend (port 8000) | OpenAPI documentation |
+| `/openapi.json` | Backend (port 8000) | OpenAPI spec |
+| `/version` | Backend (port 8000) | Version endpoint |
+
+**Headers:**
+- `X-Forwarded-Proto` - original protocol (https)
+- `X-Forwarded-For` - client IP address
+- `Host` - original host header
+
+**Requirements:**
+- WebSocket support (for real-time features)
+- TLS termination with valid certificate
+
+### Using nginx Instead of Traefik
+
+```nginx
+upstream frontend {
+    server frontend:3000;
+}
+
+upstream backend {
+    server backend:8000;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name eneo.example.com;
+
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+    # API routes to backend
+    location /api/ {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /docs {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+    }
+
+    location /openapi.json {
+        proxy_pass http://backend;
+    }
+
+    location /version {
+        proxy_pass http://backend;
+    }
+
+    # Everything else to frontend
+    location / {
+        proxy_pass http://frontend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
 ---
 
-## Monitoring & Logs
+## API Key Hierarchy
 
-### View Logs
+Eneo uses a three-tier API key system for different administrative tasks.
+
+| Key | Environment Variable | Purpose |
+|-----|---------------------|---------|
+| **Super API Key** | `INTRIC_SUPER_API_KEY` | Sysadmin operations: tenants, users, credentials, crawler settings |
+| **Super Duper API Key** | `INTRIC_SUPER_DUPER_API_KEY` | Module management: assigning modules to tenants |
+| **User API Key** | Generated per user | Admin operations within a tenant via `/api/v1/admin/` |
+
+<Callout type="info">
+  **Service Account Pattern:** We recommend creating a dedicated admin account (service account) for automated user provisioning via the admin API endpoints, rather than using personal accounts.
+</Callout>
+
+### Credentials API
+
+Manage AI provider credentials per tenant using the sysadmin API.
+
+<Callout type="warning">
+  **Prerequisite:** Set `TENANT_CREDENTIALS_ENABLED=true` and `ENCRYPTION_KEY` in backend env before using these endpoints. See [Per-Tenant Credentials](#environment-configuration) in the Backend configuration.
+</Callout>
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/litellm-overview.svg"
+    alt="LiteLLM Architecture showing credential flow from Sysadmin API to encrypted storage to AI providers"
+    className="w-full max-w-4xl mx-auto"
+  />
+</div>
+
+<Tabs items={['Set Credentials', 'List Credentials', 'Remove Credentials']}>
+  <Tabs.Tab>
+    ```bash
+    curl -X PUT "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}" \
+      -H "X-API-Key: your-super-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{"api_key": "sk-..."}'
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    curl "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/credentials" \
+      -H "X-API-Key: your-super-api-key"
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    curl -X DELETE "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}" \
+      -H "X-API-Key: your-super-api-key"
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+**Supported providers:** `openai`, `anthropic`, `azure`, `google`, `mistral`, `berget`, `gdm`, `vllm`
+
+<Callout type="warning">
+  Credentials are encrypted with Fernet (AES-128-CBC + HMAC). **Backup your `ENCRYPTION_KEY`** - if lost, all credentials must be re-entered.
+</Callout>
+
+### Crawler Settings API
+
+Configure crawling behavior per tenant.
+
+<Tabs items={['Set Settings', 'Get Settings', 'Reset to Defaults']}>
+  <Tabs.Tab>
+    ```bash
+    curl -X PUT "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings" \
+      -H "X-API-Key: your-super-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{"crawl_feeder_enabled": true, "closespider_itemcount": 20000}'
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    curl "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings" \
+      -H "X-API-Key: your-super-api-key"
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    curl -X DELETE "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings" \
+      -H "X-API-Key: your-super-api-key"
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+---
+
+## Enabling Features
+
+After deployment, some features require additional configuration in the Admin panel.
+
+### Crawler & Document Upload
+
+<Callout type="info">
+  To use the web crawler or upload documents for processing, the **worker service must be running** and at least one **embedding model must be enabled** in Admin → Models → Embeddings.
+</Callout>
+
+### Apps (Voice/Audio Features)
+
+<Callout type="info">
+  **Can't create Apps?** This feature requires a transcription model. Go to Admin → Models → Transcription tab and enable a model like Whisper.
+</Callout>
+
+### Sysadmin API Access
+
+To use system administration endpoints (tenants, credentials, crawler settings), set the API key in `env_backend.env`:
+
+```bash
+INTRIC_SUPER_API_KEY=your-secure-api-key
+```
+
+### Modules API Access
+
+To manage module assignments to tenants, set a separate higher-privileged API key:
+
+```bash
+INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run | Uncomment vars in env_backend.env, check `docker logs eneo_db_init` |
+| Can't see Users page in Admin | `USING_ACCESS_MANAGEMENT=false` | Set to `true`, restart backend |
+| Frontend shows wrong API URL | `PUBLIC_INTRIC_BACKEND_URL` incorrect | Set to external URL (not localhost in prod) |
+| Can't upload multiple files | `MAX_IN_QUESTION=1` | Increase value in backend env |
+| Large file uploads fail | `UPLOAD_MAX_FILE_SIZE` too low | Increase value (default 10MB = 10485760 bytes) |
+| "Failed to decrypt credential" | `ENCRYPTION_KEY` missing or changed | Set correct key or re-enter credentials |
+| Credentials API returns 404/error | `TENANT_CREDENTIALS_ENABLED=false` | Set to `true`, requires `ENCRYPTION_KEY` |
+| OIDC redirect fails | `PUBLIC_ORIGIN` mismatch | Must match in backend, frontend, AND IdP config |
+| Crawls not processing | `CRAWL_FEEDER_ENABLED=false` | Set to `true` |
+| Crawls/uploads not working | Worker not running or no embedding model | Check worker is running, enable embedding model in Admin → Models |
+| Can't create Apps | No transcription model enabled | Admin → Models → Transcription tab, enable Whisper |
+| JWT token invalid | `JWT_SECRET` mismatch | Must be identical in backend AND frontend |
+| Worker jobs stuck or slow | Worker overloaded | Reduce `WORKER_MAX_JOBS` or increase resources |
+| `ECONNREFUSED 127.0.0.1:8000` | Frontend using localhost instead of Docker service | Set `INTRIC_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
+| HTTP to HTTPS redirect broken | Missing Traefik label | Ensure `traefik.enable=true` label on traefik service |
+| 502 Bad Gateway | Domain not replaced in docker-compose.yml | Replace `your-domain.com` in all 4 locations |
+
+### Debug Mode
+
+Enable detailed logging for troubleshooting:
+
+```bash
+# In env_backend.env
+LOGLEVEL=DEBUG
+```
+
+Then restart and view logs:
+
+```bash
+docker compose restart backend
+docker compose logs -f backend
+```
+
+### Service Health Checks
+
+```bash
+# Check all services are running
+docker compose ps
+
+# Test backend API
+curl https://your-domain.com/api/health
+
+# Check database
+docker compose exec db psql -U eneo -c "SELECT version()"
+
+# Check Redis
+docker compose exec redis redis-cli ping
+
+# View db-init logs (for first-run issues)
+docker logs eneo_db_init
+```
+
+### Container Logs
 
 ```bash
 # All services
@@ -295,276 +600,132 @@ docker compose logs -f
 docker compose logs -f backend
 
 # Last 100 lines
-docker compose logs --tail=100 backend
-```
-
-### Monitor Resource Usage
-
-```bash
-# Container stats
-docker stats
-
-# Disk usage
-docker system df
-```
-
-### Health Checks
-
-```bash
-# Check service health
-docker compose ps
-
-# Test backend API
-curl https://your-domain.com/api/health
-
-# Test database connection
-docker compose exec db psql -U eneo -c "SELECT 1"
+docker compose logs --tail=100 backend worker
 ```
 
 ---
 
 ## Maintenance
 
-### Update Eneo
+### Version Pinning (Recommended)
+
+<Callout type="warning">
+  **Production deployments should pin to specific version tags** instead of using `latest`. This gives you control over when updates are applied and makes rollbacks straightforward.
+</Callout>
+
+The example `docker-compose.yml` uses `:latest` tags for simplicity, but for production you should pin versions:
+
+```yaml
+# Default (not recommended for production)
+frontend:
+  image: ghcr.io/eneo-ai/eneo-frontend:latest
+
+# Production (pin to specific version)
+frontend:
+  image: ghcr.io/eneo-ai/eneo-frontend:v1.2.3
+backend:
+  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+worker:
+  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+```
+
+**Find available versions:**
+- GitHub Releases: https://github.com/eneo-ai/eneo/releases
+- Container Registry: https://github.com/orgs/eneo-ai/packages
+
+<Callout type="info">
+  **Always run the latest released version** to get bug fixes and security patches. Check the release notes before upgrading.
+</Callout>
+
+### Backups
+
+<Callout type="warning">
+  **Always back up before updating.** Take database and volume backups before any upgrade to enable rollback if issues occur.
+</Callout>
+
+**Database backup with pg_dump (recommended):**
 
 ```bash
-# Pull latest images
+# Create timestamped database backup
+docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
+
+# Restore from backup (if needed)
+gunzip -c backup_20250108.sql.gz | docker compose exec -T db psql -U eneo eneo
+```
+
+**Volume backup (for complete recovery):**
+
+```bash
+# Stop services first
+docker compose down
+
+# Backup PostgreSQL data volume
+docker run --rm -v eneo_postgres_data:/data -v $(pwd):/backup ubuntu \
+  tar czf /backup/postgres_volume_$(date +%Y%m%d).tar.gz /data
+
+# Backup Redis data volume (optional)
+docker run --rm -v eneo_redis_data:/data -v $(pwd):/backup ubuntu \
+  tar czf /backup/redis_volume_$(date +%Y%m%d).tar.gz /data
+```
+
+### Updating Eneo
+
+<Steps>
+### Back up your data
+
+```bash
+# Database backup (required)
+docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
+```
+
+### Update version tags (if pinned)
+
+Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
+
+### Pull and deploy
+
+```bash
+# Pull new images
 docker compose pull
 
-# Restart with new images
+# Deploy updated version
 docker compose up -d
 
-# Remove old images
+# Verify services are running
+docker compose ps
+```
+
+### Clean up old images
+
+```bash
 docker image prune -a
 ```
+</Steps>
 
-### Restart Services
+<Callout type="info">
+  **Rollback procedure:** If issues occur after an update, restore from your backup:
+  ```bash
+  docker compose down
+  gunzip -c backup_YYYYMMDD.sql.gz | docker compose exec -T db psql -U eneo eneo
+  docker compose up -d
+  ```
+  If using pinned versions, also revert the version tags in `docker-compose.yml`.
+</Callout>
 
-```bash
-# All services
-docker compose restart
-
-# Single service
-docker compose restart backend
-```
-
-### Scale Services
-
-```bash
-# Run multiple backend instances
-docker compose up -d --scale backend=3
-```
-
----
-
-## Kubernetes Deployment
-
-For larger deployments, use Kubernetes:
-
-### Prerequisites
-
-- Kubernetes cluster (1.24+)
-- kubectl configured
-- Helm 3 installed
-
-### Deployment Steps
+### Scaling
 
 ```bash
-# Add Eneo Helm repository (when available)
-helm repo add eneo https://charts.eneo.ai
-helm repo update
-
-# Create namespace
-kubectl create namespace eneo
-
-# Create secrets
-kubectl create secret generic eneo-secrets \
-  --from-literal=jwt-secret=$(openssl rand -hex 32) \
-  --from-literal=db-password=$(openssl rand -base64 32) \
-  --from-literal=openai-api-key=sk-... \
-  -n eneo
-
-# Install Eneo
-helm install eneo eneo/eneo \
-  --namespace eneo \
-  --set domain=eneo.your-company.com \
-  --set ingress.enabled=true \
-  --set postgresql.enabled=true \
-  --set redis.enabled=true
-```
-
-**Note**: Kubernetes Helm charts are in development. Check the [GitHub repository](https://github.com/eneo-ai/eneo) for updates.
-
----
-
-## Security Hardening
-
-### Change Default Credentials
-
-1. Log in with default credentials
-2. Go to **Settings** → **Profile**
-3. Change password
-4. Update email address
-5. Enable two-factor authentication (if available)
-
-### Firewall Configuration
-
-```bash
-# Ubuntu/Debian with ufw
-sudo ufw allow 22/tcp   # SSH
-sudo ufw allow 80/tcp   # HTTP
-sudo ufw allow 443/tcp  # HTTPS
-sudo ufw enable
-```
-
-### Secure Docker Socket
-
-```bash
-# Don't expose Docker socket
-# Remove this from docker-compose.yml if present:
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
-```
-
-### Regular Updates
-
-```bash
-# Update system packages
-sudo apt update && sudo apt upgrade -y
-
-# Update Docker images
-docker compose pull
-docker compose up -d
-
-# Update Docker itself
-sudo apt update && sudo apt install docker-ce docker-ce-cli containerd.io
-```
-
-### Enable Fail2ban
-
-```bash
-# Install fail2ban
-sudo apt install fail2ban
-
-# Configure for SSH
-sudo systemctl enable fail2ban
-sudo systemctl start fail2ban
+# Scale backend instances (with load balancer)
+docker compose up -d --scale backend=3 --scale worker=2
 ```
 
 ---
 
-## Troubleshooting
+## Related Documentation
 
-### Services Won't Start
-
-**Check logs:**
-```bash
-docker compose logs
-```
-
-**Common issues:**
-- Port conflicts (80, 443 already in use)
-- Missing environment variables
-- Insufficient disk space
-- Memory constraints
-
-### SSL Certificate Issues
-
-**Check Traefik logs:**
-```bash
-docker compose logs traefik
-```
-
-**Common issues:**
-- DNS not pointing to server
-- Firewall blocking ports 80/443
-- Let's Encrypt rate limits (use staging for testing)
-
-### Database Connection Errors
-
-**Test database:**
-```bash
-docker compose exec db psql -U eneo -c "SELECT version()"
-```
-
-**Check credentials:**
-- Ensure `DATABASE_URL` in `env_backend.env` matches `POSTGRES_PASSWORD` in `env_db.env`
-
-### Performance Issues
-
-**Check resources:**
-```bash
-docker stats
-```
-
-**Solutions:**
-- Increase server resources
-- Add resource limits to docker-compose.yml
-- Scale backend service
-- Optimize database (vacuum, indexes)
-
-### File Upload Failures
-
-**Ensure worker is running:**
-```bash
-docker compose ps worker
-docker compose logs worker
-```
-
-**Check disk space:**
-```bash
-df -h
-```
-
----
-
-## Alternative Deployment Methods
-
-### Without Traefik
-
-If you prefer using your own reverse proxy (Nginx, Caddy):
-
-```bash
-# Remove Traefik from docker-compose.yml
-# Expose backend and frontend ports directly
-services:
-  frontend:
-    ports:
-      - "3000:3000"
-  backend:
-    ports:
-      - "8123:8123"
-```
-
-Then configure your reverse proxy to forward:
-- `https://your-domain.com/*` → `http://localhost:3000`
-- `https://your-domain.com/api/*` → `http://localhost:8123`
-
-### Cloud Platforms
-
-**AWS:**
-- Use ECS or EKS
-- RDS for PostgreSQL
-- ElastiCache for Redis
-- S3 for file storage
-
-**Azure:**
-- Use Azure Container Instances or AKS
-- Azure Database for PostgreSQL
-- Azure Cache for Redis
-- Azure Blob Storage
-
-**Google Cloud:**
-- Use Cloud Run or GKE
-- Cloud SQL for PostgreSQL
-- Memorystore for Redis
-- Cloud Storage
-
----
-
-## Need Help?
-
-- **Documentation**: [GitHub docs](https://github.com/eneo-ai/eneo/tree/main/docs)
-- **Deployment Guide**: [DEPLOYMENT.md](https://github.com/eneo-ai/eneo/blob/main/docs/DEPLOYMENT.md)
-- **Issues**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
-- **Email**: digitalisering@sundsvall.se (public sector organizations)
+- [AI Provider Configuration](/guides/ai-providers) - Configure AI models and providers
+- [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) - Enterprise SSO setup
+- [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) - Simple SSO setup
+- [SharePoint Integration](/guides/sharepoint-integration) - Connect SharePoint and OneDrive
+- [Authentication Architecture](/docs/authentication-architecture) - Technical authentication details
+- [System Architecture](/docs/architecture) - Complete architecture overview

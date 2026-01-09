@@ -1,297 +1,420 @@
 # AI Provider Configuration
 
-Eneo is model-agnostic and supports multiple AI providers. This guide covers configuration for each supported provider.
+Eneo is model-agnostic and supports multiple AI providers through a unified routing layer. This guide covers architecture, configuration, and credential management for each supported provider.
+
+import { Callout, Tabs } from 'nextra/components'
 
 ## Overview
 
 Eneo supports the following AI providers:
-- **OpenAI** (GPT-4, GPT-3.5, etc.)
-- **Anthropic** (Claude)
-- **Azure OpenAI Service**
-- **Google Gemini**
-- **Local Models** (Ollama, LM Studio)
+- **OpenAI** (GPT-4o, GPT-4o-mini, GPT-5)
+- **Anthropic** (Claude 3.5, Claude 3.7, Claude Haiku 4.5)
+- **Azure OpenAI Service** (GPT-4o, GPT-5 variants)
+- **Google Gemini** (Gemini 1.5, Gemini 2.0)
+- **Regional Providers** (Berget AI, GDM - Swedish data residency)
+- **Self-hosted** (vLLM, compatible OpenAI API servers)
 
 You can configure multiple providers simultaneously and switch between them based on your needs.
 
 ---
 
+## Architecture
+
+Eneo routes all AI requests through **LiteLLM**, a unified API layer that supports 100+ provider APIs with consistent interfaces for completions, embeddings, and streaming.
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/litellm-overview.svg"
+    alt="LiteLLM Architecture Overview showing Service Layer (CompletionService, EmbeddingService) connecting through Adapter Layer (LiteLLMModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 100+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral), Regional/Swedish (Berget, GDM), and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials."
+    className="w-full max-w-5xl mx-auto"
+  />
+</div>
+
+### How Provider Routing Works
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+  <img
+    src="/diagrams/litellm-routing.svg"
+    alt="LiteLLM Provider Routing showing how Eneo routes AI requests through LiteLLM to various providers (OpenAI, Azure, Anthropic, local models) with automatic provider detection and credential management."
+    className="w-full max-w-5xl mx-auto"
+  />
+</div>
+
+The routing system uses model name prefixes to determine the target provider:
+
+| Prefix | Provider | Example |
+|--------|----------|---------|
+| `azure/` | Azure OpenAI | `azure/gpt-4o` |
+| `berget/` | Berget AI | `berget/llama-3-70b` |
+| `gdm/` | GDM (Swedish) | `gdm/mistral-large` |
+| `openai/` | OpenAI Direct | `openai/gpt-4o` |
+| (no prefix) | Default provider | `gpt-4o-mini` |
+
+### LiteLLM Adapter (Recommended)
+
+The `LiteLLMModelAdapter` is the recommended approach for all new model integrations:
+
+```python
+# Models with litellm_model_name field use LiteLLM routing
+completion_models:
+  - model_name: "gpt-4o-mini"
+    litellm_model_name: "azure/gpt-4o-mini"  # Routes via LiteLLM
+    context_window: 128000
+```
+
+**Benefits:**
+- Unified API for 100+ providers
+- Automatic retry and fallback logic
+- Consistent streaming support
+- Multi-tenant credential injection
+
+<Callout type="warning">
+  **Legacy Adapters (Deprecated)**: The following adapters are deprecated and maintained only for backward compatibility: `OpenAIModelAdapter`, `ClaudeModelAdapter`, `AzureOpenAIModelAdapter`, `MistralModelAdapter`, `VLLMModelAdapter`, `OVHCloudModelAdapter`. New models should use LiteLLM routing via the `litellm_model_name` field.
+</Callout>
+
+### Model Configuration
+
+Models are currently defined in `ai_models.yml`. This configuration approach will become more flexible in future updates.
+
+```yaml
+# Example from ai_models.yml
+completion_models:
+  - model_name: "gpt-5-azure"
+    litellm_model_name: "azure/gpt-5"
+    context_window: 400000
+    supports_json_output: true
+    supports_tool_use: true
+    supports_vision: true
+    supports_reasoning: true
+    description: "GPT-5 on Azure - Advanced reasoning with 400K context"
+```
+
+<Callout type="info">
+  **For Contributors**: To add new models, reference the GPT-5 implementation in `ai_models.yml`. Models with `litellm_model_name` automatically use the LiteLLM adapter, while models without it fall back to legacy adapters (not recommended for new models).
+</Callout>
+
+---
+
 ## OpenAI
 
-OpenAI provides access to GPT models including GPT-4, GPT-4 Turbo, and GPT-3.5 Turbo.
+OpenAI provides access to GPT models including GPT-4o, GPT-4o-mini, and the latest GPT-5 series.
 
-### Step 1: Get an API Key
+### Configuration
 
-1. Go to [OpenAI Platform](https://platform.openai.com/)
-2. Sign in or create an account
-3. Navigate to **API keys** in your account settings
-4. Click **Create new secret key**
-5. Copy the key (you won't be able to see it again)
+<Tabs items={['Environment Variables', 'Credential API (Recommended)']}>
+  <Tabs.Tab>
+    Add to your `env_backend.env`:
 
-### Step 2: Configure Eneo
+    ```bash
+    OPENAI_API_KEY=sk-...your-api-key
+    ```
 
-Add this to your `env_backend.env`:
+    Then restart the backend:
 
-```bash
-OPENAI_API_KEY=sk-...your-api-key
-```
+    ```bash
+    docker compose restart backend
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    Use the credential management API for multi-tenant deployments:
 
-### Step 3: Restart the Backend
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/openai" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{"api_key": "sk-...your-api-key"}'
+    ```
 
-```bash
-docker compose restart backend
-```
+    See [Credential Management](#credential-management) for details.
+  </Tabs.Tab>
+</Tabs>
 
 ### Available Models
 
-Once configured, these models will be available in Eneo:
-- `gpt-4o` (GPT-4 Omni - latest and most capable)
-- `gpt-4-turbo` (GPT-4 Turbo)
-- `gpt-4` (GPT-4)
-- `gpt-3.5-turbo` (GPT-3.5 Turbo - faster and more economical)
+| Model | Context | Features | Status |
+|-------|---------|----------|--------|
+| `gpt-4o` | 128K | Vision, Tool Use, JSON | **Recommended** |
+| `gpt-4o-mini` | 128K | Vision, Tool Use, JSON | **Recommended** (economical) |
+| `gpt-4-turbo` | 128K | Vision, Tool Use | Supported |
+| `gpt-3.5-turbo` | 16K | Basic | **Deprecated** |
+
+<Callout type="warning">
+  `gpt-3.5-turbo` is deprecated and will be removed in a future update. Migrate to `gpt-4o-mini` for a cost-effective alternative with better performance.
+</Callout>
 
 ### Cost Considerations
 
-OpenAI charges based on token usage:
-- **GPT-4**: Higher quality, higher cost
-- **GPT-3.5 Turbo**: Good quality, lower cost
-- **GPT-4 Turbo**: Balance of quality and cost
-
-Monitor your usage at [OpenAI Usage Dashboard](https://platform.openai.com/usage).
+- **GPT-4o-mini**: Best value for most use cases
+- **GPT-4o**: Higher capability for complex tasks
+- Monitor usage at [OpenAI Usage Dashboard](https://platform.openai.com/usage)
 
 ---
 
 ## Anthropic (Claude)
 
-Anthropic's Claude models offer strong performance with large context windows.
+Anthropic's Claude models offer strong performance with large context windows and advanced reasoning.
 
-### Step 1: Get an API Key
+### Configuration
 
-1. Go to [Anthropic Console](https://console.anthropic.com/)
-2. Sign in or create an account
-3. Navigate to **API Keys**
-4. Click **Create Key**
-5. Copy the key
+<Tabs items={['Environment Variables', 'Credential API (Recommended)']}>
+  <Tabs.Tab>
+    Add to your `env_backend.env`:
 
-### Step 2: Configure Eneo
+    ```bash
+    ANTHROPIC_API_KEY=sk-ant-...your-api-key
+    ```
 
-Add this to your `env_backend.env`:
+    Then restart the backend:
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-...your-api-key
-```
+    ```bash
+    docker compose restart backend
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    Use the credential management API:
 
-### Step 3: Restart the Backend
-
-```bash
-docker compose restart backend
-```
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/anthropic" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{"api_key": "sk-ant-...your-api-key"}'
+    ```
+  </Tabs.Tab>
+</Tabs>
 
 ### Available Models
 
-- `claude-3-opus` (Most capable, largest context)
-- `claude-3-sonnet` (Balanced performance)
-- `claude-3-haiku` (Fast and economical)
-- `claude-3.5-sonnet` (Latest Sonnet version)
+| Model | Context | Features | Status |
+|-------|---------|----------|--------|
+| `claude-3-7-sonnet-latest` | 200K | Vision, Tool Use, Extended Thinking | **Recommended** |
+| `claude-3-5-sonnet-latest` | 200K | Vision, Tool Use | **Recommended** |
+| `claude-haiku-4-5-20251001` | 200K | Vision, Tool Use | **Recommended** (fast) |
+| `claude-3-opus` | 200K | Vision, Tool Use | Supported |
+| `claude-3-sonnet` | 200K | Vision | **Deprecated** |
+| `claude-3-haiku` | 200K | Basic | **Deprecated** |
+
+<Callout type="info">
+  Claude 3.7 Sonnet includes **extended thinking** capabilities for complex reasoning tasks. Claude Haiku 4.5 provides excellent speed-to-quality ratio for high-throughput applications.
+</Callout>
 
 ### Key Features
 
 - **Large Context**: Up to 200K tokens
-- **Strong Reasoning**: Excellent for complex tasks
-- **Safety**: Built-in safety features
+- **Extended Thinking**: Deep reasoning mode (Claude 3.7)
+- **Vision**: Image understanding and analysis
+- **Safety**: Built-in constitutional AI safety
 
 ---
 
 ## Azure OpenAI Service
 
-Azure OpenAI provides OpenAI models through Microsoft Azure with enterprise features.
+Azure OpenAI provides OpenAI models through Microsoft Azure with enterprise features, including GPT-5 variants with advanced reasoning.
 
-### Step 1: Create an Azure OpenAI Resource
+### Configuration
+
+<Tabs items={['Environment Variables', 'Credential API (Recommended)']}>
+  <Tabs.Tab>
+    Add to your `env_backend.env`:
+
+    ```bash
+    AZURE_OPENAI_API_KEY=your-azure-key
+    AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+    AZURE_OPENAI_API_VERSION=2024-02-15-preview
+    ```
+
+    Then restart the backend:
+
+    ```bash
+    docker compose restart backend
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    Use the credential management API:
+
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/azure" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "api_key": "your-azure-key",
+        "api_base": "https://your-resource.openai.azure.com/",
+        "api_version": "2024-02-15-preview"
+      }'
+    ```
+  </Tabs.Tab>
+</Tabs>
+
+### Available Models
+
+| Model | Context | Features | Status |
+|-------|---------|----------|--------|
+| `gpt-5-azure` | 400K | Vision, Tool Use, Reasoning | **Recommended** |
+| `gpt-5-mini-azure` | 400K | Vision, Tool Use, Reasoning | **Recommended** (balanced) |
+| `gpt-5-nano-azure` | 400K | Vision, Tool Use, Reasoning | **Recommended** (fast) |
+| `gpt-4o-azure` | 128K | Vision, Tool Use, JSON | Supported |
+| `gpt-4o-mini-azure` | 128K | Vision, Tool Use, JSON | Supported |
+
+<Callout type="info">
+  **GPT-5 on Azure**: The GPT-5 series offers 400K token context windows and advanced reasoning capabilities. Models are available in three tiers: full (`gpt-5`), balanced (`gpt-5-mini`), and fast (`gpt-5-nano`).
+</Callout>
+
+### Azure Setup Steps
 
 1. Go to [Azure Portal](https://portal.azure.com)
-2. Search for **Azure OpenAI**
-3. Click **Create** and fill in:
-   - **Subscription**: Your Azure subscription
-   - **Resource group**: Create new or select existing
-   - **Region**: Choose a region
-   - **Name**: Your resource name
-   - **Pricing tier**: Select based on your needs
-4. Click **Review + Create** → **Create**
+2. Create an **Azure OpenAI** resource
+3. Navigate to **Model deployments** → **Create**
+4. Deploy desired models (e.g., `gpt-4o`, `gpt-5`)
+5. Note your **Endpoint** and **API Key** from **Keys and Endpoint**
 
-### Step 2: Deploy a Model
-
-1. Go to your Azure OpenAI resource
-2. Navigate to **Model deployments** → **Create**
-3. Select a model (e.g., `gpt-4`, `gpt-35-turbo`)
-4. Give it a deployment name (you'll use this in configuration)
-5. Click **Create**
-
-### Step 3: Get Your Credentials
-
-1. In your Azure OpenAI resource, go to **Keys and Endpoint**
-2. Note:
-   - **Endpoint** (e.g., `https://your-resource.openai.azure.com/`)
-   - **Key 1** or **Key 2**
-
-### Step 4: Configure Eneo
-
-Add these to your `env_backend.env`:
-
-```bash
-AZURE_OPENAI_API_KEY=your-azure-key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
-AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
-```
-
-### Step 5: Restart the Backend
-
-```bash
-docker compose restart backend
-```
-
-### Benefits of Azure OpenAI
+### Benefits
 
 - **Enterprise SLA**: Microsoft's service level agreement
-- **Data Residency**: Keep data in specific Azure regions
+- **Data Residency**: Keep data in specific Azure regions (EU, Sweden available)
 - **Private Network**: Use Azure Virtual Networks
-- **Microsoft Support**: Enterprise support options
-- **Compliance**: Additional compliance certifications
+- **Compliance**: SOC 2, ISO 27001, GDPR
 
 ---
 
 ## Google Gemini
 
-Google's Gemini models offer multimodal capabilities and competitive performance.
+Google's Gemini models offer multimodal capabilities with very large context windows.
 
-### Step 1: Get an API Key
+### Configuration
 
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Sign in with your Google account
-3. Click **Create API Key**
-4. Select or create a Google Cloud project
-5. Copy the API key
+<Tabs items={['Environment Variables', 'Credential API (Recommended)']}>
+  <Tabs.Tab>
+    Add to your `env_backend.env`:
 
-### Step 2: Configure Eneo
+    ```bash
+    GOOGLE_API_KEY=AIza...your-api-key
+    ```
 
-Add this to your `env_backend.env`:
+    Then restart the backend:
 
-```bash
-GOOGLE_API_KEY=AIza...your-api-key
-```
+    ```bash
+    docker compose restart backend
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    Use the credential management API:
 
-### Step 3: Restart the Backend
-
-```bash
-docker compose restart backend
-```
+    ```bash
+    curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/google" \
+      -H "X-API-Key: your-super-admin-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{"api_key": "AIza...your-api-key"}'
+    ```
+  </Tabs.Tab>
+</Tabs>
 
 ### Available Models
 
-- `gemini-pro` (Text-only model)
-- `gemini-pro-vision` (Multimodal model with image support)
-- `gemini-1.5-pro` (Latest version with extended capabilities)
+| Model | Context | Features | Status |
+|-------|---------|----------|--------|
+| `gemini-2.0-flash` | 1M | Vision, Tool Use, Audio | **Recommended** |
+| `gemini-1.5-pro` | 1M | Vision, Tool Use | Supported |
+| `gemini-1.5-flash` | 1M | Vision, Tool Use | Supported (fast) |
+| `gemini-pro` | 32K | Basic | **Deprecated** |
 
 ### Key Features
 
-- **Multimodal**: Process text and images
-- **Long Context**: Up to 1M tokens (Gemini 1.5 Pro)
-- **Fast**: Quick response times
+- **Massive Context**: Up to 1M tokens
+- **Multimodal**: Process text, images, and audio
+- **Fast**: Quick response times with Flash variants
 
 ---
 
-## Local Models (Ollama)
+## Regional Providers (Swedish Data Residency)
 
-Run AI models locally on your own hardware for complete data privacy.
+For organizations requiring data to remain within Sweden or the EU, Eneo supports regional AI providers.
 
-### Step 1: Install Ollama
+### Berget AI
 
-1. Download Ollama from [ollama.ai](https://ollama.ai)
-2. Install on your server or local machine
-3. Pull a model:
-   ```bash
-   ollama pull llama2
-   ollama pull mistral
-   ollama pull codellama
-   ```
-
-### Step 2: Configure Eneo
-
-Add this to your `env_backend.env`:
+Swedish AI infrastructure with data residency guarantees.
 
 ```bash
-OLLAMA_BASE_URL=http://localhost:11434
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/berget" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "your-berget-api-key",
+    "api_base": "https://api.berget.ai/v1"
+  }'
 ```
 
-If Ollama is on a different server:
+**Available Models:**
+- `berget/llama-3-70b` - Llama 3 70B hosted in Sweden
+- `berget/mistral-large` - Mistral Large with Swedish data residency
+
+### GDM (Government Digital Services)
+
+Swedish government-approved AI infrastructure.
+
 ```bash
-OLLAMA_BASE_URL=http://ollama-server:11434
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/gdm" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "your-gdm-api-key",
+    "api_base": "https://api.gdm.se/v1"
+  }'
 ```
 
-### Step 3: Restart the Backend
+<Callout type="info">
+  Regional providers are ideal for Swedish municipalities, government agencies, and organizations with strict data sovereignty requirements.
+</Callout>
+
+---
+
+## Self-Hosted Models (vLLM)
+
+Run AI models on your own infrastructure for complete data privacy and control.
+
+### vLLM Configuration
+
+vLLM provides high-performance inference with an OpenAI-compatible API.
+
+Add to your `env_backend.env`:
 
 ```bash
-docker compose restart backend
+VLLM_BASE_URL=http://your-vllm-server:8000/v1
+VLLM_API_KEY=your-vllm-api-key  # If authentication is enabled
 ```
 
-### Popular Models
+Or use the credential API:
 
-- `llama2` (Meta's Llama 2, various sizes)
-- `mistral` (Mistral AI's open model)
-- `codellama` (Code-specialized model)
-- `neural-chat` (Intel's conversational model)
-- `starling-lm` (High-performing open model)
+```bash
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/vllm" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "your-vllm-api-key",
+    "api_base": "http://your-vllm-server:8000/v1"
+  }'
+```
 
 ### Hardware Requirements
 
-Model performance depends on your hardware:
-- **7B models**: 8GB RAM minimum
-- **13B models**: 16GB RAM minimum
-- **70B models**: 64GB RAM, GPU recommended
+| Model Size | VRAM Required | Recommended GPU |
+|------------|---------------|-----------------|
+| 7B | 16GB | RTX 4090, A10 |
+| 13B | 32GB | A100-40GB |
+| 70B | 140GB | 2x A100-80GB |
 
-### Benefits of Local Models
+### Benefits
 
 - **Complete Privacy**: Data never leaves your infrastructure
-- **No API Costs**: Only hardware costs
-- **Offline Capable**: No internet required
-- **Customizable**: Fine-tune models for your needs
-
----
-
-## LM Studio
-
-Alternative to Ollama for running local models with a GUI.
-
-### Step 1: Install LM Studio
-
-1. Download from [lmstudio.ai](https://lmstudio.ai)
-2. Install on your server
-3. Download models through the LM Studio interface
-
-### Step 2: Start the Server
-
-1. In LM Studio, go to the **Local Server** tab
-2. Click **Start Server**
-3. Note the server URL (usually `http://localhost:1234`)
-
-### Step 3: Configure Eneo
-
-Add this to your `env_backend.env`:
-
-```bash
-LM_STUDIO_BASE_URL=http://localhost:1234
-```
-
-### Step 4: Restart the Backend
-
-```bash
-docker compose restart backend
-```
+- **No API Costs**: Only hardware/cloud compute costs
+- **Customizable**: Fine-tune and deploy custom models
+- **Low Latency**: No network round-trip to external APIs
 
 ---
 
 ## Using Multiple Providers
 
-You can configure multiple providers simultaneously:
+You can configure multiple providers simultaneously. Users can then select their preferred model when creating assistants or chatting.
+
+**Environment variables approach:**
 
 ```bash
 # OpenAI
@@ -303,46 +426,126 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Azure OpenAI
 AZURE_OPENAI_API_KEY=...
 AZURE_OPENAI_ENDPOINT=...
-AZURE_OPENAI_DEPLOYMENT_NAME=...
 
 # Google Gemini
 GOOGLE_API_KEY=AIza...
 
-# Local Ollama
-OLLAMA_BASE_URL=http://localhost:11434
+# Self-hosted
+VLLM_BASE_URL=http://localhost:8000/v1
 ```
 
-Users can then select their preferred model when creating assistants or chatting.
+**Credential API approach (recommended for multi-tenant):**
+
+Configure each provider per-tenant using the credential management API. See [Credential Management](#credential-management) below.
+
+---
+
+## Credential Management
+
+For multi-tenant deployments, API credentials are managed per-tenant through a secure API. Credentials are encrypted using Fernet (AES-128-CBC + HMAC-SHA256) before storage.
+
+### Authentication
+
+All credential endpoints require the `INTRIC_SUPER_API_KEY` header:
+
+```bash
+-H "X-API-Key: your-super-admin-api-key"
+```
+
+### Set Provider Credentials
+
+```bash
+curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "your-provider-api-key",
+    "api_base": "https://api.provider.com/v1"  # Optional, for custom endpoints
+  }'
+```
+
+**Supported providers:** `openai`, `anthropic`, `azure`, `google`, `mistral`, `berget`, `gdm`, `vllm`
+
+### List Tenant Credentials
+
+```bash
+curl "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+Response shows configured providers (credentials are masked):
+
+```json
+{
+  "credentials": [
+    {"provider": "azure", "configured": true, "api_key": "****...****"},
+    {"provider": "anthropic", "configured": true, "api_key": "****...****"}
+  ]
+}
+```
+
+### Remove Provider Credentials
+
+```bash
+curl -X DELETE "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+### Encryption Details
+
+Credentials are encrypted at rest using Fernet encryption:
+
+| Aspect | Details |
+|--------|---------|
+| Algorithm | Fernet (AES-128-CBC + HMAC-SHA256) |
+| Key Source | `ENCRYPTION_KEY` environment variable |
+| Storage Format | `enc:fernet:v1:<ciphertext>` |
+
+<Callout type="warning">
+  **Backup your `ENCRYPTION_KEY`**: If lost, all stored credentials become unrecoverable and must be re-entered for each tenant.
+</Callout>
+
+Generate an encryption key:
+
+```bash
+uv run python -m intric.cli.generate_encryption_key
+```
 
 ---
 
 ## Model Selection Guidelines
 
-### Choose OpenAI if:
-- You need the most capable models
-- You want fast response times
-- You're okay with cloud-based processing
+### Choose Azure OpenAI (GPT-5) if:
+- You need the most advanced reasoning capabilities
+- You require enterprise SLA and compliance
+- You want 400K token context windows
+- Data residency in EU/Sweden is important
+
+### Choose OpenAI Direct if:
+- You want fast access to latest models
+- You don't need enterprise compliance features
+- Cost efficiency with GPT-4o-mini is important
 
 ### Choose Anthropic Claude if:
-- You need very large context windows
-- You want strong reasoning capabilities
-- You prefer Anthropic's approach to AI safety
-
-### Choose Azure OpenAI if:
-- You need enterprise SLA and support
-- You require specific data residency
-- You're already using Azure services
+- You need extended thinking for complex analysis
+- You want strong reasoning with 200K context
+- You prefer Claude's writing style and safety approach
 
 ### Choose Google Gemini if:
-- You need multimodal capabilities
-- You want long context support
-- You prefer Google's ecosystem
+- You need massive 1M token context
+- Multimodal processing (text, images, audio) is required
+- You want fast response times with Flash variants
 
-### Choose Local Models if:
-- Data privacy is paramount
-- You want to avoid API costs
-- You have sufficient hardware
-- You need offline capabilities
+### Choose Regional Providers (Berget/GDM) if:
+- Data must remain in Sweden
+- You're a Swedish municipality or government agency
+- Compliance with Swedish data sovereignty requirements
+
+### Choose Self-Hosted (vLLM) if:
+- Complete data privacy is paramount
+- You want to eliminate API costs
+- You have GPU infrastructure available
+- You need to run custom fine-tuned models
 
 ---
 
@@ -373,47 +576,56 @@ Check your usage regularly:
 
 ## Troubleshooting
 
-### Invalid API Key
+### Invalid API Key (401 Errors)
 
 **Symptoms**: Authentication errors, 401 responses
 
 **Solutions**:
-- Verify the API key is copied correctly
-- Check for extra spaces or line breaks
-- Ensure the key hasn't expired
-- Verify the key has necessary permissions
+- Verify the API key is copied correctly (no extra spaces)
+- Check if the key has expired
+- For credential API: Verify `INTRIC_SUPER_API_KEY` is correct
+- For Azure: Ensure endpoint URL ends with `/`
 
-### Rate Limit Errors
+### Rate Limit Errors (429)
 
 **Symptoms**: 429 status codes, "rate limit exceeded"
 
 **Solutions**:
-- Check your API tier limits
-- Implement request queuing
-- Upgrade your API tier
-- Spread load across multiple keys/providers
+- Check your API tier limits with the provider
+- Consider using multiple providers for load distribution
+- Upgrade your API tier if needed
+- For Azure: Check your TPM (tokens per minute) quota
 
 ### Model Not Available
 
-**Symptoms**: Model name not recognized
+**Symptoms**: Model name not recognized, routing errors
 
 **Solutions**:
-- Verify model name spelling
-- Check model availability in your region
-- Ensure you have access to the model
-- Review provider's model list
+- Verify model name matches `ai_models.yml` exactly
+- Check if `litellm_model_name` prefix is correct (e.g., `azure/gpt-4o`)
+- Ensure credentials are configured for the target provider
+- For new models: Add to `ai_models.yml` with correct LiteLLM routing
+
+### Credential Decryption Errors
+
+**Symptoms**: "Failed to decrypt credential" errors
+
+**Solutions**:
+- Verify `ENCRYPTION_KEY` is set correctly in environment
+- If key was changed/lost, re-enter credentials via API
+- Check that credentials were stored with the current encryption key
 
 ### Connection Errors
 
 **For cloud providers:**
 - Check internet connectivity
-- Verify firewall rules allow outbound HTTPS
-- Check provider status page
+- Verify firewall allows outbound HTTPS (443)
+- Check provider status pages
 
-**For local models:**
-- Ensure Ollama/LM Studio is running
-- Verify the URL and port
-- Check Docker network settings (if using containers)
+**For self-hosted (vLLM):**
+- Verify the vLLM server is running
+- Check the URL and port configuration
+- Ensure Docker network allows communication
 
 ---
 
@@ -421,33 +633,40 @@ Check your usage regularly:
 
 1. **Protect API Keys**
    - Never commit keys to version control
-   - Use environment variables
+   - Use the credential API for multi-tenant deployments (encrypted storage)
    - Rotate keys regularly
+   - Use separate keys for development and production
 
-2. **Network Security**
+2. **Encryption Key Management**
+   - Securely backup `ENCRYPTION_KEY`
+   - Store in secrets manager (AWS Secrets Manager, HashiCorp Vault)
+   - Never share or commit encryption keys
+
+3. **Network Security**
    - Use HTTPS for all API connections
-   - Consider VPN for local model access
-   - Implement firewall rules
+   - For self-hosted: Use VPN or private networks
+   - Implement firewall rules for vLLM endpoints
 
-3. **Access Control**
-   - Limit who can configure API keys
-   - Use separate keys for different environments
-   - Monitor API usage for anomalies
+4. **Access Control**
+   - Limit `INTRIC_SUPER_API_KEY` access to administrators
+   - Use separate credentials per tenant
+   - Monitor credential API usage for anomalies
 
-4. **Data Handling**
-   - Review provider data policies
-   - Use local models for sensitive data
-   - Implement data retention policies
+5. **Data Handling**
+   - Review provider data policies before use
+   - Use regional providers (Berget/GDM) or self-hosted for sensitive data
+   - Consider data residency requirements
 
 ---
 
 ## Need Help?
 
-- Check the [security guide](/guides/security-compliance)
+- Check the [Security Guide](/guides/security-compliance)
 - Visit [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
 - Review provider documentation:
   - [OpenAI Docs](https://platform.openai.com/docs)
   - [Anthropic Docs](https://docs.anthropic.com)
   - [Azure OpenAI Docs](https://learn.microsoft.com/azure/ai-services/openai/)
   - [Google AI Docs](https://ai.google.dev/docs)
-  - [Ollama Docs](https://ollama.ai/docs)
+  - [LiteLLM Docs](https://docs.litellm.ai/)
+  - [vLLM Docs](https://docs.vllm.ai/)
