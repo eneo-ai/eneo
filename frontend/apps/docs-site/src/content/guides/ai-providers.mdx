@@ -23,21 +23,17 @@ You can configure multiple providers simultaneously and switch between them base
 Eneo routes all AI requests through **LiteLLM**, a unified API layer that supports 100+ provider APIs with consistent interfaces for completions, embeddings, and streaming.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/litellm-overview.svg"
-    alt="LiteLLM Architecture Overview showing Service Layer (CompletionService, EmbeddingService) connecting through Adapter Layer (LiteLLMModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 100+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral), Regional/Swedish (Berget, GDM), and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials."
-    className="w-full max-w-5xl mx-auto"
-  />
+
+![LiteLLM Architecture Overview showing Service Layer (CompletionService, EmbeddingService) connecting through Adapter Layer (LiteLLMModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 100+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral), Regional/Swedish (Berget, GDM), and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials.](/diagrams/litellm-overview.svg)
+
 </div>
 
 ### How Provider Routing Works
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/litellm-routing.svg"
-    alt="LiteLLM Provider Routing showing how Eneo routes AI requests through LiteLLM to various providers (OpenAI, Azure, Anthropic, local models) with automatic provider detection and credential management."
-    className="w-full max-w-5xl mx-auto"
-  />
+
+![LiteLLM Provider Routing showing how Eneo routes AI requests through LiteLLM to various providers (OpenAI, Azure, Anthropic, local models) with automatic provider detection and credential management.](/diagrams/litellm-routing.svg)
+
 </div>
 
 The routing system uses model name prefixes to determine the target provider:

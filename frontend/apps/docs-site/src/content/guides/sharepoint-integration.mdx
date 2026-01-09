@@ -7,11 +7,9 @@ This guide describes how to configure the SharePoint integration in Eneo. Once s
 The SharePoint integration enables connecting SharePoint sites and OneDrive folders to Eneo. When the integration is configured, users can select which folders or sites they want to import, and Eneo automatically fetches the content and keeps it up to date via webhooks.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/sharepoint-integration.svg"
-    alt="SharePoint Integration Architecture showing User connecting to Eneo Platform (Backend API, SharePoint Service, Worker, PostgreSQL, Webhook Endpoint) which communicates with Microsoft Cloud (Azure AD, Microsoft Graph API, SharePoint & OneDrive). Includes authentication methods (Service Account, Tenant App, User OAuth) and webhook subscription lifecycle."
-    className="w-full max-w-5xl mx-auto"
-  />
+
+![SharePoint Integration Architecture showing User connecting to Eneo Platform (Backend API, SharePoint Service, Worker, PostgreSQL, Webhook Endpoint) which communicates with Microsoft Cloud (Azure AD, Microsoft Graph API, SharePoint & OneDrive). Includes authentication methods (Service Account, Tenant App, User OAuth) and webhook subscription lifecycle.](/diagrams/sharepoint-integration.svg)
+
 </div>
 
 There are two different use cases to consider:
