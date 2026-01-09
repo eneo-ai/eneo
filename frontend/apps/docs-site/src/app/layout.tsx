@@ -63,7 +63,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           pageMap={await getPageMap()}
           docsRepositoryBase="https://github.com/eneo-ai/eneo/tree/main/frontend/apps/docs-site"
           footer={footer}
-          // ... Your additional layout options
         >
           {children}
         </Layout>
