@@ -149,9 +149,9 @@ class Worker:
         # Allows Scrapy/Twisted reactor cleanup via crochet
         self.job_completion_wait = 60  # seconds
 
-        # ARQ lifecycle hooks for centralized job status management
-        # These run for ALL job types, providing consistent state tracking
-        self.on_job_start = self._on_job_start
+        # ARQ lifecycle hooks for job observability
+        # NOTE: on_job_start removed - conflicts with mark_job_started() CAS check
+        # after_job_end is safe - runs AFTER job completes, no CAS conflict
         self.after_job_end = self._after_job_end
 
     async def _on_job_start(self, ctx: dict) -> None:

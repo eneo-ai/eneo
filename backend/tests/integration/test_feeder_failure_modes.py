@@ -55,14 +55,18 @@ class TestZombieLeaderScenario:
 
         # Verify Feeder B cannot acquire while lock is valid
         acquired_b_before = await election_b.try_acquire()
-        assert acquired_b_before is False, "Feeder B should NOT acquire while lock valid"
+        assert acquired_b_before is False, (
+            "Feeder B should NOT acquire while lock valid"
+        )
 
         # Simulate lock expiry by deleting it (simulates 30s passing)
         await redis_client.delete("crawl_feeder:leader")
 
         # Now Feeder B can acquire - this is the Zombie Leader scenario
         acquired_b_after = await election_b.try_acquire()
-        assert acquired_b_after is True, "Feeder B acquires after lock expires (Zombie Leader)"
+        assert acquired_b_after is True, (
+            "Feeder B acquires after lock expires (Zombie Leader)"
+        )
 
         # Cleanup
         await redis_client.delete("crawl_feeder:leader")
@@ -221,9 +225,12 @@ class TestCrashBeforeLremRecovery:
             )
 
             # This should return True (success) despite the exception
-            success, returned_job_id = await job_enqueuer.enqueue(job_data, tenant_id)
+            success, is_duplicate, returned_job_id = await job_enqueuer.enqueue(
+                job_data, tenant_id
+            )
 
         assert success is True, "Duplicate job_id error should be treated as success"
+        assert is_duplicate is True, "Should be marked as duplicate"
         assert returned_job_id == job_id, "Should return the job_id"
 
     async def test_real_error_not_treated_as_success(
@@ -256,13 +263,14 @@ class TestCrashBeforeLremRecovery:
             )
 
             # This should return False (failure) for real errors
-            success, returned_job_id = await job_enqueuer.enqueue(job_data, tenant_id)
+            success, is_duplicate, returned_job_id = await job_enqueuer.enqueue(
+                job_data, tenant_id
+            )
 
         assert success is False, "Real errors should NOT be treated as success"
+        assert is_duplicate is False, "Should not be marked as duplicate"
 
-    async def test_various_duplicate_error_messages(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_various_duplicate_error_messages(self, redis_client: aioredis.Redis):
         """Test various forms of duplicate job error messages are handled.
 
         ARQ or other queue systems might phrase the error differently.
@@ -298,9 +306,16 @@ class TestCrashBeforeLremRecovery:
             with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
                 mock_job_manager.enqueue = AsyncMock(side_effect=Exception(error_msg))
 
-                success, _ = await job_enqueuer.enqueue(job_data, tenant_id)
+                success, is_duplicate, _ = await job_enqueuer.enqueue(
+                    job_data, tenant_id
+                )
 
-            assert success is True, f"Error '{error_msg}' should be treated as duplicate"
+            assert success is True, (
+                f"Error '{error_msg}' should be treated as duplicate"
+            )
+            assert is_duplicate is True, (
+                f"Error '{error_msg}' should be marked as duplicate"
+            )
 
 
 @pytest.mark.integration
@@ -367,7 +382,9 @@ class TestPendingQueueIdempotency:
 
         # Verify FIFO order - access tuple index 1 for job_data dict
         for i, (raw_bytes, job_data) in enumerate(pending):
-            assert job_data["url"] == f"https://example.com/{i}", f"Job {i} should be in FIFO order"
+            assert job_data["url"] == f"https://example.com/{i}", (
+                f"Job {i} should be in FIFO order"
+            )
 
         # Cleanup
         await redis_client.delete(queue_key)

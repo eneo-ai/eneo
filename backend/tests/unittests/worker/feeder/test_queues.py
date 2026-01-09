@@ -139,7 +139,7 @@ class TestJobEnqueuerEnqueue:
 
     @pytest.mark.asyncio
     async def test_returns_success_on_successful_enqueue(self):
-        """Should return (True, job_id) on successful enqueue."""
+        """Should return (True, False, job_id) on successful enqueue."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -163,41 +163,46 @@ class TestJobEnqueuerEnqueue:
             mock_manager.enqueue = AsyncMock()
 
             enqueuer = JobEnqueuer()
-            success, returned_id = await enqueuer.enqueue(job_data, tenant_id)
+            success, is_duplicate, returned_id = await enqueuer.enqueue(
+                job_data, tenant_id
+            )
 
             assert success is True
+            assert is_duplicate is False
             assert returned_id == job_id
             mock_manager.enqueue.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_invalid_job_id(self):
-        """Should return (False, nil_uuid) when job_id is invalid."""
+        """Should return (False, False, nil_uuid) when job_id is invalid."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_data = {"job_id": "not-a-uuid"}
 
         enqueuer = JobEnqueuer()
-        success, returned_id = await enqueuer.enqueue(job_data, uuid4())
+        success, is_duplicate, returned_id = await enqueuer.enqueue(job_data, uuid4())
 
         assert success is False
+        assert is_duplicate is False
         assert returned_id == UUID("00000000-0000-0000-0000-000000000000")
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_missing_job_id(self):
-        """Should return (False, nil_uuid) when job_id is missing."""
+        """Should return (False, False, nil_uuid) when job_id is missing."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_data = {"url": "https://example.com"}
 
         enqueuer = JobEnqueuer()
-        success, returned_id = await enqueuer.enqueue(job_data, uuid4())
+        success, is_duplicate, returned_id = await enqueuer.enqueue(job_data, uuid4())
 
         assert success is False
+        assert is_duplicate is False
         assert returned_id == UUID("00000000-0000-0000-0000-000000000000")
 
     @pytest.mark.asyncio
     async def test_treats_duplicate_job_as_success(self):
-        """Should return (True, job_id) when job already exists in ARQ."""
+        """Should return (True, True, job_id) when job already exists in ARQ."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -222,14 +227,17 @@ class TestJobEnqueuerEnqueue:
             )
 
             enqueuer = JobEnqueuer()
-            success, returned_id = await enqueuer.enqueue(job_data, uuid4())
+            success, is_duplicate, returned_id = await enqueuer.enqueue(
+                job_data, uuid4()
+            )
 
             assert success is True
+            assert is_duplicate is True  # This is a duplicate!
             assert returned_id == job_id
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_real_error(self):
-        """Should return (False, job_id) on non-duplicate errors."""
+        """Should return (False, False, job_id) on non-duplicate errors."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -254,9 +262,12 @@ class TestJobEnqueuerEnqueue:
             )
 
             enqueuer = JobEnqueuer()
-            success, returned_id = await enqueuer.enqueue(job_data, uuid4())
+            success, is_duplicate, returned_id = await enqueuer.enqueue(
+                job_data, uuid4()
+            )
 
             assert success is False
+            assert is_duplicate is False
             assert returned_id == job_id
 
 
@@ -298,6 +309,9 @@ class TestJobEnqueuerDuplicateDetection:
             mock_manager.enqueue = AsyncMock(side_effect=Exception(error_message))
 
             enqueuer = JobEnqueuer()
-            success, _ = await enqueuer.enqueue(job_data, uuid4())
+            success, is_duplicate, _ = await enqueuer.enqueue(job_data, uuid4())
 
             assert success is True, f"Should treat '{error_message}' as duplicate"
+            assert is_duplicate is True, (
+                f"'{error_message}' should be marked as duplicate"
+            )

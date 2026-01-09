@@ -242,7 +242,7 @@ async def redis_client(test_settings: Settings):
     import redis.asyncio as aioredis
 
     redis = aioredis.from_url(
-        f"redis://{test_settings.redis_host}:{test_settings.redis_port}",
+        f"redis://{test_settings.redis_host}:{test_settings.redis_port}/{test_settings.redis_db}",
         encoding="utf-8",
         decode_responses=False,
     )

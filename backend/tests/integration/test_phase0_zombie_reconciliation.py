@@ -202,7 +202,7 @@ class TestPhase0ZombieCounterReconciliation:
                     id=uuid4(),
                     user_id=admin_user.id,
                     task=Task.CRAWL.value,
-                    status=Status.QUEUED,
+                    status=Status.QUEUED.value,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
                 )
