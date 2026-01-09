@@ -21,6 +21,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
+from intric.jobs.job_models import Task
 from intric.main.models import Status
 
 
@@ -61,7 +62,9 @@ async def test_embedding_model_id(db_container):
     async with db_container() as container:
         session = container.session()
         result = await session.execute(
-            select(EmbeddingModels.id).where(EmbeddingModels.name == "fixture-text-embedding")
+            select(EmbeddingModels.id).where(
+                EmbeddingModels.name == "fixture-text-embedding"
+            )
         )
         return result.scalar_one()
 
@@ -71,9 +74,7 @@ async def test_embedding_model_id(db_container):
 class TestOrphanCleanupConfiguration:
     """Tests that orphan cleanup timeout is configured correctly."""
 
-    async def test_orphan_timeout_setting_from_environment(
-        self, test_settings
-    ):
+    async def test_orphan_timeout_setting_from_environment(self, test_settings):
         """Orphan cleanup timeout should come from environment settings.
 
         This setting controls how long before a stuck Job is considered orphaned.
@@ -104,7 +105,7 @@ class TestOrphanJobDetection:
             recent_time = datetime.now(timezone.utc) - timedelta(minutes=30)
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=recent_time,
                 updated_at=recent_time,
@@ -134,7 +135,7 @@ class TestOrphanJobDetection:
 
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=old_time,
                 updated_at=old_time,
@@ -147,7 +148,9 @@ class TestOrphanJobDetection:
             # This job should be eligible for cleanup
             # (actual cleanup happens in feeder's _cleanup_orphaned_crawl_jobs)
             assert job.status == Status.QUEUED
-            age_hours = (datetime.now(timezone.utc) - job.updated_at).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - job.updated_at
+            ).total_seconds() / 3600
             assert age_hours > timeout_hours, "Job should be older than timeout"
 
     async def test_old_in_progress_job_eligible_for_cleanup(
@@ -159,13 +162,11 @@ class TestOrphanJobDetection:
         async with db_container() as container:
             # Create a job stuck in IN_PROGRESS
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            old_time = datetime.now(timezone.utc) - timedelta(
-                hours=timeout_hours + 1
-            )
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 1)
 
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.IN_PROGRESS,
                 created_at=old_time,
                 updated_at=old_time,
@@ -177,7 +178,9 @@ class TestOrphanJobDetection:
 
             # Job is old and stuck in IN_PROGRESS -> eligible for cleanup
             assert job.status == Status.IN_PROGRESS
-            age_hours = (datetime.now(timezone.utc) - job.updated_at).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - job.updated_at
+            ).total_seconds() / 3600
             assert age_hours > timeout_hours
 
 
@@ -201,7 +204,7 @@ class TestOrphanCleanupPreservesActiveJobs:
 
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.COMPLETE,
                 created_at=old_time,
                 updated_at=old_time,
@@ -222,13 +225,11 @@ class TestOrphanCleanupPreservesActiveJobs:
 
         async with db_container() as container:
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            old_time = datetime.now(timezone.utc) - timedelta(
-                hours=timeout_hours + 5
-            )
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 5)
 
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.FAILED,
                 created_at=old_time,
                 updated_at=old_time,
@@ -255,9 +256,7 @@ class TestOrphanCleanupMultiTenant:
 
         async with db_container() as container:
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            old_time = datetime.now(timezone.utc) - timedelta(
-                hours=timeout_hours + 1
-            )
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 1)
 
             # Create old stuck job of non-crawl type
             other_job = Jobs(
@@ -311,9 +310,7 @@ class TestOrphanCleanupMultiTenant:
 
         async with db_container() as container:
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            old_time = datetime.now(timezone.utc) - timedelta(
-                hours=timeout_hours + 1
-            )
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 1)
 
             # Create users for each tenant
             user_1 = Users(
@@ -335,14 +332,14 @@ class TestOrphanCleanupMultiTenant:
             # Create old stuck jobs for both tenants
             job_1 = Jobs(
                 user_id=user_1.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=old_time,
                 updated_at=old_time,
             )
             job_2 = Jobs(
                 user_id=user_2.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=old_time,
                 updated_at=old_time,
@@ -373,13 +370,11 @@ class TestOrphanCleanupTimingBoundaries:
         async with db_container() as container:
             # Create job exactly at the timeout boundary
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            boundary_time = datetime.now(timezone.utc) - timedelta(
-                hours=timeout_hours
-            )
+            boundary_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
 
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=boundary_time,
                 updated_at=boundary_time,
@@ -390,7 +385,9 @@ class TestOrphanCleanupTimingBoundaries:
             await session.flush()
 
             # Job at exact boundary
-            age_hours = (datetime.now(timezone.utc) - job.updated_at).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - job.updated_at
+            ).total_seconds() / 3600
             # Allow small tolerance for test execution time
             assert abs(age_hours - timeout_hours) < 0.1
 
@@ -409,7 +406,7 @@ class TestOrphanCleanupTimingBoundaries:
 
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=almost_timeout,
                 updated_at=almost_timeout,
@@ -420,7 +417,9 @@ class TestOrphanCleanupTimingBoundaries:
             await session.flush()
 
             # Job is just before timeout -> not orphaned yet
-            age_hours = (datetime.now(timezone.utc) - job.updated_at).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - job.updated_at
+            ).total_seconds() / 3600
             assert age_hours < timeout_hours
 
 
@@ -445,14 +444,12 @@ class TestOrphanCleanupPreventsBlocking:
         async with db_container() as container:
             # Simulate orphaned scenario: old stuck Job
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            old_time = datetime.now(timezone.utc) - timedelta(
-                hours=timeout_hours + 2
-            )
+            old_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours + 2)
 
             # Create old stuck crawl Job (orphaned)
             orphan_job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=old_time,
                 updated_at=old_time,
@@ -469,8 +466,12 @@ class TestOrphanCleanupPreventsBlocking:
             # Problem: Job stuck in QUEUED blocks new crawls
             # Solution: Orphan cleanup marks old Job as FAILED
             assert orphan_job.status == Status.QUEUED
-            age_hours = (datetime.now(timezone.utc) - orphan_job.updated_at).total_seconds() / 3600
-            assert age_hours > timeout_hours, "Job should be orphaned and eligible for cleanup"
+            age_hours = (
+                datetime.now(timezone.utc) - orphan_job.updated_at
+            ).total_seconds() / 3600
+            assert age_hours > timeout_hours, (
+                "Job should be orphaned and eligible for cleanup"
+            )
 
 
 @pytest.mark.asyncio
@@ -485,7 +486,12 @@ class TestOrphanCrawlRunCleanup:
     """
 
     async def test_recent_crawl_run_with_null_job_id_not_cleaned(
-        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+        self,
+        db_container,
+        test_tenant,
+        test_settings,
+        admin_user,
+        test_embedding_model_id,
     ):
         """Recently created CrawlRuns with NULL job_id should NOT be cleaned up."""
         from intric.database.tables.websites_table import CrawlRuns
@@ -517,12 +523,21 @@ class TestOrphanCrawlRunCleanup:
 
             # Recent CrawlRuns should not be cleaned up
             assert crawl_run.job_id is None
-            age_hours = (datetime.now(timezone.utc) - crawl_run.updated_at).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - crawl_run.updated_at
+            ).total_seconds() / 3600
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
-            assert age_hours < timeout_hours, "Recent CrawlRun should not be eligible for cleanup"
+            assert age_hours < timeout_hours, (
+                "Recent CrawlRun should not be eligible for cleanup"
+            )
 
     async def test_old_crawl_run_with_null_job_id_eligible_for_cleanup(
-        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+        self,
+        db_container,
+        test_tenant,
+        test_settings,
+        admin_user,
+        test_embedding_model_id,
     ):
         """Old CrawlRuns with NULL job_id should be eligible for cleanup."""
         from intric.database.tables.websites_table import CrawlRuns
@@ -556,11 +571,20 @@ class TestOrphanCrawlRunCleanup:
 
             # Old CrawlRun with NULL job_id should be eligible for cleanup
             assert crawl_run.job_id is None
-            age_hours = (datetime.now(timezone.utc) - crawl_run.updated_at).total_seconds() / 3600
-            assert age_hours > timeout_hours, "Old CrawlRun should be eligible for cleanup"
+            age_hours = (
+                datetime.now(timezone.utc) - crawl_run.updated_at
+            ).total_seconds() / 3600
+            assert age_hours > timeout_hours, (
+                "Old CrawlRun should be eligible for cleanup"
+            )
 
     async def test_crawl_run_with_valid_job_id_not_affected(
-        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+        self,
+        db_container,
+        test_tenant,
+        test_settings,
+        admin_user,
+        test_embedding_model_id,
     ):
         """CrawlRuns WITH valid job_id should NOT be cleaned up, even if old."""
         from intric.database.tables.websites_table import CrawlRuns
@@ -580,7 +604,7 @@ class TestOrphanCrawlRunCleanup:
             # Create a job first
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.COMPLETE,
                 created_at=old_time,
                 updated_at=old_time,
@@ -617,7 +641,12 @@ class TestOrphanCrawlRunCleanupExecution:
     """Tests that actually execute the cleanup method."""
 
     async def test_cleanup_deletes_old_null_job_id_crawl_runs(
-        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+        self,
+        db_container,
+        test_tenant,
+        test_settings,
+        admin_user,
+        test_embedding_model_id,
     ):
         """Cleanup should delete old CrawlRuns with NULL job_id."""
         from sqlalchemy import select
@@ -683,16 +712,25 @@ class TestOrphanCrawlRunCleanupExecution:
             old_result = await session.execute(
                 select(CrawlRuns).where(CrawlRuns.id == old_orphan_id)
             )
-            assert old_result.scalar_one_or_none() is None, "Old orphan should be deleted"
+            assert old_result.scalar_one_or_none() is None, (
+                "Old orphan should be deleted"
+            )
 
             # Recent orphan should still exist
             recent_result = await session.execute(
                 select(CrawlRuns).where(CrawlRuns.id == recent_orphan_id)
             )
-            assert recent_result.scalar_one_or_none() is not None, "Recent orphan should be preserved"
+            assert recent_result.scalar_one_or_none() is not None, (
+                "Recent orphan should be preserved"
+            )
 
     async def test_cleanup_preserves_crawl_runs_with_valid_job_id(
-        self, db_container, test_tenant, test_settings, admin_user, test_embedding_model_id
+        self,
+        db_container,
+        test_tenant,
+        test_settings,
+        admin_user,
+        test_embedding_model_id,
     ):
         """Cleanup should NOT delete CrawlRuns with valid job_id, even if old."""
         from sqlalchemy import select
@@ -714,7 +752,7 @@ class TestOrphanCrawlRunCleanupExecution:
             # Create a job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.COMPLETE,
                 created_at=old_time,
                 updated_at=old_time,
@@ -751,5 +789,7 @@ class TestOrphanCrawlRunCleanupExecution:
                 select(CrawlRuns).where(CrawlRuns.id == crawl_run_id)
             )
             preserved = result.scalar_one_or_none()
-            assert preserved is not None, "CrawlRun with valid job_id should be preserved"
+            assert preserved is not None, (
+                "CrawlRun with valid job_id should be preserved"
+            )
             assert preserved.job_id is not None

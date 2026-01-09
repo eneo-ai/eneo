@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
@@ -24,6 +25,56 @@ from intric.server.dependencies import lifespan
 from intric.worker.task_manager import TaskManager, WorkerConfig
 
 logger = get_logger(__name__)
+
+
+def _log_startup_diagnostics(settings) -> None:
+    """Log effective worker settings and detect common env var typos.
+
+    Why: Prevents config drift and helps diagnose issues caused by
+    typos in environment variable names (e.g., TRESHOLD vs THRESHOLD).
+    """
+    # Common env var typos and naming mismatches to detect
+    typo_checks = [
+        ("CRAWL_STALE_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
+        ("CRAWL_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
+        ("TENANT_WORKER_CONCURENCY_LIMIT", "TENANT_WORKER_CONCURRENCY_LIMIT"),
+        ("CRAWL_HEARBEAT_INTERVAL_SECONDS", "CRAWL_HEARTBEAT_INTERVAL_SECONDS"),
+        ("WORKER_MAX_CONCURRENT_JOBS", "WORKER_MAX_JOBS"),  # naming mismatch
+    ]
+
+    # Check for typos in environment
+    typos_found = []
+    for typo, correct in typo_checks:
+        if typo in os.environ:
+            typos_found.append(f"{typo} (should be {correct})")
+
+    if typos_found:
+        logger.warning(
+            "Detected possible env var typos (these are ignored)",
+            extra={"typos": typos_found},
+        )
+
+    # Log effective worker/crawler settings
+    logger.info(
+        "Worker startup diagnostics - effective settings",
+        extra={
+            # Feeder settings
+            "crawl_feeder_enabled": settings.crawl_feeder_enabled,
+            "crawl_feeder_interval_seconds": settings.crawl_feeder_interval_seconds,
+            "crawl_feeder_batch_size": settings.crawl_feeder_batch_size,
+            # Concurrency settings
+            "tenant_worker_concurrency_limit": settings.tenant_worker_concurrency_limit,
+            "tenant_worker_semaphore_ttl_seconds": settings.tenant_worker_semaphore_ttl_seconds,
+            # Crawl settings
+            "crawl_max_length": settings.crawl_max_length,
+            "crawl_stale_threshold_minutes": settings.crawl_stale_threshold_minutes,
+            "crawl_heartbeat_interval_seconds": settings.crawl_heartbeat_interval_seconds,
+            "crawl_heartbeat_max_failures": settings.crawl_heartbeat_max_failures,
+            "crawl_job_max_age_seconds": settings.crawl_job_max_age_seconds,
+            # Cleanup settings
+            "orphan_crawl_run_timeout_hours": settings.orphan_crawl_run_timeout_hours,
+        },
+    )
 
 
 class Worker:
@@ -80,7 +131,9 @@ class Worker:
         # Job timeout is a safety net - uses global env default as upper bound.
         # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
         # which respects tenant-specific crawl_max_length settings.
-        self.job_timeout = settings.crawl_max_length + 60 * 60  # crawl window + 1h buffer
+        self.job_timeout = (
+            settings.crawl_max_length + 60 * 60
+        )  # crawl window + 1h buffer
         self.max_jobs = settings.worker_max_jobs
         self.expires_extra_ms = 604800000  # 1 week
 
@@ -196,10 +249,13 @@ class Worker:
         await lifespan.startup()
         crochet.setup()
 
+        # Log effective settings at startup for observability
+        settings = get_settings()
+        _log_startup_diagnostics(settings)
+
         # Start crawl feeder as background task if enabled
         # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
         # Uses leader election to ensure only ONE feeder runs across all workers
-        settings = get_settings()
         if settings.crawl_feeder_enabled:
             from intric.worker.crawl_feeder import CrawlFeeder
 
@@ -288,6 +344,7 @@ class Worker:
                     await repo.update(...)
                 # Session returned to pool immediately
         """
+
         def decorator(func):
             @wraps(func)
             async def wrapper(*args):
@@ -320,7 +377,9 @@ class Worker:
                                 .options(
                                     selectinload(Users.roles),
                                     selectinload(Users.predefined_roles),
-                                    selectinload(Users.tenant).selectinload(Tenants.modules),
+                                    selectinload(Users.tenant).selectinload(
+                                        Tenants.modules
+                                    ),
                                     selectinload(Users.api_key),
                                     selectinload(Users.user_groups),
                                 )
@@ -345,6 +404,7 @@ class Worker:
                 # Override user if found during bootstrap
                 if user is not None:
                     from intric.main.container.container_overrides import override_user
+
                     override_user(container=container, user=user)
 
                 # PHASE 3: Execute task - NO session held
