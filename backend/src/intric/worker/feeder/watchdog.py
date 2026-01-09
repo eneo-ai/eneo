@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.jobs.job_models import Task
 from intric.main.logging import get_logger
 from intric.worker.redis.lua_scripts import LuaScripts
 
@@ -37,10 +38,19 @@ logger = get_logger(__name__)
 
 @dataclass
 class SlotReleaseJob:
-    """Job requiring slot release after transaction commit."""
+    """Job requiring slot release after transaction commit.
+
+    Args:
+        job_id: The job's UUID.
+        tenant_id: The tenant's UUID.
+        was_in_progress: True if job was IN_PROGRESS when failed.
+            IN_PROGRESS jobs definitely acquired a slot, so release is safe.
+            QUEUED jobs might not have acquired a slot yet, so we check flag first.
+    """
 
     job_id: UUID
     tenant_id: UUID
+    was_in_progress: bool = False
 
 
 @dataclass
@@ -278,7 +288,7 @@ class OrphanWatchdog:
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
-                Jobs.task == "CRAWL",
+                Jobs.task == Task.CRAWL.value,
                 Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
                 CrawlRuns.tenant_id == tenant_uuid,
             )
@@ -382,7 +392,7 @@ class OrphanWatchdog:
         # Get all expired job IDs (including orphaned without CrawlRun)
         all_expired_query = select(Jobs.id).where(
             and_(
-                Jobs.task == "CRAWL",
+                Jobs.task == Task.CRAWL.value,
                 Jobs.status == Status.QUEUED,
                 Jobs.created_at < max_age_cutoff,
             )
@@ -397,7 +407,7 @@ class OrphanWatchdog:
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.QUEUED,
                     Jobs.created_at < max_age_cutoff,
                 )
@@ -424,7 +434,7 @@ class OrphanWatchdog:
                 update(Jobs)
                 .where(
                     and_(
-                        Jobs.task == "CRAWL",
+                        Jobs.task == Task.CRAWL.value,
                         Jobs.status == Status.QUEUED,
                         Jobs.created_at < max_age_cutoff,
                     )
@@ -512,7 +522,7 @@ class OrphanWatchdog:
             .join(Tenants, Tenants.id == CrawlRuns.tenant_id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.QUEUED,
                     Jobs.updated_at < min_stale_cutoff,
                     Jobs.created_at >= max_age_cutoff,
@@ -702,7 +712,7 @@ class OrphanWatchdog:
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.IN_PROGRESS,
                     Jobs.updated_at < startup_cutoff,
                     # Compound condition: no progress ever made (NULL or 0)
@@ -736,11 +746,15 @@ class OrphanWatchdog:
             )
             await session.execute(fail_stmt)
 
-            # Track for slot release
+            # Track for slot release (IN_PROGRESS jobs definitely had a slot)
             for row in stalled_jobs:
                 result.failed_job_ids.append(row.job_id)
                 result.slots_to_release.append(
-                    SlotReleaseJob(job_id=row.job_id, tenant_id=row.tenant_id)
+                    SlotReleaseJob(
+                        job_id=row.job_id,
+                        tenant_id=row.tenant_id,
+                        was_in_progress=True,
+                    )
                 )
 
         return result
@@ -778,7 +792,7 @@ class OrphanWatchdog:
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.IN_PROGRESS,
                     Jobs.updated_at < timeout_cutoff,
                 )
@@ -799,11 +813,15 @@ class OrphanWatchdog:
             )
             await session.execute(fail_stmt)
 
-            # Track for slot release
+            # Track for slot release (IN_PROGRESS jobs definitely had a slot)
             for row in stale_jobs:
                 result.failed_job_ids.append(row.job_id)
                 result.slots_to_release.append(
-                    SlotReleaseJob(job_id=row.job_id, tenant_id=row.tenant_id)
+                    SlotReleaseJob(
+                        job_id=row.job_id,
+                        tenant_id=row.tenant_id,
+                        was_in_progress=True,
+                    )
                 )
 
         return result
@@ -811,7 +829,11 @@ class OrphanWatchdog:
     async def _release_slots_safe(self, slots: list[SlotReleaseJob]) -> int:
         """Release slots for jobs (best effort, post-transaction).
 
-        Only releases if the pre-acquired flag exists (job had a slot).
+        Release strategy:
+        - IN_PROGRESS jobs (was_in_progress=True): Always release. These jobs
+          definitely acquired a slot, but the flag may have expired on long crawls.
+        - QUEUED jobs (was_in_progress=False): Only release if flag exists.
+          These jobs might not have acquired a slot yet (still in pending queue).
 
         Args:
             slots: Jobs needing slot release.
@@ -825,15 +847,32 @@ class OrphanWatchdog:
         for slot in slots:
             flag_key = f"job:{slot.job_id}:slot_preacquired"
             try:
-                if await self._redis.get(flag_key):
+                # IN_PROGRESS jobs definitely had a slot - always release
+                # QUEUED jobs might not have acquired a slot - check flag first
+                should_release = slot.was_in_progress or await self._redis.get(flag_key)
+
+                if should_release:
                     await LuaScripts.release_slot(self._redis, slot.tenant_id, ttl)
-                    await self._redis.delete(flag_key)
                     released += 1
+
+                    # Best-effort flag cleanup
+                    try:
+                        await self._redis.delete(flag_key)
+                    except Exception as flag_exc:
+                        logger.debug(
+                            "Failed to delete slot_preacquired flag",
+                            extra={
+                                "job_id": str(slot.job_id),
+                                "error": str(flag_exc),
+                            },
+                        )
+
                     logger.debug(
                         "Released slot for job",
                         extra={
                             "job_id": str(slot.job_id),
                             "tenant_id": str(slot.tenant_id),
+                            "was_in_progress": slot.was_in_progress,
                         },
                     )
             except Exception as exc:
