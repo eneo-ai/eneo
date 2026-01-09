@@ -5,11 +5,9 @@ Eneo follows a modern microservices architecture with clean separation of concer
 ## High-Level Overview
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/eneo-architecture.svg"
-    alt="Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers (OpenAI, Anthropic, Azure, Local models)"
-    className="w-full max-w-5xl mx-auto"
-  />
+
+![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers (OpenAI, Anthropic, Azure, Local models)](/diagrams/eneo-architecture.svg)
+
 </div>
 
 ---
@@ -303,11 +301,9 @@ Save conversation to database
 ### Document Upload Flow
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/document-processing-pipeline.svg"
-    alt="Document Processing Pipeline showing User uploading to Backend API, which queues jobs in Redis for the Worker to process. The Worker runs the Processing Pipeline (Text Extractor, Text Chunker, Embedding Model, Vector Store) and stores results in PostgreSQL with pgvector (InfoBlobs for raw text, InfoBlobChunks for embeddings with HNSW index, Jobs for status tracking)."
-    className="w-full max-w-5xl mx-auto"
-  />
+
+![Document Processing Pipeline showing User uploading to Backend API, which queues jobs in Redis for the Worker to process. The Worker runs the Processing Pipeline (Text Extractor, Text Chunker, Embedding Model, Vector Store) and stores results in PostgreSQL with pgvector (InfoBlobs for raw text, InfoBlobChunks for embeddings with HNSW index, Jobs for status tracking).](/diagrams/document-processing-pipeline.svg)
+
 </div>
 
 1. User uploads file via `POST /api/v1/files/`

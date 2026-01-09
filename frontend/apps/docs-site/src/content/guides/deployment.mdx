@@ -17,11 +17,9 @@ import { Callout, Steps, Tabs } from 'nextra/components'
 Eneo uses a microservices architecture with six core services.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/eneo-architecture.svg"
-    alt="Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers"
-    className="w-full max-w-5xl mx-auto"
-  />
+
+![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers](/diagrams/eneo-architecture.svg)
+
 </div>
 
 | Service | Technology | Port | Role |
@@ -433,11 +431,9 @@ Manage AI provider credentials per tenant using the sysadmin API.
 </Callout>
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-  <img
-    src="/diagrams/litellm-overview.svg"
-    alt="LiteLLM Architecture showing credential flow from Sysadmin API to encrypted storage to AI providers"
-    className="w-full max-w-4xl mx-auto"
-  />
+
+![LiteLLM Architecture showing credential flow from Sysadmin API to encrypted storage to AI providers](/diagrams/litellm-overview.svg)
+
 </div>
 
 <Tabs items={['Set Credentials', 'List Credentials', 'Remove Credentials']}>
