@@ -20,6 +20,7 @@ These tests verify the configuration layer that enables stale detection.
 import pytest
 from httpx import AsyncClient
 
+from intric.jobs.job_models import Task
 from intric.tenants.crawler_settings_helper import (
     get_crawler_setting,
 )
@@ -84,7 +85,9 @@ class TestStaleThresholdConfiguration:
 
             # Verify it's a reasonable stale threshold
             assert isinstance(default_threshold, int)
-            assert 5 <= default_threshold <= 1440, "Default should be within valid range"
+            assert 5 <= default_threshold <= 1440, (
+                "Default should be within valid range"
+            )
 
 
 @pytest.mark.asyncio
@@ -285,7 +288,9 @@ class TestStaleThresholdUseCases:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            max_length = get_crawler_setting("crawl_max_length", tenant.crawler_settings)
+            max_length = get_crawler_setting(
+                "crawl_max_length", tenant.crawler_settings
+            )
             stale_threshold = get_crawler_setting(
                 "crawl_stale_threshold_minutes", tenant.crawler_settings
             )
@@ -316,7 +321,9 @@ class TestStaleThresholdUseCases:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            max_length = get_crawler_setting("crawl_max_length", tenant.crawler_settings)
+            max_length = get_crawler_setting(
+                "crawl_max_length", tenant.crawler_settings
+            )
             stale_threshold = get_crawler_setting(
                 "crawl_stale_threshold_minutes", tenant.crawler_settings
             )
@@ -462,9 +469,7 @@ class TestJobRepoTouchJob:
     This prevents safe preemption from marking the job as stale during long crawls.
     """
 
-    async def test_touch_job_updates_timestamp(
-        self, db_container, admin_user
-    ):
+    async def test_touch_job_updates_timestamp(self, db_container, admin_user):
         """touch_job() should update the job's updated_at timestamp."""
         from datetime import datetime, timezone, timedelta
         from intric.database.tables.job_table import Jobs
@@ -478,7 +483,7 @@ class TestJobRepoTouchJob:
             old_time = datetime.now(timezone.utc) - timedelta(hours=1)
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.IN_PROGRESS,
                 created_at=old_time,
                 updated_at=old_time,
@@ -498,9 +503,13 @@ class TestJobRepoTouchJob:
             await session.refresh(job)
 
             # Verify timestamp was updated
-            assert job.updated_at > original_updated_at, "touch_job should update timestamp"
+            assert job.updated_at > original_updated_at, (
+                "touch_job should update timestamp"
+            )
             # Should be recent (within last minute)
-            time_diff = datetime.now(timezone.utc) - job.updated_at.replace(tzinfo=timezone.utc)
+            time_diff = datetime.now(timezone.utc) - job.updated_at.replace(
+                tzinfo=timezone.utc
+            )
             assert time_diff.total_seconds() < 60, "Timestamp should be recent"
 
     async def test_touch_job_prevents_stale_detection(
@@ -518,7 +527,7 @@ class TestJobRepoTouchJob:
             # Create a job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.IN_PROGRESS,
             )
             session.add(job)
@@ -534,7 +543,9 @@ class TestJobRepoTouchJob:
 
             # Calculate age
             job_updated = job.updated_at.replace(tzinfo=timezone.utc)
-            age_minutes = (datetime.now(timezone.utc) - job_updated).total_seconds() / 60
+            age_minutes = (
+                datetime.now(timezone.utc) - job_updated
+            ).total_seconds() / 60
             threshold_minutes = test_settings.crawl_stale_threshold_minutes
 
             # Should be well under stale threshold
@@ -542,9 +553,7 @@ class TestJobRepoTouchJob:
                 "Touched job should be under stale threshold"
             )
 
-    async def test_touch_job_nonexistent_job_no_error(
-        self, db_container
-    ):
+    async def test_touch_job_nonexistent_job_no_error(self, db_container):
         """touch_job() on non-existent job should not raise error."""
         from uuid import uuid4
         from intric.jobs.job_repo import JobRepository
@@ -568,9 +577,7 @@ class TestJobRepoMarkJobFailedIfRunning:
     when multiple users try to preempt the same stale job.
     """
 
-    async def test_marks_queued_job_as_failed(
-        self, db_container, admin_user
-    ):
+    async def test_marks_queued_job_as_failed(self, db_container, admin_user):
         """mark_job_failed_if_running() should fail QUEUED jobs."""
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
@@ -582,7 +589,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             # Create a QUEUED job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
             )
             session.add(job)
@@ -601,9 +608,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             assert rows_affected == 1, "Should affect 1 row"
             assert job.status == Status.FAILED, "Job should be FAILED"
 
-    async def test_marks_in_progress_job_as_failed(
-        self, db_container, admin_user
-    ):
+    async def test_marks_in_progress_job_as_failed(self, db_container, admin_user):
         """mark_job_failed_if_running() should fail IN_PROGRESS jobs."""
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
@@ -615,7 +620,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             # Create an IN_PROGRESS job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.IN_PROGRESS,
             )
             session.add(job)
@@ -634,9 +639,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             assert rows_affected == 1, "Should affect 1 row"
             assert job.status == Status.FAILED, "Job should be FAILED"
 
-    async def test_does_not_affect_completed_job(
-        self, db_container, admin_user
-    ):
+    async def test_does_not_affect_completed_job(self, db_container, admin_user):
         """mark_job_failed_if_running() should not touch COMPLETE jobs."""
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
@@ -648,7 +651,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             # Create a COMPLETE job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.COMPLETE,
             )
             session.add(job)
@@ -667,9 +670,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             assert rows_affected == 0, "Should not affect completed job"
             assert job.status == Status.COMPLETE, "Status should remain COMPLETE"
 
-    async def test_does_not_affect_already_failed_job(
-        self, db_container, admin_user
-    ):
+    async def test_does_not_affect_already_failed_job(self, db_container, admin_user):
         """mark_job_failed_if_running() should not touch already FAILED jobs."""
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
@@ -681,7 +682,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             # Create a FAILED job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.FAILED,
             )
             session.add(job)
@@ -718,7 +719,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             # Create a QUEUED job
             job = Jobs(
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
             )
             session.add(job)
@@ -746,9 +747,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             assert rows_2 == 0, "Second attempt should fail (job already failed)"
             assert job.status == Status.FAILED, "Job should be in FAILED status"
 
-    async def test_nonexistent_job_returns_zero(
-        self, db_container
-    ):
+    async def test_nonexistent_job_returns_zero(self, db_container):
         """mark_job_failed_if_running() on non-existent job returns 0."""
         from uuid import uuid4
         from intric.jobs.job_repo import JobRepository

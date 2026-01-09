@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.jobs.job_models import Task
 from intric.main.logging import get_logger
 from intric.worker.redis.lua_scripts import LuaScripts
 
@@ -37,10 +38,19 @@ logger = get_logger(__name__)
 
 @dataclass
 class SlotReleaseJob:
-    """Job requiring slot release after transaction commit."""
+    """Job requiring slot release after transaction commit.
+
+    Args:
+        job_id: The job's UUID.
+        tenant_id: The tenant's UUID.
+        was_in_progress: True if job was IN_PROGRESS when failed.
+            IN_PROGRESS jobs definitely acquired a slot, so release is safe.
+            QUEUED jobs might not have acquired a slot yet, so we check flag first.
+    """
 
     job_id: UUID
     tenant_id: UUID
+    was_in_progress: bool = False
 
 
 @dataclass
@@ -141,7 +151,9 @@ class OrphanWatchdog:
 
                 # Phase 3.5: Fail stalled startup jobs (early zombies)
                 # Runs BEFORE Phase 3 to catch jobs that never made progress
-                phase3_5_result = await self._fail_stalled_startup_jobs(session, now=now)
+                phase3_5_result = await self._fail_stalled_startup_jobs(
+                    session, now=now
+                )
                 metrics.early_zombies_failed = len(phase3_5_result.failed_job_ids)
                 slots_to_release.extend(phase3_5_result.slots_to_release)
 
@@ -154,7 +166,28 @@ class OrphanWatchdog:
 
             # Post-transaction: Release slots (best effort)
             if slots_to_release:
-                metrics.slots_released = await self._release_slots_safe(slots_to_release)
+                metrics.slots_released = await self._release_slots_safe(
+                    slots_to_release
+                )
+
+            # Record successful cleanup timestamp for observability
+            # TTL = max(2 * feeder cadence, 300s) to avoid flapping if feeder
+            # has backoff; monitoring can alert on key absence to detect dead watchdog
+            watchdog_ttl = max(
+                2 * self._settings.crawl_feeder_interval_seconds,
+                300,  # minimum 5 minutes
+            )
+            try:
+                await self._redis.set(
+                    "crawl_watchdog:last_success_epoch",
+                    str(int(now.timestamp())),
+                    ex=watchdog_ttl,
+                )
+            except Exception as redis_exc:
+                logger.debug(
+                    "Failed to update watchdog success timestamp",
+                    extra={"error": str(redis_exc)},
+                )
 
             self._log_metrics(metrics)
 
@@ -255,7 +288,7 @@ class OrphanWatchdog:
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
-                Jobs.task == "CRAWL",
+                Jobs.task == Task.CRAWL.value,
                 Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
                 CrawlRuns.tenant_id == tenant_uuid,
             )
@@ -359,7 +392,7 @@ class OrphanWatchdog:
         # Get all expired job IDs (including orphaned without CrawlRun)
         all_expired_query = select(Jobs.id).where(
             and_(
-                Jobs.task == "CRAWL",
+                Jobs.task == Task.CRAWL.value,
                 Jobs.status == Status.QUEUED,
                 Jobs.created_at < max_age_cutoff,
             )
@@ -374,7 +407,7 @@ class OrphanWatchdog:
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.QUEUED,
                     Jobs.created_at < max_age_cutoff,
                 )
@@ -401,7 +434,7 @@ class OrphanWatchdog:
                 update(Jobs)
                 .where(
                     and_(
-                        Jobs.task == "CRAWL",
+                        Jobs.task == Task.CRAWL.value,
                         Jobs.status == Status.QUEUED,
                         Jobs.created_at < max_age_cutoff,
                     )
@@ -411,6 +444,17 @@ class OrphanWatchdog:
             )
             await session.execute(kill_stmt)
 
+            # Log Phase 1 metrics for observability
+            logger.info(
+                "Phase 1: Killed expired QUEUED jobs",
+                extra={
+                    "selected_count": len(all_expired_ids),
+                    "with_crawlrun_count": len(jobs_with_crawlrun),
+                    "orphaned_count": len(result.orphaned_job_ids),
+                    "max_age_seconds": max_age_seconds,
+                },
+            )
+
         return result
 
     async def _rescue_stuck_jobs(
@@ -419,15 +463,20 @@ class OrphanWatchdog:
         now: datetime,
         stale_threshold_minutes: int = 5,
     ) -> Phase2Result:
-        """Phase 2: Re-queue stuck QUEUED jobs.
+        """Phase 2: Re-queue stuck QUEUED jobs with per-tenant thresholds.
 
         Jobs with stale updated_at but fresh created_at are re-queued.
         updated_at is bumped to prevent immediate re-pickup.
 
+        Per-tenant thresholds:
+        - Uses queued_stale_threshold_minutes from tenant's crawler_settings
+        - Safety bounds: floor=5 min, ceiling=60 min
+        - Fallback to default (5 min) if unset
+
         Args:
             session: Database session.
             now: Current timestamp.
-            stale_threshold_minutes: Minutes before a job is considered stale.
+            stale_threshold_minutes: Default threshold (used as fallback).
 
         Returns:
             Phase2Result with jobs to requeue.
@@ -435,45 +484,77 @@ class OrphanWatchdog:
         from sqlalchemy import and_, select, update
 
         from intric.database.tables.job_table import Jobs
+        from intric.database.tables.tenant_table import Tenants
         from intric.database.tables.websites_table import CrawlRuns, Websites
         from intric.main.models import Status
+        from intric.tenants.crawler_settings_helper import get_crawler_setting
+
+        # Safety bounds for threshold (per plan: floor=5, ceiling=60)
+        THRESHOLD_FLOOR_MINUTES = 5
+        THRESHOLD_CEILING_MINUTES = 60
 
         max_age_seconds = self._settings.crawl_job_max_age_seconds or 7200
         max_age_cutoff = now - timedelta(seconds=max_age_seconds)
-        stale_cutoff = now - timedelta(minutes=stale_threshold_minutes)
+
+        # Use floor threshold as SQL cutoff to reduce query load
+        # No tenant can have a threshold below the floor, so we won't miss valid rescues
+        min_stale_cutoff = now - timedelta(minutes=THRESHOLD_FLOOR_MINUTES)
 
         result = Phase2Result()
 
-        # Find stuck jobs (stale but not expired)
+        # Find potentially stuck jobs (stale but not expired), including tenant settings
         rescue_query = (
             select(
                 Jobs.id.label("job_id"),
                 Jobs.user_id,
+                Jobs.updated_at,
                 CrawlRuns.id.label("run_id"),
                 CrawlRuns.tenant_id,
                 CrawlRuns.website_id,
                 Websites.url,
                 Websites.download_files,
                 Websites.crawl_type,
+                Tenants.crawler_settings,
             )
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .join(Websites, Websites.id == CrawlRuns.website_id)
+            .join(Tenants, Tenants.id == CrawlRuns.tenant_id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.QUEUED,
-                    Jobs.updated_at < stale_cutoff,
+                    Jobs.updated_at < min_stale_cutoff,
                     Jobs.created_at >= max_age_cutoff,
                 )
             )
         )
         rescue_result = await session.execute(rescue_query)
-        stuck_jobs = rescue_result.fetchall()
+        potential_stuck_jobs = rescue_result.fetchall()
 
-        # Re-queue stuck jobs
+        # Re-queue stuck jobs that meet their tenant's threshold
         rescued_job_ids = []
-        for row in stuck_jobs:
+        skipped_count = 0
+        for row in potential_stuck_jobs:
+            # Get tenant-specific threshold with bounds
+            raw_threshold = get_crawler_setting(
+                "queued_stale_threshold_minutes",
+                row.crawler_settings,
+                default=stale_threshold_minutes,
+            )
+            # Apply safety bounds
+            effective_threshold = max(
+                THRESHOLD_FLOOR_MINUTES,
+                min(THRESHOLD_CEILING_MINUTES, raw_threshold),
+            )
+
+            # Check if job is stale according to this tenant's threshold
+            tenant_stale_cutoff = now - timedelta(minutes=effective_threshold)
+            if row.updated_at >= tenant_stale_cutoff:
+                # Job is not stale enough for this tenant's threshold
+                skipped_count += 1
+                continue
+
             try:
                 await self._requeue_job(
                     job_id=row.job_id,
@@ -503,6 +584,18 @@ class OrphanWatchdog:
                 .execution_options(synchronize_session=False)
             )
             await session.execute(bump_stmt)
+
+        # Log Phase 2 metrics for observability
+        if potential_stuck_jobs:
+            logger.info(
+                "Phase 2: Rescued stuck QUEUED jobs",
+                extra={
+                    "selected_count": len(potential_stuck_jobs),
+                    "rescued_count": result.rescued_count,
+                    "skipped_by_threshold": skipped_count,
+                    "default_threshold_minutes": stale_threshold_minutes,
+                },
+            )
 
         return result
 
@@ -550,7 +643,9 @@ class OrphanWatchdog:
             run_id=run_id,
             url=url,
             download_files=download_files,
-            crawl_type=CrawlType(crawl_type) if isinstance(crawl_type, str) else crawl_type,
+            crawl_type=CrawlType(crawl_type)
+            if isinstance(crawl_type, str)
+            else crawl_type,
         )
 
         try:
@@ -608,16 +703,22 @@ class OrphanWatchdog:
         # Find early zombie jobs: IN_PROGRESS with no progress and stale updated_at
         # Catch both NULL and 0 for pages_crawled (some code paths may initialize to 0)
         query = (
-            select(Jobs.id.label("job_id"), CrawlRuns.tenant_id, CrawlRuns.id.label("crawl_run_id"))
+            select(
+                Jobs.id.label("job_id"),
+                CrawlRuns.tenant_id,
+                CrawlRuns.id.label("crawl_run_id"),
+            )
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.IN_PROGRESS,
                     Jobs.updated_at < startup_cutoff,
                     # Compound condition: no progress ever made (NULL or 0)
-                    or_(CrawlRuns.pages_crawled.is_(None), CrawlRuns.pages_crawled == 0),
+                    or_(
+                        CrawlRuns.pages_crawled.is_(None), CrawlRuns.pages_crawled == 0
+                    ),
                 )
             )
         )
@@ -645,11 +746,15 @@ class OrphanWatchdog:
             )
             await session.execute(fail_stmt)
 
-            # Track for slot release
+            # Track for slot release (IN_PROGRESS jobs definitely had a slot)
             for row in stalled_jobs:
                 result.failed_job_ids.append(row.job_id)
                 result.slots_to_release.append(
-                    SlotReleaseJob(job_id=row.job_id, tenant_id=row.tenant_id)
+                    SlotReleaseJob(
+                        job_id=row.job_id,
+                        tenant_id=row.tenant_id,
+                        was_in_progress=True,
+                    )
                 )
 
         return result
@@ -687,7 +792,7 @@ class OrphanWatchdog:
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
                 and_(
-                    Jobs.task == "CRAWL",
+                    Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.IN_PROGRESS,
                     Jobs.updated_at < timeout_cutoff,
                 )
@@ -708,21 +813,27 @@ class OrphanWatchdog:
             )
             await session.execute(fail_stmt)
 
-            # Track for slot release
+            # Track for slot release (IN_PROGRESS jobs definitely had a slot)
             for row in stale_jobs:
                 result.failed_job_ids.append(row.job_id)
                 result.slots_to_release.append(
-                    SlotReleaseJob(job_id=row.job_id, tenant_id=row.tenant_id)
+                    SlotReleaseJob(
+                        job_id=row.job_id,
+                        tenant_id=row.tenant_id,
+                        was_in_progress=True,
+                    )
                 )
 
         return result
 
-    async def _release_slots_safe(
-        self, slots: list[SlotReleaseJob]
-    ) -> int:
+    async def _release_slots_safe(self, slots: list[SlotReleaseJob]) -> int:
         """Release slots for jobs (best effort, post-transaction).
 
-        Only releases if the pre-acquired flag exists (job had a slot).
+        Release strategy:
+        - IN_PROGRESS jobs (was_in_progress=True): Always release. These jobs
+          definitely acquired a slot, but the flag may have expired on long crawls.
+        - QUEUED jobs (was_in_progress=False): Only release if flag exists.
+          These jobs might not have acquired a slot yet (still in pending queue).
 
         Args:
             slots: Jobs needing slot release.
@@ -736,15 +847,32 @@ class OrphanWatchdog:
         for slot in slots:
             flag_key = f"job:{slot.job_id}:slot_preacquired"
             try:
-                if await self._redis.get(flag_key):
+                # IN_PROGRESS jobs definitely had a slot - always release
+                # QUEUED jobs might not have acquired a slot - check flag first
+                should_release = slot.was_in_progress or await self._redis.get(flag_key)
+
+                if should_release:
                     await LuaScripts.release_slot(self._redis, slot.tenant_id, ttl)
-                    await self._redis.delete(flag_key)
                     released += 1
+
+                    # Best-effort flag cleanup
+                    try:
+                        await self._redis.delete(flag_key)
+                    except Exception as flag_exc:
+                        logger.debug(
+                            "Failed to delete slot_preacquired flag",
+                            extra={
+                                "job_id": str(slot.job_id),
+                                "error": str(flag_exc),
+                            },
+                        )
+
                     logger.debug(
                         "Released slot for job",
                         extra={
                             "job_id": str(slot.job_id),
                             "tenant_id": str(slot.tenant_id),
+                            "was_in_progress": slot.was_in_progress,
                         },
                     )
             except Exception as exc:

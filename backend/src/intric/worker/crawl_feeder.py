@@ -194,14 +194,20 @@ class CrawlFeeder:
                 # Mark failed - MUST release slot and skip enqueue to prevent double-acquire
                 logger.error(
                     "Failed to mark slot pre-acquired, rolling back slot",
-                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id), "error": str(mark_exc)},
+                    extra={
+                        "job_id": str(job_id),
+                        "tenant_id": str(tenant_id),
+                        "error": str(mark_exc),
+                    },
                 )
                 await self._capacity_manager.release_slot(tenant_id)
                 failed_count += 1
                 continue
 
             # Enqueue to ARQ
-            success, returned_job_id = await self._job_enqueuer.enqueue(job_data, tenant_id)
+            success, returned_job_id = await self._job_enqueuer.enqueue(
+                job_data, tenant_id
+            )
 
             if success:
                 # Remove from pending queue using exact raw bytes
@@ -211,8 +217,11 @@ class CrawlFeeder:
                 # Enqueue failed - rollback: delete flag and release slot
                 try:
                     await redis_client.delete(f"job:{job_id}:slot_preacquired")
-                except Exception:
-                    pass  # Best effort cleanup
+                except Exception as flag_exc:
+                    logger.debug(
+                        "Failed to delete slot_preacquired flag during rollback",
+                        extra={"job_id": str(job_id), "error": str(flag_exc)},
+                    )
                 await self._capacity_manager.release_slot(tenant_id)
                 failed_count += 1
 
@@ -321,7 +330,8 @@ class CrawlFeeder:
                     if not processed_any:
                         if (
                             self._last_heartbeat is None
-                            or (now - self._last_heartbeat).total_seconds() >= self._heartbeat_interval
+                            or (now - self._last_heartbeat).total_seconds()
+                            >= self._heartbeat_interval
                         ):
                             logger.info("Feeder heartbeat: idle, no pending crawls")
                             self._last_heartbeat = now
@@ -333,13 +343,17 @@ class CrawlFeeder:
                     await self._leader_election.refresh()
 
                     # Sleep until next cycle (use shortest interval among active tenants)
-                    sleep_interval = await self._capacity_manager.get_minimum_feeder_interval()
+                    sleep_interval = (
+                        await self._capacity_manager.get_minimum_feeder_interval()
+                    )
                     await asyncio.sleep(sleep_interval)
 
                 except Exception as exc:
                     logger.error(f"Error in feeder loop: {exc}")
                     # Continue running - feeder should be resilient
-                    sleep_interval = await self._capacity_manager.get_minimum_feeder_interval()
+                    sleep_interval = (
+                        await self._capacity_manager.get_minimum_feeder_interval()
+                    )
                     await asyncio.sleep(sleep_interval)
         finally:
             await self._close_redis()
