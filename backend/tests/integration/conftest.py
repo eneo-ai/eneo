@@ -70,6 +70,18 @@ if not os.getenv("URL_SIGNING_KEY"):
 if not os.getenv("ENCRYPTION_KEY"):
     os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
 
+# Crawler settings - ensure TTL > max_length to pass validation
+# These must be set BEFORE importing any module that calls get_settings()
+if not os.getenv("CRAWL_MAX_LENGTH"):
+    os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
+if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
+    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
+
+# CRITICAL: Set super admin API key for sysadmin endpoint authentication
+# Must be set before any imports that might trigger get_settings()
+if not os.getenv("INTRIC_SUPER_API_KEY"):
+    os.environ["INTRIC_SUPER_API_KEY"] = "test-super-admin-key-for-integration-tests"
+
 import contextlib
 from typing import AsyncGenerator, Generator
 

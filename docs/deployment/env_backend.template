@@ -27,7 +27,7 @@ API_KEY_LENGTH=64
 API_KEY_HEADER_NAME=X-API-Key
 JWT_AUDIENCE=*
 JWT_ISSUER=ENEO
-JWT_EXPIRY_TIME=86400
+JWT_EXPIRY_TIME=86400                       # seconds (24 hours)
 JWT_ALGORITHM=HS256
 
 # JWT_SECRET - CRITICAL FOR PRODUCTION
@@ -43,6 +43,11 @@ URL_SIGNING_KEY=
 # ----------------------------------------------------------------------------
 # Authentication Configuration
 # ----------------------------------------------------------------------------
+# Glossary:
+#   IdP = Identity Provider (Auth0, Azure AD, Keycloak, etc.)
+#   OIDC = OpenID Connect (authentication protocol built on OAuth 2.0)
+#   JWKS = JSON Web Key Set (public keys used to verify JWT signatures)
+#
 # Choose ONE of two modes:
 #   1. Single-Tenant OIDC: One shared IdP for all users (recommended for most)
 #   2. Multi-Tenant Federation: Each tenant has their own IdP (enterprise)
@@ -76,9 +81,23 @@ OIDC_CLIENT_SECRET=
 # [OPTIONAL] OIDC tenant ID (for backward compatibility with user creation)
 OIDC_TENANT_ID=
 
-# MULTI-TENANT FEDERATION MODE (Enterprise Only)
-# Enable per-tenant identity providers (each tenant configures their own IdP)
-# Requires ENCRYPTION_KEY and tenant configuration via sysadmin API
+# FEDERATION MODE
+# ----------------------------------------------------------------------------
+# Controls how OIDC/IdP configuration is managed:
+#
+# FALSE (default) - Single-Tenant via Environment Variables:
+#   - Uses OIDC_* variables above (OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, etc.)
+#   - Requires backend restart to change OIDC settings
+#   - Simplest setup for single-organization deployments
+#
+# TRUE - Federation via Sysadmin API:
+#   - Configure IdP settings via PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
+#   - Changes take effect immediately (no restart required)
+#   - Requires ENCRYPTION_KEY (secrets are encrypted at rest)
+#   - Use cases:
+#     a) Multi-tenant: Each tenant has their own IdP (Entra ID, Okta, Auth0, etc.)
+#     b) Single-tenant with API management: One tenant, but manage OIDC via API
+#        instead of environment variables (useful for dynamic configuration)
 # ----------------------------------------------------------------------------
 FEDERATION_PER_TENANT_ENABLED=false
 
@@ -94,6 +113,7 @@ OIDC_REDIRECT_GRACE_PERIOD_SECONDS=600
 STRICT_OIDC_REDIRECT_VALIDATION=true
 
 # [OPTIONAL] Clock drift tolerance for OIDC JWT validation (default: 120 seconds)
+# Prevents "token not yet valid" errors when IdP server clock is slightly ahead
 OIDC_CLOCK_LEEWAY_SECONDS=120
 
 # ----------------------------------------------------------------------------
@@ -121,17 +141,20 @@ TENANT_CREDENTIALS_ENABLED=false
 # ----------------------------------------------------------------------------
 # LLM Provider API Keys (REQUIRED - At least ONE provider)
 # ----------------------------------------------------------------------------
-# Behavior depends on TENANT_CREDENTIALS_ENABLED setting:
+# How API keys are resolved depends on TENANT_CREDENTIALS_ENABLED:
 #
-# STRICT MODE (TENANT_CREDENTIALS_ENABLED=true):
-#   - Tenant has configured key → tenant key is used
-#   - Tenant has NO key → ERROR (no fallback to global)
-#   - Tenant key is INVALID → ERROR (no fallback to global)
+# SINGLE-TENANT / GLOBAL FALLBACK MODE (TENANT_CREDENTIALS_ENABLED=false):
+#   Use this when running Eneo for one organization (not multi-tenant SaaS).
+#   - You CAN set keys here in .env (convenient for single deployments)
+#   - You CAN ALSO configure keys via the credentials API endpoint
+#   - If tenant has no key configured → falls back to these global keys
+#   - If tenant HAS a key configured → tenant key is used (API takes priority)
 #
-# SINGLE-TENANT MODE (TENANT_CREDENTIALS_ENABLED=false):
-#   - Tenant has configured key → tenant key is used
-#   - Tenant has NO key → global key is used (fallback)
-#   - Tenant key is INVALID → ERROR (no fallback to global)
+# STRICT MULTI-TENANT MODE (TENANT_CREDENTIALS_ENABLED=true):
+#   Use this for multi-tenant SaaS where each tenant pays their own LLM bills.
+#   - Each tenant MUST configure their own keys via credentials API
+#   - NO fallback to global keys (prevents billing confusion between tenants)
+#   - These .env keys are ignored; only tenant-configured keys work
 # ----------------------------------------------------------------------------
 
 # OpenAI (GPT models)
@@ -142,7 +165,10 @@ OPENAI_API_KEY=
 # Get from: https://console.anthropic.com/
 ANTHROPIC_API_KEY=
 
-# Azure OpenAI (Requires ALL 4 fields)
+# Google Gemini
+GEMINI_API_KEY=
+
+# Azure OpenAI (Requires ALL 5 fields below to work)
 AZURE_API_KEY=
 AZURE_ENDPOINT=
 AZURE_API_BASE=
@@ -182,9 +208,39 @@ INTRIC_SUPER_API_KEY=
 INTRIC_SUPER_DUPER_API_KEY=
 
 # ----------------------------------------------------------------------------
+# Database Connection Pool Configuration
+# ----------------------------------------------------------------------------
+# Controls PostgreSQL connection pooling. Each container has its own pool.
+#
+# ⚠️  API STARVATION PREVENTION
+# Reserve ≥40% of DB connections for API: WORKER_MAX_JOBS ≤ 0.6 × pool_max
+# If workers consume all connections, API requests timeout during crawling.
+#
+# RECOMMENDED TUNING:
+#   Small (8GB):   POOL_SIZE=10, OVERFLOW=5  → WORKER_MAX_JOBS=8
+#   Medium (16GB): POOL_SIZE=20, OVERFLOW=10 → WORKER_MAX_JOBS=15
+#   Large (32GB+): POOL_SIZE=30, OVERFLOW=20 → WORKER_MAX_JOBS=25
+#
+# Symptoms of misconfiguration: API timeouts, "QueuePool limit reached" errors
+# ----------------------------------------------------------------------------
+# Base pool size - permanent connections
+DB_POOL_SIZE=20
+# Extra connections above pool_size (pool_max = size + overflow = 30)
+DB_POOL_MAX_OVERFLOW=10
+# Seconds to wait for connection before error (increase for high-traffic)
+DB_POOL_TIMEOUT=30
+# Verify connections before use - prevents stale connection errors (KEEP TRUE)
+DB_POOL_PRE_PING=true
+# Recycle connections after N seconds (-1 = never, set to 3600 for cloud DBs)
+# DB_POOL_RECYCLE=-1
+# Log connections held >60s - use for debugging pool exhaustion only
+# DB_POOL_DEBUG=false
+
+# ----------------------------------------------------------------------------
 # Background Worker Configuration
 # ----------------------------------------------------------------------------
-# Controls ARQ worker pool behavior and per-tenant concurrency fairness
+# Controls ARQ (Async Redis Queue) worker pool and per-tenant concurrency fairness.
+# ARQ processes background jobs like web crawling, document processing, etc.
 #
 # NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as
 # a background task processor instead of HTTP server. Both backend and worker
@@ -195,79 +251,97 @@ INTRIC_SUPER_DUPER_API_KEY=
 #   - eneo_backend_data:/app/data
 #   - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
 # ----------------------------------------------------------------------------
+# ⚠️  WORKER_MAX_JOBS ≤ 0.6 × (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW)
+# Crawl jobs hold DB connections for hours. See "Database Connection Pool" above.
+# ----------------------------------------------------------------------------
+# Max concurrent jobs across all tenants
+# Memory: 100-500MB per job. With default pool (30), safe max is 18.
+WORKER_MAX_JOBS=15
 
-# [OPTIONAL] Max concurrent jobs across all tenants (default: 20)
-# Memory impact: Each job uses 100-500MB depending on task type
-# Recommendation: 10-15 for <8GB RAM, 20+ for 16GB+ RAM
-WORKER_MAX_CONCURRENT_JOBS=20
-
-# [OPTIONAL] Max concurrent jobs per tenant (default: 4)
-# Prevents one tenant from monopolizing worker slots
+# Max concurrent jobs per tenant (prevents "noisy neighbor" problem)
+# In multi-tenant deployments, prevents one tenant from monopolizing all worker slots
+# Set to 0 to disable (not recommended for multi-tenant production)
 TENANT_WORKER_CONCURRENCY_LIMIT=4
 
-# [OPTIONAL] Semaphore TTL - auto-cleanup for crashed workers (default: 36000 = 10 hours)
-# Keep >= CRAWL_MAX_LENGTH so long crawls never drop their semaphore key
-TENANT_WORKER_SEMAPHORE_TTL_SECONDS=36000
+# Semaphore TTL - auto-cleanup for crashed workers
+# CRITICAL: Must be > CRAWL_MAX_LENGTH to prevent premature lock release
+# If TTL < crawl duration, slot expires mid-crawl causing tenant lockout
+# Formula: TENANT_WORKER_SEMAPHORE_TTL_SECONDS > CRAWL_MAX_LENGTH + 1 hour buffer
+# Default: 39600s (11 hours) > 36000s (10 hours) + 1 hour buffer
+TENANT_WORKER_SEMAPHORE_TTL_SECONDS=39600  # 11 hours
 
-# [OPTIONAL] Retry delay when tenant hits limit (default: 30 seconds)
-# Base delay for exponential backoff: 30s → 60s → 90s → ...
-TENANT_WORKER_RETRY_DELAY_SECONDS=30
+# ============================================================================
+# WEB CRAWLER SETTINGS
+# ============================================================================
 
-# [OPTIONAL] Crawl job age limit - Prevents infinite retry loops (default: 1800 = 30 min)
-# Jobs permanently fail if still retrying after this duration
-# Protects against cascading failures during burst crawl periods (e.g., 2 AM scheduled crawls)
+# --- BASIC SETTINGS ---------------------------------------------------------
+
+# How long a single crawl can run (seconds). Default: 10 hours
+# Large municipal websites may need 6-10 hours for full crawl
+CRAWL_MAX_LENGTH=36000
+
+# Maximum pages to crawl per website
+CLOSESPIDER_ITEMCOUNT=20000
+
+# Maximum file size the crawler will download (bytes). Default: 10MB
+DOWNLOAD_MAX_SIZE=10485760
+
+# Follow robots.txt rules (recommended)
+OBEY_ROBOTS=true
+
+# Automatically slow down to not overload target websites
+AUTOTHROTTLE_ENABLED=true
+
+# --- ADVANCED SETTINGS ------------------------------------------------------
+
+# Pages saved per database write. Lower = less data loss on crash, higher = faster
+CRAWL_PAGE_BATCH_SIZE=100
+
+# Retry configuration for failed pages during crawl
+# CRAWL_PAGE_MAX_RETRIES=3           # Maximum retries per page (default: 3)
+# CRAWL_PAGE_RETRY_DELAY=1.0         # Initial retry delay in seconds (exponential backoff)
+
+# Parallel embedding API calls per crawl
+CRAWL_EMBEDDING_CONCURRENCY=3
+
+# How often crawler reports it's still running (seconds)
+CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
+
+# Stop crawler after this many missed heartbeats
+CRAWL_HEARTBEAT_MAX_FAILURES=3
+
+# Cancel old jobs for same website when user starts a new crawl (minutes)
+CRAWL_STALE_THRESHOLD_MINUTES=30
+
+# Mark stuck/crashed jobs as failed after this time (hours)
+# Must be > CRAWL_MAX_LENGTH to avoid killing valid long crawls
+ORPHAN_CRAWL_RUN_TIMEOUT_HOURS=12
+
+# Reject jobs waiting in queue longer than this (seconds). Prevents backlog
 CRAWL_JOB_MAX_AGE_SECONDS=1800
 
-# ----------------------------------------------------------------------------
-# Crawl Feeder Service (OPTIONAL - Prevents Burst Overload)
-# ----------------------------------------------------------------------------
-# The feeder service meters job enqueue rate to prevent overwhelming the worker
-# queue when schedulers trigger (e.g., 50 websites at 2 AM causing retry storms)
-#
-# When enabled: Scheduler adds jobs to pending queue, feeder enqueues when capacity exists
-# When disabled: Scheduler enqueues directly to ARQ (original behavior)
-# ----------------------------------------------------------------------------
+# --- OPTIONAL: Queue Throttling ---------------------------------------------
+# Spreads out scheduled crawls to prevent worker overload
+# Rate: releases BATCH_SIZE jobs every INTERVAL seconds
 
-# [OPTIONAL] Enable feeder service (default: false for gradual rollout)
-# Keep false until tested in your production environment
-CRAWL_FEEDER_ENABLED=false
-
-# [OPTIONAL] Feeder check interval (default: 10 seconds)
-# How often the feeder checks for pending jobs and available capacity
+CRAWL_FEEDER_ENABLED=true
 CRAWL_FEEDER_INTERVAL_SECONDS=10
-
-# [OPTIONAL] Feeder batch size (default: 10 jobs per cycle per tenant)
-# Maximum jobs to enqueue per tenant per feeder cycle
-# Prevents enqueueing entire queue at once if large capacity suddenly available
 CRAWL_FEEDER_BATCH_SIZE=10
 
 # ----------------------------------------------------------------------------
-# Crawl Reliability & Recovery
+# Web Crawling Configuration
 # ----------------------------------------------------------------------------
-# These settings prevent "Crawl already in progress" blocking and enable
-# safe recovery from crashed workers or stuck jobs
-# ----------------------------------------------------------------------------
-
-# [OPTIONAL] Orphan crawl run cleanup timeout (default: 6 hours)
-# Marks stuck QUEUED/IN_PROGRESS crawl runs as FAILED after this duration
-# Prevents "Crawl already in progress" blocking new crawls indefinitely
-# Higher values are safer for large websites; lower values provide faster cleanup
-ORPHAN_CRAWL_RUN_TIMEOUT_HOURS=6
-
-# [OPTIONAL] Safe preemption threshold for user-initiated recrawls (default: 30 min)
-# When a user triggers a recrawl but an existing job is QUEUED/IN_PROGRESS:
-#   - Job's last activity OLDER than threshold → job is "stale", marked FAILED, new crawl starts
-#   - Job's last activity NEWER than threshold → job is "active", user gets error
-# The worker sends heartbeats (see below) to keep active jobs alive
-# 30 minutes is safe for most; increase for very large sites (>5000 pages)
-CRAWL_STALE_THRESHOLD_MINUTES=30
-
-# [OPTIONAL] Heartbeat interval for crawl jobs (default: 300 seconds = 5 min)
-# During crawl, worker updates job's updated_at timestamp periodically
-# This "heartbeat" signals the job is alive, preventing false-positive staleness
-# TIME-BASED (not page-count-based) to handle slow-loading pages correctly
-# Should be significantly less than CRAWL_STALE_THRESHOLD_MINUTES
-CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
+# [OPTIONAL] Max crawl duration (default: 14400 = 4 hours)
+CRAWL_MAX_LENGTH=14400
+# [OPTIONAL] Max items before stopping (default: 20000)
+CLOSESPIDER_ITEMCOUNT=20000
+# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
+# Separate from UPLOAD_MAX_FILE_SIZE - controls crawler's DOWNLOAD_MAXSIZE
+DOWNLOAD_MAX_SIZE=10485760
+# [OPTIONAL] Respect robots.txt (default: True)
+OBEY_ROBOTS=True
+# [OPTIONAL] Auto-throttle requests (default: True)
+AUTOTHROTTLE_ENABLED=True
 
 # ----------------------------------------------------------------------------
 # Audit Log Export Configuration
@@ -287,40 +361,25 @@ EXPORT_MAX_CONCURRENT_PER_TENANT=2
 # Files older than this are automatically cleaned up by daily cron job (03:00 UTC)
 EXPORT_MAX_AGE_HOURS=24
 
-# ----------------------------------------------------------------------------
-# Feature Flags
-# ----------------------------------------------------------------------------
-USING_ACCESS_MANAGEMENT=True
-USING_AZURE_MODELS=False
-USING_IAM=False
-USING_IMAGE_GENERATION=False
-USING_CRAWL=True
-TESTING=False
-DEV=False
+# ============================================================================
+# FEATURE FLAGS
+# ============================================================================
+USING_ACCESS_MANAGEMENT=true
+USING_AZURE_MODELS=false
+USING_IAM=false
+USING_IMAGE_GENERATION=false
+USING_CRAWL=true
+TESTING=false
+DEV=false
 
-# ----------------------------------------------------------------------------
-# File Upload Limits (bytes)
-# ----------------------------------------------------------------------------
-UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
-UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
-UPLOAD_MAX_FILE_SIZE=10485760
-TRANSCRIPTION_MAX_FILE_SIZE=10485760
-MAX_IN_QUESTION=1
-
-# ----------------------------------------------------------------------------
-# Web Crawling Configuration
-# ----------------------------------------------------------------------------
-# [OPTIONAL] Max crawl duration (default: 14400 = 4 hours)
-CRAWL_MAX_LENGTH=14400
-# [OPTIONAL] Max items before stopping (default: 20000)
-CLOSESPIDER_ITEMCOUNT=20000
-# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
-# Separate from UPLOAD_MAX_FILE_SIZE - controls crawler's DOWNLOAD_MAXSIZE
-DOWNLOAD_MAX_SIZE=10485760
-# [OPTIONAL] Respect robots.txt (default: True)
-OBEY_ROBOTS=True
-# [OPTIONAL] Auto-throttle requests (default: True)
-AUTOTHROTTLE_ENABLED=True
+# ============================================================================
+# FILE UPLOAD LIMITS
+# ============================================================================
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760    # 10MB - max file size in chat session
+UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760   # 10MB - max image size in chat session
+UPLOAD_MAX_FILE_SIZE=10485760               # 10MB - global upload limit
+TRANSCRIPTION_MAX_FILE_SIZE=10485760        # 10MB - max audio file for transcription
+MAX_IN_QUESTION=1                           # Max file attachments per chat message
 
 # ----------------------------------------------------------------------------
 # Integration OAuth Callbacks
@@ -332,17 +391,20 @@ SHAREPOINT_CLIENT_ID=
 SHAREPOINT_CLIENT_SECRET=
 
 # ----------------------------------------------------------------------------
-# Default Tenant & User (OPTIONAL - First-time Bootstrap Only)
+# Default Tenant & User (First-time Bootstrap)
 # ----------------------------------------------------------------------------
-# Uncomment these ONLY for initial deployment to create a default tenant/user
-# After first deployment, comment them out or remove them
-# WARNING: If left enabled, uses these values on every init_db run (but skips if already exists)
+# These credentials are used by init_db.py to create the initial tenant and user.
+# The default credentials below match the DEPLOYMENT.md guide.
+#
+# IMPORTANT: Change the password after first login!
+#
+# If tenant/user already exist, init_db.py will skip creation (safe to re-run).
 # ----------------------------------------------------------------------------
-# DEFAULT_TENANT_NAME=YourOrganization
-# DEFAULT_TENANT_QUOTA_LIMIT=10737418240
-# DEFAULT_USER_NAME=Admin User
-# DEFAULT_USER_EMAIL=admin@yourdomain.com
-# DEFAULT_USER_PASSWORD=ChangeMe123!
+DEFAULT_TENANT_NAME=ExampleTenant
+DEFAULT_TENANT_QUOTA_LIMIT=10737418240
+DEFAULT_USER_NAME=ExampleUser
+DEFAULT_USER_EMAIL=user@example.com
+DEFAULT_USER_PASSWORD=Password1!
 
 # ----------------------------------------------------------------------------
 # Migration & Maintenance

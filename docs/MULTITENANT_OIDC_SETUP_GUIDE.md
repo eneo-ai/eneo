@@ -1,8 +1,18 @@
 # Multi-Tenant OIDC Setup Guide
 
-**Updated:** 2025-10-18  
-**Audience:** Platform & support engineers  
+**Updated:** 2026-01-05
+**Audience:** Platform & support engineers
 **Goal:** Let each tenant authenticate against its own IdP while keeping a single Eneo deployment.
+
+---
+
+## When to Use This Guide
+
+This guide applies when `FEDERATION_PER_TENANT_ENABLED=true`. Use this mode if:
+- **Multi-tenant:** Each tenant needs their own IdP (Entra ID, Okta, Auth0, etc.)
+- **Single-tenant with API management:** You want to manage OIDC via API instead of environment variables (changes take effect without restart)
+
+**Not using federation?** For simple single-tenant deployments, keep `FEDERATION_PER_TENANT_ENABLED=false` and configure OIDC via environment variables (`OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`). See the [deployment templates](./deployment/env_backend.template).
 
 ---
 

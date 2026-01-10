@@ -76,12 +76,12 @@ function SpacesManager(data: SpacesManagerParams) {
         switch (type) {
           case "applications": {
             const applications = await intric.spaces.listApplications($currentSpace);
-            $currentSpace.applications = applications;
+            $currentSpace = { ...$currentSpace, applications };
             break;
           }
           case "knowledge": {
             const knowledge = await intric.spaces.listKnowledge($currentSpace);
-            $currentSpace.knowledge = knowledge;
+            $currentSpace = { ...$currentSpace, knowledge };
             break;
           }
         }

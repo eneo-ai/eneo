@@ -32,6 +32,7 @@ def service(actor: MagicMock):
         completion_model_service=AsyncMock(),
         transcription_model_service=AsyncMock(),
         security_classification_service=AsyncMock(),
+        icon_repo=AsyncMock(),
     )
 
     return service

@@ -5,12 +5,19 @@
   import GroupChatActions from "./GroupChatActions.svelte";
   import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams";
+  import { getAppContext } from "$lib/core/AppContext";
 
   export let item: AssistantSparse | GroupChatSparse;
 
+  const { environment } = getAppContext();
   const {
     state: { currentSpace }
   } = getSpacesManager();
+
+  // Generate icon URL from icon_id
+  $: iconUrl = item.type === "assistant" && item.icon_id
+    ? `${environment.baseUrl}/api/v1/icons/${item.icon_id}/`
+    : null;
 </script>
 
 <a
@@ -38,7 +45,13 @@
     class="group-hover:text-on-fill pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[4.5rem]"
   >
     {#if item.type === "assistant"}
-      {([...item.name][0] ?? "").toUpperCase()}
+      {#if iconUrl}
+        <div class="flex h-32 w-32 items-center justify-center overflow-hidden rounded-xl">
+          <img src={iconUrl} alt={item.name} class="h-full w-full object-cover" />
+        </div>
+      {:else}
+        {([...item.name][0] ?? "").toUpperCase()}
+      {/if}
     {:else}
       <svg
         xmlns="http://www.w3.org/2000/svg"

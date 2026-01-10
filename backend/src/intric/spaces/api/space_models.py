@@ -75,8 +75,11 @@ class AppSparse(ResourcePermissionsMixin, InDB):
     name: str
     description: Optional[str] = None
     published: bool
-
     user_id: UUID
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
+    )
 
 
 # Spaces
@@ -102,6 +105,10 @@ class UpdateSpaceRequest(BaseModel):
             "Set to null to remove the security classification. "
             "Omit to keep the current security classification unchanged."
         ),
+    )
+    icon_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
 
     data_retention_days: Union[int, None, NotProvided] = Field(
@@ -148,6 +155,10 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     description: Optional[str]
     personal: bool
     organization: bool
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
+    )
     applications: Optional[Applications] = None
     default_assistant: Optional[DefaultAssistant] = None
     data_retention_days: Optional[int] = None
@@ -287,3 +298,11 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     embedding_model: ModelId
     url: str
     key: Optional[str] = None
+    folder_id: Optional[str] = None
+    folder_path: Optional[str] = None
+    selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
+    resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+
+
+class UpdateIntegrationKnowledgeRequest(BaseModel):
+    name: str

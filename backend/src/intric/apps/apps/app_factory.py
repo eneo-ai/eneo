@@ -133,6 +133,7 @@ class AppFactory:
             source_template=source_template,
             transcription_model=transcription_model,
             data_retention_days=app_in_db.data_retention_days,
+            icon_id=app_in_db.icon_id,
         )
 
     def create_space_app_from_db(
@@ -196,4 +197,5 @@ class AppFactory:
             source_template=source_template,
             transcription_model=transcription_model,
             data_retention_days=app_in_db.data_retention_days,
+            icon_id=app_in_db.icon_id,
         )

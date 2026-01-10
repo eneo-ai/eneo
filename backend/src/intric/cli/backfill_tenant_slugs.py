@@ -4,7 +4,7 @@ This script generates URL-safe slugs for all tenants that don't have one.
 It should be run after deploying the federation per tenant feature.
 
 Usage:
-    poetry run python -m intric.cli.backfill_tenant_slugs
+    uv run python -m intric.cli.backfill_tenant_slugs
 """
 
 import asyncio

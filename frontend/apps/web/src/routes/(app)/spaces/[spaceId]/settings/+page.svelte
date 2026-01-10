@@ -18,6 +18,7 @@
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
+  import IconUpload from "$lib/features/icons/IconUpload.svelte";
 
   const intric = getIntric();
 
@@ -38,6 +39,55 @@
   let showStillDeletingMessage = $state(false);
   let deletionMessageTimeout: ReturnType<typeof setTimeout>;
   let isOrgSpace = $currentSpace.organization;
+
+  // Icon state
+  let currentIconId = $state<string | null>($currentSpace.icon_id);
+  let iconUploading = $state(false);
+  let iconError = $state<string | null>(null);
+
+  function getIconUrl(id: string | null): string | null {
+    return id ? intric.icons.url({ id }) : null;
+  }
+
+  let iconUrl = $derived(getIconUrl(currentIconId));
+
+  async function handleIconUpload(event: CustomEvent<File>) {
+    const file = event.detail;
+    iconUploading = true;
+    iconError = null;
+    try {
+      const newIcon = await intric.icons.upload({ file });
+      await intric.spaces.update({
+        space: { id: $currentSpace.id },
+        update: { icon_id: newIcon.id }
+      });
+      currentIconId = newIcon.id;
+      await spaces.refreshCurrentSpace();
+    } catch (error) {
+      console.error("Failed to upload icon:", error);
+      iconError = m.avatar_upload_failed();
+    } finally {
+      iconUploading = false;
+    }
+  }
+
+  async function handleIconDelete() {
+    iconError = null;
+    try {
+      if (currentIconId) {
+        await intric.icons.delete({ id: currentIconId });
+      }
+      await intric.spaces.update({
+        space: { id: $currentSpace.id },
+        update: { icon_id: null }
+      });
+      currentIconId = null;
+      await spaces.refreshCurrentSpace();
+    } catch (error) {
+      console.error("Failed to delete icon:", error);
+      iconError = m.avatar_delete_failed();
+    }
+  }
 
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
@@ -75,6 +125,15 @@
       {#if !isOrgSpace}
       <Settings.Group title={m.general()}>
         <EditNameAndDescription></EditNameAndDescription>
+        <Settings.Row title={m.avatar()} description={m.avatar_description()}>
+          <IconUpload
+            {iconUrl}
+            uploading={iconUploading}
+            error={iconError}
+            on:upload={handleIconUpload}
+            on:delete={handleIconDelete}
+          />
+        </Settings.Row>
         <SpaceStorageOverview></SpaceStorageOverview>
       </Settings.Group>
       {/if}

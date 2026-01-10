@@ -1124,6 +1124,25 @@ export interface paths {
      */
     get: operations["download_file_signed_api_v1_files__id__download__get"];
   };
+  "/api/v1/icons/{id}/": {
+    /**
+     * Get icon image
+     * @description Returns icon as binary data. Public endpoint for img tags. Cached for 1 year.
+     */
+    get: operations["get_icon_api_v1_icons__id___get"];
+    /**
+     * Delete icon
+     * @description Delete an icon by ID. Requires authentication and ownership.
+     */
+    delete: operations["delete_icon_api_v1_icons__id___delete"];
+  };
+  "/api/v1/icons/": {
+    /**
+     * Upload icon
+     * @description Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.
+     */
+    post: operations["create_icon_api_v1_icons__post"];
+  };
   "/api/v1/limits/": {
     /** Get Limits */
     get: operations["get_limits_api_v1_limits__get"];
@@ -2493,6 +2512,11 @@ export interface components {
       transcription_model: components["schemas"]["TranscriptionModelPublic"];
       /** Data Retention Days */
       data_retention_days?: number | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
     };
     /** AppRunInput */
     AppRunInput: {
@@ -2564,6 +2588,11 @@ export interface components {
        * Format: uuid
        */
       user_id: string;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
     };
     /**
      * AppTemplateAdminCreate
@@ -2786,6 +2815,12 @@ export interface components {
        * @default NOT_PROVIDED
        */
       data_retention_days?: number | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       * @default NOT_PROVIDED
+       */
+      icon_id?: string | null;
     };
     /** Applications */
     Applications: {
@@ -2998,6 +3033,11 @@ export interface components {
        */
       description?: string | null;
       /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
+      /**
        * Insight Enabled
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
@@ -3059,6 +3099,11 @@ export interface components {
         [key: string]: unknown;
       } | null;
       type: components["schemas"]["AssistantType"];
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -3433,6 +3478,14 @@ export interface components {
       client_id?: string | null;
       /** Client Secret */
       client_secret?: string | null;
+    };
+    /** Body_create_icon_api_v1_icons__post */
+    Body_create_icon_api_v1_icons__post: {
+      /**
+       * File
+       * Format: binary
+       */
+      file: string;
     };
     /** Body_upload_file_api_v1_files__post */
     Body_upload_file_api_v1_files__post: {
@@ -4085,7 +4138,7 @@ export interface components {
       tenant_worker_concurrency_limit?: number | null;
       /**
        * Crawl Stale Threshold Minutes
-       * @description Minutes without activity before job is considered stale (5 min to 24 hours)
+       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
        */
       crawl_stale_threshold_minutes?: number | null;
       /**
@@ -4293,6 +4346,11 @@ export interface components {
        * @example This is a helpful AI assistant
        */
       description?: string | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       /**
        * Insight Enabled
        * @default false
@@ -4721,7 +4779,11 @@ export interface components {
       | 9023
       | 9024
       | 9025
-      | 9026;
+      | 9026
+      | 9027
+      | 9028
+      | 9029
+      | 9030;
     /**
      * ExportJobRequest
      * @description Schema for requesting async audit log export.
@@ -5188,6 +5250,18 @@ export interface components {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
     };
+    /** IconPublic */
+    IconPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+    };
     /** InfoBlobAddPublic */
     InfoBlobAddPublic: {
       /** Text */
@@ -5340,6 +5414,17 @@ export interface components {
     IntegrationKnowledgeMetaData: {
       /** Size */
       size: number;
+      /** Last Sync Summary */
+      last_sync_summary?: {
+        files_processed?: number | null;
+        pages_processed?: number | null;
+        folders_processed?: number | null;
+        skipped_items?: number | null;
+      } | null;
+      /** Last Synced At */
+      last_synced_at?: string | null;
+      /** SharePoint Subscription Expires At */
+      sharepoint_subscription_expires_at?: string | null;
     };
     /** IntegrationKnowledgePublic */
     IntegrationKnowledgePublic: {
@@ -5368,6 +5453,9 @@ export interface components {
        */
       user_integration_id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublicLegacy"];
+      site_id?: string | null;
+      sharepoint_subscription_id?: string | null;
+      sharepoint_subscription_expires_at?: string | null;
       /**
        * Permissions
        * @default []
@@ -6615,6 +6703,11 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       */
+      icon_id?: string | null;
     };
     /** PartialCompletionModelUpdate */
     PartialCompletionModelUpdate: {
@@ -6722,6 +6815,11 @@ export interface components {
        * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       */
+      icon_id?: string | null;
     };
     /**
      * Permission
@@ -7482,6 +7580,11 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       applications: components["schemas"]["Applications"];
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
@@ -7531,6 +7634,11 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       applications: components["schemas"]["Applications"];
       default_assistant: components["schemas"]["DefaultAssistant"];
       /** Data Retention Days */
@@ -7582,6 +7690,11 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon
+       */
+      icon_id?: string | null;
       applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
@@ -9433,6 +9546,7 @@ export interface operations {
   get_crawl_run_api_v1_crawl_runs__id___get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the crawl run to retrieve */
         id: string;
       };
     };
@@ -15087,6 +15201,101 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get icon image
+   * @description Returns icon as binary data. Public endpoint for img tags. Cached for 1 year.
+   */
+  get_icon_api_v1_icons__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "image/png": unknown;
+          "image/jpeg": unknown;
+          "image/webp": unknown;
+        };
+      };
+      /** @description Icon not found */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete icon
+   * @description Delete an icon by ID. Requires authentication and ownership.
+   */
+  delete_icon_api_v1_icons__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted */
+      204: {
+        content: never;
+      };
+      /** @description Not found */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload icon
+   * @description Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.
+   */
+  create_icon_api_v1_icons__post: {
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_create_icon_api_v1_icons__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IconPublic"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Limits */
   get_limits_api_v1_limits__get: {
     responses: {
@@ -15851,6 +16060,7 @@ export interface operations {
   get_websites_api_v1_websites__get: {
     parameters: {
       query?: {
+        /** @description Filter websites by tenant scope */
         for_tenant?: boolean;
       };
     };
@@ -15969,6 +16179,7 @@ export interface operations {
   get_website_api_v1_websites__id___get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
     };
@@ -15997,6 +16208,7 @@ export interface operations {
   update_website_api_v1_websites__id___post: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to update */
         id: string;
       };
     };
@@ -16030,6 +16242,7 @@ export interface operations {
   delete_website_api_v1_websites__id___delete: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to delete */
         id: string;
       };
     };
@@ -16074,6 +16287,7 @@ export interface operations {
   run_crawl_api_v1_websites__id__run__post: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to crawl */
         id: string;
       };
     };
@@ -16108,6 +16322,7 @@ export interface operations {
   get_crawl_runs_api_v1_websites__id__runs__get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
     };
@@ -16130,6 +16345,7 @@ export interface operations {
   transfer_website_to_space_api_v1_websites__id__transfer__post: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website to transfer */
         id: string;
       };
     };
@@ -16155,6 +16371,7 @@ export interface operations {
   get_info_blobs_api_v1_websites__id__info_blobs__get: {
     parameters: {
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
     };

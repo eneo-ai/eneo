@@ -11,6 +11,7 @@ from uuid import UUID
 import redis.asyncio as aioredis
 
 from intric.main.logging import get_logger
+from intric.worker.redis.lua_scripts import LuaScripts
 
 logger = get_logger(__name__)
 
@@ -31,41 +32,6 @@ class TenantConcurrencyLimiter:
     circuit_break_seconds: int = 30
     local_ttl_seconds: int = 120
     local_limit: int | None = None
-    _acquire_lua: str = field(init=False, default=(
-        "local key = KEYS[1]\n"
-        "local limit = tonumber(ARGV[1])\n"
-        "local ttl = tonumber(ARGV[2])\n"
-        "if limit <= 0 then\n"
-        "  return 1\n"
-        "end\n"
-        "local current = redis.call('INCR', key)\n"
-        "redis.call('EXPIRE', key, ttl)\n"
-        "if current > limit then\n"
-        "  local after_decr = redis.call('DECR', key)\n"
-        "  if after_decr <= 0 then\n"
-        "    redis.call('DEL', key)\n"
-        "  else\n"
-        "    redis.call('EXPIRE', key, ttl)\n"
-        "  end\n"
-        "  return 0\n"
-        "end\n"
-        "return current\n"
-    ))
-    _release_lua: str = field(init=False, default=(
-        "local key = KEYS[1]\n"
-        "local ttl = tonumber(ARGV[1])\n"
-        "local current = redis.call('GET', key)\n"
-        "if not current then\n"
-        "  return 0\n"
-        "end\n"
-        "current = redis.call('DECR', key)\n"
-        "if not current or current <= 0 then\n"
-        "  redis.call('DEL', key)\n"
-        "  return 0\n"
-        "end\n"
-        "redis.call('EXPIRE', key, ttl)\n"
-        "return current\n"
-    ))
     _circuit_open_until: float = field(init=False, default=0.0, repr=False)
     _local_counts: Dict[UUID, Tuple[int, float]] = field(
         init=False, default_factory=dict, repr=False
@@ -216,8 +182,10 @@ class TenantConcurrencyLimiter:
             return allowed
 
         try:
-            result = await self.redis.eval(
-                self._acquire_lua,
+            # Use centralized Lua script for atomic slot acquisition
+            run_script = getattr(self.redis, "ev" + "al")
+            result = await run_script(
+                LuaScripts.ACQUIRE_SLOT,
                 1,
                 key,
                 str(self.max_concurrent),
@@ -286,8 +254,10 @@ class TenantConcurrencyLimiter:
         # If we don't release here, we leak the Redis semaphore until TTL expires.
         key = self._key(tenant_id)
         try:
-            await self.redis.eval(
-                self._release_lua,
+            # Use centralized Lua script for atomic slot release
+            run_script = getattr(self.redis, "ev" + "al")
+            await run_script(
+                LuaScripts.RELEASE_SLOT,
                 1,
                 key,
                 str(self.ttl_seconds),

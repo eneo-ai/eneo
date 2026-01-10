@@ -21,12 +21,19 @@ from intric.embedding_models.presentation.embedding_model_router import (
 from intric.files.file_router import router as files_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
+from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
 from intric.integration.presentation.integration_auth_router import (
     router as integration_auth_router,
 )
 from intric.integration.presentation.integration_router import (
     router as integration_router,
+)
+from intric.integration.presentation.sharepoint_webhook_router import (
+    router as sharepoint_webhook_router,
+)
+from intric.integration.presentation.admin_sharepoint_router import (
+    router as admin_sharepoint_router,
 )
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
@@ -115,6 +122,7 @@ router.include_router(
     tags=["transcription-models"],
 )
 router.include_router(files_router, prefix="/files", tags=["files"])
+router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
 router.include_router(space_router, prefix="/spaces", tags=["spaces"])
 router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
@@ -141,6 +149,8 @@ router.include_router(
 )
 router.include_router(audit_router, prefix="", tags=["audit"])
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
+router.include_router(sharepoint_webhook_router, prefix="/integrations", tags=["integrations"])
+router.include_router(admin_sharepoint_router, prefix="/admin", tags=["admin"])
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 
 router.include_router(integration_auth_router, prefix="/integrations/auth", tags=["integrations"])

@@ -16,9 +16,9 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.crawl_tasks import (
-    _calculate_exponential_backoff,
-    _update_job_retry_stats,
+from intric.worker.crawl.recovery import (
+    calculate_exponential_backoff,
+    update_job_retry_stats,
 )
 
 
@@ -40,7 +40,7 @@ async def test_job_retry_stats_tracks_per_job_not_per_tenant(
 
     # Simulate failures for job_1 (3 failures)
     for _ in range(3):
-        await _update_job_retry_stats(
+        await update_job_retry_stats(
             job_id=job_1,
             redis_client=redis_client,
             is_actual_failure=True,
@@ -48,7 +48,7 @@ async def test_job_retry_stats_tracks_per_job_not_per_tenant(
         )
 
     # Simulate failures for job_2 (1 failure)
-    await _update_job_retry_stats(
+    await update_job_retry_stats(
         job_id=job_2,
         redis_client=redis_client,
         is_actual_failure=True,
@@ -86,7 +86,7 @@ async def test_busy_signal_does_not_increment_retry_count(
 
     # Simulate 5 busy signals (waiting for slot)
     for _ in range(5):
-        retry_count, job_age = await _update_job_retry_stats(
+        retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
             is_actual_failure=False,  # Busy signal, not real failure
@@ -118,7 +118,7 @@ async def test_actual_failure_increments_retry_count(
 
     # Simulate 3 actual failures (network errors, etc.)
     for i in range(3):
-        retry_count, job_age = await _update_job_retry_stats(
+        retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
             is_actual_failure=True,  # Real failure
@@ -154,7 +154,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
 
     # 3 busy signals
     for _ in range(3):
-        await _update_job_retry_stats(
+        await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
             is_actual_failure=False,
@@ -162,7 +162,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
         )
 
     # 1 actual failure
-    await _update_job_retry_stats(
+    await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=True,
@@ -171,7 +171,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
 
     # 2 more busy signals
     for _ in range(2):
-        await _update_job_retry_stats(
+        await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
             is_actual_failure=False,
@@ -179,7 +179,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
         )
 
     # 1 more actual failure
-    await _update_job_retry_stats(
+    await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=True,
@@ -206,7 +206,7 @@ async def test_job_age_tracking_from_first_attempt(
     job_id = uuid4()
 
     # First attempt - should set start_time
-    retry_count_1, job_age_1 = await _update_job_retry_stats(
+    retry_count_1, job_age_1 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=False,
@@ -222,7 +222,7 @@ async def test_job_age_tracking_from_first_attempt(
     await asyncio.sleep(0.5)
 
     # Second attempt - should NOT update start_time (NX flag)
-    retry_count_2, job_age_2 = await _update_job_retry_stats(
+    retry_count_2, job_age_2 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=False,
@@ -248,7 +248,7 @@ async def test_redis_keys_have_proper_ttl(
     job_id = uuid4()
     max_age = 1800  # 30 minutes
 
-    await _update_job_retry_stats(
+    await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=True,
@@ -287,10 +287,10 @@ async def test_exponential_backoff_with_real_calculation(
     max_delay = 300.0
 
     # Test several attempts
-    attempt_1_delays = [_calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)]
-    attempt_2_delays = [_calculate_exponential_backoff(2, base_delay, max_delay) for _ in range(100)]
-    attempt_3_delays = [_calculate_exponential_backoff(3, base_delay, max_delay) for _ in range(100)]
-    attempt_4_delays = [_calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(100)]
+    attempt_1_delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)]
+    attempt_2_delays = [calculate_exponential_backoff(2, base_delay, max_delay) for _ in range(100)]
+    attempt_3_delays = [calculate_exponential_backoff(3, base_delay, max_delay) for _ in range(100)]
+    attempt_4_delays = [calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(100)]
 
     # Verify ranges (with jitter)
     # Attempt 1: 60 * 2^0 = 60 -> [0, 60]
@@ -333,7 +333,7 @@ async def test_concurrent_job_updates_race_condition(
 
     async def update_job_stats():
         """Simulate a worker updating job retry stats."""
-        await _update_job_retry_stats(
+        await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
             is_actual_failure=True,
@@ -374,7 +374,7 @@ async def test_max_retry_count_behavior(
 
     # Simulate exceeding max retries
     for i in range(max_retries + 3):  # Go 3 beyond max
-        retry_count, job_age = await _update_job_retry_stats(
+        retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
             is_actual_failure=True,
@@ -412,7 +412,7 @@ async def test_job_age_exceeds_max_age(
     max_age_seconds = 60  # 1 minute for test
 
     # First update - sets start_time
-    retry_count_1, job_age_1 = await _update_job_retry_stats(
+    retry_count_1, job_age_1 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=False,
@@ -425,7 +425,7 @@ async def test_job_age_exceeds_max_age(
     await redis_client.set(f"job:{job_id}:start_time", str(old_start_time))
 
     # Second update - should report age > max_age
-    retry_count_2, job_age_2 = await _update_job_retry_stats(
+    retry_count_2, job_age_2 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=False,
@@ -452,14 +452,14 @@ async def test_job_age_exceeds_max_age(
 async def test_retry_count_returned_correctly(
     redis_client: aioredis.Redis,
 ):
-    """Verify _update_job_retry_stats returns correct retry_count.
+    """Verify update_job_retry_stats returns correct retry_count.
 
     The returned retry_count should match what's in Redis.
     """
     job_id = uuid4()
 
     # First failure
-    retry_count_1, _ = await _update_job_retry_stats(
+    retry_count_1, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=True,
@@ -468,7 +468,7 @@ async def test_retry_count_returned_correctly(
     assert retry_count_1 == 1, "First failure should return retry_count=1"
 
     # Second failure
-    retry_count_2, _ = await _update_job_retry_stats(
+    retry_count_2, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=True,
@@ -477,7 +477,7 @@ async def test_retry_count_returned_correctly(
     assert retry_count_2 == 2, "Second failure should return retry_count=2"
 
     # Busy signal (should not increment)
-    retry_count_3, _ = await _update_job_retry_stats(
+    retry_count_3, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=False,
@@ -486,7 +486,7 @@ async def test_retry_count_returned_correctly(
     assert retry_count_3 == 2, "Busy signal should return same retry_count=2"
 
     # Third failure
-    retry_count_4, _ = await _update_job_retry_stats(
+    retry_count_4, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
         is_actual_failure=True,

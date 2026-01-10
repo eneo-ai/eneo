@@ -27,8 +27,17 @@ async def transcription(job_id: str, params: Transcription, container: Container
     return await transcription_task(job_id=job_id, params=params, container=container)
 
 
-@worker.function()
+@worker.long_running_function()
 async def crawl(job_id: str, params: CrawlTask, container: Container):
+    """Crawl task uses long_running_function to avoid DB pool exhaustion.
+
+    Unlike regular worker.function(), this:
+    1. Uses short-lived bootstrap session for user lookup (~50ms)
+    2. Runs with sessionless container (no connection held)
+    3. crawl_task manages its own sessions via Container.session_scope()
+
+    This prevents holding a DB connection for the entire crawl (5-30 minutes).
+    """
     return await crawl_task(job_id=job_id, params=params, container=container)
 
 

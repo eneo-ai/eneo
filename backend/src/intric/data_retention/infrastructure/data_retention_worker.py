@@ -2,6 +2,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
 
+from dependency_injector import providers
+
+from intric.database.database import sessionmanager
 from intric.main.container.container import Container
 from intric.worker.worker import Worker
 
@@ -14,13 +17,15 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
     """
     Daily cleanup of old data based on retention policies.
 
+    Uses explicit sessionmanager.session() to avoid nested transaction issues
+    when cron wrapper already has a transaction open.
+
     Runs separate transactions for each deletion type to ensure partial
     success is possible if one type fails.
 
     Returns:
         Dictionary with deletion counts and any errors encountered
     """
-    data_retention_service = container.data_retention_service()
     start_time = datetime.now(timezone.utc)
 
     results = {
@@ -36,44 +41,53 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
 
     logger.info("Starting data retention cleanup job")
 
-    # Delete old questions
-    try:
-        async with container.session().begin():
-            questions_count = await data_retention_service.delete_old_questions()
-            results["deleted"]["questions"] = questions_count
-            if questions_count > 0:
-                logger.info(f"Deleted {questions_count} old questions based on retention policies")
-    except Exception as e:
-        error_msg = f"Failed to delete old questions: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        results["errors"].append(error_msg)
-        results["success"] = False
+    # Use fresh session to avoid nested transaction error from cron wrapper
+    async with sessionmanager.session() as session:
+        container.session.override(providers.Object(session))
+        try:
+            data_retention_service = container.data_retention_service()
 
-    # Delete old app runs
-    try:
-        async with container.session().begin():
-            app_runs_count = await data_retention_service.delete_old_app_runs()
-            results["deleted"]["app_runs"] = app_runs_count
-            if app_runs_count > 0:
-                logger.info(f"Deleted {app_runs_count} old app runs based on retention policies")
-    except Exception as e:
-        error_msg = f"Failed to delete old app runs: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        results["errors"].append(error_msg)
-        results["success"] = False
+            # Delete old questions
+            try:
+                async with session.begin():
+                    questions_count = await data_retention_service.delete_old_questions()
+                    results["deleted"]["questions"] = questions_count
+                    if questions_count > 0:
+                        logger.info(f"Deleted {questions_count} old questions based on retention policies")
+            except Exception as e:
+                error_msg = f"Failed to delete old questions: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append(error_msg)
+                results["success"] = False
 
-    # Delete old orphaned sessions
-    try:
-        async with container.session().begin():
-            sessions_count = await data_retention_service.delete_old_sessions()
-            results["deleted"]["sessions"] = sessions_count
-            if sessions_count > 0:
-                logger.info(f"Deleted {sessions_count} orphaned sessions")
-    except Exception as e:
-        error_msg = f"Failed to delete old sessions: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        results["errors"].append(error_msg)
-        results["success"] = False
+            # Delete old app runs
+            try:
+                async with session.begin():
+                    app_runs_count = await data_retention_service.delete_old_app_runs()
+                    results["deleted"]["app_runs"] = app_runs_count
+                    if app_runs_count > 0:
+                        logger.info(f"Deleted {app_runs_count} old app runs based on retention policies")
+            except Exception as e:
+                error_msg = f"Failed to delete old app runs: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append(error_msg)
+                results["success"] = False
+
+            # Delete old orphaned sessions
+            try:
+                async with session.begin():
+                    sessions_count = await data_retention_service.delete_old_sessions()
+                    results["deleted"]["sessions"] = sessions_count
+                    if sessions_count > 0:
+                        logger.info(f"Deleted {sessions_count} orphaned sessions")
+            except Exception as e:
+                error_msg = f"Failed to delete old sessions: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append(error_msg)
+                results["success"] = False
+        finally:
+            # Always reset override, even on exception
+            container.session.reset_override()
 
     # Calculate total and duration
     end_time = datetime.now(timezone.utc)

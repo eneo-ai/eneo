@@ -42,8 +42,8 @@ class TestCrawlerSettingSpecs:
             )
 
     def test_expected_settings_count(self):
-        """Verify we have all 15 crawler settings."""
-        assert len(CRAWLER_SETTING_SPECS) == 15
+        """Verify we have all 18 crawler settings."""
+        assert len(CRAWLER_SETTING_SPECS) == 18
 
     def test_known_settings_present(self):
         """Verify all known settings are present."""
@@ -63,6 +63,8 @@ class TestCrawlerSettingSpecs:
             "crawl_feeder_interval_seconds",
             "crawl_feeder_batch_size",
             "crawl_job_max_age_seconds",
+            "tenant_worker_semaphore_ttl_seconds",
+            "crawl_page_batch_size",
         ]
         for name in expected:
             assert name in CRAWLER_SETTING_SPECS, f"Missing setting: {name}"
@@ -153,12 +155,14 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_feeder_interval_seconds = 10
             mock_settings.crawl_feeder_batch_size = 10
             mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
+            mock_settings.crawl_page_batch_size = 100
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings({})
             assert "download_timeout" in result
             assert "crawl_max_length" in result
-            assert len(result) == 15
+            assert len(result) == 18
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
@@ -201,10 +205,12 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_feeder_interval_seconds = 10
             mock_settings.crawl_feeder_batch_size = 10
             mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
+            mock_settings.crawl_page_batch_size = 100
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings(None)
-            assert len(result) == 15
+            assert len(result) == 18
 
 
 class TestValidateCrawlerSetting:

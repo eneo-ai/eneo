@@ -10,6 +10,7 @@ from intric.database.tables.ai_models_table import (
     TranscriptionModels,
 )
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
+from intric.database.tables.icons_table import Icons
 from intric.database.tables.security_classifications_table import SecurityClassification
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
@@ -35,6 +36,9 @@ class Spaces(BasePublic):
     )
     security_classification_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(SecurityClassification.id, ondelete="SET NULL"), nullable=True
+    )
+    icon_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
     )
 
     tenant_space_id: Mapped[Optional[UUID]] = mapped_column(

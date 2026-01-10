@@ -4,8 +4,7 @@ import ConfluenceImportDialog from "./ConfluenceImportDialog.svelte";
 
 export const ConfluenceIntegrationData: IntegrationData = {
   logo: confluenceImgUrl,
-  description:
-    "This integration enables the seamless import of knowledge from Confluence spaces into intric.",
+  descriptionKey: "confluence_integration_description",
   displayName: "Confluence",
   importHint: "Import a Confluence space into your knowledge",
   ImportDialog: ConfluenceImportDialog,

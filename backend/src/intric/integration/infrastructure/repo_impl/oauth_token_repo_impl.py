@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.tables.integration_table import (
     OauthToken as OauthTokenDBModel,
+    UserIntegration,
 )
 from intric.integration.domain.entities.oauth_token import OauthToken
 from intric.integration.domain.repositories.oauth_token_repo import (
@@ -24,4 +25,8 @@ class OauthTokenRepoImpl(
 ):
     def __init__(self, session: "AsyncSession", mapper: OauthTokenMapper):
         super().__init__(session=session, model=OauthTokenDBModel, mapper=mapper)
-        self._options = [selectinload(self._db_model.user_integration)]
+        self._options = [
+            selectinload(self._db_model.user_integration).selectinload(
+                UserIntegration.tenant_integration
+            )
+        ]

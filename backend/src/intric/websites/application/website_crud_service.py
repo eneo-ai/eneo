@@ -186,12 +186,23 @@ class WebsiteCRUDService:
             if not job:
                 return True  # Job not found, allow new crawl
 
-            # Check if job is stale - use tenant-aware setting
+            # Check if job is stale - use different thresholds for QUEUED vs IN_PROGRESS
+            # QUEUED jobs should move to IN_PROGRESS quickly (within seconds)
+            # If stuck in QUEUED for 5+ min, it's likely orphaned (Redis cleared, worker restarted)
+            # IN_PROGRESS jobs use longer tenant-configurable threshold (heartbeat timeout)
             tenant = await self.tenant_repo.get(self.user.tenant_id)
             tenant_settings = tenant.crawler_settings if tenant else None
-            threshold_minutes = get_crawler_setting(
-                "crawl_stale_threshold_minutes", tenant_settings
-            )
+
+            if job.status == Status.QUEUED:
+                # Configurable threshold for QUEUED - if stuck, it's orphaned
+                threshold_minutes = get_crawler_setting(
+                    "queued_stale_threshold_minutes", tenant_settings
+                )
+            else:
+                # Standard threshold for IN_PROGRESS (heartbeat timeout)
+                threshold_minutes = get_crawler_setting(
+                    "crawl_stale_threshold_minutes", tenant_settings
+                )
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
 
             # Use updated_at if available, otherwise created_at
@@ -211,6 +222,21 @@ class WebsiteCRUDService:
 
                 if rows_affected > 0:
                     # We successfully preempted the job
+                    # Release Redis slot and clean up flag to prevent zombie slots
+                    # Safe to call even if resources don't exist (idempotent)
+                    try:
+                        await self.crawl_service.release_job_resources(
+                            job_id=latest_crawl.job_id,
+                            tenant_id=website.tenant_id,
+                        )
+                    except Exception as slot_exc:
+                        logger.warning(
+                            "Failed to release slot for preempted job",
+                            extra={
+                                "job_id": str(latest_crawl.job_id),
+                                "error": str(slot_exc),
+                            },
+                        )
                     logger.info(
                         "Preempted stale crawl job",
                         extra={
