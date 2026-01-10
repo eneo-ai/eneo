@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
+  import { goto, replaceState } from "$app/navigation";
   import { page } from "$app/stores";
   import { writable } from "svelte/store";
   import { Page } from "$lib/components/layout";
@@ -17,7 +17,7 @@
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
   import { CircleCheck, CircleX, Calendar, Shield, FileText, Settings, Trash2 } from "lucide-svelte";
-  import { fade } from "svelte/transition";
+  import { fade, slide, scale } from "svelte/transition";
   import { onDestroy } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -31,8 +31,36 @@
 
   const intric = getIntric();
 
+  // Local state for audit logs (shadows data from load function to allow client-side updates)
+  let logs = $state<AuditLogResponse[]>(data.logs || []);
+  let totalCount = $state(data.total_count || 0);
+  let currentPage = $state(data.page || 1);
+  let pageSize = $state(data.page_size || 100);
+  let totalPages = $state(data.total_pages || 0);
+  let hasSessionState = $state(data.hasSession);
+  let isFiltering = $state(false);
+
+  // Track if we're using client-side filtering (to avoid $effect overwriting state)
+  let useClientSideData = $state(false);
+
+  // Abort controller for cancelling stale requests
+  let filterAbortController: AbortController | null = null;
+
+  // Only sync from load function data when NOT using client-side filtering
+  // This prevents the effect from overwriting state during manual filtering
+  $effect(() => {
+    if (!useClientSideData) {
+      logs = data.logs || [];
+      totalCount = data.total_count || 0;
+      currentPage = data.page || 1;
+      pageSize = data.page_size || 100;
+      totalPages = data.total_pages || 0;
+      hasSessionState = data.hasSession;
+    }
+  });
+
   // Session state (determined by successful data load)
-  let hasSession = $derived(data.hasSession);
+  let hasSession = $derived(hasSessionState);
 
   // Tab state
   let activeTab = $state<'logs' | 'config'>('logs');
@@ -88,10 +116,13 @@
     end: undefined
   });
   let selectedAction = $state<ActionType | "all">("all");
+  let selectedActions = $state<ActionType[]>([]);  // Multi-select support
+  let showActionDropdown = $state(false);  // For multi-select dropdown
   let selectedUser = $state<UserSparse | null>(null);
   let userSearchResults = $state<UserSparse[]>([]);
   let isSearchingUsers = $state(false);
   let showUserDropdown = $state(false);
+  let userSearchCompleted = $state(false); // Track if search has completed (for empty state)
 
   // Unified scoped search state
   let searchScope = $state<'entity' | 'user'>('entity');
@@ -278,8 +309,11 @@
     }
   });
 
-  // Initialize filters from URL on mount
+  // Initialize filters from URL on mount (skip when doing client-side filtering)
   $effect(() => {
+    // Skip URL sync when using client-side filtering to prevent overwriting local state
+    if (useClientSideData) return;
+
     const url = $page.url;
     const fromDate = url.searchParams.get("from_date");
     const toDate = url.searchParams.get("to_date");
@@ -318,15 +352,22 @@
       activePreset = null;
     }
 
-    // Set action from URL
-    if (action && action !== "all") {
+    // Set actions from URL (multi-select support)
+    const actions = url.searchParams.get("actions");
+    if (actions) {
+      selectedActions = actions.split(",") as ActionType[];
+      selectedAction = "all";  // Keep legacy state at default
+    } else if (action && action !== "all") {
+      // Legacy single-action support (backwards compatible)
       selectedAction = action as ActionType;
+      selectedActions = [action as ActionType];
       const option = actionOptions.find(opt => opt.value === action);
       if (option) {
         actionStore.set(option);
       }
     } else {
       selectedAction = "all";
+      selectedActions = [];
       actionStore.set({ value: "all", label: m.audit_all_actions() });
     }
 
@@ -343,8 +384,16 @@
     });
   });
 
-  // Date preset functions
+  // Date preset functions (toggle behavior - click again to deselect)
   function setDatePreset(days: 7 | 30 | 90) {
+    // Toggle off if clicking the same preset
+    if (activePreset === days) {
+      dateRange = { start: undefined, end: undefined };
+      activePreset = null;
+      applyFilters();
+      return;
+    }
+
     const tz = getLocalTimeZone();
     const endDate = today(tz); // Set to current day (applyFilters will add 1 day to make it inclusive)
     const startDate = today(tz).subtract({ days: days - 1 }); // Subtract days-1 to get actual range
@@ -448,37 +497,90 @@
     }
   }
 
-  function applyFilters() {
+  async function applyFilters() {
+    // Mark that we're using client-side filtering (prevents $effect from overwriting state)
+    useClientSideData = true;
+
+    // Cancel any pending request to prevent race conditions
+    if (filterAbortController) {
+      filterAbortController.abort();
+    }
+    filterAbortController = new AbortController();
+
     const params = new URLSearchParams();
 
-    if (data.page) params.set("page", data.page.toString());
-    if (data.page_size) params.set("page_size", data.page_size.toString());
+    // Build filter params for API call
+    const filterParams: {
+      page?: number;
+      page_size?: number;
+      from_date?: string;
+      to_date?: string;
+      actions?: string[];
+      actor_id?: string;
+      search?: string;
+    } = {
+      page: currentPage,
+      page_size: pageSize,
+    };
+
+    if (currentPage) params.set("page", currentPage.toString());
+    if (pageSize) params.set("page_size", pageSize.toString());
 
     if (dateRange?.start && dateRange?.end) {
       params.set("from_date", dateRange.start.toString());
       // Add 1 day to end date to make it inclusive (include full selected day)
       const inclusiveEndDate = dateRange.end.add({ days: 1 });
       params.set("to_date", inclusiveEndDate.toString());
+      filterParams.from_date = dateRange.start.toString();
+      filterParams.to_date = inclusiveEndDate.toString();
     }
 
-    if (selectedAction !== "all") {
-      params.set("action", selectedAction);
+    // Multi-action filter support
+    if (selectedActions.length > 0) {
+      params.set("actions", selectedActions.join(","));
+      filterParams.actions = selectedActions;
     }
 
     if (selectedUser) {
       params.set("actor_id", selectedUser.id);
+      filterParams.actor_id = selectedUser.id;
     }
 
     if (searchScope === 'entity' && searchQuery.length >= 3) {
       params.set("search", searchQuery);
+      filterParams.search = searchQuery;
     }
 
     if (activeTab === 'config') {
       params.set("tab", "config");
     }
 
+    // Update URL without triggering navigation (preserves session)
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
-    goto(url, { noScroll: true, keepFocus: true });
+    replaceState(url, {});
+
+    // Fetch data directly without triggering load function
+    try {
+      isFiltering = true;
+      const response = await intric.audit.list(filterParams);
+      logs = response.logs || [];
+      totalCount = response.total_count || 0;
+      currentPage = response.page || 1;
+      totalPages = response.total_pages || 0;
+    } catch (error: any) {
+      // Ignore abort errors (request was cancelled by a newer request)
+      if (error?.name === 'AbortError') return;
+
+      // If 401, session expired - show justification form
+      if (error?.status === 401) {
+        hasSessionState = false;
+        useClientSideData = false; // Reset to allow load function to take over
+      } else {
+        console.error("Failed to fetch audit logs:", error);
+      }
+    } finally {
+      isFiltering = false;
+    }
   }
 
   function clearFilters() {
@@ -490,12 +592,14 @@
 
     dateRange = { start: undefined, end: undefined };
     selectedAction = "all";
+    selectedActions = [];  // Clear multi-select
     actionStore.set({ value: "all", label: m.audit_all_actions() });
     selectedUser = null;
     searchQuery = "";
     searchScope = 'entity';
     userSearchResults = [];
     showScopeDropdown = false;
+    userSearchCompleted = false;
     activePreset = null; // Clear active preset
 
     const params = new URLSearchParams();
@@ -523,7 +627,9 @@
         }, 300);
       }
     } else {
-      // User search logic
+      // User search logic - reset completed flag on any query change
+      userSearchCompleted = false;
+
       if (query.length < 3) {
         userSearchResults = [];
         showUserDropdown = false;
@@ -541,10 +647,12 @@
             page_size: 10,
           });
           userSearchResults = response?.items || [];
-          showUserDropdown = true;
+          showUserDropdown = userSearchResults.length > 0;
+          userSearchCompleted = true; // Mark search as completed (for empty state)
         } catch (err) {
           console.error("User search failed:", err);
           userSearchResults = [];
+          userSearchCompleted = true; // Still mark as completed even on error
         } finally {
           isSearchingUsers = false;
         }
@@ -557,6 +665,7 @@
     searchQuery = user.email;
     userSearchResults = [];
     showUserDropdown = false;
+    userSearchCompleted = false; // Reset since user is now selected
     applyFilters();
   }
 
@@ -567,6 +676,7 @@
     }
     userSearchResults = [];
     showUserDropdown = false;
+    userSearchCompleted = false;
     applyFilters();
   }
 
@@ -576,9 +686,28 @@
     clearTimeout(userSearchTimer);
     userSearchResults = [];
     showUserDropdown = false;
+    userSearchCompleted = false;
     if (searchScope === 'entity') {
       applyFilters();
     }
+  }
+
+  // Debounced timer for action multi-select
+  let actionDebounceTimer: ReturnType<typeof setTimeout>;
+
+  // Toggle action selection with debounced filter application
+  function toggleAction(actionValue: ActionType) {
+    if (selectedActions.includes(actionValue)) {
+      selectedActions = selectedActions.filter(a => a !== actionValue);
+    } else {
+      selectedActions = [...selectedActions, actionValue];
+    }
+
+    // Debounce filter application to reduce API calls during rapid selections
+    clearTimeout(actionDebounceTimer);
+    actionDebounceTimer = setTimeout(() => {
+      applyFilters();
+    }, 500);  // 500ms debounce for multi-select
   }
 
   // Handle scope change - preserve query and re-trigger search in new scope
@@ -595,6 +724,10 @@
       selectedUser = null;
       userSearchResults = [];
       showUserDropdown = false;
+      userSearchCompleted = false;
+    } else {
+      // Switching to user scope - reset completed flag for fresh search
+      userSearchCompleted = false;
     }
 
     // Preserve searchQuery and immediately trigger search in new scope
@@ -615,15 +748,13 @@
   }
 
   function nextPage() {
-    const params = new URLSearchParams($page.url.search);
-    params.set("page", (data.page + 1).toString());
-    goto(`/admin/audit-logs?${params.toString()}`, { noScroll: true });
+    currentPage = currentPage + 1;
+    applyFilters();
   }
 
   function prevPage() {
-    const params = new URLSearchParams($page.url.search);
-    params.set("page", Math.max(1, data.page - 1).toString());
-    goto(`/admin/audit-logs?${params.toString()}`, { noScroll: true });
+    currentPage = Math.max(1, currentPage - 1);
+    applyFilters();
   }
 
   async function exportLogs(format: "csv" | "json") {
@@ -781,14 +912,15 @@
 
     // Track filter changes and apply with debounce
     const hasDateFilter = dateRange?.start && dateRange?.end;
-    const hasActionFilter = selectedAction !== undefined && selectedAction !== "all";
+    const hasActionFilter = selectedActions.length > 0;
 
     // Only auto-apply if we're not in the initial load state
+    // Debounce for 2.5 seconds to reduce audit log noise (hybrid logging approach)
     if (hasDateFilter || hasActionFilter) {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         applyFilters();
-      }, 300);
+      }, 2500);
     }
   });
 
@@ -803,7 +935,7 @@
   // Count active filters
   let activeFilterCount = $derived(
     (dateRange?.start && dateRange?.end ? 1 : 0) +
-    (selectedAction !== "all" ? 1 : 0) +
+    selectedActions.length +  // Count each selected action as a filter
     (selectedUser ? 1 : 0) +
     (searchScope === 'entity' && searchQuery.length >= 3 ? 1 : 0)
   );
@@ -897,7 +1029,7 @@
         <div class="flex gap-[1px]">
           <Button variant="primary" onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
             <IconDownload class="h-4 w-4" />
-            Export ({data.total_count})
+            Export ({totalCount})
           </Button>
           <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
             <Dropdown.Trigger asFragment let:trigger>
@@ -935,10 +1067,10 @@
       <div class="inline-flex gap-1 p-1.5 bg-subtle rounded-lg border border-default shadow-sm">
         <button
           onclick={() => switchTab('logs')}
-          class={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md text-sm font-semibold transition-all ${
+          class={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md text-sm font-semibold transition-all duration-150 ${
             activeTab === 'logs'
-              ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20'
-              : 'text-muted hover:text-default hover:bg-hover'
+              ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 shadow-accent-default/25'
+              : 'text-muted hover:text-default hover:bg-hover hover:scale-[1.02] active:scale-[0.98]'
           }`}
         >
           <FileText class="h-4 w-4" />
@@ -946,10 +1078,10 @@
         </button>
         <button
           onclick={() => switchTab('config')}
-          class={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md text-sm font-semibold transition-all ${
+          class={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md text-sm font-semibold transition-all duration-150 ${
             activeTab === 'config'
-              ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20'
-              : 'text-muted hover:text-default hover:bg-hover'
+              ? 'bg-accent-default text-on-fill shadow-md ring-1 ring-accent-default/20 shadow-accent-default/25'
+              : 'text-muted hover:text-default hover:bg-hover hover:scale-[1.02] active:scale-[0.98]'
           }`}
         >
           <Settings class="h-4 w-4" />
@@ -967,7 +1099,7 @@
         {:else}
         <div class="px-4 pb-8 sm:px-6 lg:px-8">
         <!-- Retention Policy Section -->
-        <div class="mb-8 rounded-xl border border-default bg-subtle p-5">
+        <div class="mb-8 rounded-xl border border-default bg-subtle p-5 transition-shadow duration-200 hover:shadow-md">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2.5">
               <div class="rounded-lg bg-accent/10 p-1.5">
@@ -987,7 +1119,7 @@
 
           {#if !isEditingRetention}
             <!-- Display Mode -->
-            <div class="rounded-lg bg-primary p-4 space-y-2">
+            <div class="rounded-lg bg-primary p-4 space-y-2" transition:slide={{ duration: 200 }}>
               <div class="flex items-start gap-3">
                 <div class="rounded-md bg-accent/10 p-1.5">
                   <Calendar class="h-4 w-4 text-accent" />
@@ -1008,7 +1140,7 @@
             </div>
           {:else}
             <!-- Edit Mode -->
-            <div class="space-y-3">
+            <div class="space-y-3" transition:slide={{ duration: 200 }}>
               <div class="rounded-lg bg-primary p-4 space-y-3">
                 <div class="max-w-xl">
                   <!-- svelte-ignore a11y_label_has_associated_control -->
@@ -1152,35 +1284,55 @@
               <div class="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex items-center">
                 <button
                   onclick={() => showScopeDropdown = !showScopeDropdown}
-                  class="flex items-center gap-1 h-7 px-2.5 text-xs font-medium text-muted bg-muted/50 hover:bg-muted/80 hover:text-default rounded-md transition-colors"
+                  aria-haspopup="listbox"
+                  aria-expanded={showScopeDropdown}
+                  aria-label="Search scope: {searchScope === 'entity' ? 'Entity' : 'User'}"
+                  class="flex items-center gap-1.5 h-7 px-2.5 text-xs font-semibold rounded-md transition-all duration-150
+                    text-muted bg-subtle/80 border border-default/40
+                    hover:bg-hover hover:text-default hover:border-default/60
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:ring-offset-1"
                 >
                   {searchScope === 'entity' ? m.audit_search_scope_entity() : m.audit_search_scope_user()}
-                  <IconChevronDown class="h-3 w-3" />
+                  <IconChevronDown class={`h-3 w-3 transition-transform duration-150 ${showScopeDropdown ? 'rotate-180' : ''}`} />
                 </button>
 
                 <!-- Scope Dropdown menu -->
                 {#if showScopeDropdown}
                   <div
-                    class="absolute top-full left-0 mt-1 bg-primary border border-default rounded-md shadow-lg z-30 min-w-[120px]"
-                    transition:fade={{ duration: 100 }}
+                    role="listbox"
+                    aria-label="Select search scope"
+                    class="absolute top-full left-0 mt-1.5 bg-primary border border-default rounded-lg shadow-lg z-30 min-w-[140px] py-1 overflow-hidden"
+                    transition:slide={{ duration: 150 }}
                   >
                     <button
+                      role="option"
+                      aria-selected={searchScope === 'entity'}
                       onclick={() => handleScopeChange('entity')}
-                      class="w-full px-3 py-2 text-left text-sm hover:bg-subtle transition-colors {searchScope === 'entity' ? 'font-medium text-accent-default' : 'text-default'}"
+                      class="w-full px-3 py-2 text-left text-sm flex items-center justify-between gap-2 transition-colors
+                        {searchScope === 'entity' ? 'font-medium text-accent-default bg-accent-default/5' : 'text-default hover:bg-subtle'}"
                     >
                       {m.audit_search_scope_entity()}
+                      {#if searchScope === 'entity'}
+                        <IconCheck class="h-4 w-4 text-accent-default" />
+                      {/if}
                     </button>
                     <button
+                      role="option"
+                      aria-selected={searchScope === 'user'}
                       onclick={() => handleScopeChange('user')}
-                      class="w-full px-3 py-2 text-left text-sm hover:bg-subtle transition-colors {searchScope === 'user' ? 'font-medium text-accent-default' : 'text-default'}"
+                      class="w-full px-3 py-2 text-left text-sm flex items-center justify-between gap-2 transition-colors
+                        {searchScope === 'user' ? 'font-medium text-accent-default bg-accent-default/5' : 'text-default hover:bg-subtle'}"
                     >
                       {m.audit_search_scope_user()}
+                      {#if searchScope === 'user'}
+                        <IconCheck class="h-4 w-4 text-accent-default" />
+                      {/if}
                     </button>
                   </div>
                 {/if}
 
                 <!-- Visual divider -->
-                <div class="ml-2 h-6 w-px bg-default/30"></div>
+                <div class="ml-2 h-6 w-px bg-default/40"></div>
               </div>
 
               <!-- Search input -->
@@ -1190,17 +1342,22 @@
                 oninput={(e) => handleScopedSearch(e.currentTarget.value)}
                 onfocus={() => searchScope === 'user' && searchQuery.length >= 3 && userSearchResults.length > 0 && (showUserDropdown = true)}
                 placeholder={searchScope === 'entity' ? m.audit_search_placeholder_entity() : m.audit_search_placeholder_user()}
-                class="w-full h-11 pl-32 pr-10 rounded-md border border-default bg-primary text-sm text-default placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent-default/20 focus:border-accent-default transition-colors"
+                aria-label={searchScope === 'entity' ? 'Search by entity name' : 'Search by user email'}
+                autocomplete="off"
+                class="w-full h-11 pl-32 pr-10 rounded-lg border border-default bg-primary text-sm text-default placeholder:text-muted
+                  focus:outline-none focus:ring-2 focus:ring-accent-default/30 focus:border-accent-default transition-all duration-150"
               />
 
               <!-- Clear button (right side) -->
               {#if searchQuery.length > 0}
                 <button
                   onclick={clearSearch}
-                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-hover transition-colors"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150
+                    text-muted hover:text-default hover:bg-hover
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-default"
                   aria-label={m.audit_search_clear()}
                 >
-                  <IconXMark class="h-4 w-4 text-muted" />
+                  <IconXMark class="h-4 w-4" />
                 </button>
               {/if}
 
@@ -1214,19 +1371,44 @@
               <!-- User dropdown results (only when scope = 'user') -->
               {#if searchScope === 'user' && showUserDropdown && userSearchResults.length > 0}
                 <div
-                  class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto divide-y divide-default"
-                  transition:fade={{ duration: 150 }}
+                  role="listbox"
+                  aria-label="User search results"
+                  class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-xl max-h-64 overflow-y-auto"
+                  transition:slide={{ duration: 150 }}
                 >
-                  {#each userSearchResults as user}
+                  {#each userSearchResults as user, index}
                     <button
+                      role="option"
+                      aria-selected={false}
                       onclick={() => selectUser(user)}
-                      class="w-full px-4 py-3 text-left hover:bg-subtle active:bg-subtle transition-colors focus:outline-none focus:bg-subtle"
+                      class="w-full px-4 py-3 text-left transition-colors focus:outline-none
+                        hover:bg-accent-default/5 focus:bg-accent-default/5
+                        {index > 0 ? 'border-t border-default/50' : ''}"
                     >
-                      <div class="flex flex-col gap-0.5">
+                      <div class="flex items-center gap-3">
+                        <div class="flex h-8 w-8 items-center justify-center rounded-full bg-accent-default/10 text-accent-default text-xs font-semibold">
+                          {user.email.charAt(0).toUpperCase()}
+                        </div>
                         <span class="text-sm font-medium text-default">{user.email}</span>
                       </div>
                     </button>
                   {/each}
+                </div>
+              {/if}
+
+              <!-- Empty state for user search (only shows after search completes with 0 results) -->
+              {#if searchScope === 'user' && searchQuery.length >= 3 && userSearchCompleted && userSearchResults.length === 0}
+                <div
+                  class="absolute top-full left-0 right-0 mt-2 z-20 rounded-lg border border-default bg-primary shadow-lg p-4"
+                  transition:fade={{ duration: 150 }}
+                >
+                  <div class="flex flex-col items-center gap-2 text-center py-2">
+                    <div class="rounded-full bg-muted/20 p-2">
+                      <IconXMark class="h-5 w-5 text-muted" />
+                    </div>
+                    <p class="text-sm text-muted">Inga användare hittades</p>
+                    <p class="text-xs text-muted/70">Försök med en annan sökning</p>
+                  </div>
                 </div>
               {/if}
             </div>
@@ -1236,49 +1418,136 @@
               <Input.DateRange bind:value={dateRange} />
 
               <!-- Quick filter buttons (connected button group) -->
-              <div class="flex items-center h-10 rounded-md border border-default/50 overflow-hidden flex-shrink-0">
+              <div class="flex items-center h-10 rounded-lg border border-default/60 overflow-hidden flex-shrink-0 bg-subtle/50" role="group" aria-label="Quick date presets">
                 <button
                   onclick={() => setDatePreset(7)}
-                  class={`px-3 py-2 text-xs font-medium transition-colors ${
+                  aria-pressed={activePreset === 7}
+                  class={`px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-default ${
                     activePreset === 7
-                      ? 'bg-accent-default/10 text-accent-default'
-                      : 'text-muted hover:bg-hover hover:text-default'
+                      ? 'bg-accent-default text-white shadow-sm'
+                      : 'text-muted hover:bg-hover hover:text-default active:scale-95'
                   }`}
                 >
                   7d
                 </button>
                 <button
                   onclick={() => setDatePreset(30)}
-                  class={`px-3 py-2 text-xs font-medium border-x border-default/50 transition-colors ${
+                  aria-pressed={activePreset === 30}
+                  class={`px-4 py-2 text-xs font-semibold border-x border-default/40 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-default ${
                     activePreset === 30
-                      ? 'bg-accent-default/10 text-accent-default'
-                      : 'text-muted hover:bg-hover hover:text-default'
+                      ? 'bg-accent-default text-white shadow-sm border-x-transparent'
+                      : 'text-muted hover:bg-hover hover:text-default active:scale-95'
                   }`}
                 >
                   30d
                 </button>
                 <button
                   onclick={() => setDatePreset(90)}
-                  class={`px-3 py-2 text-xs font-medium transition-colors ${
+                  aria-pressed={activePreset === 90}
+                  class={`px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-default ${
                     activePreset === 90
-                      ? 'bg-accent-default/10 text-accent-default'
-                      : 'text-muted hover:bg-hover hover:text-default'
+                      ? 'bg-accent-default text-white shadow-sm'
+                      : 'text-muted hover:bg-hover hover:text-default active:scale-95'
                   }`}
                 >
                   90d
                 </button>
               </div>
 
-              <!-- Action Select -->
-              <div class="min-w-[200px]">
-                <Select.Root customStore={actionStore}>
-                  <Select.Trigger placeholder={m.audit_all_actions()} />
-                  <Select.Options>
-                    {#each actionOptions as option}
-                      <Select.Item value={option.value} label={option.label} />
-                    {/each}
-                  </Select.Options>
-                </Select.Root>
+              <!-- Action Multi-Select -->
+              <div class="min-w-[200px] sm:min-w-[220px] relative">
+                <Dropdown.Root bind:open={showActionDropdown} gutter={4} placement="bottom-start">
+                  <Dropdown.Trigger asFragment let:trigger>
+                    <Button
+                      is={trigger}
+                      variant="outline"
+                      class="w-full justify-between"
+                      aria-haspopup="listbox"
+                      aria-expanded={showActionDropdown}
+                      aria-label={selectedActions.length === 0
+                        ? m.audit_all_actions()
+                        : `${selectedActions.length} ${m.audit_actions_selected()}`}
+                    >
+                      <span class={selectedActions.length === 0 ? 'text-muted' : 'text-default'}>
+                        {#if selectedActions.length === 0}
+                          {m.audit_all_actions()}
+                        {:else if selectedActions.length === 1}
+                          {actionOptions.find(o => o.value === selectedActions[0])?.label}
+                        {:else}
+                          {selectedActions.length} {m.audit_actions_selected()}
+                        {/if}
+                      </span>
+                      <IconChevronDown class={`h-4 w-4 text-muted transition-transform duration-200 ${showActionDropdown ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </Dropdown.Trigger>
+                  <Dropdown.Menu>
+                    <!-- Scrollable container wrapper (Dropdown.Menu doesn't pass class prop) -->
+                    <div
+                      class="relative max-h-[50vh] sm:max-h-[300px] overflow-y-auto min-w-[280px] sm:min-w-[300px] overscroll-contain scroll-smooth -mx-2 -mb-2"
+                      role="listbox"
+                      aria-multiselectable="true"
+                      aria-label={m.audit_all_actions()}
+                    >
+                      <!-- Selected count header when items are selected -->
+                      {#if selectedActions.length > 0}
+                        <div class="-mt-2 sticky top-0 z-20 flex items-center justify-between px-3 py-2.5 bg-primary border-b border-default text-xs font-medium shadow-sm">
+                          <span class="text-muted">{selectedActions.length} {m.audit_actions_selected()}</span>
+                          <button
+                            class="px-2 py-1 rounded text-accent-default hover:text-white hover:bg-accent-default transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-default"
+                            onclick={() => { selectedActions = []; applyFilters(); }}
+                            aria-label="Clear all selected actions"
+                          >
+                            {m.audit_clear_all()}
+                          </button>
+                        </div>
+                      {/if}
+
+                      <!-- Items list with proper stacking context -->
+                      <div class="relative z-10">
+                        {#each actionOptions.filter(o => o.value !== 'all') as option, index}
+                          {@const isSelected = selectedActions.includes(option.value as ActionType)}
+                          <button
+                            role="option"
+                            aria-selected={isSelected}
+                            tabindex={showActionDropdown ? 0 : -1}
+                            class={`flex w-full items-center gap-3 px-3 py-2.5 sm:py-2 text-sm text-left transition-all duration-150 bg-primary
+                              hover:bg-hover focus:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-default/50
+                              ${isSelected ? 'bg-accent-default/5' : ''}`}
+                          onclick={() => toggleAction(option.value as ActionType)}
+                          onkeydown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleAction(option.value as ActionType);
+                            }
+                          }}
+                        >
+                          <span
+                            class={`flex h-5 w-5 sm:h-4 sm:w-4 shrink-0 items-center justify-center rounded border-2 transition-all duration-200 ${
+                              isSelected
+                                ? 'bg-accent-default border-accent-default scale-100 shadow-sm shadow-accent-default/25'
+                                : 'border-default/60 hover:border-default scale-95 hover:scale-100'
+                            }`}
+                            aria-hidden="true"
+                          >
+                            {#if isSelected}
+                              <IconCheck class="h-3 w-3 text-on-fill" />
+                            {/if}
+                          </span>
+                          <span class={`flex-1 ${isSelected ? 'text-default font-medium' : 'text-default'}`}>
+                            {option.label}
+                          </span>
+                          {#if isSelected}
+                            <span class="sr-only">(selected)</span>
+                          {/if}
+                          </button>
+                        {/each}
+                      </div>
+
+                      <!-- Scroll fade indicator at bottom -->
+                      <div class="sticky bottom-0 h-4 bg-gradient-to-t from-primary to-transparent pointer-events-none z-10" aria-hidden="true"></div>
+                    </div>
+                  </Dropdown.Menu>
+                </Dropdown.Root>
               </div>
             </div>
           </div>
@@ -1288,41 +1557,41 @@
         {#if activeFilterCount > 0}
           <div class="flex flex-wrap items-center gap-2 mb-4">
             {#if dateRange?.start && dateRange?.end && !activePreset}
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-xs">
+              <span transition:scale={{ duration: 150, start: 0.9 }} class="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950 px-3 py-1 text-xs shadow-sm">
                 <span class="text-blue-800 dark:text-blue-300">
                   {dateRange.start.toString()} – {dateRange.end.toString()}
                 </span>
                 <button
                   onclick={() => { dateRange = { start: undefined, end: undefined }; applyFilters(); }}
-                  class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-colors"
+                  class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-all duration-150 hover:scale-110"
                 >
                   <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
                 </button>
               </span>
             {/if}
 
-            {#if selectedAction !== 'all'}
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-purple-50 dark:bg-purple-950 px-3 py-1 text-xs">
+            {#each selectedActions as action}
+              <span transition:scale={{ duration: 150, start: 0.9 }} class="inline-flex items-center gap-1.5 rounded-full bg-purple-50 dark:bg-purple-950 px-3 py-1 text-xs shadow-sm">
                 <span class="text-purple-800 dark:text-purple-300">
-                  {actionOptions.find(o => o.value === selectedAction)?.label}
+                  {actionOptions.find(o => o.value === action)?.label}
                 </span>
                 <button
-                  onclick={() => { selectedAction = 'all'; actionStore.set({ value: 'all', label: m.audit_all_actions() }); applyFilters(); }}
-                  class="rounded-full hover:bg-purple-100 dark:hover:bg-purple-900 p-0.5 transition-colors"
+                  onclick={() => { selectedActions = selectedActions.filter(a => a !== action); applyFilters(); }}
+                  class="rounded-full hover:bg-purple-100 dark:hover:bg-purple-900 p-0.5 transition-all duration-150 hover:scale-110"
                 >
                   <IconXMark class="h-3 w-3 text-purple-700 dark:text-purple-300" />
                 </button>
               </span>
-            {/if}
+            {/each}
 
             {#if selectedUser}
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-950 px-3 py-1 text-xs">
+              <span transition:scale={{ duration: 150, start: 0.9 }} class="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-950 px-3 py-1 text-xs shadow-sm">
                 <span class="text-green-800 dark:text-green-300">
                   {m.audit_filtering_by_user()}: {selectedUser.email}
                 </span>
                 <button
                   onclick={clearUserFilter}
-                  class="rounded-full hover:bg-green-100 dark:hover:bg-green-900 p-0.5 transition-colors"
+                  class="rounded-full hover:bg-green-100 dark:hover:bg-green-900 p-0.5 transition-all duration-150 hover:scale-110"
                 >
                   <IconXMark class="h-3 w-3 text-green-700 dark:text-green-300" />
                 </button>
@@ -1330,23 +1599,27 @@
             {/if}
 
             {#if searchScope === 'entity' && searchQuery.length >= 3}
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950 px-3 py-1 text-xs">
+              <span transition:scale={{ duration: 150, start: 0.9 }} class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950 px-3 py-1 text-xs shadow-sm">
                 <span class="text-amber-800 dark:text-amber-300">
                   {m.audit_filtering_by_entity()}: "{searchQuery}"
                 </span>
                 <button
                   onclick={clearSearch}
-                  class="rounded-full hover:bg-amber-100 dark:hover:bg-amber-900 p-0.5 transition-colors"
+                  class="rounded-full hover:bg-amber-100 dark:hover:bg-amber-900 p-0.5 transition-all duration-150 hover:scale-110"
                 >
                   <IconXMark class="h-3 w-3 text-amber-700 dark:text-amber-300" />
                 </button>
               </span>
             {/if}
 
-            <!-- Clear all (ghost button with icon) -->
+            <!-- Clear all (ghost button with icon) - accessible hover with 4.5:1+ contrast -->
             <button
               onclick={clearFilters}
-              class="ml-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-md transition-colors"
+              class="ml-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all duration-150
+                text-muted hover:text-white dark:hover:text-white
+                hover:bg-red-600 dark:hover:bg-red-500
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2
+                active:scale-95"
             >
               <Trash2 class="h-3.5 w-3.5" />
               {m.audit_clear_all()}
@@ -1359,21 +1632,21 @@
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div class="flex items-center gap-3">
               <p class="text-sm font-medium text-default">
-                {m.audit_showing_results({ shown: data.logs.length, total: data.total_count })}
+                {m.audit_showing_results({ shown: logs.length, total: totalCount })}
               </p>
-              {#if data.total_pages > 1}
+              {#if totalPages > 1}
                 <span class="text-sm text-muted border-l border-default pl-3">
-                  {m.audit_page_info({ current: data.page, total: data.total_pages })}
+                  {m.audit_page_info({ current: currentPage, total: totalPages })}
                 </span>
               {/if}
             </div>
 
-            {#if data.total_pages > 1}
+            {#if totalPages > 1}
               <div class="flex items-center gap-3">
-                <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" size="sm" class="min-w-[100px]">
+                <Button onclick={prevPage} disabled={currentPage <= 1} variant="outlined" size="sm" class="min-w-[100px]">
                   {m.audit_previous()}
                 </Button>
-                <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" size="sm" class="min-w-[100px]">
+                <Button onclick={nextPage} disabled={currentPage >= totalPages} variant="outlined" size="sm" class="min-w-[100px]">
                   {m.audit_next()}
                 </Button>
               </div>
@@ -1385,7 +1658,7 @@
         <div class="rounded-lg border border-default shadow-sm bg-primary">
           <div class="overflow-x-auto">
             <table class="w-full">
-              <thead class="sticky top-0 border-b border-default bg-subtle">
+              <thead class="sticky top-0 border-b-2 border-accent-default/20 bg-subtle">
                 <tr>
                   <th class="w-8 px-4 py-3"></th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-default uppercase tracking-wider w-[15%]">
@@ -1406,7 +1679,7 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-default bg-primary">
-                {#if data.logs.length === 0}
+                {#if logs.length === 0}
                   <tr>
                     <td colspan="6" class="px-4 py-16 text-center">
                       <div class="flex flex-col items-center gap-3">
@@ -1426,20 +1699,16 @@
                     </td>
                   </tr>
                 {:else}
-                  {#each data.logs as log, index (log.id || index)}
+                  {#each logs as log, index (log.id || index)}
                     {@const isExpanded = expandedRows.has(log.id || index.toString())}
                     <!-- Main Row -->
                     <tr
-                      class="cursor-pointer transition-colors hover:bg-hover"
+                      class="cursor-pointer transition-colors duration-150 hover:bg-hover/70"
                       onclick={() => toggleRowExpansion(log.id || index.toString())}
                     >
                       <td class="px-4 py-3">
-                        <div class="rounded-md hover:bg-hover p-1 transition-colors">
-                          {#if isExpanded}
-                            <IconChevronDown class="h-5 w-5 text-muted rotate-180 transition-transform" />
-                          {:else}
-                            <IconChevronDown class="h-5 w-5 text-muted transition-transform" />
-                          {/if}
+                        <div class="rounded-md hover:bg-hover p-1 transition-colors duration-150">
+                          <IconChevronDown class={`h-5 w-5 text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                         </div>
                       </td>
                       <td class="px-4 py-3">
@@ -1453,7 +1722,7 @@
                         </div>
                       </td>
                       <td class="px-4 py-3">
-                        <span class={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${getActionBadgeClass(log.action)}`}>
+                        <span class={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium shadow-sm ${getActionBadgeClass(log.action)}`}>
                           {getActionLabel(log.action as ActionType)}
                         </span>
                       </td>
@@ -1476,12 +1745,12 @@
                       </td>
                       <td class="px-4 py-3">
                         {#if log.outcome === "success"}
-                          <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-900 dark:text-green-300 border border-green-200 dark:border-green-800">
+                          <span class="inline-flex items-center gap-1 rounded-md bg-green-50 dark:bg-green-950 px-2 py-1 text-xs font-medium text-green-900 dark:text-green-300 border border-green-200 dark:border-green-800 transition-transform duration-150 hover:scale-105">
                             <CircleCheck class="h-3.5 w-3.5" />
                             {m.audit_success()}
                           </span>
                         {:else}
-                          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-900 dark:text-red-300 border border-red-200 dark:border-red-800">
+                          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950 px-2 py-1 text-xs font-medium text-red-900 dark:text-red-300 border border-red-200 dark:border-red-800 transition-transform duration-150 hover:scale-105">
                             <CircleX class="h-3.5 w-3.5" />
                             {m.audit_failure()}
                           </span>
@@ -1491,7 +1760,7 @@
 
                     <!-- Expanded Metadata Row -->
                     {#if isExpanded}
-                      <tr transition:fade={{ duration: 150 }}>
+                      <tr transition:slide={{ duration: 200 }}>
                         <td colspan="6" class="bg-subtle px-4 py-4">
                           <div class="mx-auto max-w-5xl space-y-3">
                             <h4 class="text-xs font-semibold text-default uppercase tracking-wider">{m.audit_full_details()}</h4>
@@ -1511,7 +1780,7 @@
                                   <p class="text-xs font-medium text-muted">{m.audit_metadata_json()}</p>
                                   <button
                                     onclick={() => copyJsonToClipboard(log.metadata, log.id || index.toString())}
-                                    class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-muted hover:bg-hover hover:text-default transition-colors"
+                                    class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-muted hover:bg-hover hover:text-default transition-all duration-150 hover:scale-105 active:scale-95"
                                     aria-label={m.audit_copy_json()}
                                   >
                                     {#if copiedRowId === (log.id || index.toString())}
@@ -1538,16 +1807,16 @@
         </div>
 
         <!-- Bottom Pagination -->
-        {#if data.total_pages > 1}
+        {#if totalPages > 1}
           <div class="mt-8 rounded-lg bg-subtle p-4">
             <div class="flex items-center justify-center gap-4">
-              <Button onclick={prevPage} disabled={data.page <= 1} variant="outlined" class="min-w-[120px]">
+              <Button onclick={prevPage} disabled={currentPage <= 1} variant="outlined" class="min-w-[120px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]">
                 {m.audit_previous()}
               </Button>
               <span class="text-sm px-4 py-2 rounded-md bg-primary border border-default">
-                {m.audit_page()} <span class="font-semibold text-default">{data.page}</span> {m.audit_of()} <span class="font-semibold text-default">{data.total_pages}</span>
+                {m.audit_page()} <span class="font-semibold text-default">{currentPage}</span> {m.audit_of()} <span class="font-semibold text-default">{totalPages}</span>
               </span>
-              <Button onclick={nextPage} disabled={data.page >= data.total_pages} variant="outlined" class="min-w-[120px]">
+              <Button onclick={nextPage} disabled={currentPage >= totalPages} variant="outlined" class="min-w-[120px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]">
                 {m.audit_next()}
               </Button>
             </div>

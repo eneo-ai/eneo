@@ -45,6 +45,40 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
+
+def parse_action_list(
+    actions: Optional[list[str]] = Query(None, description="Filter by multiple action types (comma-separated or repeated)")
+) -> Optional[list[ActionType]]:
+    """
+    Parse query parameters that could be:
+    1. Standard repeated: ?actions=user_created&actions=assistant_created
+    2. Comma-separated: ?actions=user_created,assistant_created
+    3. Mixed: ?actions=user_created,assistant_created&actions=other
+
+    This handles the mismatch between frontend SDK serialization (comma-separated)
+    and FastAPI's default list parsing (repeated params).
+    """
+    if not actions:
+        return None
+
+    parsed_actions = []
+
+    for item in actions:
+        # Split each item by comma in case it's comma-separated
+        parts = [p.strip() for p in item.split(",")]
+        for part in parts:
+            if not part:
+                continue
+            try:
+                parsed_actions.append(ActionType(part))
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid action type: '{part}'. See /api/v1/audit/config/actions for valid types."
+                )
+
+    return parsed_actions if parsed_actions else None
+
 # Include config routes
 router.include_router(config_router)
 
@@ -290,7 +324,8 @@ async def create_access_session(
 async def list_audit_logs(
     request: Request,
     actor_id: Optional[UUID] = Query(None, description="Filter by actor"),
-    action: Optional[ActionType] = Query(None, description="Filter by action type"),
+    action: Optional[ActionType] = Query(None, description="Filter by single action type (deprecated, use actions)"),
+    actions: Optional[list[ActionType]] = Depends(parse_action_list),
     from_date: Optional[datetime] = Query(None, description="Filter from date"),
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
     search: Optional[str] = Query(
@@ -378,6 +413,7 @@ async def list_audit_logs(
         tenant_id=current_user.tenant_id,
         actor_id=actor_id,
         action=action,
+        actions=actions,
         from_date=from_date,
         to_date=to_date,
         search=search,
@@ -402,7 +438,9 @@ async def list_audit_logs(
     filters_applied = {}
     if actor_id:
         filters_applied["actor_id"] = str(actor_id)
-    if action:
+    if actions:
+        filters_applied["action_types"] = [a.value for a in actions]
+    elif action:
         filters_applied["action_type"] = action.value
     if from_date:
         filters_applied["from_date"] = from_date.isoformat()

@@ -120,6 +120,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         tenant_id: UUID,
         actor_id: Optional[UUID] = None,
         action: Optional[ActionType] = None,
+        actions: Optional[list[ActionType]] = None,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         search: Optional[str] = None,
@@ -138,7 +139,11 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         if actor_id:
             query = query.where(AuditLogTable.actor_id == actor_id)
 
-        if action:
+        # Support both single action (deprecated) and multiple actions
+        if actions:
+            action_values = [a.value for a in actions]
+            query = query.where(AuditLogTable.action.in_(action_values))
+        elif action:
             query = query.where(AuditLogTable.action == action.value)
 
         if from_date:
@@ -177,6 +182,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         logger.debug(
             f"get_logs: tenant={tenant_id}, page={page}, page_size={page_size}, "
             f"actor_id={actor_id}, action={action.value if action else None}, "
+            f"actions={[a.value for a in actions] if actions else None}, "
             f"results={len(logs)}, total={total_count}, "
             f"count_time={count_time:.2f}ms, query_time={query_time:.2f}ms"
         )

@@ -12,8 +12,12 @@ export const load = async (event) => {
     const from_date = event.url.searchParams.get("from_date") || undefined;
     const to_date = event.url.searchParams.get("to_date") || undefined;
     const action = event.url.searchParams.get("action") || undefined;
+    const actions = event.url.searchParams.get("actions") || undefined;  // Multi-select support
     const actor_id = event.url.searchParams.get("actor_id") || undefined;
     const search = event.url.searchParams.get("search") || undefined;
+
+    // Parse actions string to array if present
+    const actionsArray = actions ? actions.split(",") : undefined;
 
     // Fetch audit logs and retention policy in parallel
     // Session cookie (if present) is automatically sent with request
@@ -23,7 +27,8 @@ export const load = async (event) => {
         page_size,
         from_date,
         to_date,
-        action: action !== "all" ? action : undefined,
+        action: action !== "all" ? action : undefined,  // Legacy single-action support
+        actions: actionsArray,  // Multi-action support
         actor_id,
         search,
       }),

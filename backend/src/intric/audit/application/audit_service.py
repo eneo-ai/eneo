@@ -151,6 +151,7 @@ class AuditService:
         tenant_id: UUID,
         actor_id: Optional[UUID] = None,
         action: Optional[ActionType] = None,
+        actions: Optional[list[ActionType]] = None,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         search: Optional[str] = None,
@@ -163,7 +164,8 @@ class AuditService:
         Args:
             tenant_id: Tenant ID
             actor_id: Filter by actor
-            action: Filter by action type
+            action: Filter by single action type (deprecated, use actions)
+            actions: Filter by multiple action types
             from_date: Filter from date
             to_date: Filter to date
             search: Search entity names in description (min 3 chars, case-insensitive)
@@ -177,6 +179,7 @@ class AuditService:
             tenant_id=tenant_id,
             actor_id=actor_id,
             action=action,
+            actions=actions,
             from_date=from_date,
             to_date=to_date,
             search=search,

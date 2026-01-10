@@ -29,15 +29,21 @@ export function initAudit(client) {
     /**
      * List audit logs with optional filtering and pagination.
      * Requires active audit access session (created via createAccessSession).
-     * @param {{actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string, page?: number, page_size?: number}} [options]
+     * @param {{actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], actions?: string[], from_date?: string, to_date?: string, search?: string, page?: number, page_size?: number}} [options]
      * @returns {Promise<import('../types/schema').components["schemas"]["AuditLogListResponse"]>}
      * @throws {IntricError}
      * */
     list: async (options) => {
+      // Convert actions array to comma-separated string for query param
+      const queryParams = { ...options };
+      if (queryParams.actions && Array.isArray(queryParams.actions)) {
+        queryParams.actions = queryParams.actions.join(",");
+      }
+
       const res = await client.fetch("/api/v1/audit/logs", {
         method: "get",
         params: {
-          query: options
+          query: queryParams
         }
       });
       return res;

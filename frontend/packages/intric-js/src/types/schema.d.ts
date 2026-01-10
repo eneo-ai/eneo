@@ -1233,6 +1233,10 @@ export interface paths {
     /** Delete Space Integration Knowledge */
     delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge__integration_knowledge_id___delete"];
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
+    /** Update Integration Knowledge */
+    patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
+  };
   "/api/v1/spaces/{id}/members/": {
     /** Add Space Member */
     post: operations["add_space_member_api_v1_spaces__id__members__post"];
@@ -1767,20 +1771,131 @@ export interface paths {
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant__tenant_integration_id___delete"];
   };
   "/api/v1/integrations/me/": {
-    /** Get User Integrations */
+    /**
+     * Get User Integrations
+     * @description Get user's personal integrations.
+     *
+     * Only returns user_oauth integrations (personal account connections).
+     * Tenant app integrations are managed in admin panel and not shown here.
+     */
     get: operations["get_user_integrations_api_v1_integrations_me__get"];
+  };
+  "/api/v1/integrations/spaces/{space_id}/available/": {
+    /**
+     * Get Available Integrations For Space
+     * @description Get integrations available for a specific space, filtered by space type and auth type.
+     *
+     * - Personal spaces: Only user OAuth integrations
+     * - Shared/Organization spaces: Both tenant app and user OAuth integrations
+     */
+    get: operations["get_available_integrations_for_space_api_v1_integrations_spaces__space_id__available__get"];
   };
   "/api/v1/integrations/users/{user_integration_id}/": {
     /** Disconnect User Integration */
     delete: operations["disconnect_user_integration_api_v1_integrations_users__user_integration_id___delete"];
   };
+  "/api/v1/integrations/sync-logs/{integration_knowledge_id}/": {
+    /**
+     * Get Sync Logs
+     * @description Get paginated sync history for an integration knowledge.
+     */
+    get: operations["get_sync_logs_api_v1_integrations_sync_logs__integration_knowledge_id___get"];
+  };
   "/api/v1/integrations/{user_integration_id}/preview/": {
     /** Get Integration Preview */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
   };
+  "/api/v1/integrations/{user_integration_id}/sharepoint/tree/": {
+    /**
+     * Get Sharepoint Folder Tree
+     * @description Get SharePoint/OneDrive folder tree with hybrid authentication support.
+     *
+     * Authentication is determined by space type:
+     * - Personal space: Uses user OAuth
+     * - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
+     * - Shared/Org space without tenant app: Falls back to user OAuth
+     *
+     * Provide site_id for SharePoint sites, or drive_id for OneDrive.
+     */
+    get: operations["get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get"];
+  };
   "/api/v1/integrations/{integration_id}/": {
     /** Get Integration By Id */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
+  };
+  "/api/v1/integrations/sharepoint/webhook/": {
+    /** Sharepoint Webhook Validation */
+    get: operations["sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get"];
+    /** Sharepoint Webhook */
+    post: operations["sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post"];
+  };
+  "/api/v1/admin/sharepoint/app": {
+    /**
+     * Get tenant SharePoint app configuration
+     * @description Retrieve the current SharePoint app configuration for the tenant. Client secret is masked in the response. Requires admin role.
+     */
+    get: operations["get_sharepoint_app_api_v1_admin_sharepoint_app_get"];
+    /**
+     * Configure tenant SharePoint app
+     * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+     */
+    post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
+    /**
+     * Permanently delete SharePoint app
+     * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
+     * - All user_integrations using this tenant app (both org and personal)
+     * - All integration_knowledge (imported SharePoint content)
+     * - All info_blobs and embeddings (document data and vectors)
+     * - All sharepoint_subscriptions (webhooks)
+     * - All oauth_tokens for personal SharePoint integrations
+     * - All sync_logs
+     *
+     * Assistants linked to this knowledge will lose their connections.
+     * Requires admin role.
+     */
+    delete: operations["delete_sharepoint_app_api_v1_admin_sharepoint_app_delete"];
+  };
+  "/api/v1/admin/sharepoint/app/test": {
+    /**
+     * Test SharePoint app credentials
+     * @description Test if the provided SharePoint app credentials are valid by attempting to acquire an access token. This does not save the credentials. Requires admin role.
+     */
+    post: operations["test_sharepoint_app_credentials_api_v1_admin_sharepoint_app_test_post"];
+  };
+  "/api/v1/admin/sharepoint/subscriptions": {
+    /**
+     * List all SharePoint webhook subscriptions
+     * @description Get all SharePoint webhook subscriptions for the tenant. Shows status, expiration time, and related integration information. Requires admin role.
+     */
+    get: operations["list_sharepoint_subscriptions_api_v1_admin_sharepoint_subscriptions_get"];
+  };
+  "/api/v1/admin/sharepoint/subscriptions/renew-expired": {
+    /**
+     * Renew all expired SharePoint subscriptions
+     * @description Recreate all expired SharePoint webhook subscriptions for the tenant. This is useful after server downtime > 24h when subscriptions have expired. Preserves all integration relationships - assistants continue to work. Requires admin role.
+     */
+    post: operations["renew_expired_subscriptions_api_v1_admin_sharepoint_subscriptions_renew_expired_post"];
+  };
+  "/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate": {
+    /**
+     * Recreate a specific SharePoint subscription
+     * @description Recreate a specific SharePoint webhook subscription. Useful for targeted fixes of expired or problematic subscriptions. Preserves all integration relationships. Requires admin role.
+     */
+    post: operations["recreate_subscription_api_v1_admin_sharepoint_subscriptions__subscription_id__recreate_post"];
+  };
+  "/api/v1/admin/sharepoint/service-account/auth/start": {
+    /**
+     * Start service account OAuth flow
+     * @description Start the OAuth flow for configuring a service account. Returns an authorization URL that the admin should be redirected to. The admin will log in with the service account credentials at Microsoft. Requires admin role.
+     */
+    post: operations["start_service_account_auth_api_v1_admin_sharepoint_service_account_auth_start_post"];
+  };
+  "/api/v1/admin/sharepoint/service-account/auth/callback": {
+    /**
+     * Complete service account OAuth flow
+     * @description Complete the OAuth flow by exchanging the authorization code for tokens. This will configure the service account for the tenant's SharePoint access. Requires admin role.
+     */
+    post: operations["service_account_auth_callback_api_v1_admin_sharepoint_service_account_auth_callback_post"];
   };
   "/api/v1/ai-models/": {
     /**
@@ -4200,6 +4315,17 @@ export interface components {
       url: string;
       /** Key */
       key?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: string | null;
+      /**
+       * Resource Type
+       * @default site
+       */
+      resource_type?: string | null;
     };
     /** CreateSpaceRequest */
     CreateSpaceRequest: {
@@ -5416,14 +5542,14 @@ export interface components {
       size: number;
       /** Last Sync Summary */
       last_sync_summary?: {
-        files_processed?: number | null;
-        pages_processed?: number | null;
-        folders_processed?: number | null;
-        skipped_items?: number | null;
+        [key: string]: number;
       } | null;
       /** Last Synced At */
       last_synced_at?: string | null;
-      /** SharePoint Subscription Expires At */
+      /**
+       * Sharepoint Subscription Expires At
+       * @description When the SharePoint webhook subscription expires (only for SharePoint integrations)
+       */
       sharepoint_subscription_expires_at?: string | null;
     };
     /** IntegrationKnowledgePublic */
@@ -5435,6 +5561,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** Original Name */
+      original_name?: string | null;
       /** Url */
       url: string;
       /**
@@ -5453,9 +5581,20 @@ export interface components {
        */
       user_integration_id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublicLegacy"];
+      /** Site Id */
       site_id?: string | null;
+      /** Drive Id */
+      drive_id?: string | null;
+      /** Resource Type */
+      resource_type?: string | null;
+      /** Sharepoint Subscription Id */
       sharepoint_subscription_id?: string | null;
-      sharepoint_subscription_expires_at?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: string | null;
       /**
        * Permissions
        * @default []
@@ -5978,7 +6117,7 @@ export interface components {
      * @description Any change to these enums will result in database changes
      * @enum {string}
      */
-    Modules: "eu_hosting" | "intric-applications" | "SWE Models";
+    Modules: "intric-applications";
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -6579,6 +6718,42 @@ export interface components {
        */
       count: number;
     };
+    /**
+     * PaginatedSyncLogList
+     * @description Paginated sync logs response with metadata.
+     */
+    PaginatedSyncLogList: {
+      /** Items */
+      items: components["schemas"]["SyncLog"][];
+      /** Total Count */
+      total_count: number;
+      /** Page Size */
+      page_size: number;
+      /** Offset */
+      offset: number;
+      /** Count */
+      count: number;
+      /**
+       * Current Page
+       * @description Calculate the current page number (1-indexed).
+       */
+      current_page: number;
+      /**
+       * Total Pages
+       * @description Calculate the total number of pages.
+       */
+      total_pages: number;
+      /**
+       * Has Next
+       * @description Check if there is a next page.
+       */
+      has_next: boolean;
+      /**
+       * Has Previous
+       * @description Check if there is a previous page.
+       */
+      has_previous: boolean;
+    };
     /** PaginatedUsersResponse[UserAdminView] */
     PaginatedUsersResponse_UserAdminView_: {
       /**
@@ -6811,15 +6986,15 @@ export interface components {
        */
       security_classification?: components["schemas"]["ModelId"] | null;
       /**
-       * Data Retention Days
-       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
-       */
-      data_retention_days?: number | null;
-      /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /**
+       * Data Retention Days
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       */
+      data_retention_days?: number | null;
     };
     /**
      * Permission
@@ -7263,6 +7438,77 @@ export interface components {
        */
       updated_at: string;
     };
+    /**
+     * ServiceAccountAuthCallback
+     * @description Request model for service account OAuth callback.
+     */
+    ServiceAccountAuthCallback: {
+      /**
+       * Auth Code
+       * @description OAuth authorization code from Microsoft callback
+       */
+      auth_code: string;
+      /**
+       * State
+       * @description OAuth state parameter for verification
+       */
+      state: string;
+      /**
+       * Client Id
+       * @description Azure AD Application (Client) ID (must match auth/start)
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description Azure AD Application Client Secret (must match auth/start)
+       */
+      client_secret: string;
+      /**
+       * Tenant Domain
+       * @description Azure AD Tenant Domain (must match auth/start)
+       */
+      tenant_domain: string;
+    };
+    /**
+     * ServiceAccountAuthStart
+     * @description Request model to start service account OAuth flow.
+     */
+    ServiceAccountAuthStart: {
+      /**
+       * Client Id
+       * @description Azure AD Application (Client) ID
+       * @example 12345678-1234-1234-1234-123456789012
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description Azure AD Application Client Secret
+       * @example abc123~xyz789
+       */
+      client_secret: string;
+      /**
+       * Tenant Domain
+       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @example contoso.onmicrosoft.com
+       */
+      tenant_domain: string;
+    };
+    /**
+     * ServiceAccountAuthStartResponse
+     * @description Response with OAuth URL for service account login.
+     */
+    ServiceAccountAuthStartResponse: {
+      /**
+       * Auth Url
+       * @description Microsoft OAuth authorization URL. Redirect the admin to this URL.
+       */
+      auth_url: string;
+      /**
+       * State
+       * @description OAuth state parameter for CSRF protection
+       */
+      state: string;
+    };
     /** ServiceCreatePublic */
     ServiceCreatePublic: {
       /** Output Format */
@@ -7527,6 +7773,90 @@ export interface components {
        */
       audit_logging_enabled?: boolean;
     };
+    /**
+     * SharePointSubscriptionPublic
+     * @description Public representation of a SharePoint subscription.
+     */
+    SharePointSubscriptionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * User Integration Id
+       * Format: uuid
+       */
+      user_integration_id: string;
+      /** Site Id */
+      site_id: string;
+      /** Subscription Id */
+      subscription_id: string;
+      /** Drive Id */
+      drive_id: string;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Is Expired
+       * @description True if subscription has already expired
+       */
+      is_expired: boolean;
+      /**
+       * Expires In Hours
+       * @description Hours until expiration (0 if already expired)
+       */
+      expires_in_hours: number;
+      /**
+       * Owner Email
+       * @description Email of subscription owner (None for organization integrations)
+       */
+      owner_email?: string | null;
+      /**
+       * Owner Type
+       * @description Type of owner: 'user' or 'organization'
+       */
+      owner_type: string;
+    };
+    /** SharePointTreeItem */
+    SharePointTreeItem: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Type */
+      type: string;
+      /** Path */
+      path: string;
+      /** Has Children */
+      has_children: boolean;
+      /** Size */
+      size?: number | null;
+      /** Modified */
+      modified?: string | null;
+      /** Web Url */
+      web_url?: string | null;
+    };
+    /** SharePointTreeResponse */
+    SharePointTreeResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /** Current Path */
+      current_path: string;
+      /** Parent Id */
+      parent_id?: string | null;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
+    };
     /** SignedURLRequest */
     SignedURLRequest: {
       /**
@@ -7776,6 +8106,112 @@ export interface components {
       role: string;
     };
     /**
+     * SubscriptionRenewalResult
+     * @description Result of subscription renewal operation.
+     */
+    SubscriptionRenewalResult: {
+      /**
+       * Total Subscriptions
+       * @description Total number of subscriptions found
+       */
+      total_subscriptions: number;
+      /**
+       * Expired Count
+       * @description Number of expired subscriptions
+       */
+      expired_count: number;
+      /**
+       * Recreated
+       * @description Number of subscriptions successfully recreated
+       * @default 0
+       */
+      recreated?: number;
+      /**
+       * Failed
+       * @description Number of subscriptions that failed to recreate
+       * @default 0
+       */
+      failed?: number;
+      /**
+       * Errors
+       * @description Error messages for failed renewals
+       */
+      errors?: string[];
+    };
+    /**
+     * SyncLog
+     * @description Detailed sync operation log.
+     */
+    SyncLog: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /** Sync Type */
+      sync_type: string;
+      /** Status */
+      status: string;
+      /** Metadata */
+      metadata?: {
+        [key: string]: unknown;
+      } | null;
+      /** Error Message */
+      error_message?: string | null;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      /** Completed At */
+      completed_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Files Processed
+       * @description Get files_processed from metadata.
+       */
+      files_processed: number;
+      /**
+       * Files Deleted
+       * @description Get files_deleted from metadata.
+       */
+      files_deleted: number;
+      /**
+       * Pages Processed
+       * @description Get pages_processed from metadata.
+       */
+      pages_processed: number;
+      /**
+       * Folders Processed
+       * @description Get folders_processed from metadata.
+       */
+      folders_processed: number;
+      /**
+       * Skipped Items
+       * @description Get skipped_items from metadata.
+       */
+      skipped_items: number;
+      /**
+       * Duration Seconds
+       * @description Calculate sync duration in seconds.
+       */
+      duration_seconds: number | null;
+      /**
+       * Total Items Processed
+       * @description Total items processed in this sync.
+       */
+      total_items_processed: number;
+    };
+    /**
      * Task
      * @enum {string}
      */
@@ -7788,6 +8224,7 @@ export interface components {
       | "run_app"
       | "pull_confluence_content"
       | "pull_sharepoint_content"
+      | "sync_sharepoint_delta"
       | "update_model_usage_stats";
     /** TemplateCreate */
     TemplateCreate: {
@@ -7825,6 +8262,21 @@ export interface components {
       title?: string | null;
       /** Description */
       description?: string | null;
+    };
+    /**
+     * TenantAppTestResult
+     * @description Result of testing tenant app credentials.
+     */
+    TenantAppTestResult: {
+      /** Success */
+      success: boolean;
+      /** Error Message */
+      error_message?: string | null;
+      /**
+       * Details
+       * @description Additional details about the test (e.g., token acquired successfully)
+       */
+      details?: string | null;
     };
     /** TenantBase */
     TenantBase: {
@@ -8008,6 +8460,88 @@ export interface components {
       security_enabled?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
+    };
+    /**
+     * TenantSharePointAppCreate
+     * @description Request model for creating/updating tenant SharePoint app credentials.
+     */
+    TenantSharePointAppCreate: {
+      /**
+       * Client Id
+       * @description Azure AD Application (Client) ID
+       * @example 12345678-1234-1234-1234-123456789012
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description Azure AD Application Client Secret
+       * @example abc123~xyz789
+       */
+      client_secret: string;
+      /**
+       * Tenant Domain
+       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @example contoso.onmicrosoft.com
+       */
+      tenant_domain: string;
+      /**
+       * Certificate Path
+       * @description Optional path to certificate for certificate-based authentication
+       */
+      certificate_path?: string | null;
+    };
+    /**
+     * TenantSharePointAppPublic
+     * @description Response model for tenant SharePoint app (secret masked).
+     */
+    TenantSharePointAppPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Client Id */
+      client_id: string;
+      /**
+       * Client Secret Masked
+       * @description Masked client secret (last 4 chars visible)
+       * @example ********xyz789
+       */
+      client_secret_masked: string;
+      /** Tenant Domain */
+      tenant_domain: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Auth Method
+       * @description Authentication method: 'tenant_app' or 'service_account'
+       * @example service_account
+       */
+      auth_method: string;
+      /**
+       * Service Account Email
+       * @description Email of the service account (only for service_account auth method)
+       */
+      service_account_email?: string | null;
+      /** Certificate Path */
+      certificate_path: string | null;
+      /** Created By */
+      created_by: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /**
      * TenantState
@@ -8336,6 +8870,11 @@ export interface components {
        * Format: uuid
        */
       target_space_id: string;
+    };
+    /** UpdateIntegrationKnowledgeRequest */
+    UpdateIntegrationKnowledgeRequest: {
+      /** Name */
+      name: string;
     };
     /**
      * UpdateInterval
@@ -8807,6 +9346,13 @@ export interface components {
       tenant_integration_id: string;
       /** Connected */
       connected: boolean;
+      /**
+       * Auth Type
+       * @default user_oauth
+       */
+      auth_type?: string;
+      /** Tenant App Id */
+      tenant_app_id?: string | null;
     };
     /** UserIntegrationList */
     UserIntegrationList: {
@@ -15851,9 +16397,9 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      200: {
+      202: {
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["JobPublic"];
         };
       };
       /** @description Validation Error */
@@ -15876,6 +16422,34 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Integration Knowledge */
+  update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
+    parameters: {
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateIntegrationKnowledgeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IntegrationKnowledgePublic"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -17217,7 +17791,7 @@ export interface operations {
       query?: {
         /** @description Filter by actor */
         actor_id?: string | null;
-        /** @description Filter by action type */
+        /** @description Filter by single action type (deprecated, use actions) */
         action?: components["schemas"]["ActionType"] | null;
         /** @description Filter from date */
         from_date?: string | null;
@@ -17229,6 +17803,8 @@ export interface operations {
         page?: number;
         /** @description Page size */
         page_size?: number;
+        /** @description Filter by multiple action types (comma-separated or repeated) */
+        actions?: string[] | null;
       };
     };
     responses: {
@@ -17613,13 +18189,47 @@ export interface operations {
       };
     };
   };
-  /** Get User Integrations */
+  /**
+   * Get User Integrations
+   * @description Get user's personal integrations.
+   *
+   * Only returns user_oauth integrations (personal account connections).
+   * Tenant app integrations are managed in admin panel and not shown here.
+   */
   get_user_integrations_api_v1_integrations_me__get: {
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["UserIntegrationList"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Available Integrations For Space
+   * @description Get integrations available for a specific space, filtered by space type and auth type.
+   *
+   * - Personal spaces: Only user OAuth integrations
+   * - Shared/Organization spaces: Both tenant app and user OAuth integrations
+   */
+  get_available_integrations_for_space_api_v1_integrations_spaces__space_id__available__get: {
+    parameters: {
+      path: {
+        space_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserIntegrationList"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -17635,6 +18245,37 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Sync Logs
+   * @description Get paginated sync history for an integration knowledge.
+   */
+  get_sync_logs_api_v1_integrations_sync_logs__integration_knowledge_id___get: {
+    parameters: {
+      query?: {
+        /** @description Number of items to skip */
+        skip?: number;
+        /** @description Number of items per page */
+        limit?: number;
+      };
+      path: {
+        integration_knowledge_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedSyncLogList"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -17666,6 +18307,50 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Sharepoint Folder Tree
+   * @description Get SharePoint/OneDrive folder tree with hybrid authentication support.
+   *
+   * Authentication is determined by space type:
+   * - Personal space: Uses user OAuth
+   * - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
+   * - Shared/Org space without tenant app: Falls back to user OAuth
+   *
+   * Provide site_id for SharePoint sites, or drive_id for OneDrive.
+   */
+  get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get: {
+    parameters: {
+      query: {
+        /** @description Space ID (for auth routing) */
+        space_id: string;
+        /** @description SharePoint site ID (required for SharePoint) */
+        site_id?: string | null;
+        /** @description Drive ID (required for OneDrive) */
+        drive_id?: string | null;
+        /** @description Folder ID (null for root) */
+        folder_id?: string | null;
+        /** @description Current folder path */
+        folder_path?: string;
+      };
+      path: {
+        user_integration_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SharePointTreeResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Integration By Id */
   get_integration_by_id_api_v1_integrations__integration_id___get: {
     parameters: {
@@ -17679,6 +18364,330 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["Integration"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Sharepoint Webhook Validation */
+  sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
+    parameters: {
+      query?: {
+        validationToken?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Sharepoint Webhook */
+  sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post: {
+    parameters: {
+      query?: {
+        validationToken?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant SharePoint app configuration
+   * @description Retrieve the current SharePoint app configuration for the tenant. Client secret is masked in the response. Requires admin role.
+   */
+  get_sharepoint_app_api_v1_admin_sharepoint_app_get: {
+    responses: {
+      /** @description SharePoint app configuration retrieved (may be null if not configured) */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantSharePointAppPublic"] | null;
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Configure tenant SharePoint app
+   * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+   */
+  configure_sharepoint_app_api_v1_admin_sharepoint_app_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantSharePointAppCreate"];
+      };
+    };
+    responses: {
+      /** @description SharePoint app successfully configured */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TenantSharePointAppPublic"];
+        };
+      };
+      /** @description Invalid credentials or configuration */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Permanently delete SharePoint app
+   * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
+   * - All user_integrations using this tenant app (both org and personal)
+   * - All integration_knowledge (imported SharePoint content)
+   * - All info_blobs and embeddings (document data and vectors)
+   * - All sharepoint_subscriptions (webhooks)
+   * - All oauth_tokens for personal SharePoint integrations
+   * - All sync_logs
+   *
+   * Assistants linked to this knowledge will lose their connections.
+   * Requires admin role.
+   */
+  delete_sharepoint_app_api_v1_admin_sharepoint_app_delete: {
+    responses: {
+      /** @description SharePoint app permanently deleted */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: string;
+          };
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description No SharePoint app configured */
+      404: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Test SharePoint app credentials
+   * @description Test if the provided SharePoint app credentials are valid by attempting to acquire an access token. This does not save the credentials. Requires admin role.
+   */
+  test_sharepoint_app_credentials_api_v1_admin_sharepoint_app_test_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantSharePointAppCreate"];
+      };
+    };
+    responses: {
+      /** @description Test completed (check success field in response) */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantAppTestResult"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List all SharePoint webhook subscriptions
+   * @description Get all SharePoint webhook subscriptions for the tenant. Shows status, expiration time, and related integration information. Requires admin role.
+   */
+  list_sharepoint_subscriptions_api_v1_admin_sharepoint_subscriptions_get: {
+    responses: {
+      /** @description List of subscriptions retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SharePointSubscriptionPublic"][];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Renew all expired SharePoint subscriptions
+   * @description Recreate all expired SharePoint webhook subscriptions for the tenant. This is useful after server downtime > 24h when subscriptions have expired. Preserves all integration relationships - assistants continue to work. Requires admin role.
+   */
+  renew_expired_subscriptions_api_v1_admin_sharepoint_subscriptions_renew_expired_post: {
+    responses: {
+      /** @description Renewal operation completed (check result for details) */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SubscriptionRenewalResult"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Recreate a specific SharePoint subscription
+   * @description Recreate a specific SharePoint webhook subscription. Useful for targeted fixes of expired or problematic subscriptions. Preserves all integration relationships. Requires admin role.
+   */
+  recreate_subscription_api_v1_admin_sharepoint_subscriptions__subscription_id__recreate_post: {
+    parameters: {
+      path: {
+        subscription_id: string;
+      };
+    };
+    responses: {
+      /** @description Subscription successfully recreated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SharePointSubscriptionPublic"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Subscription not found */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Start service account OAuth flow
+   * @description Start the OAuth flow for configuring a service account. Returns an authorization URL that the admin should be redirected to. The admin will log in with the service account credentials at Microsoft. Requires admin role.
+   */
+  start_service_account_auth_api_v1_admin_sharepoint_service_account_auth_start_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ServiceAccountAuthStart"];
+      };
+    };
+    responses: {
+      /** @description OAuth authorization URL generated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ServiceAccountAuthStartResponse"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Complete service account OAuth flow
+   * @description Complete the OAuth flow by exchanging the authorization code for tokens. This will configure the service account for the tenant's SharePoint access. Requires admin role.
+   */
+  service_account_auth_callback_api_v1_admin_sharepoint_service_account_auth_callback_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ServiceAccountAuthCallback"];
+      };
+    };
+    responses: {
+      /** @description Service account successfully configured */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TenantSharePointAppPublic"];
+        };
+      };
+      /** @description Invalid state or auth code */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
       };
       /** @description Validation Error */
       422: {

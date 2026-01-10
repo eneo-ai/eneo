@@ -4,6 +4,7 @@
   import * as m from "$lib/paraglide/messages";
   import { ChevronDown, ChevronRight, Search, Check, X } from "lucide-svelte";
   import { onMount } from "svelte";
+  import { slide, fly } from "svelte/transition";
 
   const intric = getIntric();
 
@@ -251,11 +252,21 @@
 </script>
 
 {#if isLoading && showLoading}
-  <div class="flex items-center justify-center py-20">
-    <div class="flex flex-col items-center gap-4">
-      <div class="h-10 w-10 animate-spin rounded-full border-4 border-accent-default border-t-transparent"></div>
-      <p class="text-sm font-medium text-muted">Laddar konfiguration...</p>
+  <div class="space-y-3 animate-pulse">
+    <!-- Skeleton header card -->
+    <div class="rounded-xl border border-default bg-subtle p-6">
+      <div class="h-6 w-48 bg-default/10 rounded mb-3"></div>
+      <div class="h-4 w-96 bg-default/10 rounded mb-5"></div>
+      <div class="flex gap-3">
+        <div class="flex-1 h-11 bg-default/10 rounded"></div>
+        <div class="h-11 w-24 bg-default/10 rounded"></div>
+        <div class="h-11 w-24 bg-default/10 rounded"></div>
+      </div>
     </div>
+    <!-- Skeleton category cards -->
+    {#each Array(5) as _}
+      <div class="rounded-xl border border-default bg-primary h-20"></div>
+    {/each}
   </div>
 {:else if !isLoading}
   <!-- Header Section with improved styling -->
@@ -294,7 +305,7 @@
       {@const isExpanded = expandedCategories.has(category.category)}
 
       {#if actions.length > 0 || !searchQuery}
-        <div class="rounded-xl border border-default bg-primary overflow-hidden shadow-sm hover:shadow transition-all duration-200">
+        <div class="rounded-xl border border-default bg-primary overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
           <!-- Category Header with improved layout -->
           <div class="px-6 py-4 bg-subtle border-b border-default">
             <div class="flex items-center justify-between gap-4">
@@ -302,12 +313,8 @@
                 onclick={() => toggleCategory(category.category)}
                 class="flex-1 flex items-center gap-3 text-left hover:text-accent-default transition-colors group min-w-0"
               >
-                <div class="rounded-md p-1 group-hover:bg-hover transition-colors flex-shrink-0">
-                  {#if isExpanded}
-                    <ChevronDown class="h-4 w-4 text-default" />
-                  {:else}
-                    <ChevronRight class="h-4 w-4 text-muted" />
-                  {/if}
+                <div class="rounded-md p-1 group-hover:bg-hover transition-all duration-200 flex-shrink-0">
+                  <ChevronRight class={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-default' : 'text-muted'}`} />
                 </div>
                 <span class="font-semibold text-default text-sm truncate">{getCategoryName(category.category)}</span>
                 <span class="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-muted border border-default flex-shrink-0">
@@ -330,9 +337,9 @@
 
           <!-- Actions List with improved styling -->
           {#if isExpanded && actions.length > 0}
-            <div class="divide-y divide-default bg-primary">
+            <div transition:slide={{ duration: 200 }} class="divide-y divide-default bg-primary">
               {#each actions as action (action.action)}
-                <div class="px-6 py-5 hover:bg-hover/30 transition-colors">
+                <div class="px-6 py-5 hover:bg-hover/50 transition-colors duration-150">
                   <div class="flex items-start justify-between gap-6">
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2.5 mb-1.5 flex-wrap">
@@ -373,7 +380,7 @@
 
   <!-- Save Bar with refined styling -->
   {#if hasChanges}
-    <div class="sticky bottom-4 mt-6">
+    <div transition:fly={{ y: 20, duration: 200 }} class="sticky bottom-4 mt-6">
       <div class="rounded-lg border border-accent-default bg-accent-default/5 backdrop-blur-sm p-4 shadow-lg">
         <div class="flex items-center justify-between flex-wrap gap-3">
           <div class="flex items-center gap-3">

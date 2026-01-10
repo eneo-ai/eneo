@@ -257,6 +257,7 @@ class TestGetLogs:
             tenant_id=tenant_id,
             actor_id=actor_id,
             action=ActionType.USER_CREATED,
+            actions=None,
             from_date=None,
             to_date=None,
             search=None,

@@ -101,24 +101,27 @@ export function initIntegrations(client) {
         const { id: user_integration_id } = integration;
         const { id } = space;
         const { key, name, url, folder_id, folder_path, type, resource_type } = preview;
-        const job = await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/", {
-          method: "post",
-          params: {
-            path: { user_integration_id, id }
-          },
-          requestBody: {
-            "application/json": {
-              key,
-              name,
-              url,
-              folder_id,
-              folder_path,
-              selected_item_type: type,
-              resource_type: resource_type || "site",
-              embedding_model
+        const job = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/",
+          {
+            method: "post",
+            params: {
+              path: { user_integration_id, id }
+            },
+            requestBody: {
+              "application/json": {
+                key,
+                name,
+                url,
+                folder_id,
+                folder_path,
+                selected_item_type: type,
+                resource_type: resource_type || "site",
+                embedding_model
+              }
             }
           }
-        });
+        );
         return job;
       },
 
@@ -151,13 +154,16 @@ export function initIntegrations(client) {
        * */
       getSyncLogs: async ({ knowledge, skip = 0, limit = 10 }) => {
         const { id: integration_knowledge_id } = knowledge;
-        const res = await client.fetch("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
-          method: "get",
-          params: {
-            path: { integration_knowledge_id },
-            query: { skip, limit }
+        const res = await client.fetch(
+          "/api/v1/integrations/sync-logs/{integration_knowledge_id}/",
+          {
+            method: "get",
+            params: {
+              path: { integration_knowledge_id },
+              query: { skip, limit }
+            }
           }
-        });
+        );
         return res;
       },
 
@@ -172,15 +178,18 @@ export function initIntegrations(client) {
       rename: async ({ knowledge, space, name }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;
-        const res = await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/", {
-          method: "patch",
-          params: {
-            path: { id, integration_knowledge_id }
-          },
-          requestBody: {
-            "application/json": { name }
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/",
+          {
+            method: "patch",
+            params: {
+              path: { id, integration_knowledge_id }
+            },
+            requestBody: {
+              "application/json": { name }
+            }
           }
-        });
+        );
         return res;
       }
     },
