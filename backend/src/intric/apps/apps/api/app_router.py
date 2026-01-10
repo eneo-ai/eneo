@@ -220,7 +220,6 @@ async def update_app(
             change_summary.append("attachments")
 
     # Data retention changes
-    from intric.main.models import NOT_PROVIDED
     if update_service_req.data_retention_days is not NOT_PROVIDED:
         old_retention = old_app.data_retention_days
         new_retention = update_service_req.data_retention_days

@@ -77,11 +77,6 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
 if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
     os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
 
-# CRITICAL: Set super admin API key for sysadmin endpoint authentication
-# Must be set before any imports that might trigger get_settings()
-if not os.getenv("INTRIC_SUPER_API_KEY"):
-    os.environ["INTRIC_SUPER_API_KEY"] = "test-super-admin-key-for-integration-tests"
-
 import contextlib
 from typing import AsyncGenerator, Generator
 
