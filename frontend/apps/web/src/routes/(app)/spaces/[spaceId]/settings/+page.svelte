@@ -5,7 +5,9 @@
 -->
 
 <script lang="ts">
+  import { beforeNavigate } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { initSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
   import { Button, Dialog, Input } from "@intric/ui";
   import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
@@ -19,6 +21,7 @@
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { fade } from "svelte/transition";
 
   const intric = getIntric();
 
@@ -33,6 +36,46 @@
   const spaces = getSpacesManager();
   const currentSpace = spaces.state.currentSpace;
 
+  // Initialize the Space Settings Editor for page-level save
+  const {
+    state: { update, currentChanges, isSaving },
+    saveChanges,
+    discardChanges
+  } = initSpaceSettingsEditor({
+    space: $currentSpace,
+    intric,
+    onUpdateDone: async (updatedSpace) => {
+      // Sync with SpacesManager so sidebar and other components update
+      await spaces.refreshCurrentSpace();
+    }
+  });
+
+  // Track success message
+  let showSaveSuccess = $state(false);
+  let saveSuccessTimeout: ReturnType<typeof setTimeout>;
+
+  // Navigation guard for unsaved changes
+  beforeNavigate((navigate) => {
+    if ($currentChanges.hasUnsavedChanges) {
+      const confirmMessage = m.unsaved_changes_warning?.() ?? "Du har osparade ändringar. Vill du lämna sidan?";
+      if (!confirm(confirmMessage)) {
+        navigate.cancel();
+        return;
+      }
+    }
+    discardChanges();
+  });
+
+  // Handle save with success feedback
+  async function handleSave() {
+    await saveChanges();
+    showSaveSuccess = true;
+    clearTimeout(saveSuccessTimeout);
+    saveSuccessTimeout = setTimeout(() => {
+      showSaveSuccess = false;
+    }, 5000);
+  }
+
   let showDeleteDialog = writable(false);
   let deleteConfirmation = $state("");
   let isDeleting = $state(false);
@@ -40,16 +83,16 @@
   let deletionMessageTimeout: ReturnType<typeof setTimeout>;
   let isOrgSpace = $currentSpace.organization;
 
-  // Icon state
-  let currentIconId = $state<string | null>($currentSpace.icon_id);
+  // Icon state - uses editor for icon_id but handles upload separately
   let iconUploading = $state(false);
   let iconError = $state<string | null>(null);
 
-  function getIconUrl(id: string | null): string | null {
+  function getIconUrl(id: string | null | undefined): string | null {
     return id ? intric.icons.url({ id }) : null;
   }
 
-  let iconUrl = $derived(getIconUrl(currentIconId));
+  // Use the update store's icon_id for displaying current icon
+  let iconUrl = $derived(getIconUrl($update.icon_id));
 
   async function handleIconUpload(event: CustomEvent<File>) {
     const file = event.detail;
@@ -57,12 +100,8 @@
     iconError = null;
     try {
       const newIcon = await intric.icons.upload({ file });
-      await intric.spaces.update({
-        space: { id: $currentSpace.id },
-        update: { icon_id: newIcon.id }
-      });
-      currentIconId = newIcon.id;
-      await spaces.refreshCurrentSpace();
+      // Update the editor's update store - will be saved with other changes
+      $update.icon_id = newIcon.id;
     } catch (error) {
       console.error("Failed to upload icon:", error);
       iconError = m.avatar_upload_failed();
@@ -74,15 +113,12 @@
   async function handleIconDelete() {
     iconError = null;
     try {
-      if (currentIconId) {
-        await intric.icons.delete({ id: currentIconId });
+      // Delete the icon file from server
+      if ($update.icon_id) {
+        await intric.icons.delete({ id: $update.icon_id });
       }
-      await intric.spaces.update({
-        space: { id: $currentSpace.id },
-        update: { icon_id: null }
-      });
-      currentIconId = null;
-      await spaces.refreshCurrentSpace();
+      // Update the editor's update store - will be saved with other changes
+      $update.icon_id = null;
     } catch (error) {
       console.error("Failed to delete icon:", error);
       iconError = m.avatar_delete_failed();
@@ -118,6 +154,26 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.settings()}></Page.Title>
+    <Page.Flex>
+      {#if $currentChanges.hasUnsavedChanges}
+        <Button
+          variant="destructive"
+          disabled={$isSaving}
+          on:click={() => discardChanges()}
+        >{m.discard_all_changes()}</Button>
+        <Button
+          variant="positive"
+          class="h-8 w-32 whitespace-nowrap"
+          disabled={$isSaving}
+          on:click={handleSave}
+        >{$isSaving ? m.loading() : m.save_changes()}</Button>
+      {:else}
+        {#if showSaveSuccess}
+          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
+        {/if}
+        <Button variant="primary" class="w-32" href={`/spaces/${$currentSpace.routeId}`}>{m.done()}</Button>
+      {/if}
+    </Page.Flex>
   </Page.Header>
 
   <Page.Main>
@@ -125,7 +181,12 @@
       {#if !isOrgSpace}
       <Settings.Group title={m.general()}>
         <EditNameAndDescription></EditNameAndDescription>
-        <Settings.Row title={m.avatar()} description={m.avatar_description()}>
+        <Settings.Row
+          title={m.avatar()}
+          description={m.avatar_description()}
+          hasChanges={$currentChanges.diff.icon_id !== undefined}
+          revertFn={() => discardChanges("icon_id")}
+        >
           <IconUpload
             {iconUrl}
             uploading={iconUploading}

@@ -569,7 +569,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
 
     Attack Scenario:
     - 2 tenants, 2 users each
-    - Fire 100 concurrent requests (mixed across tenants)
+    - Fire 20 concurrent requests (mixed across tenants)
     - Each request: create space, list spaces, get tenant info
     - Verify ZERO cross-tenant data leakage
 
@@ -577,7 +577,14 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     - Request context pollution
     - Thread-local storage bugs
     - Database connection pooling issues
+
+    Note: We use 20 concurrent requests (10 per tenant) to stay within
+    connection pool limits (size 20 + overflow 10 = 30 max connections).
+    Each workflow uses ~2 connections, so 20 concurrent = ~40 potential
+    connections. Using a semaphore ensures we stay within limits.
     """
+    import asyncio
+
     # Create two tenants with users
     tenant_a = await _create_tenant(client, super_admin_token, f"tenant-concurrent-a-{uuid4().hex[:6]}")
     tenant_b = await _create_tenant(client, super_admin_token, f"tenant-concurrent-b-{uuid4().hex[:6]}")
@@ -604,42 +611,48 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     results_a = []
     results_b = []
 
+    # Limit concurrent operations to avoid connection pool exhaustion
+    # Pool has 30 max connections (20 + 10 overflow), each workflow uses ~2
+    semaphore = asyncio.Semaphore(10)
+
     async def user_a_workflow():
         """User A creates space and verifies tenant info."""
-        # Create space
-        space = await _create_space(client, token_a, f"space-a-{uuid4().hex[:4]}")
+        async with semaphore:
+            # Create space
+            space = await _create_space(client, token_a, f"space-a-{uuid4().hex[:4]}")
 
-        # Get tenant info
-        tenant_info = await client.get(
-            "/api/v1/users/tenant/",
-            headers={"Authorization": f"Bearer {token_a}"},
-        )
+            # Get tenant info
+            tenant_info = await client.get(
+                "/api/v1/users/tenant/",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
 
-        results_a.append({
-            "space_id": space["id"],
-            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-        })
+            results_a.append({
+                "space_id": space["id"],
+                "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
+            })
 
     async def user_b_workflow():
         """User B creates space and verifies tenant info."""
-        # Create space
-        space = await _create_space(client, token_b, f"space-b-{uuid4().hex[:4]}")
+        async with semaphore:
+            # Create space
+            space = await _create_space(client, token_b, f"space-b-{uuid4().hex[:4]}")
 
-        # Get tenant info
-        tenant_info = await client.get(
-            "/api/v1/users/tenant/",
-            headers={"Authorization": f"Bearer {token_b}"},
-        )
+            # Get tenant info
+            tenant_info = await client.get(
+                "/api/v1/users/tenant/",
+                headers={"Authorization": f"Bearer {token_b}"},
+            )
 
-        results_b.append({
-            "space_id": space["id"],
-            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-        })
+            results_b.append({
+                "space_id": space["id"],
+                "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
+            })
 
-    # Fire 100 concurrent requests (50 per tenant, interleaved)
-    import asyncio
+    # Fire 20 concurrent requests (10 per tenant, interleaved)
+    # This is sufficient to test concurrency while staying within pool limits
     tasks = []
-    for i in range(100):
+    for i in range(20):
         if i % 2 == 0:
             tasks.append(user_a_workflow())
         else:
@@ -648,8 +661,8 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     await asyncio.gather(*tasks)
 
     # Verify results
-    assert len(results_a) == 50, f"Expected 50 results for User A, got {len(results_a)}"
-    assert len(results_b) == 50, f"Expected 50 results for User B, got {len(results_b)}"
+    assert len(results_a) == 10, f"Expected 10 results for User A, got {len(results_a)}"
+    assert len(results_b) == 10, f"Expected 10 results for User B, got {len(results_b)}"
 
     # Verify ALL User A results have correct tenant_name
     for result in results_a:

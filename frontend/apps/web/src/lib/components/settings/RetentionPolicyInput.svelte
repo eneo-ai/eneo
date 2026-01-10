@@ -42,6 +42,11 @@
     }
     return null;
   });
+
+  // Show inherited value as placeholder when field is empty
+  let placeholderText = $derived(
+    inheritedDays !== null && value === null ? inheritedDays.toString() : undefined
+  );
 </script>
 
 <div class="flex flex-col gap-2">
@@ -51,19 +56,25 @@
       bind:value
       min={1}
       max={2555}
+      placeholder={placeholderText}
       aria-label="Gallring av konversationshistorik i dagar"
       aria-labelledby={labelId}
       aria-describedby={descriptionId}
-      class="w-[120px]"
+      class="w-[120px] transition-all duration-150"
     />
     <span class="text-default-dimmer text-base">dagar</span>
   </div>
 
-  <!-- Inheritance status (assistants only) -->
+  <!-- Inheritance status (assistants/apps only) -->
   {#if showInheritanceStatus && inheritanceStatusMessage()}
-    <div class="flex items-center gap-1 text-gray-600">
-      <IconInfo class="h-4 w-4 flex-shrink-0" />
-      <span class="text-xs">{inheritanceStatusMessage()}</span>
+    <div
+      class="flex items-center gap-1.5 transition-colors duration-200"
+      class:text-accent-default={isFollowingSpace}
+      class:text-amber-600={isOverridingSpace}
+      class:dark:text-amber-400={isOverridingSpace}
+    >
+      <IconInfo class="h-4 w-4 flex-shrink-0 opacity-80" />
+      <span class="text-sm">{inheritanceStatusMessage()}</span>
     </div>
   {/if}
 </div>
