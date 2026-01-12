@@ -40,8 +40,6 @@ jobs:
 
       - name: Build docs site
         working-directory: ./frontend/apps/docs-site
-        env:
-          PAGES_BASE_PATH: /eneo
         run: bun run build
 
       - name: Setup Pages

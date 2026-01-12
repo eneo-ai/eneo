@@ -17,7 +17,7 @@ export const metadata = {
   openGraph: {
     title: 'Eneo - Democratic AI Platform',
     description: 'Open-source AI platform for public sector organizations',
-    url: 'https://eneo.ai',
+    url: 'https://docs.eneo.ai',
     siteName: 'Eneo Documentation',
     type: 'website',
   },
