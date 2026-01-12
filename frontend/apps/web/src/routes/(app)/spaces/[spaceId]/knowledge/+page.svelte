@@ -82,7 +82,7 @@
       {#if userCanSeeCollections}
         <Page.TabTrigger tab="collections">{m.collections()}</Page.TabTrigger>
       {/if}
-      {#if userCanSeeWebsites && !isPersonalSpace}
+      {#if userCanSeeWebsites}
         <Page.TabTrigger tab="websites">{m.websites()}</Page.TabTrigger>
       {/if}
       {#if userCanSeeIntegrations}
