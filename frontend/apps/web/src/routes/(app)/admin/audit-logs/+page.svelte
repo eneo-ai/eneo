@@ -602,16 +602,8 @@
     userSearchCompleted = false;
     activePreset = null; // Clear active preset
 
-    const params = new URLSearchParams();
-
-    if (activeTab === 'config') {
-      params.set("tab", "config");
-    }
-
-    const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
-
-    // Use replaceState to avoid polluting history
-    goto(url, { noScroll: true, replaceState: true });
+    // Refetch data with cleared filters (this also updates the URL)
+    applyFilters();
   }
 
   // Unified scoped search handler
