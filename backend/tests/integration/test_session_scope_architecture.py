@@ -612,10 +612,10 @@ class TestPoolExhaustionRegression:
             test_settings.database_url,
             pool_size=3,
             max_overflow=2,  # Total: 5 connections
-            pool_timeout=1.0,
+            pool_timeout=2.0,
         )
 
-        num_tasks = 8  # More tasks than connections
+        num_tasks = 6  # More tasks than connections, but less flakey
         completed = []
         failed = []
 

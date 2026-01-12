@@ -20,7 +20,8 @@ Slot releases happen AFTER commit (best-effort, won't rollback DB).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -190,6 +191,9 @@ class OrphanWatchdog:
                 )
 
             self._log_metrics(metrics)
+
+            # Write metrics snapshot to Redis for healthz endpoint
+            await self._write_metrics_snapshot(metrics)
 
         except Exception as exc:
             logger.warning(
@@ -915,4 +919,28 @@ class OrphanWatchdog:
                     "long_running_failed": metrics.long_running_failed,
                     "slots_released": metrics.slots_released,
                 },
+            )
+
+    async def _write_metrics_snapshot(self, metrics: CleanupMetrics) -> None:
+        """Write metrics snapshot to Redis for healthz consumption.
+
+        Stores cleanup metrics as JSON for the /api/healthz/crawler endpoint.
+        Uses same TTL policy as success key: max(2*feeder_interval, 300).
+        """
+        snapshot = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **asdict(metrics),
+        }
+        feeder_interval = self._settings.crawl_feeder_interval_seconds
+        ttl = max(2 * feeder_interval, 300)
+        try:
+            await self._redis.set(
+                "crawl_watchdog:last_metrics",
+                json.dumps(snapshot),
+                ex=ttl,
+            )
+        except Exception as redis_exc:
+            logger.debug(
+                "Failed to write watchdog metrics snapshot",
+                extra={"error": str(redis_exc)},
             )

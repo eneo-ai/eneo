@@ -130,8 +130,8 @@ async def test_missing_openai_api_key_returns_503(
     openai_completion_model,
 ):
     """When OpenAI API key is missing, raise APIKeyNotConfiguredException with clear error message."""
-    # Ensure tenant has no credentials
-    assert test_tenant.api_credentials == {}
+    # Ensure tenant has no credentials (avoid cross-test contamination)
+    tenant = test_tenant.model_copy(update={"api_credentials": {}})
 
     # Override settings to ensure strict mode is enabled
     settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
@@ -139,7 +139,7 @@ async def test_missing_openai_api_key_returns_503(
 
     service = CompletionService(
         context_builder=mock_context_builder,
-        tenant=test_tenant,
+        tenant=tenant,
         config=settings,
     )
 
