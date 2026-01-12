@@ -157,9 +157,7 @@ class JobEnqueuer:
     # Patterns indicating a duplicate job (case-insensitive matching)
     _DUPLICATE_PATTERNS = ("already exists", "duplicate", "job exists")
 
-    async def enqueue(
-        self, job_data: dict, tenant_id: UUID
-    ) -> tuple[bool, UUID]:
+    async def enqueue(self, job_data: dict, tenant_id: UUID) -> tuple[bool, bool, UUID]:
         """Enqueue a crawl job to ARQ using pre-created job record.
 
         Job and CrawlRun records are already created by the scheduler.
@@ -170,7 +168,8 @@ class JobEnqueuer:
             tenant_id: Tenant identifier.
 
         Returns:
-            Tuple of (success: bool, job_id: UUID).
+            Tuple of (success: bool, is_duplicate: bool, job_id: UUID).
+            is_duplicate=True when job already exists in ARQ (idempotent success).
             Returns nil UUID on invalid job_id.
         """
         # Parse job_id early for clean error handling
@@ -185,7 +184,7 @@ class JobEnqueuer:
                     "error": str(exc),
                 },
             )
-            return False, UUID("00000000-0000-0000-0000-000000000000")
+            return False, False, UUID("00000000-0000-0000-0000-000000000000")
 
         try:
             from intric.jobs.job_models import Task
@@ -218,20 +217,23 @@ class JobEnqueuer:
                     "url": job_data["url"],
                 },
             )
-            return True, job_id
+            return True, False, job_id  # success, not duplicate
 
         except Exception as exc:
             return self._handle_enqueue_error(exc, job_id, job_data, tenant_id)
 
     def _handle_enqueue_error(
         self, exc: Exception, job_id: UUID, job_data: dict, tenant_id: UUID
-    ) -> tuple[bool, UUID]:
+    ) -> tuple[bool, bool, UUID]:
         """Handle enqueue errors with duplicate detection.
 
         Duplicate jobs are treated as success for idempotency.
         If the feeder crashes after enqueue but before LREM, the job stays
         in pending. On retry, ARQ returns "already exists" - we treat this
         as SUCCESS so LREM proceeds and clears the job.
+
+        IMPORTANT: Caller must release slot when is_duplicate=True, since
+        the original enqueue already acquired a slot.
 
         Args:
             exc: The exception that occurred.
@@ -240,16 +242,15 @@ class JobEnqueuer:
             tenant_id: Tenant identifier.
 
         Returns:
-            Tuple of (success: bool, job_id: UUID).
+            Tuple of (success: bool, is_duplicate: bool, job_id: UUID).
         """
         error_msg = str(exc).lower()
 
-        is_duplicate = any(
-            pattern in error_msg for pattern in self._DUPLICATE_PATTERNS
-        )
+        is_duplicate = any(pattern in error_msg for pattern in self._DUPLICATE_PATTERNS)
 
         if is_duplicate:
-            logger.info(
+            # Debug-level per-job log; summary is at INFO in crawl_feeder.py
+            logger.debug(
                 "Job already in ARQ queue (idempotent), treating as success",
                 extra={
                     "tenant_id": str(tenant_id),
@@ -258,7 +259,7 @@ class JobEnqueuer:
                     "reason": "duplicate_job_id",
                 },
             )
-            return True, job_id
+            return True, True, job_id  # success, IS duplicate
 
         logger.error(
             "Failed to enqueue crawl job from feeder",
@@ -268,4 +269,4 @@ class JobEnqueuer:
                 "error": str(exc),
             },
         )
-        return False, job_id
+        return False, False, job_id  # failed, not duplicate

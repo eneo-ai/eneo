@@ -58,7 +58,9 @@ class SlotLeakDetector:
             f"Leaked={(final - initial)} slots. {msg}"
         )
 
-    async def assert_slots_released(self, initial: int, expected_release: int, msg: str = "") -> None:
+    async def assert_slots_released(
+        self, initial: int, expected_release: int, msg: str = ""
+    ) -> None:
         """Assert specific number of slots were released."""
         final = await self.snapshot()
         actual_release = initial - final
@@ -152,15 +154,16 @@ class TestEnqueueGapSlotLeak:
 
         # Create a duplicate error
         dup_error = RuntimeError("Job already exists in queue")
-        result, returned_job_id = enqueuer._handle_enqueue_error(
+        result, is_duplicate, returned_job_id = enqueuer._handle_enqueue_error(
             exc=dup_error,
             job_id=job_id,
             job_data={"url": "https://example.com"},
             tenant_id=tenant_id,
         )
 
-        # Duplicate should return success=True (idempotency)
+        # Duplicate should return success=True (idempotency) and is_duplicate=True
         assert result is True, "Duplicate detection should return success=True"
+        assert is_duplicate is True, "Should be marked as duplicate"
 
         # Slot should NOT be released for duplicates
         await detector.assert_no_leak(initial, "Duplicate should not release slot")
@@ -343,7 +346,9 @@ class TestHeartbeatTTLTiming:
         )
 
         # First tick should execute
-        with patch.object(monitor, '_execute_heartbeat', new_callable=AsyncMock) as mock_execute:
+        with patch.object(
+            monitor, "_execute_heartbeat", new_callable=AsyncMock
+        ) as mock_execute:
             # Need to set last_beat_time to 0 to ensure first tick runs
             monitor._last_beat_time = 0
             await monitor.tick()
@@ -464,7 +469,9 @@ class TestSlotCounterAccuracy:
         detector = SlotLeakDetector(redis_client, tenant_id)
         final = await detector.snapshot()
 
-        assert final == 0, f"After {num_operations} acquire/release pairs, expected 0, got {final}"
+        assert final == 0, (
+            f"After {num_operations} acquire/release pairs, expected 0, got {final}"
+        )
 
         # Cleanup
         await redis_client.delete(slot_key)
@@ -485,7 +492,9 @@ class TestSlotCounterAccuracy:
 
         # Run concurrent acquire attempts
         async def try_acquire():
-            result = await LuaScripts.acquire_slot(redis_client, tenant_id, max_slots, ttl)
+            result = await LuaScripts.acquire_slot(
+                redis_client, tenant_id, max_slots, ttl
+            )
             return result > 0
 
         results = await asyncio.gather(*[try_acquire() for _ in range(num_requests)])
@@ -498,7 +507,9 @@ class TestSlotCounterAccuracy:
 
         # Verify counter equals max_slots
         counter = await redis_client.get(slot_key)
-        assert int(counter) == max_slots, f"Counter should be {max_slots}, got {counter}"
+        assert int(counter) == max_slots, (
+            f"Counter should be {max_slots}, got {counter}"
+        )
 
         # Cleanup
         await redis_client.delete(slot_key)

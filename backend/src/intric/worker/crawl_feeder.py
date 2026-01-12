@@ -30,6 +30,10 @@ from intric.worker.feeder.watchdog import OrphanWatchdog
 
 logger = get_logger(__name__)
 
+# DLQ (Dead Letter Queue) configuration for poison entries
+DLQ_MAX_ENTRIES = 1000  # Maximum poison entries to retain per tenant
+DLQ_TTL_SECONDS = 86400 * 7  # 7 days retention
+
 
 class CrawlFeeder:
     """Meters crawl job enqueue rate based on available concurrency capacity.
@@ -150,6 +154,7 @@ class CrawlFeeder:
         enqueued_count = 0
         failed_count = 0
         skipped_capacity = 0
+        duplicate_count = 0
 
         # pending_jobs is list of (raw_bytes, job_data) tuples
         # raw_bytes preserved for exact LREM matching
@@ -158,11 +163,30 @@ class CrawlFeeder:
             # Why: Need job_id before enqueue to mark flag first
             try:
                 job_id = UUID(job_data["job_id"])
-            except (KeyError, ValueError, TypeError):
+            except (KeyError, ValueError, TypeError) as parse_exc:
                 logger.warning(
-                    "Invalid job_id in pending job, skipping",
-                    extra={"tenant_id": str(tenant_id), "job_data": job_data},
+                    "Invalid job_id in pending job, removing poison entry",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "job_data": job_data,
+                        "error": str(parse_exc),
+                        "metric_name": "feeder.poison_entry_removed",
+                        "metric_value": 1,
+                    },
                 )
+                # Push to DLQ for forensics before removing
+                try:
+                    dlq_key = f"tenant:{tenant_id}:crawl_pending:dlq"
+                    await redis_client.lpush(dlq_key, raw_bytes)
+                    await redis_client.ltrim(dlq_key, 0, DLQ_MAX_ENTRIES - 1)
+                    await redis_client.expire(dlq_key, DLQ_TTL_SECONDS)
+                except Exception:
+                    pass  # Best effort DLQ push
+                # Remove poison entry to prevent infinite retry loop
+                try:
+                    await self._pending_queue.remove(tenant_id, raw_bytes)
+                except Exception:
+                    pass  # Best effort removal
                 failed_count += 1
                 continue
 
@@ -205,14 +229,29 @@ class CrawlFeeder:
                 continue
 
             # Enqueue to ARQ
-            success, returned_job_id = await self._job_enqueuer.enqueue(
+            success, is_duplicate, returned_job_id = await self._job_enqueuer.enqueue(
                 job_data, tenant_id
             )
 
             if success:
                 # Remove from pending queue using exact raw bytes
                 await self._pending_queue.remove(tenant_id, raw_bytes)
-                enqueued_count += 1
+
+                if is_duplicate:
+                    # Duplicate: job already in ARQ, release the slot we acquired
+                    # The original enqueue already holds a slot, so we must release
+                    # ours to avoid slot counter inflation.
+                    #
+                    # IMPORTANT: Do NOT delete the slot_preacquired flag!
+                    # The flag belongs to the original enqueue. If we delete it,
+                    # the worker will acquire a new slot (thinking none was pre-acquired)
+                    # and the original slot will leak. The flag must remain so the
+                    # worker knows to skip slot acquisition and release the original.
+                    await self._capacity_manager.release_slot(tenant_id)
+                    duplicate_count += 1
+                    # Don't increment enqueued_count - job wasn't newly enqueued
+                else:
+                    enqueued_count += 1
             else:
                 # Enqueue failed - rollback: delete flag and release slot
                 try:
@@ -225,10 +264,23 @@ class CrawlFeeder:
                 await self._capacity_manager.release_slot(tenant_id)
                 failed_count += 1
 
-        if enqueued_count > 0 or failed_count > 0 or skipped_capacity > 0:
+        if (
+            enqueued_count > 0
+            or failed_count > 0
+            or skipped_capacity > 0
+            or duplicate_count > 0
+        ):
             logger.info(
-                f"Feeder cycle complete: {enqueued_count} enqueued, {failed_count} failed, {skipped_capacity} skipped (capacity)",
-                extra={"tenant_id": str(tenant_id)},
+                "Feeder cycle complete",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "enqueued": enqueued_count,
+                    "failed": failed_count,
+                    "skipped_capacity": skipped_capacity,
+                    "duplicates": duplicate_count,
+                    "metric_name": "feeder.cycle_summary",
+                    "metric_value": enqueued_count,
+                },
             )
 
     async def run_forever(self) -> None:
