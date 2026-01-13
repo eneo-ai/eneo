@@ -1832,6 +1832,8 @@
   "conversation_retention_assistant_description": "Åsidosätter utrymmes- och organisationspolicyer för denna assistent",
   "conversation_retention_app_description": "Åsidosätter utrymmes- och organisationspolicyer för denna app",
   "conversation_retention_warning_confirm": "Jag förstår att detta raderar konversationer permanent",
+  "conversation_retention_override_label": "Åsidosätt policy",
+  "number_of_days": "Antal dagar",
   "security_and_privacy": "Säkerhet & Integritet",
   "retention_unit_weeks": "veckor",
   "retention_unit_months": "månader",

@@ -1797,6 +1797,8 @@
   "conversation_retention_assistant_description": "Overrides space and organization policies for this assistant",
   "conversation_retention_app_description": "Overrides space and organization policies for this app",
   "conversation_retention_warning_confirm": "I understand this will permanently delete conversations",
+  "conversation_retention_override_label": "Override policy",
+  "number_of_days": "Number of days",
   "security_and_privacy": "Security & Privacy",
   "retention_unit_weeks": "weeks",
   "retention_unit_months": "months",
