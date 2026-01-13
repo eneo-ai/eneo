@@ -118,6 +118,7 @@
   let selectedAction = $state<ActionType | "all">("all");
   let selectedActions = $state<ActionType[]>([]);  // Multi-select support
   let showActionDropdown = $state(false);  // For multi-select dropdown
+  let actionSearchQuery = $state("");
   let selectedUser = $state<UserSparse | null>(null);
   let userSearchResults = $state<UserSparse[]>([]);
   let isSearchingUsers = $state(false);
@@ -292,20 +293,31 @@
     { value: "audit_session_created" as ActionType, label: m.audit_action_audit_session_created(), category: "system" },
   ]);
 
+  const filteredActionOptions = $derived(
+    actionSearchQuery.length > 0
+      ? actionOptions.filter(o =>
+          o.value !== 'all' &&
+          o.label.toLowerCase().includes(actionSearchQuery.toLowerCase())
+        )
+      : actionOptions.filter(o => o.value !== 'all')
+  );
+
   // Create store for Select component
   const actionStore = writable<{ value: ActionType | "all"; label: string }>({
     value: "all",
     label: m.audit_all_actions()
   });
 
-  // Watch store changes and apply filters
   $effect(() => {
     const newAction = $actionStore.value;
     if (selectedAction !== newAction) {
       selectedAction = newAction;
-      if (!isInitializingFromUrl) {
-        applyFilters();
-      }
+    }
+  });
+
+  $effect(() => {
+    if (!showActionDropdown) {
+      actionSearchQuery = "";
     }
   });
 
@@ -390,7 +402,6 @@
     if (activePreset === days) {
       dateRange = { start: undefined, end: undefined };
       activePreset = null;
-      applyFilters();
       return;
     }
 
@@ -399,7 +410,6 @@
     const startDate = today(tz).subtract({ days: days - 1 }); // Subtract days-1 to get actual range
     dateRange = { start: startDate, end: endDate };
     activePreset = days; // Track which preset is active
-    applyFilters();
   }
 
   // Helper function to detect which preset matches a date range
@@ -610,15 +620,7 @@
   function handleScopedSearch(query: string) {
     searchQuery = query;
 
-    if (searchScope === 'entity') {
-      // Entity search logic
-      clearTimeout(entitySearchTimer);
-      if (query.length >= 3 || query.length === 0) {
-        entitySearchTimer = setTimeout(() => {
-          applyFilters();
-        }, 300);
-      }
-    } else {
+    if (searchScope === 'user') {
       // User search logic - reset completed flag on any query change
       userSearchCompleted = false;
 
@@ -658,7 +660,6 @@
     userSearchResults = [];
     showUserDropdown = false;
     userSearchCompleted = false; // Reset since user is now selected
-    applyFilters();
   }
 
   function clearUserFilter() {
@@ -669,7 +670,6 @@
     userSearchResults = [];
     showUserDropdown = false;
     userSearchCompleted = false;
-    applyFilters();
   }
 
   function clearSearch() {
@@ -679,27 +679,14 @@
     userSearchResults = [];
     showUserDropdown = false;
     userSearchCompleted = false;
-    if (searchScope === 'entity') {
-      applyFilters();
-    }
   }
 
-  // Debounced timer for action multi-select
-  let actionDebounceTimer: ReturnType<typeof setTimeout>;
-
-  // Toggle action selection with debounced filter application
   function toggleAction(actionValue: ActionType) {
     if (selectedActions.includes(actionValue)) {
       selectedActions = selectedActions.filter(a => a !== actionValue);
     } else {
       selectedActions = [...selectedActions, actionValue];
     }
-
-    // Debounce filter application to reduce API calls during rapid selections
-    clearTimeout(actionDebounceTimer);
-    actionDebounceTimer = setTimeout(() => {
-      applyFilters();
-    }, 500);  // 500ms debounce for multi-select
   }
 
   // Handle scope change - preserve query and re-trigger search in new scope
@@ -896,25 +883,6 @@
     exportProcessedRecords = 0;
     exportTotalRecords = 0;
   }
-
-  // Auto-apply filters on any filter change (consolidated for performance)
-  $effect(() => {
-    // Skip auto-apply when initializing from URL to prevent redirect loops
-    if (isInitializingFromUrl) return;
-
-    // Track filter changes and apply with debounce
-    const hasDateFilter = dateRange?.start && dateRange?.end;
-    const hasActionFilter = selectedActions.length > 0;
-
-    // Only auto-apply if we're not in the initial load state
-    // Debounce for 2.5 seconds to reduce audit log noise (hybrid logging approach)
-    if (hasDateFilter || hasActionFilter) {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        applyFilters();
-      }, 2500);
-    }
-  });
 
   // Cleanup timers on component unmount to prevent navigation issues
   onDestroy(() => {
@@ -1473,20 +1441,27 @@
                     </Button>
                   </Dropdown.Trigger>
                   <Dropdown.Menu>
-                    <!-- Scrollable container wrapper (Dropdown.Menu doesn't pass class prop) -->
-                    <div
-                      class="relative max-h-[50vh] sm:max-h-[300px] overflow-y-auto min-w-[280px] sm:min-w-[300px] overscroll-contain scroll-smooth -mx-2 -mb-2"
-                      role="listbox"
-                      aria-multiselectable="true"
-                      aria-label={m.audit_all_actions()}
-                    >
+                    <!-- Container with search and scrollable list -->
+                    <div class="min-w-[280px] sm:min-w-[300px] -mx-2 -mb-2">
+                      <!-- Search input (sticky at top) -->
+                      <div class="-mt-2 sticky top-0 z-30 bg-primary border-b border-default p-2">
+                        <input
+                          type="text"
+                          bind:value={actionSearchQuery}
+                          placeholder={m.audit_search_actions?.() ?? "Sök åtgärder..."}
+                          class="w-full h-8 px-3 rounded-md border border-default bg-subtle text-sm text-default placeholder:text-muted
+                            focus:outline-none focus:ring-2 focus:ring-accent-default/30 focus:border-accent-default transition-all duration-150"
+                          onclick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+
                       <!-- Selected count header when items are selected -->
                       {#if selectedActions.length > 0}
-                        <div class="-mt-2 sticky top-0 z-20 flex items-center justify-between px-3 py-2.5 bg-primary border-b border-default text-xs font-medium shadow-sm">
+                        <div class="sticky top-10 z-20 flex items-center justify-between px-3 py-2 bg-primary border-b border-default text-xs font-medium shadow-sm">
                           <span class="text-muted">{selectedActions.length} {m.audit_actions_selected()}</span>
                           <button
                             class="px-2 py-1 rounded text-accent-default hover:text-white hover:bg-accent-default transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-default"
-                            onclick={() => { selectedActions = []; applyFilters(); }}
+                            onclick={() => { selectedActions = []; }}
                             aria-label="Clear all selected actions"
                           >
                             {m.audit_clear_all()}
@@ -1494,9 +1469,20 @@
                         </div>
                       {/if}
 
-                      <!-- Items list with proper stacking context -->
-                      <div class="relative z-10">
-                        {#each actionOptions.filter(o => o.value !== 'all') as option, index}
+                      <!-- Scrollable list -->
+                      <div
+                        class="relative max-h-[40vh] sm:max-h-[250px] overflow-y-auto overscroll-contain scroll-smooth"
+                        role="listbox"
+                        aria-multiselectable="true"
+                        aria-label={m.audit_all_actions()}
+                      >
+                        <!-- Items list -->
+                        {#if filteredActionOptions.length === 0}
+                          <div class="px-3 py-4 text-center text-sm text-muted">
+                            {m.audit_no_actions_found?.() ?? "Inga åtgärder hittades"}
+                          </div>
+                        {:else}
+                          {#each filteredActionOptions as option, index}
                           {@const isSelected = selectedActions.includes(option.value as ActionType)}
                           <button
                             role="option"
@@ -1532,15 +1518,33 @@
                             <span class="sr-only">(selected)</span>
                           {/if}
                           </button>
-                        {/each}
-                      </div>
+                          {/each}
+                        {/if}
 
-                      <!-- Scroll fade indicator at bottom -->
-                      <div class="sticky bottom-0 h-4 bg-gradient-to-t from-primary to-transparent pointer-events-none z-10" aria-hidden="true"></div>
+                        <!-- Scroll fade indicator at bottom -->
+                        <div class="sticky bottom-0 h-4 bg-gradient-to-t from-primary to-transparent pointer-events-none z-10" aria-hidden="true"></div>
+                      </div>
                     </div>
                   </Dropdown.Menu>
                 </Dropdown.Root>
               </div>
+
+              <!-- Apply Filters Button -->
+              <Button
+                variant="primary"
+                onclick={() => applyFilters()}
+                disabled={activeFilterCount === 0 || isFiltering}
+                class="min-w-[100px]"
+              >
+                {#if isFiltering}
+                  <div class="flex items-center gap-2">
+                    <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                    {m.audit_applying?.() ?? "Tillämpar..."}
+                  </div>
+                {:else}
+                  {m.audit_apply?.() ?? "Tillämpa"}
+                {/if}
+              </Button>
             </div>
           </div>
         </div>
@@ -1554,7 +1558,7 @@
                   {dateRange.start.toString()} – {dateRange.end.toString()}
                 </span>
                 <button
-                  onclick={() => { dateRange = { start: undefined, end: undefined }; applyFilters(); }}
+                  onclick={() => { dateRange = { start: undefined, end: undefined }; activePreset = null; }}
                   class="rounded-full hover:bg-blue-100 dark:hover:bg-blue-900 p-0.5 transition-all duration-150 hover:scale-110"
                 >
                   <IconXMark class="h-3 w-3 text-blue-700 dark:text-blue-300" />
@@ -1568,7 +1572,7 @@
                   {actionOptions.find(o => o.value === action)?.label}
                 </span>
                 <button
-                  onclick={() => { selectedActions = selectedActions.filter(a => a !== action); applyFilters(); }}
+                  onclick={() => { selectedActions = selectedActions.filter(a => a !== action); }}
                   class="rounded-full hover:bg-purple-100 dark:hover:bg-purple-900 p-0.5 transition-all duration-150 hover:scale-110"
                 >
                   <IconXMark class="h-3 w-3 text-purple-700 dark:text-purple-300" />
