@@ -750,6 +750,8 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
         # Set grace > TTL (should trigger validation warning)
         test_settings.oidc_state_ttl_seconds = 600
         test_settings.oidc_redirect_grace_period_seconds = 900
+        from intric.main.config import set_settings
+        set_settings(test_settings)
 
         # Configure federation
         await _configure_federation(
@@ -776,3 +778,5 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     finally:
         test_settings.oidc_state_ttl_seconds = original_ttl
         test_settings.oidc_redirect_grace_period_seconds = original_grace
+        from intric.main.config import set_settings
+        set_settings(test_settings)
