@@ -72,7 +72,7 @@ const headerFilterHandle: Handle = async ({ event, resolve }) => {
 
 export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
-export const handleError: HandleServerError = async ({ error, status, message }) => {
+export const handleError: HandleServerError = async ({ error, status, message, event }) => {
   let code: IntricErrorCode = 0;
   if (error instanceof IntricError) {
     status = error.status;
@@ -80,9 +80,16 @@ export const handleError: HandleServerError = async ({ error, status, message })
     code = error.code;
   }
 
-  if (dev) {
-    console.error("server error", error);
-  }
+  // Always log errors (captured by Docker logs)
+  console.error("[SvelteKit Error]", {
+    timestamp: new Date().toISOString(),
+    status,
+    message,
+    code,
+    route: event.route.id,
+    url: event.url.pathname,
+    error: error instanceof Error ? error.stack : String(error)
+  });
 
   return {
     status,
