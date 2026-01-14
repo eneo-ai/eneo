@@ -1,5 +1,7 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Protocol
+from uuid import UUID
 
+from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
@@ -11,11 +13,28 @@ from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
-    from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
 
 logger = get_logger(__name__)
+
+
+class EmbeddingModelLike(Protocol):
+    """Protocol defining the interface for embedding model objects.
+
+    This allows both ORM EmbeddingModel and frozen EmbeddingModelSpec DTO
+    to be used interchangeably via duck typing. The adapters only access
+    these attributes, so any object providing them will work.
+    """
+    id: UUID
+    name: str
+    provider_id: UUID | None
+    litellm_model_name: str | None
+    family: ModelFamily | None
+    max_input: int
+    max_batch_size: int | None
+    dimensions: int | None
+    open_source: bool
 
 
 class CreateEmbeddingsService:
@@ -31,12 +50,15 @@ class CreateEmbeddingsService:
         self.encryption_service = encryption_service
         self.session = session
 
-    async def _get_adapter(self, model: "EmbeddingModel") -> EmbeddingModelAdapter:
-        """
-        Get the adapter for the given embedding model.
+    async def _get_adapter(self, model: EmbeddingModelLike) -> EmbeddingModelAdapter:
+        """Get the appropriate adapter for the embedding model.
 
         All models must have a provider_id linking to a ModelProvider.
         Uses LiteLLMEmbeddingAdapter which routes through LiteLLM.
+
+        Args:
+            model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
+                   Both satisfy the EmbeddingModelLike protocol.
         """
         import sqlalchemy as sa
         from intric.database.tables.model_providers_table import ModelProviders
@@ -112,16 +134,28 @@ class CreateEmbeddingsService:
 
     async def get_embeddings(
         self,
-        model: "EmbeddingModel",
+        model: EmbeddingModelLike,
         chunks: list[InfoBlobChunk],
     ) -> ChunkEmbeddingList:
+        """Generate embeddings for text chunks.
+
+        Args:
+            model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
+            chunks: List of InfoBlobChunk objects to embed.
+        """
         adapter = await self._get_adapter(model)
         return await adapter.get_embeddings(chunks)
 
     async def get_embedding_for_query(
         self,
-        model: "EmbeddingModel",
+        model: EmbeddingModelLike,
         query: str,
     ) -> list[float]:
+        """Generate embedding for a search query.
+
+        Args:
+            model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
+            query: Search query string to embed.
+        """
         adapter = await self._get_adapter(model)
         return await adapter.get_embedding_for_query(query)

@@ -727,17 +727,27 @@ async def test_cross_tenant_credential_isolation(
 
     settings = get_settings()
     encryption_service = EncryptionService(settings)
-    repo = TenantRepository(async_session)
 
-    tenant1 = await repo.get(tenant1_id)
-    resolver1 = CredentialResolver(tenant=tenant1, encryption_service=encryption_service)
-    key1 = resolver1.get_api_key("openai")
-    assert key1 == "sk-tenant1-key-abc"
+    # Use a fresh session to see data committed by HTTP requests
+    from intric.database.database import sessionmanager
 
-    tenant2 = await repo.get(tenant2_id)
-    resolver2 = CredentialResolver(tenant=tenant2, encryption_service=encryption_service)
-    key2 = resolver2.get_api_key("openai")
-    assert key2 == "sk-tenant2-key-xyz"
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            repo = TenantRepository(session)
+
+            tenant1 = await repo.get(tenant1_id)
+            resolver1 = CredentialResolver(
+                tenant=tenant1, encryption_service=encryption_service
+            )
+            key1 = resolver1.get_api_key("openai")
+            assert key1 == "sk-tenant1-key-abc"
+
+            tenant2 = await repo.get(tenant2_id)
+            resolver2 = CredentialResolver(
+                tenant=tenant2, encryption_service=encryption_service
+            )
+            key2 = resolver2.get_api_key("openai")
+            assert key2 == "sk-tenant2-key-xyz"
 
     # Verify keys are different
     assert key1 != key2, "Tenants should have isolated credentials"

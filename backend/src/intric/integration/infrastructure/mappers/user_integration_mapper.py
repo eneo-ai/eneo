@@ -17,6 +17,8 @@ class UserIntegrationMapper(EntityMapper[UserIntegration, UserIntegrationDBModel
             "tenant_id": entity.tenant_integration.tenant_id,
             "tenant_integration_id": entity.tenant_integration.id,
             "authenticated": entity.authenticated,
+            "auth_type": entity.auth_type,
+            "tenant_app_id": entity.tenant_app_id,
         }
 
     def to_entity(self, db_model: UserIntegrationDBModel) -> UserIntegration:

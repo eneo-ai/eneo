@@ -1,0 +1,324 @@
+# SharePoint Integration
+
+This guide describes how to configure the SharePoint integration in Eneo. Once set up, users can import documents and files from SharePoint and OneDrive directly into their spaces in Eneo, with automatic synchronization when files are updated.
+
+## Overview
+
+The SharePoint integration enables connecting SharePoint sites and OneDrive folders to Eneo. When the integration is configured, users can select which folders or sites they want to import, and Eneo automatically fetches the content and keeps it up to date via webhooks.
+
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+
+![SharePoint Integration Architecture showing User connecting to Eneo Platform (Backend API, SharePoint Service, Worker, PostgreSQL, Webhook Endpoint) which communicates with Microsoft Cloud (Azure AD, Microsoft Graph API, SharePoint & OneDrive). Includes authentication methods (Service Account, Tenant App, User OAuth) and webhook subscription lifecycle.](/diagrams/sharepoint-integration.svg)
+
+</div>
+
+There are two different use cases to consider:
+
+**Personal spaces** use OAuth login where each user authenticates with their own Microsoft account. This is suitable when users want to import from their personal OneDrive or SharePoint sites they have access to.
+
+**Shared and organization spaces** use centralized authentication configured by an administrator. This means no individual user needs to log in with their account for the integration to work, avoiding issues if someone leaves or changes roles.
+
+> **Important:** Both use cases require an administrator to first register an Azure AD application and configure the integration in Eneo. The Azure AD app handles authentication for all users. Without this setup, users cannot connect to SharePoint even in personal spaces.
+
+## Prerequisites
+
+Before you begin, you need:
+
+- Access to Azure Portal with permission to register applications in your organization's Azure AD
+- An Eneo installation with HTTPS (required for webhooks from Microsoft)
+- Administrator permissions in Eneo
+
+## Backend Configuration
+
+Before configuring the integration in the Eneo UI, ensure the following environment variable is set in your backend:
+
+```bash
+# Required: Secret for validating webhook notifications from Microsoft
+# Generate with: openssl rand -hex 32
+SHAREPOINT_WEBHOOK_CLIENT_STATE=your-random-secret-min-32-characters
+```
+
+Optionally, if Eneo cannot auto-detect its public URL (e.g., behind a reverse proxy), you may also need:
+
+```bash
+# Optional: Explicit webhook callback URL
+# Only needed if auto-detection fails
+SHAREPOINT_WEBHOOK_NOTIFICATION_URL=https://your-eneo-domain.com/api/v1/integrations/sharepoint/webhook/
+```
+
+After setting these variables, restart the backend service.
+
+---
+
+## Creating an Azure AD Application
+
+All communication between Eneo and SharePoint occurs via the Microsoft Graph API, which requires a registered application in Azure AD.
+
+### Register the Application
+
+Go to [Azure Portal](https://portal.azure.com) and navigate to **Azure Active Directory** → **App registrations** → **New registration**.
+
+Fill in the following:
+- **Name**: Choose a descriptive name, for example "Eneo SharePoint Integration"
+- **Supported account types**: Select "Accounts in this organizational directory only" if the integration should only be used within your organization
+- **Redirect URI**: Select "Web" and enter `https://your-eneo-domain.com/integrations/callback/token/`
+
+Click **Register**.
+
+> **Note:** The Redirect URI must match exactly. If your Eneo installation uses a different base URL or port, adjust the URI accordingly. The callback page is always at `/integrations/callback/token/` and is used for all integration types.
+
+### Configure Permissions
+
+After registration, the application needs the right permissions to read files from SharePoint. Navigate to **API permissions** → **Add a permission** → **Microsoft Graph**.
+
+Which permissions are needed depends on which authentication method you choose (see next section), but generally you need:
+
+**For delegated permissions:**
+- `Files.Read.All` – read files the user has access to
+- `Sites.Read.All` – read SharePoint sites
+- `offline_access` – keep the session active without the user needing to log in again
+
+**For application permissions:**
+- `Files.Read.All` – read files across the entire organization
+- `Sites.Read.All` – read all SharePoint sites
+
+After adding the permissions, click **Grant admin consent** to approve them at the organization level.
+
+### Create a Client Secret
+
+Navigate to **Certificates & secrets** → **New client secret**. Enter a description and choose a validity period. Copy the value that appears – it will only be shown once.
+
+Note the following values needed for configuration in Eneo:
+- **Application (client) ID** – found on the application's overview page
+- **Client secret** – the value you just copied
+- **Directory (tenant) ID** or domain name – for example `contoso.onmicrosoft.com`
+
+---
+
+## Choosing Authentication Method
+
+Eneo supports two methods for authenticating with SharePoint in shared spaces. The choice affects which permissions are required and how access control works.
+
+### Service Account (Recommended)
+
+With the service account method, an administrator logs in with a dedicated Microsoft account during configuration. Eneo then uses that account's permissions to read files.
+
+**Why we recommend this:** Unlike the tenant app method, service account authentication only grants access to SharePoint sites that the service account explicitly has permission to access. This follows the principle of least privilege – Eneo cannot access more data than necessary.
+
+**Advantages:**
+- Granular access control – Eneo can only read files the service account has access to
+- No person dependency – the integration continues to work even if the person who configured it leaves
+- Clear traceability in SharePoint's access logs
+- Follows security best practices (least privilege)
+
+**Requires:**
+- A dedicated service account in Azure AD (for example `eneo-service@contoso.com`)
+- The account must have read permission to the SharePoint sites to be imported
+- Delegated permissions in the Azure AD application
+
+### Tenant App
+
+With the tenant app method, Eneo uses application permissions that grant access to **all SharePoint sites in the entire organization**, without any user needing to log in.
+
+**When this is appropriate:** Tenant app can be a good choice for smaller organizations or test environments where managing a separate service account adds unnecessary overhead, and where exposing all SharePoint content to Eneo is acceptable. It's also useful when you explicitly want Eneo to have access to all sites.
+
+**Advantages:**
+- Simpler setup – no separate login required or service account to manage
+- Immediate access to all content
+- No risk of token expiration due to password changes or account issues
+
+**Disadvantages:**
+- **No granular access control** – the application can read all files across all SharePoint sites in the organization
+- Microsoft does not provide any mechanism to restrict which sites an application with application permissions can access – it's all or nothing
+- Requires an Azure AD administrator to approve application permissions
+- May not comply with data minimization requirements in some organizations
+
+**Requires:**
+- Application permissions in the Azure AD application
+- Admin consent for these permissions
+
+---
+
+## Configuring the Integration in Eneo
+
+Once the Azure AD application is created, you can configure the integration in Eneo.
+
+### Open Configuration
+
+Log in to Eneo as an administrator and navigate to **Admin** → **Integrations**. Under the SharePoint card, click **Configure**.
+
+### Enter Credentials
+
+Fill in the form with the credentials from Azure AD:
+
+- **Client ID**: Application (client) ID from Azure Portal
+- **Client Secret**: The client secret you created
+- **Tenant**: Your organization's domain (e.g., `contoso.onmicrosoft.com`) or Directory (tenant) ID (a GUID found on the app's overview page)
+
+### Select Authentication Method
+
+**For service account:** Select "Service Account" and click "Sign in with Microsoft". You will be redirected to Microsoft's login where you log in with the service account. After login, the configuration is saved automatically.
+
+**For tenant app:** Select "Tenant App", click "Test Connection" to verify the credentials work, then click "Save".
+
+### Verify
+
+When the configuration is saved, the status displays as "Configured" on the integrations page. Users can now start importing from SharePoint in their shared spaces.
+
+---
+
+## Importing Content from SharePoint
+
+Once the integration is configured, users can import content from SharePoint into their spaces. The process differs slightly depending on the space type.
+
+### Importing in Shared Spaces
+
+In shared spaces (team or organization spaces), the integration uses the centralized authentication configured by the administrator:
+
+1. Navigate to your space in Eneo
+2. Go to **Knowledge** → **Add knowledge** → **SharePoint**
+3. Browse available SharePoint sites and folders
+4. Select the folders you want to import
+5. Click **Import**
+
+Eneo will fetch all documents from the selected folders and process them for use with AI assistants. The content is automatically kept in sync via webhooks.
+
+### Importing in Personal Spaces
+
+Personal spaces use OAuth authentication, allowing each user to import from their own OneDrive or SharePoint sites they have access to. This requires that an administrator has already configured the SharePoint integration at the organization level (the Azure AD app credentials must be in place).
+
+1. Navigate to your personal space
+2. Go to **Knowledge** → **Add knowledge** → **SharePoint**
+3. Click **Sign in with Microsoft** to authenticate with your Microsoft account
+4. Grant Eneo permission to read your files
+5. Browse and select the folders you want to import
+6. Click **Import**
+
+Your OAuth token is stored securely and refreshed automatically using the `offline_access` permission. If your token expires (for example, after password changes or revoked consent), you'll be prompted to sign in again.
+
+### Supported File Types
+
+Eneo can process the following file types from SharePoint:
+
+- **Documents**: PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx)
+- **Text files**: Plain text, Markdown, CSV
+- **Web content**: SharePoint pages and OneNote notebooks (text content only)
+
+Files that cannot be processed (images, videos, executables) are skipped during import.
+
+### Import Limits and Quotas
+
+Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows progress in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
+
+---
+
+## Webhooks and Real-time Synchronization
+
+To keep imported content up to date, Eneo uses Microsoft Graph's webhook functionality. When a file changes in SharePoint, Microsoft sends a notification to Eneo which then fetches the updated file.
+
+### How Webhooks Work
+
+When a user imports a SharePoint folder, Eneo creates a webhook subscription with Microsoft Graph. Microsoft then sends notifications to Eneo's webhook endpoint every time something changes in that folder.
+
+Webhook subscriptions have a maximum lifetime of approximately 29 days according to Microsoft's limitations. Eneo has a background job that runs every 12 hours and automatically renews subscriptions that are approaching expiration (within 48 hours). Under normal circumstances, administrators don't need to manage this manually.
+
+### Managing Webhooks
+
+Under **Admin** → **Integrations** → **Manage webhooks** you can see all active subscriptions and their status:
+
+- **Active**: The subscription is working normally
+- **Expiring soon**: The subscription expires within 48 hours and will be renewed automatically on the next run
+- **Expired**: The subscription has expired and needs to be recreated
+
+If webhooks have stopped working, for example after an extended outage where the background job couldn't run, you can click **Renew expired** to manually recreate all expired subscriptions.
+
+### Troubleshooting Webhooks
+
+If changes in SharePoint aren't synchronizing:
+
+1. Check webhook status in the admin panel
+2. Verify that Eneo's domain is reachable via HTTPS from the internet
+3. Check that the firewall allows incoming traffic from Microsoft's IP addresses
+
+---
+
+## Troubleshooting
+
+### Authentication Fails
+
+If connection testing fails, check:
+
+- That client ID and client secret are correctly copied from Azure Portal
+- That the client secret hasn't expired (they have limited validity periods)
+- That admin consent has been granted for all permissions
+- That the correct permission type is used (delegated for service account, application for tenant app)
+
+### Files Don't Synchronize
+
+If imported files aren't updating:
+
+- Check webhook status in the admin panel
+- Verify that the service account (when using service account method) still has access to the files
+
+### Users Can't Import
+
+If users get error messages when importing:
+
+- Verify that the integration is correctly configured at the organization level
+- Check that the user has access to the SharePoint site they're trying to import from
+- For personal spaces, ask the user to log out and in again to renew their OAuth token
+
+---
+
+## Rotating Client Secret
+
+Client secrets in Azure AD have limited validity – usually between 6 months and 2 years depending on what was chosen when created. When the secret expires, the integration stops working.
+
+### Plan Rotation in Advance
+
+Azure AD shows expiration dates for client secrets under **Certificates & secrets** in the application's settings. It's recommended to set a calendar reminder at least one week before the expiration date to have time to rotate the secret without interruption.
+
+### Updating the Secret
+
+Updating the client secret doesn't affect existing webhook subscriptions or imported knowledge – only the authentication credentials are replaced.
+
+To rotate the secret:
+
+1. **Create new secret in Azure AD:**
+   - Go to [Azure Portal](https://portal.azure.com) and navigate to your app registration
+   - Under **Certificates & secrets**, click **New client secret**
+   - Enter description and validity period, then click **Add**
+   - Copy the new secret (it's only shown once)
+
+2. **Update in Eneo:**
+   - Navigate to **Admin** → **Integrations**
+   - Click **Configure** under SharePoint
+   - Click **Update secret**
+   - Paste the new client secret
+   - Click **Save**
+
+3. **Verify:**
+   - Check that the integration still works by testing an import or checking webhook status
+
+4. **Delete old secret:**
+   - Once the new secret is verified to work, go back to Azure Portal and delete the old secret to avoid security risks
+
+### When Secret Has Expired
+
+If the secret has already expired, the integration won't be able to authenticate with Microsoft Graph. Existing webhooks won't receive notifications and new imports will fail.
+
+The solution is the same as above: create a new secret in Azure AD and update it in Eneo. After the new secret is saved, normal function resumes automatically.
+
+---
+
+## Switching Authentication Method
+
+If you need to switch from service account to tenant app or vice versa, the existing configuration must first be removed. This is because the two methods use different types of permissions and tokens.
+
+Removing the configuration means all imported SharePoint knowledge is also removed. Users will then need to re-import their content after the new configuration is in place.
+
+To switch method:
+1. Navigate to **Admin** → **Integrations**
+2. Click **Configure** under SharePoint
+3. Click **Remove integration** and confirm
+4. Configure the integration again with the new method

@@ -124,19 +124,35 @@ echo "URL_SIGNING_KEY=$(openssl rand -hex 32)" >> env_backend.env
 
 #### D. Frontend Configuration in `env_frontend.env`
 
-The frontend needs to know its public URL and must share the exact same `JWT_SECRET` as the backend.
+The frontend needs three URLs configured and must share the exact same `JWT_SECRET` as the backend.
 
 ```bash
-# 1. Set the public URLs (use your actual domain)
-echo "ORIGIN=https://eneo.your-company.com" >> env_frontend.env
+# 1. Set the URLs (replace eneo.your-company.com with your actual domain)
+# Server-side URL - used by frontend SSR
 echo "INTRIC_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
+
+# Internal URL - server-to-server within Docker (skips Traefik, faster)
+echo "INTRIC_BACKEND_SERVER_URL=http://backend:8000" >> env_frontend.env
+
+# Client-side URL - used by browser for API calls (PUBLIC_ exposes to browser)
+echo "PUBLIC_INTRIC_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
+
+# Origin - used for cookies and CORS
+echo "ORIGIN=https://eneo.your-company.com" >> env_frontend.env
+
+# Public origin - required for OIDC authentication
+echo "PUBLIC_ORIGIN=https://eneo.your-company.com" >> env_frontend.env
 
 # 2. Copy the JWT_SECRET from the backend's .env file
 JWT_SECRET_VALUE=$(grep '^JWT_SECRET=' env_backend.env | cut -d= -f2-)
 echo "JWT_SECRET=$JWT_SECRET_VALUE" >> env_frontend.env
 ```
 
-> **Important**: The `JWT_SECRET` must be identical in both `env_backend.env` and `env_frontend.env` for authentication to work correctly.
+> **Important**:
+> - The `JWT_SECRET` must be identical in both `env_backend.env` and `env_frontend.env` for authentication to work correctly.
+> - `INTRIC_BACKEND_SERVER_URL` must be `http://backend:8000` (using Docker service name, not `localhost`).
+> - `PUBLIC_INTRIC_BACKEND_URL` is the URL the browser uses - must be your public domain.
+> - `PUBLIC_ORIGIN` is required for OIDC authentication.
 
 ### Step 3: Launch the Application
 
@@ -414,6 +430,42 @@ If you encounter issues, here are some common problems and their solutions.
 **If upgrading from an old version:**
 - Database migration issues can cause authentication failures
 - See the [Upgrading Your Eneo Instance](#upgrading-your-eneo-instance) section for guidance on starting fresh
+
+### Default User Not Created (Can't Login)
+If the database tables exist but you can't login with `user@example.com` / `Password1!`:
+- Check that the `DEFAULT_*` variables are set (not commented out) in `env_backend.env`:
+  ```bash
+  DEFAULT_TENANT_NAME=ExampleTenant
+  DEFAULT_TENANT_QUOTA_LIMIT=10737418240
+  DEFAULT_USER_NAME=ExampleUser
+  DEFAULT_USER_EMAIL=user@example.com
+  DEFAULT_USER_PASSWORD=Password1!
+  ```
+- Re-run the database initialization:
+  ```bash
+  docker compose run --rm db-init
+  ```
+
+### Frontend Shows "ECONNREFUSED 127.0.0.1:8000"
+This means the frontend is trying to connect to `localhost` instead of the backend container:
+- Check `env_frontend.env` has the correct URLs:
+  ```bash
+  INTRIC_BACKEND_URL=https://your-domain.com        # Public URL (your actual domain)
+  INTRIC_BACKEND_SERVER_URL=http://backend:8000     # Must be "backend", NOT "localhost"
+  ORIGIN=https://your-domain.com
+  ```
+- In Docker, `localhost` means "this container" - use `backend` (the Docker service name) instead
+
+### HTTP to HTTPS Redirect Not Working
+If you see `middleware "redirect-to-https@docker" does not exist` in Traefik logs:
+- Ensure the `traefik` service in `docker-compose.yml` has `traefik.enable=true` in its labels:
+  ```yaml
+  traefik:
+    labels:
+      - "traefik.enable=true"  # This line is required!
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+  ```
 
 ### 502 Bad Gateway or 404 Not Found
 - Verify that you replaced `your-domain.com` in all four places within `docker-compose.yml`

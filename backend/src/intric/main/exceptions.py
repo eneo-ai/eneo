@@ -1,5 +1,12 @@
 from enum import Enum
 
+from intric.files.text import (
+    CorruptFileError,
+    EncryptedFileError,
+    ExtractionError,
+    UnsupportedFormatError,
+)
+
 
 class ErrorCodes(int, Enum):
     NOT_FOUND = 9000
@@ -29,6 +36,11 @@ class ErrorCodes(int, Enum):
     INTERNAL_SERVER_ERROR = 9024
     TENANT_SUSPENDED = 9025
     API_KEY_NOT_CONFIGURED = 9026
+    # File extraction errors
+    FILE_EXTRACTION_ERROR = 9027
+    FILE_ENCRYPTED = 9028
+    FILE_CORRUPT = 9029
+    FILE_FORMAT_UNSUPPORTED = 9030
 
 
 class NotFoundException(Exception):
@@ -101,6 +113,35 @@ class ChunkEmbeddingMisMatchException(Exception):
 
 class CrawlerException(Exception):
     pass
+
+
+class CrawlTimeoutError(CrawlerException):
+    """Raised when a crawl times out but may have partial results.
+
+    This is a controlled termination, not a failure. The crawler ran for
+    the configured max_length but didn't complete naturally. Partial results
+    in the JSONL spool file should be preserved and persisted.
+
+    Attributes:
+        url: The URL that was being crawled
+        timeout_seconds: The timeout value that was exceeded
+        pages_collected: Number of pages in the spool file (if known)
+    """
+
+    def __init__(
+        self,
+        url: str,
+        timeout_seconds: int,
+        pages_collected: int = 0,
+        message: str | None = None,
+    ):
+        self.url = url
+        self.timeout_seconds = timeout_seconds
+        self.pages_collected = pages_collected
+        msg = message or f"Crawl timeout: exceeded {timeout_seconds}s for {url}"
+        if pages_collected > 0:
+            msg += f" ({pages_collected} pages collected)"
+        super().__init__(msg)
 
 
 class NameCollisionException(Exception):
@@ -194,4 +235,9 @@ EXCEPTION_MAP = {
     ),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
+    # File extraction errors - use None to pass through the exception's own message
+    ExtractionError: (400, None, ErrorCodes.FILE_EXTRACTION_ERROR),
+    EncryptedFileError: (400, None, ErrorCodes.FILE_ENCRYPTED),
+    CorruptFileError: (400, None, ErrorCodes.FILE_CORRUPT),
+    UnsupportedFormatError: (415, None, ErrorCodes.FILE_FORMAT_UNSUPPORTED),
 }

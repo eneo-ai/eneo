@@ -1,7 +1,9 @@
 """Unit tests for tenant usage statistics task helpers."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -25,6 +27,9 @@ class ProviderStub:
         return new_value
 
     def reset(self):
+        self._value = None
+
+    def reset_override(self):
         self._value = None
 
     def value(self):
@@ -132,11 +137,13 @@ class FakeContainer:
     ):
         self.user = ProviderStub()
         self.tenant = ProviderStub()
+        self.session = ProviderStub()
 
         self._tenant_repo = FakeTenantRepo(tenant, tenant_list)
         self._user_repo = FakeUserRepo(users or ([user_obj] if user_obj else []))
         session_rows = user_rows if user_rows is not None else [user_row]
         self._session = FakeSession(session_rows)
+        self.session.override(self._session)
         self._job_service = job_service
         self._usage_service = FakeUsageService(self.user, self.tenant)
 
@@ -145,9 +152,6 @@ class FakeContainer:
 
     def user_repo(self):
         return self._user_repo
-
-    def session(self):
-        return self._session
 
     def job_service(self):
         return self._job_service
@@ -299,7 +303,27 @@ async def test_recalculate_all_tenants_usage_stats_processes_active_tenants_only
         users=[user_a, user_b],
     )
 
-    result = await recalculate_all_tenants_usage_stats(container)
+    # Create a mock sessionmanager that returns FakeSession with correct user per iteration
+    iteration = [0]
+
+    @asynccontextmanager
+    async def mock_session():
+        # First call is for getting tenant list, subsequent calls are per-tenant
+        if iteration[0] == 0:
+            # Initial tenant list fetch - doesn't query users
+            yield FakeSession([None])
+        else:
+            # Per-tenant iteration - return the correct user row
+            user_idx = iteration[0] - 1
+            if user_idx < len(user_rows):
+                yield FakeSession([user_rows[user_idx]])
+            else:
+                yield FakeSession([None])
+        iteration[0] += 1
+
+    with patch("intric.worker.usage_stats_tasks.sessionmanager") as mock_sm:
+        mock_sm.session = mock_session
+        result = await recalculate_all_tenants_usage_stats(container)
 
     assert result is True
     usage_calls = container.completion_model_usage_service().calls
@@ -332,7 +356,27 @@ async def test_recalculate_all_tenants_usage_stats_balances_multiple_tenants():
         users=users,
     )
 
-    result = await recalculate_all_tenants_usage_stats(container)
+    # Create a mock sessionmanager that returns FakeSession with correct user per iteration
+    iteration = [0]
+
+    @asynccontextmanager
+    async def mock_session():
+        # First call is for getting tenant list, subsequent calls are per-tenant
+        if iteration[0] == 0:
+            # Initial tenant list fetch - doesn't query users
+            yield FakeSession([None])
+        else:
+            # Per-tenant iteration - return the correct user row
+            user_idx = iteration[0] - 1
+            if user_idx < len(user_rows):
+                yield FakeSession([user_rows[user_idx]])
+            else:
+                yield FakeSession([None])
+        iteration[0] += 1
+
+    with patch("intric.worker.usage_stats_tasks.sessionmanager") as mock_sm:
+        mock_sm.session = mock_session
+        result = await recalculate_all_tenants_usage_stats(container)
 
     assert result is True
     usage_calls = container.completion_model_usage_service().calls

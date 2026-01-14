@@ -94,13 +94,14 @@ export function initIntegrations(client) {
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
        *
+       * @returns {Promise<Job>} The background job processing this import
        * @throws {IntricError}
        * */
       import: async ({ integration, preview, space, embedding_model }) => {
         const { id: user_integration_id } = integration;
         const { id } = space;
-        const { key, name, url } = preview;
-        await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/", {
+        const { key, name, url, folder_id, folder_path, type, resource_type } = preview;
+        const job = await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/", {
           method: "post",
           params: {
             path: { user_integration_id, id }
@@ -110,10 +111,15 @@ export function initIntegrations(client) {
               key,
               name,
               url,
+              folder_id,
+              folder_path,
+              selected_item_type: type,
+              resource_type: resource_type || "site",
               embedding_model
             }
           }
         });
+        return job;
       },
 
       /**
@@ -133,6 +139,49 @@ export function initIntegrations(client) {
             path: { integration_knowledge_id, id }
           }
         });
+      },
+
+      /**
+       * Get paginated sync history for an integration knowledge
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge
+       * @param {number} args.skip Number of items to skip (default: 0)
+       * @param {number} args.limit Maximum number of sync logs per page (default: 10)
+       * @throws {IntricError}
+       * */
+      getSyncLogs: async ({ knowledge, skip = 0, limit = 10 }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const res = await client.fetch("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
+          method: "get",
+          params: {
+            path: { integration_knowledge_id },
+            query: { skip, limit }
+          }
+        });
+        return res;
+      },
+
+      /**
+       * Rename an integration knowledge item
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       * @param {string} args.name New name for the knowledge
+       * @throws {IntricError}
+       * */
+      rename: async ({ knowledge, space, name }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const res = await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/", {
+          method: "patch",
+          params: {
+            path: { id, integration_knowledge_id }
+          },
+          requestBody: {
+            "application/json": { name }
+          }
+        });
+        return res;
       }
     },
 
@@ -143,6 +192,24 @@ export function initIntegrations(client) {
        * */
       list: async () => {
         const res = await client.fetch("/api/v1/integrations/me/", { method: "get" });
+        return res.items.sort((a, b) => a.name.localeCompare(b.name));
+      },
+
+      /**
+       * List integrations available for a specific space, filtered by space type and auth type.
+       * - Personal spaces: Only user OAuth integrations
+       * - Shared/Organization spaces: Only tenant app integrations
+       * @param {{id: string}} space The space to get available integrations for
+       * @throws {IntricError}
+       * */
+      listForSpace: async (space) => {
+        const { id: space_id } = space;
+        const res = await client.fetch("/api/v1/integrations/spaces/{space_id}/available/", {
+          method: "get",
+          params: {
+            path: { space_id }
+          }
+        });
         return res.items.sort((a, b) => a.name.localeCompare(b.name));
       },
 
@@ -198,6 +265,48 @@ export function initIntegrations(client) {
         });
 
         return res;
+      }
+    },
+
+    admin: {
+      sharepoint: {
+        /**
+         * List all SharePoint webhook subscriptions
+         * @throws {IntricError}
+         * */
+        listSubscriptions: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/", {
+            method: "get"
+          });
+          return res;
+        },
+
+        /**
+         * Renew all expired SharePoint subscriptions
+         * @throws {IntricError}
+         * */
+        renewExpiredSubscriptions: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/renew-expired/", {
+            method: "post"
+          });
+          return res;
+        },
+
+        /**
+         * Recreate a specific SharePoint subscription
+         * @param {{id: string}} subscription The subscription to recreate
+         * @throws {IntricError}
+         * */
+        recreateSubscription: async (subscription) => {
+          const { id } = subscription;
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{id}/recreate/", {
+            method: "post",
+            params: {
+              path: { id }
+            }
+          });
+          return res;
+        }
       }
     }
   };

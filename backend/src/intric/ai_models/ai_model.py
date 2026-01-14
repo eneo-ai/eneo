@@ -8,7 +8,6 @@ from intric.ai_models.model_enums import (
 )
 from intric.base.base_entity import Entity
 from intric.main.config import get_settings
-from intric.modules.module import Modules
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -84,28 +83,10 @@ class AIModel(Entity):
 
     @property
     def is_locked(self):
-        # Handle both enum and string values
-        if self.hosting in (ModelHostingLocation.EU, "eu"):
-            if Modules.EU_HOSTING not in self.user.modules:
-                return True
-
-        if self.hosting in (ModelHostingLocation.SWE, "swe"):
-            if Modules.SWE_HOSTING not in self.user.modules:
-                return True
-
         return False
 
     @property
     def lock_reason(self) -> Optional[str]:
-        # Handle both enum and string values
-        if self.hosting in (ModelHostingLocation.EU, "eu"):
-            if Modules.EU_HOSTING not in self.user.modules:
-                return "module"
-
-        if self.hosting in (ModelHostingLocation.SWE, "swe"):
-            if Modules.SWE_HOSTING not in self.user.modules:
-                return "module"
-
         # Check if tenant credentials are missing
         if get_settings().tenant_credentials_enabled:
             provider = self.get_credential_provider_name()

@@ -42,6 +42,8 @@ class CrawlService:
     """
 
     # Lua script for atomic slot acquisition (same as TenantConcurrencyLimiter)
+    # FIX: Only refresh TTL on SUCCESS path - prevents zombie counters when acquire fails
+    # Bug: Previous version refreshed TTL on both success AND failure, keeping counter alive forever
     _acquire_slot_lua: str = (
         "local key = KEYS[1]\n"
         "local limit = tonumber(ARGV[1])\n"
@@ -50,16 +52,16 @@ class CrawlService:
         "  return 1\n"
         "end\n"
         "local current = redis.call('INCR', key)\n"
-        "redis.call('EXPIRE', key, ttl)\n"
         "if current > limit then\n"
         "  local after_decr = redis.call('DECR', key)\n"
         "  if after_decr <= 0 then\n"
         "    redis.call('DEL', key)\n"
-        "  else\n"
-        "    redis.call('EXPIRE', key, ttl)\n"
         "  end\n"
+        "  -- DO NOT refresh TTL on failure - let counter expire naturally if unused\n"
         "  return 0\n"
         "end\n"
+        "-- Success: refresh TTL only after confirming slot acquired\n"
+        "redis.call('EXPIRE', key, ttl)\n"
         "return current\n"
     )
 
@@ -138,18 +140,24 @@ class CrawlService:
             )
             return False
 
-    async def _mark_slot_preacquired(self, job_id: UUID) -> None:
+    async def _mark_slot_preacquired(self, job_id: UUID, tenant_id: UUID) -> None:
         """Mark that we pre-acquired a slot for this job.
 
         Worker checks this flag to skip limiter.acquire() (slot already held).
         TTL ensures cleanup if job is never picked up.
 
+        Args:
+            job_id: Job identifier for the flag key
+            tenant_id: Stored in value so worker can release slot even if tenant
+                       injection fails. Consistent with Feeder's implementation.
+
         Raises on failure - caller must handle rollback to prevent double-acquire.
         """
         key = f"job:{job_id}:slot_preacquired"
+        # Store tenant_id (same as Feeder) so worker can release slot on failure
         # Let exception propagate - caller handles rollback
         await self.redis_client.set(
-            key, "1", ex=self.settings.tenant_worker_semaphore_ttl_seconds
+            key, str(tenant_id), ex=self.settings.tenant_worker_semaphore_ttl_seconds
         )
 
     async def _release_slot(self, tenant_id: UUID) -> None:
@@ -163,6 +171,43 @@ class CrawlService:
             logger.warning(
                 "Failed to release slot",
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
+            )
+
+    async def release_job_resources(self, job_id: UUID, tenant_id: UUID) -> None:
+        """Release slot and clean up flag for a failed/preempted job.
+
+        Called by Safe Preemption (WebsiteCRUDService) when preempting stale jobs.
+        Safe to call even if resources don't exist (idempotent).
+        Double-release is handled gracefully by Lua script (counter clamps at 0).
+
+        Args:
+            job_id: Job ID to clean up flag for
+            tenant_id: Tenant ID for slot release
+        """
+        # Release slot using Redis EVAL for atomic Lua script execution (best-effort)
+        key = f"tenant:{tenant_id}:active_jobs"
+        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
+        try:
+            # Note: redis_client.eval runs Lua script atomically on Redis server
+            await self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl))
+        except Exception as exc:
+            logger.warning(
+                "Failed to release slot for preempted job",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "job_id": str(job_id),
+                    "error": str(exc),
+                },
+            )
+
+        # Delete pre-acquired flag (harmless if doesn't exist)
+        flag_key = f"job:{job_id}:slot_preacquired"
+        try:
+            await self.redis_client.delete(flag_key)
+        except Exception as flag_exc:
+            logger.debug(
+                "Failed to delete slot_preacquired flag during preemption",
+                extra={"job_id": str(job_id), "error": str(flag_exc)},
             )
 
     async def _add_to_pending_queue(
@@ -210,6 +255,24 @@ class CrawlService:
                     "error": str(exc),
                 },
             )
+            # CRITICAL: Fail the job immediately to prevent orphaned DB records
+            # Why: If rpush fails, job stays QUEUED in DB but never enters Redis.
+            # Without this, job becomes zombie (blocks recrawl but never runs).
+            # By marking FAILED, user can immediately retry.
+            try:
+                await self.task_service.job_service.fail_job(
+                    job_id, error_message=f"Failed to queue: {exc}"
+                )
+                logger.info(
+                    "Marked orphaned job as FAILED after rpush failure",
+                    extra={"job_id": str(job_id)},
+                )
+            except Exception as fail_exc:
+                # Best effort - orphan cleanup will catch it eventually
+                logger.warning(
+                    "Could not fail orphaned job",
+                    extra={"job_id": str(job_id), "error": str(fail_exc)},
+                )
             raise
 
     async def _enqueue_to_arq(
@@ -274,7 +337,7 @@ class CrawlService:
                 try:
                     # Mark flag BEFORE enqueueing (safe hand-off)
                     # Must be inside try block - if mark fails, rollback slot
-                    await self._mark_slot_preacquired(crawl_job.id)
+                    await self._mark_slot_preacquired(crawl_job.id, website.tenant_id)
 
                     # Enqueue directly to ARQ
                     await self._enqueue_to_arq(crawl_job.id, website, crawl_run.id)
@@ -292,8 +355,11 @@ class CrawlService:
                         await self.redis_client.delete(
                             f"job:{crawl_job.id}:slot_preacquired"
                         )
-                    except Exception:
-                        pass
+                    except Exception as flag_exc:
+                        logger.debug(
+                            "Failed to delete slot_preacquired flag during rollback",
+                            extra={"job_id": str(crawl_job.id), "error": str(flag_exc)},
+                        )
                     await self._release_slot(website.tenant_id)
 
                     # Fail the job to prevent orphaned DB records

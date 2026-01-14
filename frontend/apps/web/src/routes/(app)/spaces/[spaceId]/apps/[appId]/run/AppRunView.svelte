@@ -81,7 +81,7 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
-  class="relative flex h-full w-full flex-grow flex-col items-center justify-center gap-2 p-4 pl-0"
+  class="relative flex h-full w-full flex-grow flex-col items-center justify-center gap-2 p-4"
   on:dragenter={(event) => {
     if ($dragDropEnabled) {
       event.preventDefault();
@@ -95,7 +95,7 @@
     <div class="-mt-[2.5rem] flex flex-grow flex-col items-center justify-center rounded pb-2">
       <div class="bg-primary flex items-center gap-4 rounded-2xl pr-6 pl-4">
         <AppIcon app={$app} size="medium"></AppIcon>
-        <span class="text-4xl font-extrabold">{formatEmojiTitle($app.name)}</span>
+        <span class="text-2xl md:text-4xl font-extrabold">{formatEmojiTitle($app.name)}</span>
       </div>
     </div>
 

@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
-from arq.jobs import JobStatus
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
@@ -52,6 +51,38 @@ class JobRepository:
         )
         await self.delegate.session.execute(stmt)
 
+    async def mark_job_started(self, id: UUID) -> bool:
+        """Atomically transition job from QUEUED to IN_PROGRESS.
+
+        Uses Compare-and-Swap (CAS) pattern to prevent race conditions where:
+        1. Safe Watchdog marks expired QUEUED job as FAILED
+        2. Worker dequeues same job from ARQ (doesn't know DB changed)
+        3. Worker would blindly set status to IN_PROGRESS, "resurrecting" the job
+
+        This atomic check-and-update ensures the worker only starts the job if
+        it's still in QUEUED state, preventing zombie job resurrection.
+
+        Args:
+            id: Job UUID to start
+
+        Returns:
+            True if job was successfully transitioned to IN_PROGRESS
+            False if job status had already changed (e.g., to FAILED by watchdog)
+        """
+        from intric.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.status == Status.QUEUED)  # KEY: Only if still QUEUED
+            .values(
+                status=Status.IN_PROGRESS,
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate.session.execute(stmt)
+        return result.rowcount > 0
+
     async def mark_job_failed_if_running(
         self, id: UUID, error_message: str
     ) -> int:
@@ -84,21 +115,24 @@ class JobRepository:
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
+        five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
 
         stmt = (
             sa.select(Jobs)
             .where(Jobs.user_id == user_id)
             .where(Jobs.created_at >= one_week_ago)
+            .where(
+                # Include running, queued, failed, OR recently completed jobs
+                sa.or_(
+                    Jobs.status.in_(["in progress", "queued", "failed"]),
+                    sa.and_(
+                        Jobs.status == "complete",
+                        Jobs.finished_at >= five_minutes_ago
+                    )
+                )
+            )
             .order_by(Jobs.created_at)
         )
 
         jobs_db = await self.delegate.get_models_from_query(stmt)
-
-        running_jobs = [
-            job
-            for job in jobs_db
-            if await self._job_manager.get_job_status(job.id)
-            not in [JobStatus.not_found, JobStatus.complete]
-        ]
-
-        return running_jobs
+        return jobs_db
