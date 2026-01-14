@@ -1,6 +1,6 @@
 """add_model_providers_and_tenant_model_columns
 Revision ID: f7f7647d5327
-Revises: 20251119_e5_berget
+Revises: 8d909e51b83b
 Create Date: 2025-11-21 10:08:15.953899
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic
 revision = 'f7f7647d5327'
-down_revision = '20251127_add_icons'
+down_revision = '8d909e51b83b'
 branch_labels = None
 depends_on = None
 
