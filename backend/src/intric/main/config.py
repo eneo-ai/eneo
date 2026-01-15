@@ -2,12 +2,12 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from pathlib import Path
 
-from pydantic import computed_field, model_validator
+from pydantic import computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version manifest lookup:
@@ -174,6 +174,14 @@ class Settings(BaseSettings):
     crawl_heartbeat_max_failures: int = 3  # Terminate after N consecutive heartbeat failures (3 * 5min = 15min max)
     crawl_page_batch_size: int = 100  # Commit after every N pages during crawl (bounds data loss)
 
+    # Audit log export configuration
+    export_batch_size: int = 20000  # Records per DB fetch for streaming exports
+    export_buffer_size: int = 50000  # Records to buffer before disk write
+    export_dir: Path = Path("/tmp/exports")  # Default: /tmp/exports (writable in Docker without special permissions)
+    export_max_age_hours: int = 24  # File retention period before cleanup
+    export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
+    export_progress_interval: int = 5000  # Update progress every N records
+
     # Federation per tenant feature flag
     federation_per_tenant_enabled: bool = False
 
@@ -289,6 +297,20 @@ class Settings(BaseSettings):
 
     # Tenant credential management
     tenant_credentials_enabled: bool = False
+
+    @field_validator("export_dir", mode="before")
+    @classmethod
+    def validate_export_dir_not_empty(cls, v):
+        """
+        Handle empty EXPORT_DIR env var by falling back to default.
+
+        When EXPORT_DIR="" (empty string), Path("") becomes "." (current dir),
+        which resolves to /app in Docker. This causes permission errors.
+        Fall back to default "exports" path instead.
+        """
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return Path("exports")
+        return v
 
     @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
@@ -474,6 +496,67 @@ class Settings(BaseSettings):
             f"{self.postgres_password}@{self.postgres_host}:"
             f"{self.postgres_port}/{self.postgres_db}"
         )
+
+    @model_validator(mode="after")
+    def ensure_export_dir_exists(self):
+        """
+        Ensure export directory exists for audit log exports.
+        Creates the directory if it doesn't exist (great for local dev).
+
+        Logs detailed information about export directory configuration
+        to help with debugging when exports aren't working.
+        """
+        original_path = self.export_dir
+
+        try:
+            # Resolve relative paths to absolute based on CWD
+            self.export_dir = self.export_dir.resolve()
+
+            # Create if it doesn't exist
+            self.export_dir.mkdir(parents=True, exist_ok=True)
+
+            # Verify the directory is writable by creating a test file
+            test_file = self.export_dir / ".write_test"
+            try:
+                test_file.touch()
+                test_file.unlink()
+            except (PermissionError, OSError) as e:
+                logging.warning(
+                    f"[EXPORT CONFIG] Export directory exists but is NOT writable: "
+                    f"{self.export_dir}. Error: {e}. "
+                    f"Audit log exports will fail. "
+                    f"Set EXPORT_DIR env var to a writable path."
+                )
+                return self
+
+            # Success - log the configured path for debugging
+            logging.info(
+                f"[EXPORT CONFIG] Export directory configured: {self.export_dir} "
+                f"(from {'env EXPORT_DIR' if str(original_path) != 'exports' else 'default'})"
+            )
+
+        except PermissionError as e:
+            logging.warning(
+                f"[EXPORT CONFIG] Cannot create export directory {self.export_dir}: "
+                f"Permission denied. Error: {e}. "
+                f"Audit log exports will fail. "
+                f"Set EXPORT_DIR env var to a writable path (e.g., /tmp/exports)."
+            )
+        except OSError as e:
+            logging.warning(
+                f"[EXPORT CONFIG] Cannot create export directory {self.export_dir}: "
+                f"OS error: {e}. "
+                f"Audit log exports will fail. "
+                f"Set EXPORT_DIR env var to a valid, writable path."
+            )
+        except Exception as e:
+            logging.error(
+                f"[EXPORT CONFIG] Unexpected error setting up export directory "
+                f"{self.export_dir}: {type(e).__name__}: {e}. "
+                f"Audit log exports may not work correctly."
+            )
+
+        return self
 
 
 _settings: Optional[Settings] = None

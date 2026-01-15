@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 class Spaces(BasePublic):
     name: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
+    data_retention_days: Mapped[Optional[int]] = mapped_column()
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

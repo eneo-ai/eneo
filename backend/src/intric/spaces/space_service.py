@@ -149,6 +149,7 @@ class SpaceService:
         completion_model_ids: list[UUID] = None,
         transcription_model_ids: list[UUID] = None,
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
+        data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
         space = await self.get_space(id)
@@ -205,6 +206,7 @@ class SpaceService:
                 if security_classification is not NOT_PROVIDED
                 else NOT_PROVIDED
             ),
+            data_retention_days=data_retention_days,
             icon_id=icon_id,
         )
 
@@ -370,6 +372,25 @@ class SpaceService:
         space.remove_member(user_id)
 
         await self.repo.update(space)
+
+    async def get_space_member(self, space_id: UUID, user_id: UUID) -> SpaceMember:
+        """Get a space member by user ID.
+
+        Args:
+            space_id: ID of the space
+            user_id: ID of the user/member
+
+        Returns:
+            SpaceMember object
+
+        Raises:
+            NotFoundException: If the user is not a member of the space
+        """
+        space = await self.get_space(space_id)
+        try:
+            return space.get_member(user_id)
+        except KeyError:
+            raise NotFoundException(f"User {user_id} is not a member of space {space_id}")
 
     async def change_role_of_member(self, id: UUID, user_id: UUID, new_role: SpaceRoleValue):
         if user_id == self.user.id:

@@ -20,6 +20,7 @@
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { m } from "$lib/paraglide/messages";
+  import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
 
   let { data } = $props();
@@ -401,6 +402,28 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+      </Settings.Group>
+
+      <Settings.Group title={m.security_and_privacy()}>
+        <Settings.Row
+          hasChanges={$currentChanges.diff.data_retention_days !== undefined}
+          revertFn={() => {
+            discardChanges("data_retention_days");
+          }}
+          title={m.conversation_retention_title()}
+          description={m.conversation_retention_assistant_description()}
+          let:labelId
+          let:descriptionId
+        >
+          <RetentionPolicyInput
+            bind:value={$update.data_retention_days}
+            hasChanges={$currentChanges.diff.data_retention_days !== undefined}
+            inheritedDays={$currentSpace.data_retention_days}
+            inheritedFrom="space"
+            {labelId}
+            {descriptionId}
+          />
+        </Settings.Row>
       </Settings.Group>
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}

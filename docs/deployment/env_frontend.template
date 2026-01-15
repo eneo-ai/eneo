@@ -76,20 +76,9 @@ PUBLIC_ORIGIN=https://your-domain.com
 FEDERATION_PER_TENANT_ENABLED=false
 
 # ----------------------------------------------------------------------------
-# Legacy Authentication (DEPRECATED - Use OIDC_* variables instead)
+# DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
+# Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
 # ----------------------------------------------------------------------------
-# MobilityGuard
-# DEPRECATED: Use OIDC_DISCOVERY_ENDPOINT instead
-# MOBILITY_GUARD_AUTH=
-# MOBILITYGUARD_CLIENT_ID=
-
-# Zitadel
-# DEPRECATED: Use OIDC_DISCOVERY_ENDPOINT instead
-# ZITADEL_INSTANCE_URL=
-# ZITADEL_PROJECT_CLIENT_ID=
-
-# Legacy authentication bypass (for development only)
-# FORCE_LEGACY_AUTH=false
 
 # ----------------------------------------------------------------------------
 # UI Feature Flags (OPTIONAL)

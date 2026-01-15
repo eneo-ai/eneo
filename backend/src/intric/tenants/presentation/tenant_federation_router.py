@@ -13,6 +13,11 @@ from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
 
+# Audit logging - module level imports for consistency
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
 logger = get_logger(__name__)
 
 
@@ -347,6 +352,29 @@ async def set_tenant_federation(
         f"...{request.client_secret[-4:]}" if len(request.client_secret) > 4 else "***"
     )
 
+    # Audit logging (sysadmin operation - system actor)
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=tenant.id,  # Use tenant as actor for sysadmin
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin configured {request.provider} federation for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "provider": request.provider,
+                "issuer": issuer,
+                "client_id": request.client_id,
+                "allowed_domains": request.allowed_domains,
+            },
+        },
+    )
+
     return SetFederationResponse(
         tenant_id=tenant_id,
         provider=request.provider,
@@ -379,6 +407,26 @@ async def delete_tenant_federation(
 
     # Delete federation config
     await tenant_repo.delete_federation_config(tenant_id=tenant_id)
+
+    # Audit logging (sysadmin operation - system actor)
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=tenant.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin deleted federation config for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "action": "deleted",
+            },
+        },
+    )
 
     logger.info(f"Federation config deleted for tenant {tenant.name}")
 

@@ -8,6 +8,13 @@ from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
 from intric.admin.quota_service import QuotaService
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.audit.application.audit_config_service import AuditConfigService
+from intric.audit.application.audit_export_service import AuditExportService
+from intric.audit.application.audit_service import AuditService
+from intric.audit.application.retention_service import RetentionService
+from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
+from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
@@ -638,6 +645,23 @@ class Container(containers.DeclarativeContainer):
         user=user,
     )
 
+    # Audit logging
+    audit_log_repo = providers.Factory(
+        AuditLogRepositoryImpl,
+        session=session,
+    )
+    audit_config_repo = providers.Factory(
+        AuditConfigRepositoryImpl,
+        session=session,
+    )
+    audit_config_service = providers.Factory(
+        AuditConfigService,
+        repository=audit_config_repo,
+    )
+    audit_session_service = providers.Factory(
+        AuditSessionService,
+    )
+
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
     completion_service = providers.Factory(
@@ -746,6 +770,25 @@ class Container(containers.DeclarativeContainer):
         repo=security_classification_repo,
         tenant_repo=tenant_repo,
     )
+    # Feature flag service for audit logging and other toggles
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
+    audit_service = providers.Factory(
+        AuditService,
+        repository=audit_log_repo,
+        audit_config_service=audit_config_service,
+        feature_flag_service=feature_flag_service,
+    )
+    audit_export_service = providers.Factory(
+        AuditExportService,
+        repository=audit_log_repo,
+    )
+    retention_service = providers.Factory(
+        RetentionService,
+        session=session,
+    )
     icon_repo = providers.Factory(
         IconRepository,
         session=session,
@@ -817,10 +860,6 @@ class Container(containers.DeclarativeContainer):
         PredefinedRolesService, repo=predefined_roles_repo
     )
     role_service = providers.Factory(RolesService, user=user, repo=role_repo)
-    feature_flag_service = providers.Factory(
-        FeatureFlagService,
-        feature_flag_repo=feature_flag_repo,
-    )
     settings_service = providers.Factory(
         SettingService,
         user=user,
@@ -900,6 +939,7 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
+        group_service=group_service,
     )
     assistant_service = providers.Factory(
         AssistantService,

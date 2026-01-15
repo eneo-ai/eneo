@@ -839,6 +839,7 @@ class SpaceRepository:
                     if space.security_classification is not None
                     else None
                 ),
+                data_retention_days=space.data_retention_days,
                 icon_id=space.icon_id,
             )
             .where(Spaces.id == space.id)
