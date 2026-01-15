@@ -67,6 +67,9 @@ from intric.token_usage.presentation.token_usage_router import (
 from intric.transcription_models.presentation.transcription_models_router import (
     router as transcription_models_router,
 )
+from intric.image_models.presentation.image_models_router import (
+    router as image_models_router,
+)
 from intric.user_groups.user_groups_router import router as user_groups_router
 from intric.users.user_router import router as users_router
 from intric.websites.presentation.website_router import router as website_router
@@ -119,6 +122,11 @@ router.include_router(
     transcription_models_router,
     prefix="/transcription-models",
     tags=["transcription-models"],
+)
+router.include_router(
+    image_models_router,
+    prefix="/image-models",
+    tags=["image-models"],
 )
 router.include_router(files_router, prefix="/files", tags=["files"])
 router.include_router(icons_router, prefix="/icons", tags=["icons"])

@@ -12,26 +12,43 @@
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
 
-  export let model: (CompletionModel | EmbeddingModel | TranscriptionModel) & {
+  interface ImageModel {
+    id: string;
+    name: string;
+    is_org_enabled: boolean;
+    is_locked?: boolean | null;
+    lock_reason?: string | null;
+  }
+
+  export let model: (CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel) & {
     is_locked?: boolean | null | undefined;
     lock_reason?: string | null | undefined;
   };
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  export let type: "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   const intric = getIntric();
   const { environment } = getAppContext();
 
   async function toggleEnabled() {
     try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
+      if (type === "imageModel") {
+        model = await intric.imageModels.update({
+          imageModel: { id: model.id },
           update: {
             is_org_enabled: !model.is_org_enabled
           }
-        }
-      );
+        });
+      } else {
+        model = await intric.models.update(
+          //@ts-expect-error ts doesn't understand this
+          {
+            [type]: model,
+            update: {
+              is_org_enabled: !model.is_org_enabled
+            }
+          }
+        );
+      }
       invalidate("admin:models:load");
     } catch (e) {
       alert(`Error changing status of ${model.name}`);

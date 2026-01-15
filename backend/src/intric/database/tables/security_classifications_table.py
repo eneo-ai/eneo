@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         EmbeddingModelSettings,
         TranscriptionModelSettings,
     )
+    from intric.database.tables.image_models_table import ImageModelSettings
     from intric.database.tables.spaces_table import Spaces
 
 
@@ -51,6 +52,10 @@ class SecurityClassification(BasePublic):
             back_populates="security_classification",
             order_by="TranscriptionModelSettings.created_at",
         )
+    )
+    image_model_settings: Mapped[list["ImageModelSettings"]] = relationship(
+        back_populates="security_classification",
+        order_by="ImageModelSettings.created_at",
     )
     spaces: Mapped[list["Spaces"]] = relationship(
         back_populates="security_classification", order_by="Spaces.created_at"

@@ -14,7 +14,8 @@ export const load = async (event) => {
 
   const promises = [
     intric.securityClassifications.list(),
-    intric.models.list()
+    intric.models.list(),
+    intric.imageModels.list()
   ];
 
   // Add credentials fetch if feature is enabled
@@ -23,11 +24,12 @@ export const load = async (event) => {
   }
 
   const results = await Promise.all(promises);
-  const [securityClassifications, models, credentialsResponse] = results;
+  const [securityClassifications, models, imageModelsResponse, credentialsResponse] = results;
 
   return {
     securityClassifications,
     models,
+    imageModels: imageModelsResponse?.items || [],
     credentials: credentialsResponse?.credentials || undefined,
     tenantCredentialsEnabled
   };

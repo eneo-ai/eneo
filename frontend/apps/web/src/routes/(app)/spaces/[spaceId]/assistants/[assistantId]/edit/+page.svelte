@@ -21,6 +21,7 @@
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { m } from "$lib/paraglide/messages";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import IconGenerator from "$lib/features/icons/IconGenerator.svelte";
 
   let { data } = $props();
 
@@ -89,6 +90,26 @@
     } catch (error) {
       console.error("Failed to delete icon:", error);
       iconError = m.avatar_delete_failed();
+    }
+  }
+
+  async function handleIconGenerated(event: CustomEvent<File>) {
+    const file = event.detail;
+    iconUploading = true;
+    iconError = null;
+    try {
+      const newIcon = await data.intric.icons.upload({ file });
+      await data.intric.assistants.update({
+        assistant: { id: $resource.id },
+        update: { icon_id: newIcon.id }
+      });
+      currentIconId = newIcon.id;
+      await refreshCurrentSpace("applications");
+    } catch (error) {
+      console.error("Failed to save generated icon:", error);
+      iconError = m.avatar_upload_failed();
+    } finally {
+      iconUploading = false;
     }
   }
 
@@ -253,13 +274,24 @@
         </Settings.Row>
 
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
-          <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
-          />
+          <div class="flex flex-col gap-2">
+            <IconUpload
+              {iconUrl}
+              uploading={iconUploading}
+              error={iconError}
+              on:upload={handleIconUpload}
+              on:delete={handleIconDelete}
+            />
+            {#if !iconUrl && !iconUploading}
+              <IconGenerator
+                intric={data.intric}
+                resourceName={$update.name}
+                resourceDescription={$update.description}
+                systemPrompt={$update.prompt?.text}
+                on:select={handleIconGenerated}
+              />
+            {/if}
+          </div>
         </Settings.Row>
       </Settings.Group>
 

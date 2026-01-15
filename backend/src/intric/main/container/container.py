@@ -82,6 +82,10 @@ from intric.groups_legacy.group_repo import GroupRepository
 from intric.groups_legacy.group_service import GroupService
 from intric.icons.icon_repo import IconRepository
 from intric.icons.icon_service import IconService
+from intric.image_models.application.image_generation_service import ImageGenerationService
+from intric.image_models.application.image_model_crud_service import ImageModelCRUDService
+from intric.image_models.domain.image_model_repo import ImageModelRepository
+from intric.image_models.infrastructure.generated_image_repo import GeneratedImageRepository
 from intric.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
 from intric.info_blobs.info_blob_service import InfoBlobService
@@ -535,6 +539,12 @@ class Container(containers.DeclarativeContainer):
     transcription_model_repo = providers.Factory(
         TranscriptionModelRepository, session=session, user=user
     )
+    image_model_repo = providers.Factory(
+        ImageModelRepository, session=session, user=user
+    )
+    generated_image_repo = providers.Factory(
+        GeneratedImageRepository, session=session
+    )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
     )
@@ -694,6 +704,20 @@ class Container(containers.DeclarativeContainer):
         user=user,
         embedding_model_repo=embedding_model_repo2,
         security_classification_repo=security_classification_repo,
+    )
+    image_model_crud_service = providers.Factory(
+        ImageModelCRUDService,
+        user=user,
+        image_model_repo=image_model_repo,
+        security_classification_repo=security_classification_repo,
+    )
+    image_generation_service = providers.Factory(
+        ImageGenerationService,
+        tenant=tenant,
+        settings=config,
+        encryption_service=encryption_service,
+        image_model_repo=image_model_repo,
+        generated_image_repo=generated_image_repo,
     )
     completion_model_service = providers.Factory(
         CompletionModelService,
