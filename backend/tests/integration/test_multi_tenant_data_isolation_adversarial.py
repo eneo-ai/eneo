@@ -615,46 +615,43 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     results_b = []
 
     # Limit concurrent operations to stay within connection pool (20 + 10 overflow = 30)
-    # Using 15 to leave headroom for cleanup and other operations
-    semaphore = asyncio.Semaphore(15)
+    # Using 10 to leave headroom for cleanup and other operations
+    semaphore = asyncio.Semaphore(10)
 
     async def user_a_workflow():
         """User A creates space and verifies tenant info."""
-        async with semaphore:
-            # Create space
-            space = await _create_space(client, token_a, f"space-a-{uuid4().hex[:4]}")
+        # Create space
+        space = await _create_space(client, token_a, f"space-a-{uuid4().hex[:4]}")
 
-            # Get tenant info
-            tenant_info = await client.get(
-                "/api/v1/users/tenant/",
-                headers={"Authorization": f"Bearer {token_a}"},
-            )
+        # Get tenant info
+        tenant_info = await client.get(
+            "/api/v1/users/tenant/",
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
 
-            results_a.append({
-                "space_id": space["id"],
-                "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-            })
+        results_a.append({
+            "space_id": space["id"],
+            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
+        })
 
     async def user_b_workflow():
         """User B creates space and verifies tenant info."""
-        async with semaphore:
-            # Create space
-            space = await _create_space(client, token_b, f"space-b-{uuid4().hex[:4]}")
+        # Create space
+        space = await _create_space(client, token_b, f"space-b-{uuid4().hex[:4]}")
 
-            # Get tenant info
-            tenant_info = await client.get(
-                "/api/v1/users/tenant/",
-                headers={"Authorization": f"Bearer {token_b}"},
-            )
+        # Get tenant info
+        tenant_info = await client.get(
+            "/api/v1/users/tenant/",
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
 
-            results_b.append({
-                "space_id": space["id"],
-                "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-            })
+        results_b.append({
+            "space_id": space["id"],
+            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
+        })
 
     # Fire concurrent requests (balanced across tenants, interleaved)
     total_tasks = 40
-    semaphore = asyncio.Semaphore(10)
     tasks = []
 
     async def _run_with_limit(coro):
