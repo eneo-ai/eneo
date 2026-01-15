@@ -403,24 +403,28 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
     """
     Automatically truncate all tables and reseed after each test for full isolation.
 
-    Note: setup_database dependency ensures migrations run before cleanup is registered.
+    Optimized for speed:
+    - Single TRUNCATE statement for all tables (instead of one per table)
+    - Models are NOT seeded here - seed_default_models fixture handles that
     """
     yield
 
-    # Clean up after each test - truncate everything and reseed
+    # Clean up after each test - truncate everything in ONE statement
     async with sessionmanager.session() as session:
         async with session.begin():
-            # Truncate all tables except alembic_version
+            # Get all tables except alembic_version
             result = await session.execute(text("""
-                SELECT tablename FROM pg_tables
+                SELECT string_agg('"' || tablename || '"', ', ')
+                FROM pg_tables
                 WHERE schemaname = 'public' AND tablename != 'alembic_version'
             """))
-            tables = result.scalars().all()
+            tables_csv = result.scalar()
 
-            for table in tables:
-                await session.execute(text(f'TRUNCATE TABLE "{table}" RESTART IDENTITY CASCADE'))
+            if tables_csv:
+                # Single TRUNCATE for all tables - much faster than one-by-one!
+                await session.execute(text(f'TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE'))
 
-    # Reseed test tenant and user
+    # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
         host=test_settings.postgres_host,
         port=test_settings.postgres_port,
@@ -435,10 +439,10 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         quota_limit=1000000,
         user_name="test_user",
         user_email="test@example.com",
-        user_password="test_password",
+        user_password="password",
     )
 
-    # Recreate using_templates feature flag (required for template tests)
+    # Add using_templates feature flag (not handled by add_tenant_user)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
@@ -449,9 +453,7 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
     """)
     conn.commit()
     cursor.close()
-
     conn.close()
-    print("Cleaned up and reseeded test database")
 
 
 @pytest.fixture
