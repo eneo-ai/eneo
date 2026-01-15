@@ -4,7 +4,13 @@ import re
 from typing import TYPE_CHECKING, AsyncIterator
 
 import litellm
-from litellm import AuthenticationError, APIError, RateLimitError
+from litellm import (
+    AuthenticationError,
+    APIError,
+    BadRequestError,
+    RateLimitError,
+    get_supported_openai_params,
+)
 
 from intric.ai_models.completion_models.completion_model import Completion, ResponseType
 from intric.completion_models.infrastructure.adapters.base_adapter import (
@@ -73,6 +79,46 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Example: "openai/openai/gpt-4" -> sends "openai/gpt-4" to custom endpoint
         self.litellm_model = f"{provider_type}/{model.name}"
         self.provider_type = provider_type
+
+    def _mask_sensitive_params(self, params: dict) -> dict:
+        """Return copy of params with masked API key for safe logging."""
+        safe_params = params.copy()
+        if "api_key" in safe_params:
+            key = safe_params["api_key"]
+            safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
+        return safe_params
+
+    def _get_dropped_params(self, litellm_kwargs: dict) -> set:
+        """Get which params will be dropped by LiteLLM for this model."""
+        # Params that are not model params (credentials, config)
+        non_model_params = {"api_key", "api_base", "api_version", "api_type", "organization", "deployment_name"}
+
+        try:
+            # Get supported params for this model
+            supported = get_supported_openai_params(model=self.litellm_model)
+            if supported is None:
+                logger.debug(f"Could not determine supported params for {self.litellm_model}")
+                return set()
+
+            supported_set = set(supported)
+            params_to_send = set(litellm_kwargs.keys()) - non_model_params
+            dropped = params_to_send - supported_set
+
+            if dropped:
+                logger.warning(
+                    f"[TenantModelAdapter] Dropping unsupported params for {self.litellm_model}: {dropped}"
+                )
+
+            return dropped
+        except Exception as e:
+            # Don't fail the request if we can't check params
+            logger.debug(f"Could not check supported params for {self.litellm_model}: {e}")
+            return set()
+
+    def _get_effective_params(self, litellm_kwargs: dict, dropped: set) -> dict:
+        """Return params dict with dropped params removed and API key masked."""
+        effective = {k: v for k, v in litellm_kwargs.items() if k not in dropped}
+        return self._mask_sensitive_params(effective)
 
     def _strip_thinking_content(self, text: str) -> str:
         """
@@ -262,6 +308,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
+            # Only pass reasoning_effort for models that support reasoning
+            if "reasoning_effort" in model_kwargs_dict and not self.model.reasoning:
+                del model_kwargs_dict["reasoning_effort"]
+
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
             if "max_tokens" not in model_kwargs_dict and "max_completion_tokens" not in model_kwargs_dict:
@@ -309,17 +359,21 @@ class TenantModelAdapter(CompletionModelAdapter):
         if tools:
             litellm_kwargs["tools"] = tools
 
+        # Check which params will be dropped and log effective params
+        dropped = self._get_dropped_params(litellm_kwargs)
+
         logger.info(
             f"[TenantModelAdapter] Making completion request to {self.litellm_model} "
-            f"with {len(messages)} messages"
+            f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
         try:
-            # Call LiteLLM
+            # Call LiteLLM with drop_params=True to handle unsupported params gracefully
             response = await litellm.acompletion(
                 model=self.litellm_model,
                 messages=messages,
                 stream=False,
+                drop_params=True,
                 **litellm_kwargs,
             )
 
@@ -371,6 +425,18 @@ class TenantModelAdapter(CompletionModelAdapter):
             raise OpenAIException(
                 f"Rate limit exceeded for {self.provider_type}. Please try again later."
             ) from exc
+
+        except BadRequestError as exc:
+            # Surface the actual error message for invalid parameters/values
+            error_message = str(exc)
+            logger.error(
+                f"Bad request for tenant model {self.model.name}: {error_message}",
+                extra={
+                    "provider_type": self.provider_type,
+                    "model": self.litellm_model,
+                },
+            )
+            raise OpenAIException(f"Invalid request: {error_message}") from exc
 
         except APIError as exc:
             error_message = str(exc)
@@ -438,22 +504,26 @@ class TenantModelAdapter(CompletionModelAdapter):
         if tools:
             litellm_kwargs["tools"] = tools
 
+        # Check which params will be dropped and log effective params
+        dropped = self._get_dropped_params(litellm_kwargs)
+
         logger.info(
             f"[TenantModelAdapter] Creating streaming connection to {self.litellm_model} "
-            f"with {len(messages)} messages"
+            f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
         try:
-            # DEBUG: Log what we're sending
+            # DEBUG: Log what we're sending (with masked credentials)
             logger.debug(f"[DEBUG] litellm_model: {self.litellm_model}")
             logger.debug(f"[DEBUG] messages: {messages}")
-            logger.debug(f"[DEBUG] litellm_kwargs: {litellm_kwargs}")
+            logger.debug(f"[DEBUG] litellm_kwargs (effective): {self._get_effective_params(litellm_kwargs, dropped)}")
 
-            # Create stream - can raise exceptions for auth/network errors
+            # Create stream with drop_params=True to handle unsupported params gracefully
             stream = await litellm.acompletion(
                 model=self.litellm_model,
                 messages=messages,
                 stream=True,
+                drop_params=True,
                 **litellm_kwargs,
             )
 
@@ -487,6 +557,18 @@ class TenantModelAdapter(CompletionModelAdapter):
             raise OpenAIException(
                 f"Rate limit exceeded for {self.provider_type}. Please try again later."
             ) from exc
+
+        except BadRequestError as exc:
+            # Surface the actual error message for invalid parameters/values
+            error_message = str(exc)
+            logger.error(
+                f"Bad request for streaming tenant model {self.model.name}: {error_message}",
+                extra={
+                    "provider_type": self.provider_type,
+                    "model": self.litellm_model,
+                },
+            )
+            raise OpenAIException(f"Invalid request: {error_message}") from exc
 
         except APIError as exc:
             error_message = str(exc)

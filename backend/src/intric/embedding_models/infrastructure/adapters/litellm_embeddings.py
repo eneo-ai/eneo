@@ -169,9 +169,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 # Inject endpoint for VLLM, Infinity and other providers with custom endpoints
                 # These providers require endpoint - fallback to global settings for single-tenant deployments
                 settings = get_settings()
-                if provider in {"vllm", "hosted_vllm"}:
-                    endpoint_fallback = settings.vllm_model_url
-                elif provider == "infinity":
+                if provider == "infinity":
                     endpoint_fallback = settings.infinity_url
                 else:
                     endpoint_fallback = None
@@ -181,7 +179,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     endpoint = self.credential_resolver.get_credential_field(
                         field="endpoint",
                         fallback=endpoint_fallback,
-                        required=(provider in {"vllm", "hosted_vllm", "infinity", "azure"})  # endpoint is required for these providers
+                        required=(provider in {"infinity", "azure"})  # endpoint is required for these providers
                     )
                 else:
                     # CredentialResolver: needs provider argument
@@ -189,7 +187,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         provider=provider,
                         field="endpoint",
                         fallback=endpoint_fallback,
-                        required=(provider in {"vllm", "hosted_vllm", "infinity", "azure"})  # endpoint is required for these providers
+                        required=(provider in {"infinity", "azure"})  # endpoint is required for these providers
                     )
 
                 if endpoint:

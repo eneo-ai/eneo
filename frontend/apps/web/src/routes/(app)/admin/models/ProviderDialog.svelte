@@ -22,7 +22,7 @@
   $: isEditMode = provider !== null;
 
   let providerName = "";
-  let providerType = "hosted_vllm";
+  let providerType = "openai";
   let apiKey = "";
   let endpoint = "";
   let apiVersion = "";
@@ -34,7 +34,6 @@
 
   // Provider type options with i18n labels
   const providerTypes = [
-    { value: "hosted_vllm", label: m.provider_type_hosted_vllm() },
     { value: "openai", label: m.provider_type_openai() },
     { value: "azure", label: m.provider_type_azure() },
     { value: "anthropic", label: m.provider_type_anthropic() },
@@ -94,11 +93,7 @@
     }
 
     if (requiresEndpoint && !endpoint.trim()) {
-      if (providerType === "azure") {
-        error = m.endpoint_required_for_azure();
-      } else if (providerType === "hosted_vllm") {
-        error = m.endpoint_required_for_vllm();
-      }
+      error = m.endpoint_required_for_azure();
       return;
     }
 
@@ -191,7 +186,7 @@
   function resetForm() {
     providerName = "";
     providerTypeStore.set(providerTypes[0]);
-    providerType = "hosted_vllm";
+    providerType = "openai";
     apiKey = "";
     endpoint = "";
     apiVersion = "";
@@ -206,8 +201,8 @@
     error = null;
   }
 
-  // Endpoint is required for Azure and self-hosted OpenAI-compatible
-  $: requiresEndpoint = providerType === "azure" || providerType === "hosted_vllm";
+  // Endpoint is required only for Azure
+  $: requiresEndpoint = providerType === "azure";
 </script>
 
 <Dialog.Root {openController}>
@@ -307,16 +302,10 @@
             bind:value={endpoint}
             placeholder={providerType === "azure"
               ? "https://your-resource.openai.azure.com"
-              : providerType === "anthropic"
-                ? "https://api.anthropic.com (default)"
-                : "https://api.openai.com (default) or custom endpoint"}
+              : "https://api.openai.com/v1 (default) or custom endpoint"}
             required={requiresEndpoint}
           />
-          {#if providerType === "hosted_vllm"}
-            <p class="text-muted-foreground text-xs">
-              {m.endpoint_required_vllm()}
-            </p>
-          {:else if providerType === "openai"}
+          {#if providerType === "openai"}
             <p class="text-muted-foreground text-xs">
               {m.endpoint_optional_openai()}
             </p>
