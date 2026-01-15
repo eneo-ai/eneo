@@ -11,6 +11,11 @@ from intric.integration.presentation.models import (
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+
 router = APIRouter()
 
 
@@ -45,4 +50,24 @@ async def on_auth_callback(
         tenant_integration_id=params.tenant_integration_id,
         auth_code=params.auth_code,
     )
+
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_CONNECTED,
+        entity_type=EntityType.INTEGRATION,
+        entity_id=integration.id,
+        description=f"Connected {integration.tenant_integration.integration.name} integration",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=integration,
+            extra={
+                "integration_name": integration.tenant_integration.integration.name,
+                "integration_type": integration.integration_type,
+            },
+        ),
+    )
+
     return assembler.from_domain_to_model(item=integration)

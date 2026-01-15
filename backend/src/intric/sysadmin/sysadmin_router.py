@@ -46,6 +46,11 @@ from intric.completion_models.presentation.completion_model_models import (
     MigrationResult,
 )
 
+# Audit logging - module level imports for sysadmin operations
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
@@ -95,7 +100,31 @@ async def register_new_user(
     new_user: UserAddSuperAdmin, container: Container = Depends(get_container())
 ):
     user_service = container.user_service()
+
+    # Create user
     created_user, access_token, api_key = await user_service.register(new_user)
+
+    # Audit logging (system action since no authenticated user for sysadmin)
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=created_user.tenant_id,
+        actor_id=created_user.id,  # System user as actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_CREATED,
+        entity_type=EntityType.USER,
+        entity_id=created_user.id,
+        description=f"Sysadmin created user {created_user.email}",
+        metadata={
+            "actor": {"type": "sysadmin", "action": "register"},
+            "target": {
+                "id": str(created_user.id),
+                "email": created_user.email,
+                "username": created_user.username,
+                "tenant_id": str(created_user.tenant_id),
+            },
+        },
+    )
 
     return UserCreated(
         **created_user.model_dump(exclude={"api_key"}),
@@ -129,7 +158,34 @@ async def delete_user(
     container: Container = Depends(get_container()),
 ):
     user_service = container.user_service()
+
+    # Get user details BEFORE deletion
+    user_to_delete = await user_service.get_user_by_id(user_id)
+
+    # Delete user
     success = await user_service.delete_user(user_id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=user_to_delete.tenant_id,
+        actor_id=user_to_delete.id,  # Use deleted user as actor for sysadmin
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_DELETED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=f"Sysadmin deleted user {user_to_delete.email}",
+        metadata={
+            "actor": {"type": "sysadmin"},
+            "target": {
+                "id": str(user_to_delete.id),
+                "email": user_to_delete.email,
+                "username": user_to_delete.username,
+                "tenant_id": str(user_to_delete.tenant_id),
+            },
+        },
+    )
 
     return DeleteResponse(success=success)
 
@@ -142,7 +198,43 @@ async def update_user(
 ):
     """Omitted fields are not updated."""
     user_service = container.user_service()
-    return await user_service.update_user(user_id, user_update)
+
+    # Get old state
+    old_user = await user_service.get_user_by_id(user_id)
+
+    # Update user
+    updated_user = await user_service.update_user(user_id, user_update)
+
+    # Track changes
+    changes = {}
+    if user_update.email and user_update.email != old_user.email:
+        changes["email"] = {"old": old_user.email, "new": user_update.email}
+    if user_update.username and user_update.username != old_user.username:
+        changes["username"] = {"old": old_user.username, "new": user_update.username}
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=updated_user.tenant_id,
+        actor_id=updated_user.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_UPDATED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=f"Sysadmin updated user {updated_user.email}",
+        metadata={
+            "actor": {"type": "sysadmin"},
+            "target": {
+                "id": str(updated_user.id),
+                "email": updated_user.email,
+                "username": updated_user.username,
+            },
+            "changes": changes,
+        },
+    )
+
+    return updated_user
 
 
 @router.post("/users/{user_id}/access-token/", include_in_schema=False)
@@ -187,7 +279,31 @@ async def get_tenants(domain: str | None = None, container: Container = Depends(
 async def create_tenant(tenant: TenantBase, container: Container = Depends(get_container())):
     tenant_service = container.tenant_service()
 
+    # Create tenant
     created_tenant = await tenant_service.create_tenant(tenant)
+
+    # Audit logging (sysadmin - system actor)
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=created_tenant.id,
+        actor_id=created_tenant.id,  # Use tenant as actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,  # Tenant creation is a settings operation
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=created_tenant.id,
+        description=f"Sysadmin created tenant '{created_tenant.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(created_tenant.id),
+                "name": created_tenant.name,
+                "display_name": created_tenant.display_name,
+                "state": created_tenant.state,
+            },
+        },
+    )
+
     return TenantWithMaskedCredentials.from_tenant(created_tenant)
 
 
@@ -203,7 +319,42 @@ async def update_tenant(
 ):
     tenant_service = container.tenant_service()
 
+    # Get old state
+    old_tenant = await tenant_service.get_tenant(id)
+
+    # Update tenant
     updated_tenant = await tenant_service.update_tenant(tenant, id)
+
+    # Track changes
+    changes = {}
+    if tenant.name and tenant.name != old_tenant.name:
+        changes["name"] = {"old": old_tenant.name, "new": tenant.name}
+    if tenant.display_name and tenant.display_name != old_tenant.display_name:
+        changes["display_name"] = {"old": old_tenant.display_name, "new": tenant.display_name}
+    if tenant.state and tenant.state != old_tenant.state:
+        changes["state"] = {"old": old_tenant.state, "new": tenant.state}
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=updated_tenant.id,
+        actor_id=updated_tenant.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=updated_tenant.id,
+        description=f"Sysadmin updated tenant '{updated_tenant.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(updated_tenant.id),
+                "name": updated_tenant.name,
+            },
+            "changes": changes,
+        },
+    )
+
     return TenantWithMaskedCredentials.from_tenant(updated_tenant)
 
 
@@ -215,7 +366,33 @@ async def update_tenant(
 async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_container())):
     tenant_service = container.tenant_service()
 
+    # Get tenant BEFORE deletion
+    tenant_to_delete = await tenant_service.get_tenant(id)
+
+    # Delete tenant
     deleted_tenant = await tenant_service.delete_tenant(id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=deleted_tenant.id,
+        actor_id=deleted_tenant.id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,  # Deletion is a settings operation
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=deleted_tenant.id,
+        description=f"Sysadmin deleted tenant '{tenant_to_delete.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(deleted_tenant.id),
+                "name": tenant_to_delete.name,
+                "display_name": tenant_to_delete.display_name,
+            },
+        },
+    )
+
     return TenantWithMaskedCredentials.from_tenant(deleted_tenant)
 
 
@@ -355,14 +532,40 @@ async def enable_completion_model(
     completion_model_repo: CompletionModelsRepository = Depends(
         get_repository(CompletionModelsRepository)
     ),
+    container: Container = Depends(get_container()),
 ):
+    # Enable model
     await completion_model_repo.enable_completion_model(
         is_org_enabled=data.is_org_enabled,
         completion_model_id=completion_model_id,
         tenant_id=id,
     )
 
-    return await completion_model_repo.get_model(completion_model_id, tenant_id=id)
+    model = await completion_model_repo.get_model(completion_model_id, tenant_id=id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=id,
+        actor_id=id,  # Use tenant as actor
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=id,
+        description=f"Sysadmin enabled completion model '{model.name}' for tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(id),
+                "model_id": str(completion_model_id),
+                "model_name": model.name,
+                "is_org_enabled": data.is_org_enabled,
+            },
+        },
+    )
+
+    return model
 
 
 @router.post(
@@ -377,14 +580,40 @@ async def enable_embedding_model(
     embedding_model_repo: AdminEmbeddingModelsService = Depends(
         get_repository(AdminEmbeddingModelsService)
     ),
+    container: Container = Depends(get_container()),
 ):
+    # Enable model
     await embedding_model_repo.enable_embedding_model(
         is_org_enabled=data.is_org_enabled,
         embedding_model_id=embedding_model_id,
         tenant_id=id,
     )
 
-    return await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
+    model = await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=id,
+        actor_id=id,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=id,
+        description=f"Sysadmin enabled embedding model '{model.name}' for tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(id),
+                "model_id": str(embedding_model_id),
+                "model_name": model.name,
+                "is_org_enabled": data.is_org_enabled,
+            },
+        },
+    )
+
+    return model
 
 
 @router.post("/allowed-origins/", response_model=AllowedOriginInDB)

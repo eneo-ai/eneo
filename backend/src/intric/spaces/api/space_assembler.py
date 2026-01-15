@@ -386,6 +386,7 @@ class SpaceAssembler:
             permissions=self._get_space_permissions(space),
             available_roles=available_roles,
             security_classification=security_classification,
+            data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
         )
 
@@ -399,6 +400,7 @@ class SpaceAssembler:
             personal=space.is_personal(),
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
+            data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
         )
 
@@ -429,6 +431,7 @@ class SpaceAssembler:
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             applications=applications,
+            data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
         )
 

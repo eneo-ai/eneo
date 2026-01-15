@@ -649,5 +649,3 @@ async def test_multiple_tenants_independent_fallback_limits(
     for tenant_id in tenants:
         for _ in range(3):
             await limiter.release(tenant_id)
-
-

@@ -51,7 +51,7 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 - **`traefik`**: A reverse proxy that handles incoming traffic, routes it to the correct service, and automatically manages SSL certificates
 - **`frontend`**: The web interface for Eneo
 - **`backend`**: The main API and application logic
-- **`worker`**: A background service for processing heavy tasks like document ingestion and crawling
+- **`worker`**: A background service for processing heavy tasks like document ingestion, crawling, and audit log exports
 - **`db`**: A PostgreSQL database with the pgvector extension for storing all application data
 - **`redis`**: An in-memory data store used for caching and managing background jobs
 
@@ -208,6 +208,20 @@ docker compose down
 # Note: This does not delete your data volumes (database, etc.)
 # To remove data as well, use: docker compose down --volumes
 ```
+
+### Docker Volumes
+
+Eneo uses several Docker volumes for persistent data storage:
+
+| Volume | Path | Description |
+|--------|------|-------------|
+| `eneo_postgres_data` | `/var/lib/postgresql/data` | PostgreSQL database storage |
+| `eneo_redis_data` | `/data` | Redis cache and job queue state |
+| `eneo_backend_data` | `/app/data` | Backend application data |
+| `eneo_exports_data` | `/app/exports` | Audit log exports (auto-cleaned after 24h) |
+| `traefik_letsencrypt` | `/letsencrypt` | SSL certificates |
+
+> **Note**: The `eneo_exports_data` volume is shared between `backend` and `worker` services for large audit log exports. Export files are automatically cleaned up after 24 hours.
 
 ## 🔄 Upgrading Your Eneo Instance
 

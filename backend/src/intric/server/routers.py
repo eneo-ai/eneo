@@ -86,6 +86,7 @@ from intric.tenants.presentation.tenant_federation_router import (
 )
 from intric.authentication.federation_router import router as federation_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
+from intric.api.audit.routes import router as audit_router
 
 router = APIRouter()
 
@@ -146,6 +147,7 @@ router.include_router(
     prefix="/security-classifications",
     tags=["security-classifications"],
 )
+router.include_router(audit_router, prefix="", tags=["audit"])
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
 router.include_router(sharepoint_webhook_router, prefix="/integrations", tags=["integrations"])
 router.include_router(admin_sharepoint_router, prefix="/admin", tags=["admin"])

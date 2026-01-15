@@ -1,6 +1,8 @@
 from uuid import UUID
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -17,16 +19,11 @@ class FeatureFlagRepository:
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
 
-    async def _delete_tenant(self, tenant_id: UUID) -> None:
-        stmt = delete(TenantFeatureFlag).where(TenantFeatureFlag.tenant_id == tenant_id)
-        await self.db_session.execute(stmt)
-
-    async def _insert_tenant(self, obj: FeatureFlag, tenant_id: UUID) -> None:
-        stmt = insert(TenantFeatureFlag).values(
-            feature_id=obj.feature_id,
-            tenant_id=tenant_id,
-            enabled=True,
-            name=obj.name,
+    async def _delete_tenant(self, feature_id: UUID, tenant_id: UUID) -> None:
+        """Delete a tenant's feature flag preference."""
+        stmt = delete(TenantFeatureFlag).where(
+            TenantFeatureFlag.feature_id == feature_id,
+            TenantFeatureFlag.tenant_id == tenant_id
         )
         await self.db_session.execute(stmt)
 
@@ -40,19 +37,47 @@ class FeatureFlagRepository:
         return feature.scalar_one()
 
     async def update(self, obj: FeatureFlag) -> FeatureFlag:
-        # Enable or disable tenant
-        feature_flag = await self.one(id=obj.feature_id)
+        """Update tenant preferences for a feature flag.
 
-        existing_tenants = feature_flag.tenant_ids
-        incoming_tenants = obj.tenant_ids
+        Uses upsert pattern to handle enabled/disabled tenant preferences.
+        Removes tenants that no longer have any preference.
+        """
+        # Get current state to know what to clean up
+        current = await self.one(id=obj.feature_id)
 
-        disabled_tenants = existing_tenants - incoming_tenants
-        for tenant_id in disabled_tenants:
-            await self._delete_tenant(tenant_id=tenant_id)
+        # Upsert all enabled tenant preferences
+        for tenant_id in obj.tenant_ids:
+            stmt = pg_insert(TenantFeatureFlag).values(
+                feature_id=obj.feature_id,
+                tenant_id=tenant_id,
+                enabled=True,
+                name=obj.name,
+            ).on_conflict_do_update(
+                index_elements=['feature_id', 'tenant_id'],
+                set_={'enabled': True, 'updated_at': datetime.now(timezone.utc)}
+            )
+            await self.db_session.execute(stmt)
 
-        enabled_tenants = incoming_tenants - existing_tenants
-        for tenant_id in enabled_tenants:
-            await self._insert_tenant(obj=obj, tenant_id=tenant_id)
+        # Upsert all disabled tenant preferences
+        for tenant_id in obj.disabled_tenant_ids:
+            stmt = pg_insert(TenantFeatureFlag).values(
+                feature_id=obj.feature_id,
+                tenant_id=tenant_id,
+                enabled=False,
+                name=obj.name,
+            ).on_conflict_do_update(
+                index_elements=['feature_id', 'tenant_id'],
+                set_={'enabled': False, 'updated_at': datetime.now(timezone.utc)}
+            )
+            await self.db_session.execute(stmt)
+
+        # Delete tenants that no longer have any preference
+        all_current = current.tenant_ids | current.disabled_tenant_ids
+        all_new = obj.tenant_ids | obj.disabled_tenant_ids
+        removed_tenants = all_current - all_new
+
+        for tenant_id in removed_tenants:
+            await self._delete_tenant(obj.feature_id, tenant_id)
 
         return obj
 
