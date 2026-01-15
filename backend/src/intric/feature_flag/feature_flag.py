@@ -23,7 +23,9 @@ class FeatureFlag:
         return enabled
 
     def disable_tenant(self, tenant_id: UUID) -> None:
-        self.tenant_ids.remove(tenant_id)
+        # Use discard() instead of remove() to make this operation idempotent
+        # remove() raises KeyError if tenant not in set, discard() is safe
+        self.tenant_ids.discard(tenant_id)
 
     def enable_tenant(self, tenant_id: UUID) -> None:
         self.tenant_ids.add(tenant_id)
