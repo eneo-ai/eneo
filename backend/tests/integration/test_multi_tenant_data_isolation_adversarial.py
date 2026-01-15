@@ -580,7 +580,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
 
     Attack Scenario:
     - 2 tenants, 2 users each
-    - Fire 100 concurrent requests (mixed across tenants)
+    - Fire 20 concurrent requests (mixed across tenants)
     - Each request: create space, list spaces, get tenant info
     - Verify ZERO cross-tenant data leakage
 
@@ -588,7 +588,14 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     - Request context pollution
     - Thread-local storage bugs
     - Database connection pooling issues
+
+    Note: We use 20 concurrent requests (10 per tenant) to stay within
+    connection pool limits (size 20 + overflow 10 = 30 max connections).
+    Each workflow uses ~2 connections, so 20 concurrent = ~40 potential
+    connections. Using a semaphore ensures we stay within limits.
     """
+    import asyncio
+
     # Create two tenants with users
     tenant_a = await _create_tenant(client, super_admin_token, f"tenant-concurrent-a-{uuid4().hex[:6]}")
     tenant_b = await _create_tenant(client, super_admin_token, f"tenant-concurrent-b-{uuid4().hex[:6]}")
@@ -614,6 +621,10 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     # Track results
     results_a = []
     results_b = []
+
+    # Limit concurrent operations to avoid connection pool exhaustion
+    # Pool has 30 max connections (20 + 10 overflow), each workflow uses ~2
+    semaphore = asyncio.Semaphore(10)
 
     async def user_a_workflow():
         """User A creates space and verifies tenant info."""
@@ -648,9 +659,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         })
 
     # Fire concurrent requests (balanced across tenants, interleaved)
-    import asyncio
     total_tasks = 40
-    semaphore = asyncio.Semaphore(10)
     tasks = []
 
     async def _run_with_limit(coro):

@@ -250,7 +250,7 @@ async def test_mixed_encryption_states_during_migration(
     2. Deploy new ENCRYPTION_KEY in .env (do NOT restart yet)
     3. Run migration script:
        ```
-       poetry run python -m intric.cli.rotate_encryption_key \\
+       uv run python -m intric.cli.rotate_encryption_key \\
          --old-key="OLD_KEY" \\
          --new-key="NEW_KEY" \\
          --dry-run

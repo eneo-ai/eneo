@@ -31,7 +31,12 @@
               {/if}
             </div>
           {:else if job.status === "complete"}
-            <div class="text-positive-default w-48 text-right font-medium">{m.done()}</div>
+            <div class="flex flex-col items-end text-right gap-0.5 w-48">
+              <div class="text-positive-default font-medium">{m.done()}</div>
+              {#if job.result_location}
+                <div class="text-secondary text-xs whitespace-normal">{job.result_location}</div>
+              {/if}
+            </div>
           {/if}
         </div>
       {/each}

@@ -48,7 +48,8 @@ class IntegrationKnowledgeRepoImpl(
         self._options = [
             selectinload(self._db_model.user_integration)
             .selectinload(UserIntegrationDBModel.tenant_integration)
-            .selectinload(TenantIntegrationDBModel.integration)
+            .selectinload(TenantIntegrationDBModel.integration),
+            selectinload(self._db_model.sharepoint_subscription)
         ]
 
     async def one_or_none(

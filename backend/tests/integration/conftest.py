@@ -295,11 +295,19 @@ def override_settings_for_session(test_settings: Settings):
     # Set test settings
     set_settings(test_settings)
 
-    # Reinitialize auth definitions with new settings
-    # This is needed because API_KEY_HEADER and OAUTH2_SCHEME are created at import time
+    # CRITICAL: Mutate the existing API_KEY_HEADER object's internal model.name
+    #
+    # Why mutation instead of replacement?
+    # - API_KEY_HEADER is created at module import time with the original settings
+    # - container.py's _get_container_with_user function captures API_KEY_HEADER
+    #   in its function signature: api_key: str = Security(API_KEY_HEADER)
+    # - Python evaluates default arguments at FUNCTION DEFINITION time, not call time
+    # - So even if we update container_module.API_KEY_HEADER, the function already
+    #   has a reference to the OLD object
+    # - By MUTATING the existing object's model.name attribute, all references
+    #   (including the one captured in the function signature) see the new header name
     import intric.server.dependencies.auth_definitions as auth_defs
-    auth_defs.OAUTH2_SCHEME = auth_defs._get_oauth2_scheme()
-    auth_defs.API_KEY_HEADER = auth_defs._get_api_key_header()
+    auth_defs.API_KEY_HEADER.model.name = test_settings.api_key_header_name
 
     # Verify settings are correct
     print("\n=== Integration Test Setup Verification ===")
@@ -352,6 +360,18 @@ async def setup_database(test_settings: Settings):
         user_password="test_password",
     )
 
+    # Create required feature flags for initial setup
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'audit_logging_enabled',
+            'Global feature flag to enable/disable audit logging',
+            true, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    conn.commit()
+    cursor.close()
+
     conn.close()
 
     # Initialize the database session manager with test settings AFTER migrations
@@ -403,24 +423,28 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
     """
     Automatically truncate all tables and reseed after each test for full isolation.
 
-    Note: setup_database dependency ensures migrations run before cleanup is registered.
+    Optimized for speed:
+    - Single TRUNCATE statement for all tables (instead of one per table)
+    - Models are NOT seeded here - seed_default_models fixture handles that
     """
     yield
 
-    # Clean up after each test - truncate everything and reseed
+    # Clean up after each test - truncate everything in ONE statement
     async with sessionmanager.session() as session:
         async with session.begin():
-            # Truncate all tables except alembic_version
+            # Get all tables except alembic_version
             result = await session.execute(text("""
-                SELECT tablename FROM pg_tables
+                SELECT string_agg('"' || tablename || '"', ', ')
+                FROM pg_tables
                 WHERE schemaname = 'public' AND tablename != 'alembic_version'
             """))
-            tables = result.scalars().all()
+            tables_csv = result.scalar()
 
-            for table in tables:
-                await session.execute(text(f'TRUNCATE TABLE "{table}" RESTART IDENTITY CASCADE'))
+            if tables_csv:
+                # Single TRUNCATE for all tables - much faster than one-by-one!
+                await session.execute(text(f'TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE'))
 
-    # Reseed test tenant and user
+    # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
         host=test_settings.postgres_host,
         port=test_settings.postgres_port,
@@ -435,10 +459,10 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         quota_limit=1000000,
         user_name="test_user",
         user_email="test@example.com",
-        user_password="test_password",
+        user_password="password",
     )
 
-    # Recreate using_templates feature flag (required for template tests)
+    # Add using_templates feature flag (not handled by add_tenant_user)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
@@ -447,11 +471,17 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
             false, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    # Add audit_logging_enabled feature flag (required for audit tests)
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'audit_logging_enabled',
+            'Global feature flag to enable/disable audit logging',
+            true, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
     conn.commit()
     cursor.close()
-
     conn.close()
-    print("Cleaned up and reseeded test database")
 
 
 @pytest.fixture
@@ -489,9 +519,13 @@ async def app(setup_database):
 async def client(app) -> AsyncGenerator[AsyncClient, None]:
     """
     Create an async HTTP client for testing the FastAPI application.
+
+    Note: base_url uses "test.local" to ensure cookies work correctly.
+    Cookies are set without an explicit domain, so they default to the request host.
+    Using a consistent domain ensures httpx sends cookies on subsequent requests.
     """
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://test.local"
     ) as client:
         yield client
 

@@ -147,6 +147,9 @@ async def iterate_stream(stream):
             if len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
 
+                if delta is None:
+                    continue
+                
                 if delta.tool_calls:
                     _tool_call = delta.tool_calls[0]
                     tool_call = FunctionCall(

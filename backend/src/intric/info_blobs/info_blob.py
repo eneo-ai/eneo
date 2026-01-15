@@ -29,7 +29,8 @@ class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
     website_id: Optional[UUID] = None
     tenant_id: UUID
     integration_knowledge_id: Optional[UUID] = None
-    content_hash: Optional[bytes] = None  # SHA-256 hash for change detection
+    content_hash: Optional[bytes] = None
+    sharepoint_item_id: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_group_id_and_website_id(self) -> "InfoBlobAdd":
@@ -69,6 +70,7 @@ class InfoBlobInDBNoText(InDB):
     group_id: Optional[UUID] = None
     website_id: Optional[UUID] = None
     integration_knowledge_id: Optional[UUID] = None
+    sharepoint_item_id: Optional[str] = None
 
     group: Optional[GroupInDBBase] = None
     website: Optional[WebsiteInDBBase] = None

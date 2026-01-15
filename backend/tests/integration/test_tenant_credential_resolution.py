@@ -6,7 +6,7 @@ instances with tenant-scoped CredentialResolver when accessed through the
 dependency injection container.
 
 Run with:
-    cd backend && poetry run pytest tests/integration/test_tenant_credential_resolution.py -v
+    cd backend && uv run pytest tests/integration/test_tenant_credential_resolution.py -v
 """
 
 import pytest

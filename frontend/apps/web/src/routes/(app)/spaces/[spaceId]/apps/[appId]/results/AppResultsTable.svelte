@@ -67,5 +67,7 @@
   $: table.update(results);
 </script>
 
-<Table.Root {viewModel} resourceName="result" emptyMessage={m.no_previous_results_found()}
-></Table.Root>
+<div class="overflow-x-auto">
+  <Table.Root {viewModel} resourceName="result" emptyMessage={m.no_previous_results_found()}
+  ></Table.Root>
+</div>

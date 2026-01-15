@@ -12,6 +12,17 @@
   import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
   import { getChatQueryParams } from "../../getChatQueryParams";
   import { m } from "$lib/paraglide/messages";
+  import { getAppContext } from "$lib/core/AppContext";
+
+  const { environment } = getAppContext();
+
+  // Helper function to get icon URL from icon_id
+  function getIconUrl(partner: AssistantSparse | GroupChatSparse): string | null {
+    if (partner.type === "assistant" && partner.icon_id) {
+      return `${environment.baseUrl}/api/v1/icons/${partner.icon_id}/`;
+    }
+    return null;
+  }
 
   const {
     state: { currentSpace }
@@ -68,9 +79,14 @@
       {...$option({ value: partner, label: partner.name, disabled: false })}
       use:option
     >
-      <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
-      {formatEmojiTitle(partner.name)}
-      <div class="flex-grow"></div>
+      {#if partner.type === "assistant" && getIconUrl(partner)}
+        <div class="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg">
+          <img src={getIconUrl(partner)} alt={partner.name} class="h-full w-full object-cover" />
+        </div>
+      {:else}
+        <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
+      {/if}
+      <span class="flex-grow truncate">{formatEmojiTitle(partner.name)}</span>
       <div class="check {$selected?.value.id === partner.id ? 'block' : 'hidden'}">
         <IconCheck class="text-positive-stronger !size-8"></IconCheck>
       </div>

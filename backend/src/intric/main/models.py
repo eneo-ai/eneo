@@ -149,6 +149,7 @@ class ChannelType(str, Enum):
     CRAWL_RUN_UPDATES = "crawl_run_updates"
     PULL_CONFLUENCE_CONTENT = "pull_confluence_content"
     PULL_SHAREPOINT_CONTENT = "pull_sharepoint_content"
+    SYNC_SHAREPOINT_DELTA = "sync_sharepoint_delta"
 
 
 class Status(str, Enum):

@@ -3,6 +3,10 @@
 import intric.database.tables.ai_models_table
 import intric.database.tables.allowed_origins_table
 import intric.database.tables.api_keys_table
+import intric.database.tables.audit_action_config_table
+import intric.database.tables.audit_category_config_table
+import intric.database.tables.audit_log_table
+import intric.database.tables.audit_retention_policy_table
 import intric.database.tables.app_table
 import intric.database.tables.app_template_table
 import intric.database.tables.assistant_table
@@ -14,6 +18,8 @@ import intric.database.tables.files_table
 import intric.database.tables.group_chats_table
 import intric.database.tables.info_blob_chunk_table
 import intric.database.tables.info_blobs_table
+import intric.database.tables.sharepoint_subscription_table
+import intric.database.tables.tenant_sharepoint_app_table
 import intric.database.tables.integration_table
 import intric.database.tables.job_table
 import intric.database.tables.logging_table
@@ -24,6 +30,7 @@ import intric.database.tables.roles_table
 import intric.database.tables.service_table
 import intric.database.tables.sessions_table
 import intric.database.tables.settings_table
+import intric.database.tables.sync_log_table
 import intric.database.tables.spaces_table
 import intric.database.tables.tenant_table
 import intric.database.tables.user_groups_table
@@ -33,4 +40,5 @@ import intric.database.tables.websites_table
 import intric.database.tables.widget_table
 import intric.database.tables.workflow_tables
 import intric.database.tables.groups_spaces_table
+import intric.database.tables.icons_table
 import intric.database.tables.websites_spaces_table

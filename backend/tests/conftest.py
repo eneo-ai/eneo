@@ -29,6 +29,7 @@ pytest_plugins = [
     "tests.integration.fixtures.services",           # Service fixtures
     "tests.integration.fixtures.spaces",             # Space fixtures
     "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
+    "tests.integration.fixtures.integrations",       # Integration fixtures (SharePoint, etc.)
 ]
 
 

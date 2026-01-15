@@ -116,6 +116,9 @@ class SpaceRepository:
             .selectinload(IntegrationKnowledge.user_integration)
             .selectinload(UserIntegrationDBModel.tenant_integration)
             .selectinload(TenantIntegrationDBModel.integration),
+            selectinload(Spaces.integration_knowledge_list).selectinload(
+                IntegrationKnowledge.sharepoint_subscription
+            ),
             selectinload(Spaces.completion_models_mapping),
             selectinload(Spaces.embedding_models_mapping),
             selectinload(Spaces.transcription_models_mapping),
@@ -863,6 +866,8 @@ class SpaceRepository:
                     if space.security_classification is not None
                     else None
                 ),
+                data_retention_days=space.data_retention_days,
+                icon_id=space.icon_id,
             )
             .where(Spaces.id == space.id)
             .returning(Spaces)
@@ -1042,6 +1047,7 @@ class SpaceRepository:
                 selectinload(ik.user_integration)
                     .selectinload(UserIntegrationDBModel.tenant_integration)
                     .selectinload(TenantIntegrationDBModel.integration),
+                selectinload(ik.sharepoint_subscription),
             )
             .order_by(ik.created_at)
         )

@@ -169,7 +169,7 @@ class Worker:
 
         try:
             # Import here to avoid circular import
-            from intric.jobs.job_models import Jobs
+            from intric.database.tables.job_table import Jobs
 
             async with sessionmanager.session() as session:
                 async with session.begin():

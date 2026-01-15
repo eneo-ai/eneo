@@ -75,8 +75,11 @@ class AppSparse(ResourcePermissionsMixin, InDB):
     name: str
     description: Optional[str] = None
     published: bool
-
     user_id: UUID
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
+    )
 
 
 # Spaces
@@ -101,6 +104,23 @@ class UpdateSpaceRequest(BaseModel):
             "ID of the security classification to apply to this space. "
             "Set to null to remove the security classification. "
             "Omit to keep the current security classification unchanged."
+        ),
+    )
+    icon_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Icon ID referencing an uploaded icon. Set to null to remove.",
+    )
+
+    data_retention_days: Union[int, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        ge=1,
+        le=2555,
+        description=(
+            "Number of days to retain conversation history for this space. "
+            "Applies to all assistants and apps in the space that don't have "
+            "their own retention policy. Set to null to disable space-level retention. "
+            "Omit to keep the current retention policy unchanged. "
+            "Valid range: 1-2555 days (1 day to 7 years)."
         ),
     )
 
@@ -134,9 +154,14 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     name: str
     description: Optional[str]
     personal: bool
-    organization: bool 
+    organization: bool
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
+    )
     applications: Optional[Applications] = None
     default_assistant: Optional[DefaultAssistant] = None
+    data_retention_days: Optional[int] = None
 
 class SpaceDashboard(SpaceSparse):
     applications: Applications
@@ -273,3 +298,11 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     embedding_model: ModelId
     url: str
     key: Optional[str] = None
+    folder_id: Optional[str] = None
+    folder_path: Optional[str] = None
+    selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
+    resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+
+
+class UpdateIntegrationKnowledgeRequest(BaseModel):
+    name: str

@@ -8,6 +8,7 @@ from intric.apps.apps.app_factory import AppFactory
 from intric.apps.apps.app_repo import AppRepository
 from intric.files.file_service import FileService
 from intric.files.transcriber import Transcriber
+from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
 from intric.prompts.prompt_service import PromptService
@@ -49,6 +50,7 @@ class AppService:
         actor_manager: "ActorManager",
         transcription_model_crud_service: "TranscriptionModelCRUDService",
         completion_service: "CompletionService",
+        icon_repo: IconRepository,
     ):
         self.user = user
         self.repo = repo
@@ -62,6 +64,7 @@ class AppService:
         self.actor_manager = actor_manager
         self.transcription_model_crud_service = transcription_model_crud_service
         self.completion_service = completion_service
+        self.icon_repo = icon_repo
 
     async def create_app(
         self, name: str, space: Space, template_data: Optional["TemplateCreate"] = None
@@ -189,6 +192,7 @@ class AppService:
         prompt_description: str | None = None,
         transcription_model_id: UUID | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> App:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
@@ -242,6 +246,7 @@ class AppService:
             prompt=prompt,
             transcription_model=transcription_model,
             data_retention_days=data_retention_days,
+            icon_id=icon_id,
         )
 
         app_in_db = await self.repo.update(app)
@@ -258,7 +263,13 @@ class AppService:
         if not actor.can_delete_apps():
             raise UnauthorizedException()
 
+        app = space.get_app(app_id=app_id)
+        icon_id = app.icon_id
+
         await self.repo.delete(app_id)
+
+        if icon_id:
+            await self.icon_repo.delete(icon_id)
 
     async def run_app(self, app_id: UUID, file_ids: list[UUID], text: str | None):
         space = await self.space_repo.get_space_by_app(app_id=app_id)

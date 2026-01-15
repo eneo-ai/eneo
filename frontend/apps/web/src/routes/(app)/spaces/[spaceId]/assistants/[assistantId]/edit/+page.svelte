@@ -20,8 +20,10 @@
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { m } from "$lib/paraglide/messages";
+  import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
+  import IconUpload from "$lib/features/icons/IconUpload.svelte";
 
-  export let data;
+  let { data } = $props();
 
   const {
     state: { currentSpace },
@@ -42,8 +44,57 @@
 
   let cancelUploadsAndClearQueue: () => void;
 
+  // Icon state
+  let currentIconId = $state<string | null>($resource.icon_id);
+  let iconUploading = $state(false);
+  let iconError = $state<string | null>(null);
+
+  function getIconUrl(id: string | null): string | null {
+    return id ? data.intric.icons.url({ id }) : null;
+  }
+
+  let iconUrl = $derived(getIconUrl(currentIconId));
+
+  async function handleIconUpload(event: CustomEvent<File>) {
+    const file = event.detail;
+    iconUploading = true;
+    iconError = null;
+    try {
+      const newIcon = await data.intric.icons.upload({ file });
+      await data.intric.assistants.update({
+        assistant: { id: $resource.id },
+        update: { icon_id: newIcon.id }
+      });
+      currentIconId = newIcon.id;
+      await refreshCurrentSpace("applications");
+    } catch (error) {
+      console.error("Failed to upload icon:", error);
+      iconError = m.avatar_upload_failed();
+    } finally {
+      iconUploading = false;
+    }
+  }
+
+  async function handleIconDelete() {
+    iconError = null;
+    try {
+      if (currentIconId) {
+        await data.intric.icons.delete({ id: currentIconId });
+      }
+      await data.intric.assistants.update({
+        assistant: { id: $resource.id },
+        update: { icon_id: null }
+      });
+      currentIconId = null;
+      await refreshCurrentSpace("applications");
+    } catch (error) {
+      console.error("Failed to delete icon:", error);
+      iconError = m.avatar_delete_failed();
+    }
+  }
+
   // Behavior-specific change detection for models with model-specific parameters
-  $: hasBehaviorChanges = (() => {
+  let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
 
     // For reasoning models or LiteLLM models, only show behavior changes if behavior-relevant fields changed
@@ -62,7 +113,7 @@
 
     // For regular models, show changes if any kwargs changed
     return true;
-  })();
+  });
 
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
@@ -200,6 +251,16 @@
             bind:value={$update.description}
             class="border-default bg-primary ring-default placeholder:text-muted min-h-24 rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
           ></textarea>
+        </Settings.Row>
+
+        <Settings.Row title={m.avatar()} description={m.avatar_description()}>
+          <IconUpload
+            {iconUrl}
+            uploading={iconUploading}
+            error={iconError}
+            on:upload={handleIconUpload}
+            on:delete={handleIconDelete}
+          />
         </Settings.Row>
       </Settings.Group>
 
@@ -341,6 +402,28 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+      </Settings.Group>
+
+      <Settings.Group title={m.security_and_privacy()}>
+        <Settings.Row
+          hasChanges={$currentChanges.diff.data_retention_days !== undefined}
+          revertFn={() => {
+            discardChanges("data_retention_days");
+          }}
+          title={m.conversation_retention_title()}
+          description={m.conversation_retention_assistant_description()}
+          let:labelId
+          let:descriptionId
+        >
+          <RetentionPolicyInput
+            bind:value={$update.data_retention_days}
+            hasChanges={$currentChanges.diff.data_retention_days !== undefined}
+            inheritedDays={$currentSpace.data_retention_days}
+            inheritedFrom="space"
+            {labelId}
+            {descriptionId}
+          />
+        </Settings.Row>
       </Settings.Group>
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}

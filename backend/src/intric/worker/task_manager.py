@@ -86,11 +86,23 @@ class TaskManager:
                 Used when mark_job_started() has already atomically set the status
                 to prevent worker resurrection race condition.
         """
+        import asyncio
+
         if not status_already_set:
             await self.set_status(Status.IN_PROGRESS)
 
         try:
             yield
+        except asyncio.CancelledError:
+            # CancelledError inherits from BaseException (not Exception) in Python 3.8+
+            # Must handle explicitly to mark job as failed when worker shuts down
+            logger.warning(
+                "Job cancelled (worker shutdown or timeout)",
+                extra={"job_id": str(self.job_id)},
+            )
+            await self.fail_job("Job cancelled")
+            self.success = False
+            raise  # Re-raise to let ARQ know the job was cancelled
         except Exception as exc:
             logger.exception("Error on worker:")
             message = str(exc).strip()

@@ -54,9 +54,15 @@ class Oauth2Service:
             id=tenant_integration_id
         )
         integration_type = tenant_integration.integration_type
+
         if integration_type not in self._auth_mapper:
             raise BadRequestException("Invalid integration type")
-        return getattr(self._auth_mapper[integration_type], "gen_auth_url")(state)
+
+        auth_service = self._auth_mapper[integration_type]
+        if integration_type == IntegrationType.Sharepoint.value:
+            return await auth_service.gen_auth_url(state, tenant_id=tenant_integration.tenant_id)
+        else:
+            return getattr(auth_service, "gen_auth_url")(state)
 
     async def auth_integration(
         self,
@@ -100,7 +106,14 @@ class Oauth2Service:
             raise BadRequestException("Invalid integration type")
         service = self._auth_mapper[integration_type]
 
-        token_result = await getattr(service, "exchange_token")(auth_code)
+        # Pass tenant_id for SharePoint to use tenant-specific configuration
+        if integration_type == IntegrationType.Sharepoint.value:
+            token_result = await service.exchange_token(
+                auth_code, tenant_id=authenticated_integration.tenant_integration.tenant_id
+            )
+        else:
+            token_result = await getattr(service, "exchange_token")(auth_code)
+
         access_token = token_result.get("access_token")
         resource_data = await getattr(service, "get_resources")(access_token)
 
