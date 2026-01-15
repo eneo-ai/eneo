@@ -42,5 +42,4 @@ devcontainer.json
 specs/
 .serena/
 .speckit/
-.devcontainer/post-create.sh
 .playwright-mcp/
