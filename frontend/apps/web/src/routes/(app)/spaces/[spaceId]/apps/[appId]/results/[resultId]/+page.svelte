@@ -21,6 +21,7 @@
   import { getIntric } from "$lib/core/Intric.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   dayjs.extend(utc);
 
   const { data } = $props();
@@ -165,13 +166,13 @@
     ></Page.Title>
 
     <Page.Flex>
-      <Button href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}/edit" class="!line-clamp-1"
+      <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)} class="!line-clamp-1"
         >{m.edit()}</Button
       >
       <Button
         variant="primary"
         class="!line-clamp-1"
-        href="/spaces/{$currentSpace.routeId}/apps/{data.app.id}">{m.new_run()}</Button
+        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}>{m.new_run()}</Button
       >
     </Page.Flex>
   </Page.Header>

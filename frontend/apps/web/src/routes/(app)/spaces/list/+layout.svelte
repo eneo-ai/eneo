@@ -10,6 +10,7 @@
   import SpaceSelector from "$lib/features/spaces/components/SpaceSelector.svelte";
   import { IconSquares } from "@intric/icons/squares";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   $: section = $page.url.pathname.split("/")[3] ?? "list";
 </script>
@@ -23,7 +24,7 @@
     <SpaceSelector showSelectPrompt={true}></SpaceSelector>
     <Navigation.Menu>
       <Navigation.Link
-        href="/spaces/list"
+        href={localizeHref("/spaces/list")}
         isActive={section === "list"}
         icon={IconSquares}
         label={m.your_spaces()}

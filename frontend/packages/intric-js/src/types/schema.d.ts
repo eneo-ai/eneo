@@ -3655,11 +3655,8 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
-      /**
-       * Actor Id
-       * Format: uuid
-       */
-      actor_id: string;
+      /** Actor Id */
+      actor_id?: string | null;
       actor_type: components["schemas"]["ActorType"];
       action: components["schemas"]["ActionType"];
       entity_type: components["schemas"]["EntityType"];

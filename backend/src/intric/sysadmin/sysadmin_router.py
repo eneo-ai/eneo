@@ -34,10 +34,17 @@ from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
 from intric.server import protocol
-from intric.server.dependencies.container import get_container, get_container_for_sysadmin
+from intric.server.dependencies.container import (
+    get_container,
+    get_container_for_sysadmin,
+)
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.tenants.tenant import TenantBase, TenantUpdatePublic, TenantWithMaskedCredentials
+from intric.tenants.tenant import (
+    TenantBase,
+    TenantUpdatePublic,
+    TenantWithMaskedCredentials,
+)
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.authentication import auth
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
@@ -109,7 +116,7 @@ async def register_new_user(
 
     await audit_service.log_async(
         tenant_id=created_user.tenant_id,
-        actor_id=created_user.id,  # System user as actor
+        actor_id=None,  # System actor (no user)
         actor_type=ActorType.SYSTEM,
         action=ActionType.USER_CREATED,
         entity_type=EntityType.USER,
@@ -170,7 +177,7 @@ async def delete_user(
 
     await audit_service.log_async(
         tenant_id=user_to_delete.tenant_id,
-        actor_id=user_to_delete.id,  # Use deleted user as actor for sysadmin
+        actor_id=None,  # System actor (no user)
         actor_type=ActorType.SYSTEM,
         action=ActionType.USER_DELETED,
         entity_type=EntityType.USER,
@@ -217,7 +224,7 @@ async def update_user(
 
     await audit_service.log_async(
         tenant_id=updated_user.tenant_id,
-        actor_id=updated_user.id,
+        actor_id=None,
         actor_type=ActorType.SYSTEM,
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
@@ -238,7 +245,9 @@ async def update_user(
 
 
 @router.post("/users/{user_id}/access-token/", include_in_schema=False)
-async def get_access_token(user_id: UUID, container: Container = Depends(get_container())):
+async def get_access_token(
+    user_id: UUID, container: Container = Depends(get_container())
+):
     user_repo = container.user_repo()
     auth_service = container.auth_service()
 
@@ -248,7 +257,9 @@ async def get_access_token(user_id: UUID, container: Container = Depends(get_con
 
 
 @router.get("/tenants/", response_model=PaginatedResponse[TenantWithMaskedCredentials])
-async def get_tenants(domain: str | None = None, container: Container = Depends(get_container())):
+async def get_tenants(
+    domain: str | None = None, container: Container = Depends(get_container())
+):
     """Get all tenants with masked API credentials.
 
     Returns tenant information with API keys masked to show only last 4 characters.
@@ -276,7 +287,9 @@ async def get_tenants(domain: str | None = None, container: Container = Depends(
     response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([400]),
 )
-async def create_tenant(tenant: TenantBase, container: Container = Depends(get_container())):
+async def create_tenant(
+    tenant: TenantBase, container: Container = Depends(get_container())
+):
     tenant_service = container.tenant_service()
 
     # Create tenant
@@ -287,7 +300,7 @@ async def create_tenant(tenant: TenantBase, container: Container = Depends(get_c
 
     await audit_service.log_async(
         tenant_id=created_tenant.id,
-        actor_id=created_tenant.id,  # Use tenant as actor
+        actor_id=None,  # System actor (no user)
         actor_type=ActorType.SYSTEM,
         action=ActionType.TENANT_SETTINGS_UPDATED,  # Tenant creation is a settings operation
         entity_type=EntityType.TENANT_SETTINGS,
@@ -330,7 +343,10 @@ async def update_tenant(
     if tenant.name and tenant.name != old_tenant.name:
         changes["name"] = {"old": old_tenant.name, "new": tenant.name}
     if tenant.display_name and tenant.display_name != old_tenant.display_name:
-        changes["display_name"] = {"old": old_tenant.display_name, "new": tenant.display_name}
+        changes["display_name"] = {
+            "old": old_tenant.display_name,
+            "new": tenant.display_name,
+        }
     if tenant.state and tenant.state != old_tenant.state:
         changes["state"] = {"old": old_tenant.state, "new": tenant.state}
 
@@ -339,7 +355,7 @@ async def update_tenant(
 
     await audit_service.log_async(
         tenant_id=updated_tenant.id,
-        actor_id=updated_tenant.id,
+        actor_id=None,
         actor_type=ActorType.SYSTEM,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
@@ -363,7 +379,9 @@ async def update_tenant(
     response_model=TenantWithMaskedCredentials,
     responses=responses.get_responses([404]),
 )
-async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_container())):
+async def delete_tenant_by_id(
+    id: UUID, container: Container = Depends(get_container())
+):
     tenant_service = container.tenant_service()
 
     # Get tenant BEFORE deletion
@@ -377,7 +395,7 @@ async def delete_tenant_by_id(id: UUID, container: Container = Depends(get_conta
 
     await audit_service.log_async(
         tenant_id=deleted_tenant.id,
-        actor_id=deleted_tenant.id,
+        actor_id=None,
         actor_type=ActorType.SYSTEM,
         action=ActionType.TENANT_SETTINGS_UPDATED,  # Deletion is a settings operation
         entity_type=EntityType.TENANT_SETTINGS,
@@ -548,7 +566,7 @@ async def enable_completion_model(
 
     await audit_service.log_async(
         tenant_id=id,
-        actor_id=id,  # Use tenant as actor
+        actor_id=None,  # System actor (no user)
         actor_type=ActorType.SYSTEM,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
@@ -596,7 +614,7 @@ async def enable_embedding_model(
 
     await audit_service.log_async(
         tenant_id=id,
-        actor_id=id,
+        actor_id=None,
         actor_type=ActorType.SYSTEM,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
@@ -622,7 +640,9 @@ async def add_origin(
     container: Container = Depends(get_container()),
 ):
     allowed_origin_repo = container.allowed_origin_repo()
-    return await allowed_origin_repo.add_origin(origin=origin.url, tenant_id=origin.tenant_id)
+    return await allowed_origin_repo.add_origin(
+        origin=origin.url, tenant_id=origin.tenant_id
+    )
 
 
 @router.get("/allowed-origins/", response_model=PaginatedResponse[AllowedOriginInDB])
@@ -659,35 +679,39 @@ async def recalculate_tenant_usage_statistics(
 ):
     """
     Recalculate usage statistics for a specific tenant.
-    
+
     This endpoint is intended for tenant-specific administrative operations,
     such as fixing usage statistics for a particular tenant.
     """
     logger.info(f"Recalculating usage statistics for tenant {tenant_id}")
-    
+
     try:
         # Use the worker task function which handles the complexity
         success = await recalculate_tenant_usage_stats_direct(container, tenant_id)
-        
+
         if success:
             return {
                 "message": f"Usage statistics recalculation completed successfully for tenant {tenant_id}",
                 "tenant_id": str(tenant_id),
-                "success": True
+                "success": True,
             }
         else:
             from fastapi import HTTPException
+
             raise HTTPException(
-                status_code=404,
-                detail=f"Tenant {tenant_id} not found or not active"
+                status_code=404, detail=f"Tenant {tenant_id} not found or not active"
             )
-            
+
     except Exception as e:
-        logger.error(f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
+            exc_info=True,
+        )
         from fastapi import HTTPException
+
         raise HTTPException(
             status_code=500,
-            detail=f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}"
+            detail=f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
         )
 
 
@@ -700,35 +724,38 @@ async def recalculate_all_tenants_usage_statistics(
 ):
     """
     Recalculate usage statistics for all active tenants.
-    
+
     This endpoint is intended for system-wide administrative operations,
     such as bulk recalculation of usage statistics across all tenants.
     """
     logger.info("Recalculating usage statistics for all tenants")
-    
+
     try:
         # Use the worker task function which handles the complexity
         from intric.worker.usage_stats_tasks import recalculate_all_tenants_usage_stats
-        
+
         success = await recalculate_all_tenants_usage_stats(container)
-        
+
         if success:
             return {
                 "message": "Usage statistics recalculation completed successfully for all tenants",
-                "success": True
+                "success": True,
             }
         else:
             return {
                 "message": "Usage statistics recalculation completed with some errors",
-                "success": False
+                "success": False,
             }
-            
+
     except Exception as e:
-        logger.error(f"Error in recalculate_all_tenants_usage_statistics endpoint: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error in recalculate_all_tenants_usage_statistics endpoint: {str(e)}",
+            exc_info=True,
+        )
         from fastapi import HTTPException
+
         raise HTTPException(
-            status_code=500,
-            detail=f"Error recalculating usage statistics: {str(e)}"
+            status_code=500, detail=f"Error recalculating usage statistics: {str(e)}"
         )
 
 
@@ -745,13 +772,13 @@ async def migrate_completion_model_for_tenant(
 ):
     """
     Migrate completion model usage for a specific tenant.
-    
-    This endpoint allows system administrators to migrate all usage from one 
+
+    This endpoint allows system administrators to migrate all usage from one
     completion model to another for a specific tenant. This is useful for:
     - Migrating tenants away from deprecated models
     - Consolidating model usage
     - Fixing model configurations for specific tenants
-    
+
     Args:
         tenant_id: UUID of the tenant to migrate
         model_id: UUID of the source model to migrate from
@@ -764,9 +791,9 @@ async def migrate_completion_model_for_tenant(
             "from_model_id": str(model_id),
             "to_model_id": str(migration_request.to_model_id),
             "entity_types": migration_request.entity_types,
-        }
+        },
     )
-    
+
     try:
         # Get required services
         tenant_repo = container.tenant_repo()
@@ -777,17 +804,17 @@ async def migrate_completion_model_for_tenant(
         tenant = await tenant_repo.get(tenant_id)
         if not tenant:
             from fastapi import HTTPException
-            raise HTTPException(
-                status_code=404,
-                detail=f"Tenant {tenant_id} not found"
-            )
+
+            raise HTTPException(status_code=404, detail=f"Tenant {tenant_id} not found")
 
         from intric.tenants.tenant import TenantState
+
         if tenant.state != TenantState.ACTIVE:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=400,
-                detail=f"Tenant {tenant_id} is not active (state: {tenant.state})"
+                detail=f"Tenant {tenant_id} is not active (state: {tenant.state})",
             )
 
         # Get a user from this tenant to set the context (needed for domain repo)
@@ -800,9 +827,10 @@ async def migrate_completion_model_for_tenant(
 
         if not user_row:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=400,
-                detail=f"No users found for tenant {tenant_id}, cannot perform migration"
+                detail=f"No users found for tenant {tenant_id}, cannot perform migration",
             )
 
         # Get the user object
@@ -810,6 +838,7 @@ async def migrate_completion_model_for_tenant(
 
         # Override container context with this user and tenant
         from dependency_injector import providers
+
         container.user.override(providers.Object(user))
         container.tenant.override(providers.Object(tenant))
 
@@ -822,7 +851,7 @@ async def migrate_completion_model_for_tenant(
             to_model_id=migration_request.to_model_id,
             entity_types=migration_request.entity_types,
             user=user,
-            confirm_migration=migration_request.confirm_migration
+            confirm_migration=migration_request.confirm_migration,
         )
 
         logger.info(
@@ -832,11 +861,11 @@ async def migrate_completion_model_for_tenant(
                 "migration_id": str(result.migration_id),
                 "migrated_count": result.migrated_count,
                 "duration": result.duration,
-            }
+            },
         )
 
         return result
-            
+
     except Exception as e:
         logger.error(
             f"Error migrating completion model for tenant {tenant_id}",
@@ -847,12 +876,13 @@ async def migrate_completion_model_for_tenant(
                 "error": str(e),
                 "error_type": type(e).__name__,
             },
-            exc_info=True
+            exc_info=True,
         )
         from fastapi import HTTPException
+
         raise HTTPException(
             status_code=500,
-            detail=f"Error migrating completion model for tenant {tenant_id}: {str(e)}"
+            detail=f"Error migrating completion model for tenant {tenant_id}: {str(e)}",
         )
 
 
@@ -868,13 +898,13 @@ async def migrate_completion_model_for_all_tenants(
 ):
     """
     Migrate completion model usage for all active tenants.
-    
-    This endpoint allows system administrators to migrate all usage from one 
+
+    This endpoint allows system administrators to migrate all usage from one
     completion model to another across all active tenants. This is useful for:
     - Deprecating models system-wide
     - Migrating to newer model versions
     - Consolidating model usage across the entire system
-    
+
     Args:
         model_id: UUID of the source model to migrate from
         migration_request: Details of the migration (target model, entity types, etc.)
@@ -885,29 +915,30 @@ async def migrate_completion_model_for_all_tenants(
             "from_model_id": str(model_id),
             "to_model_id": str(migration_request.to_model_id),
             "entity_types": migration_request.entity_types,
-        }
+        },
     )
-    
+
     try:
         # Get required services
         tenant_repo = container.tenant_repo()
         user_repo = container.user_repo()
-        
+
         # Get all active tenants (using a separate session scope)
         tenants = await tenant_repo.get_all_tenants()
-        
+
         from intric.tenants.tenant import TenantState
+
         active_tenants = [t for t in tenants if t.state == TenantState.ACTIVE]
-        
+
         logger.info(
             f"Found {len(active_tenants)} active tenants for migration",
             extra={
                 "total_tenants": len(tenants),
                 "active_tenants": len(active_tenants),
                 "active_tenant_ids": [str(t.id) for t in active_tenants],
-            }
+            },
         )
-        
+
         if not active_tenants:
             return {
                 "message": "No active tenants found",
@@ -916,72 +947,82 @@ async def migrate_completion_model_for_all_tenants(
                 "failed_migrations": 0,
                 "results": [],
             }
-        
+
         # Process each tenant
         successful_migrations = 0
         failed_migrations = 0
         migration_results = []
-        
+
         for tenant in active_tenants:
             try:
-                logger.info(f"Processing migration for tenant {tenant.id} ({tenant.name})")
-                
+                logger.info(
+                    f"Processing migration for tenant {tenant.id} ({tenant.name})"
+                )
+
                 # Process each tenant in its own transaction
                 async with container.session().begin():
                     # Get a user from this tenant to set the context
                     from intric.database.tables.users_table import Users
                     from sqlalchemy import select
-                    
+
                     stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
                     result = await container.session().execute(stmt)
                     user_row = result.scalar_one_or_none()
-                    
+
                     if not user_row:
                         logger.warning(
                             f"No users found for tenant {tenant.id}, skipping migration",
-                            extra={"tenant_id": str(tenant.id), "tenant_name": tenant.name}
+                            extra={
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                            },
                         )
-                        migration_results.append({
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "success": False,
-                            "error": "No users found for tenant",
-                            "migrated_count": 0,
-                        })
+                        migration_results.append(
+                            {
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                                "success": False,
+                                "error": "No users found for tenant",
+                                "migrated_count": 0,
+                            }
+                        )
                         failed_migrations += 1
                         continue
-                    
+
                     # Get the user object
                     user = await user_repo.get_user_by_id(user_row.id)
-                    
+
                     # Override container context with this user and tenant
                     from dependency_injector import providers
+
                     container.user.override(providers.Object(user))
                     container.tenant.override(providers.Object(tenant))
-                    
+
                     # Get the migration service with proper context
                     migration_service = container.completion_model_migration_service()
-                    
+
                     # Execute the migration
                     result = await migration_service.migrate_model_usage(
                         from_model_id=model_id,
                         to_model_id=migration_request.to_model_id,
                         entity_types=migration_request.entity_types,
                         user=user,
-                        confirm_migration=migration_request.confirm_migration
+                        confirm_migration=migration_request.confirm_migration,
                     )
-                    
+
                     successful_migrations += 1
-                    migration_results.append({
-                        "tenant_id": str(tenant.id),
-                        "tenant_name": tenant.name,
-                        "success": True,
-                        "migration_id": str(result.migration_id),
-                        "migrated_count": result.migrated_count,
-                        "duration": result.duration,
-                        "warnings": result.warnings,
-                    })
-                    
+                    migration_results.append(
+                        {
+                            "tenant_id": str(tenant.id),
+                            "tenant_name": tenant.name,
+                            "success": True,
+                            "migration_id": str(result.migration_id),
+                            "migrated_count": result.migrated_count,
+                            "duration": result.duration,
+                            "warnings": result.warnings,
+                        }
+                    )
+
                     logger.info(
                         f"Successfully completed migration for tenant {tenant.id}",
                         extra={
@@ -989,30 +1030,32 @@ async def migrate_completion_model_for_all_tenants(
                             "tenant_name": tenant.name,
                             "migration_id": str(result.migration_id),
                             "migrated_count": result.migrated_count,
-                        }
+                        },
                     )
-                    
+
             except Exception as e:
                 logger.error(
                     f"Error migrating completion model for tenant {tenant.id}",
                     extra={
                         "tenant_id": str(tenant.id),
-                        "tenant_name": getattr(tenant, 'name', 'unknown'),
+                        "tenant_name": getattr(tenant, "name", "unknown"),
                         "error": str(e),
                         "error_type": type(e).__name__,
                     },
-                    exc_info=True
+                    exc_info=True,
                 )
                 failed_migrations += 1
-                migration_results.append({
-                    "tenant_id": str(tenant.id),
-                    "tenant_name": getattr(tenant, 'name', 'unknown'),
-                    "success": False,
-                    "error": str(e),
-                    "migrated_count": 0,
-                })
+                migration_results.append(
+                    {
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": getattr(tenant, "name", "unknown"),
+                        "success": False,
+                        "error": str(e),
+                        "migrated_count": 0,
+                    }
+                )
                 continue
-        
+
         logger.info(
             "Completed completion model migration for all tenants",
             extra={
@@ -1021,9 +1064,9 @@ async def migrate_completion_model_for_all_tenants(
                 "failed_migrations": failed_migrations,
                 "from_model_id": str(model_id),
                 "to_model_id": str(migration_request.to_model_id),
-            }
+            },
         )
-        
+
         return {
             "message": f"Migration completed for {successful_migrations} out of {len(active_tenants)} tenants",
             "total_tenants": len(active_tenants),
@@ -1031,7 +1074,7 @@ async def migrate_completion_model_for_all_tenants(
             "failed_migrations": failed_migrations,
             "results": migration_results,
         }
-        
+
     except Exception as e:
         logger.error(
             "Error in migrate_completion_model_for_all_tenants endpoint",
@@ -1041,12 +1084,13 @@ async def migrate_completion_model_for_all_tenants(
                 "error": str(e),
                 "error_type": type(e).__name__,
             },
-            exc_info=True
+            exc_info=True,
         )
         from fastapi import HTTPException
+
         raise HTTPException(
             status_code=500,
-            detail=f"Error migrating completion model for all tenants: {str(e)}"
+            detail=f"Error migrating completion model for all tenants: {str(e)}",
         )
 
 
@@ -1062,6 +1106,7 @@ async def migrate_completion_model_for_all_tenants(
 
 
 # Completion Models CRUD
+
 
 @router.post(
     "/completion-models/create",
@@ -1153,6 +1198,7 @@ async def delete_completion_model(
 
 
 # Embedding Models CRUD
+
 
 @router.post(
     "/embedding-models/create",
