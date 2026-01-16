@@ -31,17 +31,33 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index(
-        "idx_audit_target_user_id",
-        "audit_logs",
-        ["tenant_id", sa.text("(metadata->'target'->>'id')")],
-        postgresql_where=sa.text("deleted_at IS NULL"),
-    )
+    with op.get_context().autocommit_block():
+        op.execute(
+            """
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_target_user_id
+            ON audit_logs (tenant_id, (metadata->'target'->>'id'))
+            WHERE deleted_at IS NULL;
+            """
+        )
 
 
 def downgrade() -> None:
-    op.execute("DELETE FROM audit_logs WHERE actor_id IS NULL")
-    op.drop_index("idx_audit_target_user_id", table_name="audit_logs")
+    bind = op.get_bind()
+    null_actor_count = int(
+        bind.execute(
+            sa.text("SELECT COUNT(*) FROM audit_logs WHERE actor_id IS NULL")
+        ).scalar()
+        or 0
+    )
+    if null_actor_count:
+        raise RuntimeError(
+            "Cannot downgrade: audit_logs contains rows with NULL actor_id. "
+            "Delete or reassign those rows before downgrading."
+        )
+
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_audit_target_user_id;")
+
     op.drop_constraint("audit_logs_actor_id_fkey", "audit_logs", type_="foreignkey")
     op.alter_column(
         "audit_logs",

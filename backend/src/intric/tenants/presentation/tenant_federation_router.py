@@ -410,7 +410,7 @@ async def delete_tenant_federation(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=tenant_id,
-        actor_id=tenant.id,
+        actor_id=None,
         actor_type=ActorType.SYSTEM,
         action=ActionType.FEDERATION_UPDATED,
         entity_type=EntityType.FEDERATION_CONFIG,
