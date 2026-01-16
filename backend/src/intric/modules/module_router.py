@@ -53,7 +53,7 @@ async def add_module_to_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=tenant_id,
-        actor_id=tenant_id,  # System actor
+        actor_id=None,  # System actor (no user)
         actor_type=ActorType.SYSTEM,
         action=ActionType.MODULE_ADDED_TO_TENANT,
         entity_type=EntityType.MODULE,

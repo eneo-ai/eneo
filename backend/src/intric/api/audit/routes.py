@@ -47,7 +47,10 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 
 
 def parse_action_list(
-    actions: Optional[list[str]] = Query(None, description="Filter by multiple action types (comma-separated or repeated)")
+    actions: Optional[list[str]] = Query(
+        None,
+        description="Filter by multiple action types (comma-separated or repeated)",
+    ),
 ) -> Optional[list[ActionType]]:
     """
     Parse query parameters that could be:
@@ -74,10 +77,11 @@ def parse_action_list(
             except ValueError:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"Invalid action type: '{part}'. See /api/v1/audit/config/actions for valid types."
+                    detail=f"Invalid action type: '{part}'. See /api/v1/audit/config/actions for valid types.",
                 )
 
     return parsed_actions if parsed_actions else None
+
 
 # Include config routes
 router.include_router(config_router)
@@ -107,7 +111,7 @@ async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
             if username:
                 display_name = username
             elif email:
-                display_name = email.split('@')[0]
+                display_name = email.split("@")[0]
             else:
                 display_name = "Unknown"
 
@@ -174,7 +178,7 @@ async def reset_rate_limit(
         logger.error(f"Failed to reset rate limit: {e}", exc_info=True)
         raise HTTPException(
             status_code=503,
-            detail="Rate limiting service temporarily unavailable. Please try again."
+            detail="Rate limiting service temporarily unavailable. Please try again.",
         )
 
     return Response(status_code=204)
@@ -214,18 +218,15 @@ async def create_access_session(
     # Input validation for security and resource protection
     if len(request.category) > 64:
         raise HTTPException(
-            status_code=400,
-            detail="Category too long (maximum 64 characters)"
+            status_code=400, detail="Category too long (maximum 64 characters)"
         )
     if len(request.description) > 2048:
         raise HTTPException(
-            status_code=400,
-            detail="Description too long (maximum 2048 characters)"
+            status_code=400, detail="Description too long (maximum 2048 characters)"
         )
     if len(request.description.strip()) < 10:
         raise HTTPException(
-            status_code=400,
-            detail="Description too short (minimum 10 characters)"
+            status_code=400, detail="Description too short (minimum 10 characters)"
         )
 
     # Rate limiting: 5 sessions per hour per user (atomic operation to prevent race conditions)
@@ -241,12 +242,12 @@ async def create_access_session(
     except RateLimitExceededError:
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed."
+            detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
         )
     except RateLimitServiceUnavailableError:
         raise HTTPException(
             status_code=503,
-            detail="Rate limiting service temporarily unavailable. Please try again."
+            detail="Rate limiting service temporarily unavailable. Please try again.",
         )
 
     # Create session in Redis (using injected service)
@@ -282,8 +283,8 @@ async def create_access_session(
                     "count": count,
                     "max": 5,
                     "period_seconds": 3600,
-                }
-            }
+                },
+            },
         )
     except Exception as e:
         # If audit logging fails, revoke the session to prevent orphaned sessions
@@ -291,7 +292,7 @@ async def create_access_session(
         await session_service.revoke_session(session_id)
         raise HTTPException(
             status_code=503,
-            detail="Audit logging service temporarily unavailable. Please try again."
+            detail="Audit logging service temporarily unavailable. Please try again.",
         )
 
     # Create response with session cookie
@@ -324,7 +325,9 @@ async def create_access_session(
 async def list_audit_logs(
     request: Request,
     actor_id: Optional[UUID] = Query(None, description="Filter by actor"),
-    action: Optional[ActionType] = Query(None, description="Filter by single action type (deprecated, use actions)"),
+    action: Optional[ActionType] = Query(
+        None, description="Filter by single action type (deprecated, use actions)"
+    ),
     actions: Optional[list[ActionType]] = Depends(parse_action_list),
     from_date: Optional[datetime] = Query(None, description="Filter from date"),
     to_date: Optional[datetime] = Query(None, description="Filter to date"),
@@ -332,7 +335,7 @@ async def list_audit_logs(
         None,
         min_length=3,
         max_length=100,
-        description="Search entity names in log descriptions (min 3 chars)"
+        description="Search entity names in log descriptions (min 3 chars)",
     ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(100, ge=1, le=1000, description="Page size"),
@@ -382,7 +385,7 @@ async def list_audit_logs(
         raise HTTPException(
             status_code=401,  # Changed from 403 for better frontend handling
             detail="Audit access requires justification. Please provide an access reason.",
-            headers={"X-Error-Code": "AUDIT_SESSION_REQUIRED"}
+            headers={"X-Error-Code": "AUDIT_SESSION_REQUIRED"},
         )
 
     # DEBUG: Log before session validation
@@ -394,11 +397,13 @@ async def list_audit_logs(
     )
 
     if not audit_session:
-        logger.warning(f"✗ 401 at line 335: Session validation failed for {session_id[:8]}...")
+        logger.warning(
+            f"✗ 401 at line 335: Session validation failed for {session_id[:8]}..."
+        )
         raise HTTPException(
             status_code=401,  # Changed from 403 for better frontend handling
             detail="Invalid or expired session. Please re-authenticate with justification.",
-            headers={"X-Error-Code": "AUDIT_SESSION_EXPIRED"}
+            headers={"X-Error-Code": "AUDIT_SESSION_EXPIRED"},
         )
 
     logger.info(f"✓ Session validation passed for {session_id[:8]}...")
@@ -462,7 +467,7 @@ async def list_audit_logs(
         newest_log_date = logs[0].created_at
         metadata["date_range_viewed"] = {
             "oldest": oldest_log_date.isoformat(),
-            "newest": newest_log_date.isoformat()
+            "newest": newest_log_date.isoformat(),
         }
 
     # Add access justification from session (always present due to validation above)
@@ -492,7 +497,7 @@ async def list_audit_logs(
         entity_type=EntityType.AUDIT_LOG,
         entity_id=current_user.tenant_id,  # Use tenant_id as entity_id for audit logs
         description=description,
-        metadata=metadata
+        metadata=metadata,
     )
 
     # Enrich logs with actor information for UI display
@@ -509,8 +514,7 @@ async def list_audit_logs(
 
     # Convert to JSON response so we can set cookie
     response = JSONResponse(
-        content=response_data.model_dump(mode='json'),
-        status_code=200
+        content=response_data.model_dump(mode="json"), status_code=200
     )
 
     # Environment-aware cookie configuration
@@ -595,7 +599,7 @@ async def get_user_logs(
         newest_log_date = logs[0].created_at
         metadata["date_range_viewed"] = {
             "oldest": oldest_log_date.isoformat(),
-            "newest": newest_log_date.isoformat()
+            "newest": newest_log_date.isoformat(),
         }
 
     # Build concise description for GDPR access
@@ -611,7 +615,7 @@ async def get_user_logs(
         entity_type=EntityType.USER,
         entity_id=user_id,
         description=description,
-        metadata=metadata
+        metadata=metadata,
     )
 
     # Enrich logs with actor information for UI display
@@ -638,7 +642,7 @@ async def export_audit_logs(
         None,
         ge=1,
         le=100000,
-        description="Maximum records to export (default: 50000, max: 100000)"
+        description="Maximum records to export (default: 50000, max: 100000)",
     ),
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -660,7 +664,9 @@ async def export_audit_logs(
     Requires: Admin permissions
     Security: Only exports logs for the authenticated user's tenant
     """
+    from intric.audit.application.audit_export_service import ExportTooLargeError
     from intric.audit.domain.constants import MAX_EXPORT_RECORDS_DEFAULT
+    from intric.audit.domain.outcome import Outcome
     from intric.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
@@ -677,7 +683,9 @@ async def export_audit_logs(
         export_format = "csv"  # Default to CSV for invalid formats
 
     # Apply default export limit if not specified
-    effective_max_records = max_records if max_records is not None else MAX_EXPORT_RECORDS_DEFAULT
+    effective_max_records = (
+        max_records if max_records is not None else MAX_EXPORT_RECORDS_DEFAULT
+    )
 
     # Build comprehensive metadata for compliance tracking
     metadata = {
@@ -748,19 +756,8 @@ async def export_audit_logs(
     if is_truncated:
         description += f" [truncated to {effective_max_records} of {export_count}]"
 
-    # Log the export with comprehensive metadata
-    await audit_service.log(
-        tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
-        action=ActionType.AUDIT_LOG_EXPORTED,
-        entity_type=EntityType.AUDIT_LOG,
-        entity_id=current_user.tenant_id,
-        description=description,
-        metadata=metadata
-    )
-
     # Generate timestamp for filename
-    timestamp = datetime.now().isoformat().split('T')[0]
+    timestamp = datetime.now().isoformat().split("T")[0]
 
     # Build response headers for truncation info
     response_headers = {
@@ -769,38 +766,82 @@ async def export_audit_logs(
         "X-Max-Records-Limit": str(effective_max_records),
     }
 
-    if export_format == "json":
-        content = await audit_export_service.export_jsonl(
+    try:
+        if export_format == "json":
+            content = await audit_export_service.export_jsonl(
+                tenant_id=current_user.tenant_id,
+                user_id=user_id,
+                actor_id=actor_id,
+                action=action,
+                from_date=from_date,
+                to_date=to_date,
+                max_records=effective_max_records,
+            )
+            response_headers["Content-Disposition"] = (
+                f"attachment; filename=audit_logs_{timestamp}.jsonl"
+            )
+            response = Response(
+                content=content,
+                media_type="application/x-ndjson",
+                headers=response_headers,
+            )
+        else:
+            content = await audit_export_service.export_csv(
+                tenant_id=current_user.tenant_id,
+                user_id=user_id,
+                actor_id=actor_id,
+                action=action,
+                from_date=from_date,
+                to_date=to_date,
+                max_records=effective_max_records,
+            )
+            response_headers["Content-Disposition"] = (
+                f"attachment; filename=audit_logs_{timestamp}.csv"
+            )
+            response = Response(
+                content=content,
+                media_type="text/csv",
+                headers=response_headers,
+            )
+    except ExportTooLargeError as exc:
+        await audit_service.log(
             tenant_id=current_user.tenant_id,
-            user_id=user_id,
-            actor_id=actor_id,
-            action=action,
-            from_date=from_date,
-            to_date=to_date,
-            max_records=effective_max_records,
+            actor_id=current_user.id,
+            action=ActionType.AUDIT_LOG_EXPORTED,
+            entity_type=EntityType.AUDIT_LOG,
+            entity_id=current_user.tenant_id,
+            description=f"{description} (failed)",
+            metadata=metadata,
+            outcome=Outcome.FAILURE,
+            error_message=str(exc),
         )
-        response_headers["Content-Disposition"] = f"attachment; filename=audit_logs_{timestamp}.jsonl"
-        return Response(
-            content=content,
-            media_type="application/x-ndjson",
-            headers=response_headers,
-        )
-    else:
-        content = await audit_export_service.export_csv(
+        raise HTTPException(status_code=413, detail=str(exc))
+    except Exception as exc:
+        await audit_service.log(
             tenant_id=current_user.tenant_id,
-            user_id=user_id,
-            actor_id=actor_id,
-            action=action,
-            from_date=from_date,
-            to_date=to_date,
-            max_records=effective_max_records,
+            actor_id=current_user.id,
+            action=ActionType.AUDIT_LOG_EXPORTED,
+            entity_type=EntityType.AUDIT_LOG,
+            entity_id=current_user.tenant_id,
+            description=f"{description} (failed)",
+            metadata=metadata,
+            outcome=Outcome.FAILURE,
+            error_message=str(exc),
         )
-        response_headers["Content-Disposition"] = f"attachment; filename=audit_logs_{timestamp}.csv"
-        return Response(
-            content=content,
-            media_type="text/csv",
-            headers=response_headers,
-        )
+        raise
+
+    # Log the export after successful generation
+    await audit_service.log(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.AUDIT_LOG_EXPORTED,
+        entity_type=EntityType.AUDIT_LOG,
+        entity_id=current_user.tenant_id,
+        description=description,
+        metadata=metadata,
+    )
+
+    return response
 
 
 # ============================================================================
@@ -834,7 +875,10 @@ async def request_async_export(
     """
     from uuid import uuid4
 
-    from intric.audit.application.audit_task_params import AuditExportTaskParams, ExportFormat
+    from intric.audit.application.audit_task_params import (
+        AuditExportTaskParams,
+        ExportFormat,
+    )
     from intric.audit.infrastructure.export_job_manager import ExportJobManager
     from intric.jobs.job_manager import job_manager
     from intric.roles.permissions import Permission, validate_permission
@@ -855,7 +899,7 @@ async def request_async_export(
         raise HTTPException(
             status_code=429,
             detail=f"Maximum {settings.export_max_concurrent_per_tenant} concurrent exports allowed. "
-                   f"Please wait for existing exports to complete or cancel them.",
+            f"Please wait for existing exports to complete or cancel them.",
         )
 
     # Validate and normalize format
@@ -883,7 +927,7 @@ async def request_async_export(
         tenant_id=current_user.tenant_id,
         user_id=request.user_id,
         actor_id=request.actor_id,
-        action=request.action.value if request.action else None,
+        action=request.action,
         from_date=request.from_date,
         to_date=request.to_date,
         format=ExportFormat(export_format),
@@ -898,8 +942,7 @@ async def request_async_export(
     )
 
     # Log the export request
-    audit_repo = AuditLogRepositoryImpl(container.session())
-    audit_service = AuditService(audit_repo)
+    audit_service = container.audit_service()
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -1089,10 +1132,13 @@ async def cancel_export(
             raise HTTPException(
                 status_code=400,
                 detail=f"Job in '{job.status.value}' state cannot be cancelled. "
-                       f"Only 'pending' or 'processing' jobs can be cancelled.",
+                f"Only 'pending' or 'processing' jobs can be cancelled.",
             )
 
-    return {"status": "cancellation_requested", "message": "Export job cancellation requested"}
+    return {
+        "status": "cancellation_requested",
+        "message": "Export job cancellation requested",
+    }
 
 
 @router.get("/retention-policy", response_model=RetentionPolicyResponse)

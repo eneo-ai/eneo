@@ -100,7 +100,9 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         result = await self.session.scalar(query)
         return self._to_domain(result)
 
-    async def get_by_id(self, audit_log_id: UUID, tenant_id: UUID) -> Optional[AuditLog]:
+    async def get_by_id(
+        self, audit_log_id: UUID, tenant_id: UUID
+    ) -> Optional[AuditLog]:
         """Get audit log by ID with tenant isolation."""
         query = sa.select(AuditLogTable).where(
             sa.and_(
@@ -325,19 +327,16 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
 
         # Build base subquery to identify logs to delete (will be limited per batch)
-        base_subquery = (
-            sa.select(AuditLogTable.id)
-            .where(
-                sa.and_(
-                    AuditLogTable.tenant_id == tenant_id,
-                    AuditLogTable.created_at < cutoff_expr,
-                )
+        base_subquery = sa.select(AuditLogTable.id).where(
+            sa.and_(
+                AuditLogTable.tenant_id == tenant_id,
+                AuditLogTable.timestamp < cutoff_expr,
             )
         )
 
         # Batch deletion to prevent transaction timeouts on large datasets
         # Note: No ORDER BY needed for deletions - any matching rows are valid targets
-        # This avoids O(N²) sorting overhead when filtering by created_at
+        # This avoids O(N²) sorting overhead when filtering by timestamp
         total_deleted = 0
         start_time = time.time()
         while True:
@@ -425,7 +424,6 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         async for row in await self.session.stream_scalars(query):
             yield self._to_domain(row)
 
-
     async def stream_logs_raw(
         self,
         tenant_id: UUID,
@@ -503,7 +501,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 "id": str(row.id),
                 "tenant_id": str(row.tenant_id),
                 "timestamp": row.timestamp.isoformat(),
-                "actor_id": str(row.actor_id),
+                "actor_id": str(row.actor_id) if row.actor_id else None,
                 "actor_type": row.actor_type,
                 "action": row.action,
                 "entity_type": row.entity_type,
@@ -597,7 +595,6 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 updated_at=row.updated_at,
             )
             yield self._to_domain(table_obj)
-
 
     async def stream_user_logs_raw(
         self,
@@ -695,7 +692,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 "id": str(row.id),
                 "tenant_id": str(row.tenant_id),
                 "timestamp": row.timestamp.isoformat(),
-                "actor_id": str(row.actor_id),
+                "actor_id": str(row.actor_id) if row.actor_id else None,
                 "actor_type": row.actor_type,
                 "action": row.action,
                 "entity_type": row.entity_type,
@@ -729,10 +726,14 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         Returns:
             Total count of matching logs
         """
-        query = sa.select(sa.func.count()).select_from(AuditLogTable).where(
-            sa.and_(
-                AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.deleted_at.is_(None),
+        query = (
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(
+                sa.and_(
+                    AuditLogTable.tenant_id == tenant_id,
+                    AuditLogTable.deleted_at.is_(None),
+                )
             )
         )
 

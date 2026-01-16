@@ -29,7 +29,7 @@ class AuditLog:
     Attributes:
         id: Unique identifier for this audit log
         tenant_id: Tenant that owns this audit log (multi-tenancy isolation)
-        actor_id: User/system/API key that performed the action
+        actor_id: User/API key ID (optional for system actions or deleted actors)
         actor_type: Type of actor (USER, SYSTEM, API_KEY)
         action: Type of action performed (see ActionType enum)
         entity_type: Type of entity affected (see EntityType enum)
@@ -49,7 +49,7 @@ class AuditLog:
 
     id: UUID
     tenant_id: UUID
-    actor_id: UUID
+    actor_id: Optional[UUID]
     actor_type: ActorType
     action: ActionType
     entity_type: EntityType
@@ -95,4 +95,6 @@ class AuditLog:
         # User agent validation
         if self.user_agent and len(self.user_agent) > MAX_USER_AGENT_LENGTH:
             # Truncate instead of raising (user agents can be very long)
-            object.__setattr__(self, "user_agent", self.user_agent[:MAX_USER_AGENT_LENGTH])
+            object.__setattr__(
+                self, "user_agent", self.user_agent[:MAX_USER_AGENT_LENGTH]
+            )
