@@ -1134,6 +1134,11 @@ export interface paths {
   };
   "/api/v1/admin/tenant-models/completion/{model_id}/": {
     /**
+     * Update Tenant Completion Model
+     * @description Update a tenant-specific completion model.
+     */
+    put: operations["update_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___put"];
+    /**
      * Delete Tenant Completion Model
      * @description Delete a tenant-specific completion model.
      */
@@ -1148,6 +1153,11 @@ export interface paths {
   };
   "/api/v1/admin/tenant-models/embedding/{model_id}/": {
     /**
+     * Update Tenant Embedding Model
+     * @description Update a tenant-specific embedding model.
+     */
+    put: operations["update_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___put"];
+    /**
      * Delete Tenant Embedding Model
      * @description Delete a tenant-specific embedding model.
      */
@@ -1161,6 +1171,11 @@ export interface paths {
     post: operations["create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post"];
   };
   "/api/v1/admin/tenant-models/transcription/{model_id}/": {
+    /**
+     * Update Tenant Transcription Model
+     * @description Update a tenant-specific transcription model.
+     */
+    put: operations["update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put"];
     /**
      * Delete Tenant Transcription Model
      * @description Delete a tenant-specific transcription model.
@@ -2327,6 +2342,18 @@ export interface paths {
     /** Get Healthz */
     get: operations["get_healthz_api_healthz_get"];
   };
+  "/api/healthz/crawler": {
+    /**
+     * Crawler Health
+     * @description Detailed crawler diagnostics. NOT for K8s probes.
+     *
+     * Public endpoint - no auth required. Shows only job counts and tenant IDs.
+     *
+     * Args:
+     *     include_all: If True, return all tenant queue lengths instead of top-10.
+     */
+    get: operations["crawler_health_api_healthz_crawler_get"];
+  };
   "/version": {
     /** Get Version */
     get: operations["get_version_version_get"];
@@ -2337,6 +2364,41 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /**
+     * ARQHealth
+     * @description Parsed ARQ health metrics (clean view).
+     */
+    ARQHealth: {
+      /** Heartbeat Ttl Seconds */
+      heartbeat_ttl_seconds?: number | null;
+      /** Age Seconds */
+      age_seconds?: number | null;
+      /**
+       * J Complete
+       * @default 0
+       */
+      j_complete?: number;
+      /**
+       * J Failed
+       * @default 0
+       */
+      j_failed?: number;
+      /**
+       * J Retried
+       * @default 0
+       */
+      j_retried?: number;
+      /**
+       * J Ongoing
+       * @default 0
+       */
+      j_ongoing?: number;
+      /**
+       * Queued
+       * @default 0
+       */
+      queued?: number;
+    };
     /** AcceptedFileType */
     AcceptedFileType: {
       /** Mimetype */
@@ -2692,12 +2754,12 @@ export interface components {
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       prompt: components["schemas"]["PromptPublic"] | null;
-      completion_model: components["schemas"]["CompletionModelSparse"];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Published */
       published: boolean;
-      transcription_model: components["schemas"]["TranscriptionModelPublic"];
+      transcription_model?: components["schemas"]["TranscriptionModelPublic"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -3204,7 +3266,7 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
-      completion_model: components["schemas"]["CompletionModelSparse"];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
        * @default false
@@ -3292,6 +3354,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
+      /**
+       * Completion Model Id
+       * @description ID of the completion model, or None if not configured
+       */
+      completion_model_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -3888,6 +3955,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -3981,6 +4052,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -3996,10 +4071,6 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
-      /** Tenant Id */
-      tenant_id?: string | null;
-      /** Provider Id */
-      provider_id?: string | null;
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -4072,6 +4143,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -4087,10 +4162,6 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
-      /** Tenant Id */
-      tenant_id?: string | null;
-      /** Provider Id */
-      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -4216,6 +4287,96 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlerActivity
+     * @description Real-time crawler activity from multiple sources.
+     */
+    CrawlerActivity: {
+      /** Db In Progress */
+      db_in_progress?: number | null;
+      /**
+       * Db Query Ok
+       * @default true
+       */
+      db_query_ok?: boolean;
+      /**
+       * Arq Ongoing
+       * @default 0
+       */
+      arq_ongoing?: number;
+      /** Delta */
+      delta?: number | null;
+    };
+    /**
+     * CrawlerHealthResponse
+     * @description Crawler health status with operator-friendly signals.
+     */
+    CrawlerHealthResponse: {
+      /** Status */
+      status: string;
+      /**
+       * Status Flags
+       * @default []
+       */
+      status_flags?: string[];
+      /**
+       * Status Reason
+       * @default
+       */
+      status_reason?: string;
+      /** Response Timestamp Utc */
+      response_timestamp_utc: string;
+      /**
+       * @default {
+       *   "db_query_ok": true,
+       *   "arq_ongoing": 0
+       * }
+       */
+      crawler_activity?: components["schemas"]["CrawlerActivity"];
+      /**
+       * @default {
+       *   "j_complete": 0,
+       *   "j_failed": 0,
+       *   "j_retried": 0,
+       *   "j_ongoing": 0,
+       *   "queued": 0
+       * }
+       */
+      arq?: components["schemas"]["ARQHealth"];
+      /**
+       * @default {
+       *   "zombies_reconciled": 0,
+       *   "expired_killed": 0,
+       *   "rescued": 0,
+       *   "early_zombies_failed": 0,
+       *   "long_running_failed": 0,
+       *   "slots_released": 0
+       * }
+       */
+      watchdog?: components["schemas"]["WatchdogMetrics"];
+      /**
+       * @default {
+       *   "status": "UNKNOWN"
+       * }
+       */
+      feeder?: components["schemas"]["FeederLeader"];
+      /**
+       * @default {
+       *   "total": 0,
+       *   "tenant_count": 0,
+       *   "top_tenants": {}
+       * }
+       */
+      pending?: components["schemas"]["PendingQueueSummary"];
+      thresholds: components["schemas"]["HealthThresholds"];
+      /**
+       * @default {
+       *   "arq_raw": "",
+       *   "queue_name": "arq:queue"
+       * }
+       */
+      debug?: components["schemas"]["DebugInfo"];
+    };
     /**
      * CrawlerSettingsResponse
      * @description Response model for crawler settings operations.
@@ -4520,6 +4681,28 @@ export interface components {
     /** Dashboard */
     Dashboard: {
       spaces: components["schemas"]["PaginatedResponse_SpaceDashboard_"];
+    };
+    /**
+     * DebugInfo
+     * @description Raw data for debugging - noisy, not for quick reads.
+     */
+    DebugInfo: {
+      /**
+       * Arq Raw
+       * @default
+       */
+      arq_raw?: string;
+      /** Arq Timestamp */
+      arq_timestamp?: string | null;
+      /** Watchdog Timestamp */
+      watchdog_timestamp?: string | null;
+      /** Redis Db */
+      redis_db?: number | null;
+      /**
+       * Queue Name
+       * @default arq:queue
+       */
+      queue_name?: string;
     };
     /** DefaultAssistant */
     DefaultAssistant: {
@@ -5190,6 +5373,21 @@ export interface components {
       /** Tenant Count */
       tenant_count: number;
     };
+    /**
+     * FeederLeader
+     * @description Feeder leader election status.
+     */
+    FeederLeader: {
+      /** Leader Id */
+      leader_id?: string | null;
+      /** Leader Ttl Seconds */
+      leader_ttl_seconds?: number | null;
+      /**
+       * Status
+       * @default UNKNOWN
+       */
+      status?: string;
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -5484,6 +5682,18 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
+    };
+    /**
+     * HealthThresholds
+     * @description Thresholds used for status decisions - helps explain status.
+     */
+    HealthThresholds: {
+      /** Feeder Interval Seconds */
+      feeder_interval_seconds: number;
+      /** Watchdog Stale Threshold Seconds */
+      watchdog_stale_threshold_seconds: number;
+      /** Heartbeat Ttl Expected Seconds */
+      heartbeat_ttl_expected_seconds: number;
     };
     /** IconPublic */
     IconPublic: {
@@ -6118,11 +6328,8 @@ export interface components {
       };
       /** Is Active */
       is_active: boolean;
-      /**
-       * Masked Api Key
-       * @description Masked API key for display (e.g., "...xyz9"), or null if not configured
-       */
-      masked_api_key: string | null;
+      /** Masked Api Key */
+      masked_api_key?: string | null;
       /**
        * Created At
        * Format: date-time
@@ -7220,6 +7427,29 @@ export interface components {
        * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
+    };
+    /**
+     * PendingQueueSummary
+     * @description Pending crawl queue summary.
+     */
+    PendingQueueSummary: {
+      /**
+       * Total
+       * @default 0
+       */
+      total?: number;
+      /**
+       * Tenant Count
+       * @default 0
+       */
+      tenant_count?: number;
+      /**
+       * Top Tenants
+       * @default {}
+       */
+      top_tenants?: {
+        [key: string]: number;
+      };
     };
     /**
      * Permission
@@ -8581,6 +8811,49 @@ export interface components {
        */
       is_default?: boolean;
     };
+    /** TenantCompletionModelUpdate */
+    TenantCompletionModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Token Limit
+       * @description Maximum context tokens
+       */
+      token_limit?: number | null;
+      /**
+       * Vision
+       * @description Supports vision/image inputs
+       */
+      vision?: boolean | null;
+      /**
+       * Reasoning
+       * @description Supports extended reasoning
+       */
+      reasoning?: boolean | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
     /** TenantEmbeddingModelCreate */
     TenantEmbeddingModelCreate: {
       /**
@@ -8599,6 +8872,12 @@ export interface components {
        * @description User-friendly display name
        */
       display_name: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'huggingface_e5', 'cohere', 'voyage')
+       * @default openai
+       */
+      family?: string;
       /**
        * Dimensions
        * @description Embedding dimensions
@@ -8621,6 +8900,49 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+    };
+    /** TenantEmbeddingModelUpdate */
+    TenantEmbeddingModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Family
+       * @description Model family
+       */
+      family?: string | null;
+      /**
+       * Dimensions
+       * @description Embedding dimensions
+       */
+      dimensions?: number | null;
+      /**
+       * Max Input
+       * @description Maximum input tokens
+       */
+      max_input?: number | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
     };
     /** TenantInDB */
     TenantInDB: {
@@ -8893,6 +9215,34 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+    };
+    /** TenantTranscriptionModelUpdate */
+    TenantTranscriptionModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
     };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
@@ -9973,6 +10323,44 @@ export interface components {
       msg: string;
       /** Error Type */
       type: string;
+    };
+    /**
+     * WatchdogMetrics
+     * @description Watchdog activity metrics.
+     */
+    WatchdogMetrics: {
+      /** Age Seconds */
+      age_seconds?: number | null;
+      /**
+       * Zombies Reconciled
+       * @default 0
+       */
+      zombies_reconciled?: number;
+      /**
+       * Expired Killed
+       * @default 0
+       */
+      expired_killed?: number;
+      /**
+       * Rescued
+       * @default 0
+       */
+      rescued?: number;
+      /**
+       * Early Zombies Failed
+       * @default 0
+       */
+      early_zombies_failed?: number;
+      /**
+       * Long Running Failed
+       * @default 0
+       */
+      long_running_failed?: number;
+      /**
+       * Slots Released
+       * @default 0
+       */
+      slots_released?: number;
     };
     /** WebSearchResultPublic */
     WebSearchResultPublic: {
@@ -11931,6 +12319,10 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -11948,10 +12340,6 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
-                /** Tenant Id */
-                tenant_id?: string | null;
-                /** Provider Id */
-                provider_id?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -12244,6 +12632,10 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -12261,10 +12653,6 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
-                /** Tenant Id */
-                tenant_id?: string | null;
-                /** Provider Id */
-                provider_id?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -14345,7 +14733,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     requestBody: {
@@ -16131,6 +16520,48 @@ export interface operations {
     };
   };
   /**
+   * Update Tenant Completion Model
+   * @description Update a tenant-specific completion model.
+   */
+  update_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Delete Tenant Completion Model
    * @description Delete a tenant-specific completion model.
    */
@@ -16205,6 +16636,48 @@ export interface operations {
     };
   };
   /**
+   * Update Tenant Embedding Model
+   * @description Update a tenant-specific embedding model.
+   */
+  update_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Delete Tenant Embedding Model
    * @description Delete a tenant-specific embedding model.
    */
@@ -16260,6 +16733,48 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Transcription Model
+   * @description Update a tenant-specific transcription model.
+   */
+  update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantTranscriptionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -20487,7 +21002,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     requestBody: {
@@ -20526,7 +21042,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     responses: {
@@ -21082,6 +21599,36 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Crawler Health
+   * @description Detailed crawler diagnostics. NOT for K8s probes.
+   *
+   * Public endpoint - no auth required. Shows only job counts and tenant IDs.
+   *
+   * Args:
+   *     include_all: If True, return all tenant queue lengths instead of top-10.
+   */
+  crawler_health_api_healthz_crawler_get: {
+    parameters: {
+      query?: {
+        include_all?: boolean;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerHealthResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

@@ -32,6 +32,17 @@ class TenantEmbeddingModelCreate(BaseModel):
     is_default: bool = Field(default=False, description="Set as default model")
 
 
+class TenantEmbeddingModelUpdate(BaseModel):
+    display_name: str | None = Field(None, description="User-friendly display name")
+    description: str | None = Field(None, description="Model description")
+    family: str | None = Field(None, description="Model family")
+    dimensions: int | None = Field(None, description="Embedding dimensions")
+    max_input: int | None = Field(None, description="Maximum input tokens")
+    hosting: str | None = Field(None, description="Hosting location (eu, usa)")
+    open_source: bool | None = Field(None, description="Is the model open source")
+    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+
+
 @router.post(
     "/",
     response_model=EmbeddingModelPublic,
@@ -109,6 +120,67 @@ async def create_tenant_embedding_model(
     return EmbeddingModelPublic.from_domain(embedding_model)
 
 
+@router.put(
+    "/{model_id}/",
+    response_model=EmbeddingModelPublic,
+    responses=responses.get_responses([403, 404]),
+)
+async def update_tenant_embedding_model(
+    model_id: UUID,
+    model_update: TenantEmbeddingModelUpdate,
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Update a tenant-specific embedding model."""
+    from intric.database.tables.ai_models_table import EmbeddingModels
+    import sqlalchemy as sa
+    from intric.main.exceptions import UnauthorizedException, NotFoundException
+
+    # Verify model exists and belongs to user's tenant
+    stmt = sa.select(EmbeddingModels).where(
+        EmbeddingModels.id == model_id,
+        EmbeddingModels.tenant_id == user.tenant_id,
+    )
+    result = await session.execute(stmt)
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise NotFoundException("Model not found or does not belong to your organization")
+
+    # Cannot update global models
+    if model.tenant_id is None:
+        raise UnauthorizedException("Cannot update global models")
+
+    # Update fields that were provided
+    if model_update.display_name is not None:
+        model.description = f"Tenant model: {model_update.display_name}"
+    if model_update.description is not None:
+        model.description = model_update.description
+    if model_update.family is not None:
+        model.family = model_update.family
+    if model_update.dimensions is not None:
+        model.dimensions = model_update.dimensions
+    if model_update.max_input is not None:
+        model.max_input = model_update.max_input
+    if model_update.hosting is not None:
+        model.hosting = model_update.hosting
+    if model_update.open_source is not None:
+        model.open_source = model_update.open_source
+    if model_update.stability is not None:
+        model.stability = model_update.stability
+
+    await session.flush()
+
+    # Load the updated model
+    from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
+    repo = EmbeddingModelRepository(session, user)
+    embedding_model = await repo.one(model.id)
+
+    await session.commit()
+
+    return EmbeddingModelPublic.from_domain(embedding_model)
+
+
 @router.delete(
     "/{model_id}/",
     responses=responses.get_responses([403, 404]),
@@ -121,7 +193,7 @@ async def delete_tenant_embedding_model(
     """Delete a tenant-specific embedding model."""
     from intric.database.tables.ai_models_table import EmbeddingModels
     import sqlalchemy as sa
-    from intric.main.exceptions import ForbiddenException, NotFoundException
+    from intric.main.exceptions import UnauthorizedException, NotFoundException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
@@ -136,7 +208,7 @@ async def delete_tenant_embedding_model(
 
     # Cannot delete global models
     if model.tenant_id is None:
-        raise ForbiddenException("Cannot delete global models")
+        raise UnauthorizedException("Cannot delete global models")
 
     # Delete the model (settings are now on the model itself)
     await session.delete(model)

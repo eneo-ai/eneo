@@ -10,9 +10,9 @@
   import { Button, Dropdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
-  import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
+  import EditModelDialog from "./EditModelDialog.svelte";
   import { writable } from "svelte/store";
-  import { IconInfo } from "@intric/icons/info";
+  import { Pencil } from "lucide-svelte";
   import { IconCancel } from "@intric/icons/cancel";
   import { IconCheck } from "@intric/icons/check";
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
@@ -61,7 +61,7 @@
     }
   }
 
-  const showCardDialog = writable(false);
+  const showEditDialog = writable(false);
   const showSecurityDialog = writable(false);
 </script>
 
@@ -76,10 +76,10 @@
       is={item}
       padding="icon-leading"
       on:click={() => {
-        $showCardDialog = true;
+        $showEditDialog = true;
       }}
     >
-      <IconInfo></IconInfo>{m.show_model_info()}
+      <Pencil class="h-4 w-4" />{m.edit_model()}
     </Button>
     <Button
       is={item}
@@ -117,7 +117,7 @@
   </Dropdown.Menu>
 </Dropdown.Root>
 
-<ModelCardDialog {model} openController={showCardDialog} includeTrigger={false}></ModelCardDialog>
+<EditModelDialog {model} {type} openController={showEditDialog} />
 
 <ModelClassificationDialog {model} {type} openController={showSecurityDialog}
 ></ModelClassificationDialog>

@@ -14,7 +14,7 @@
     getLabels
   } from "$lib/features/ai-models/components/ModelLabels.svelte";
   import ModelActions from "./ModelActions.svelte";
-  import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
+  import ModelNameCell from "./ModelNameCell.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import ProviderActions from "./ProviderActions.svelte";
@@ -48,7 +48,7 @@
       accessor: (model) => model,
       header: m.name(),
       cell: (item) => {
-        return createRender(ModelCardDialog, { model: item.value, includeTrigger: true });
+        return createRender(ModelNameCell, { model: item.value });
       },
       plugins: {
         sort: {

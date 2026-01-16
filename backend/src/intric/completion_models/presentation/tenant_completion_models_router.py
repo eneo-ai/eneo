@@ -31,6 +31,17 @@ class TenantCompletionModelCreate(BaseModel):
     is_default: bool = Field(default=False, description="Set as default model")
 
 
+class TenantCompletionModelUpdate(BaseModel):
+    display_name: str | None = Field(None, description="User-friendly display name")
+    description: str | None = Field(None, description="Model description")
+    token_limit: int | None = Field(None, description="Maximum context tokens")
+    vision: bool | None = Field(None, description="Supports vision/image inputs")
+    reasoning: bool | None = Field(None, description="Supports extended reasoning")
+    hosting: str | None = Field(None, description="Hosting location (eu, usa)")
+    open_source: bool | None = Field(None, description="Is the model open source")
+    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+
+
 @router.post(
     "/",
     response_model=CompletionModelPublic,
@@ -117,6 +128,70 @@ async def create_tenant_completion_model(
     return assembler.from_completion_model_to_model(completion_model=completion_model)
 
 
+@router.put(
+    "/{model_id}/",
+    response_model=CompletionModelPublic,
+    responses=responses.get_responses([403, 404]),
+)
+async def update_tenant_completion_model(
+    model_id: UUID,
+    model_update: TenantCompletionModelUpdate,
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Update a tenant-specific completion model."""
+    from intric.database.tables.ai_models_table import CompletionModels
+    import sqlalchemy as sa
+    from intric.main.exceptions import UnauthorizedException, NotFoundException
+
+    assembler = container.completion_model_assembler()
+
+    # Verify model exists and belongs to user's tenant
+    stmt = sa.select(CompletionModels).where(
+        CompletionModels.id == model_id,
+        CompletionModels.tenant_id == user.tenant_id,
+    )
+    result = await session.execute(stmt)
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise NotFoundException("Model not found or does not belong to your organization")
+
+    # Cannot update global models
+    if model.tenant_id is None:
+        raise UnauthorizedException("Cannot update global models")
+
+    # Update fields that were provided
+    if model_update.display_name is not None:
+        model.nickname = model_update.display_name
+    if model_update.description is not None:
+        model.description = model_update.description
+    if model_update.token_limit is not None:
+        model.token_limit = model_update.token_limit
+    if model_update.vision is not None:
+        model.vision = model_update.vision
+    if model_update.reasoning is not None:
+        model.reasoning = model_update.reasoning
+    if model_update.hosting is not None:
+        model.hosting = model_update.hosting
+    if model_update.open_source is not None:
+        model.open_source = model_update.open_source
+    if model_update.stability is not None:
+        model.stability = model_update.stability
+
+    await session.flush()
+
+    # Load the updated model
+    from intric.completion_models.domain.completion_model_repo import CompletionModelRepository
+    repo = CompletionModelRepository(session, user)
+    completion_model = await repo.one(model.id)
+
+    await session.commit()
+
+    return assembler.from_completion_model_to_model(completion_model=completion_model)
+
+
 @router.delete(
     "/{model_id}/",
     responses=responses.get_responses([403, 404]),
@@ -129,7 +204,7 @@ async def delete_tenant_completion_model(
     """Delete a tenant-specific completion model."""
     from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import ForbiddenException, NotFoundException
+    from intric.main.exceptions import UnauthorizedException, NotFoundException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(CompletionModels).where(
@@ -144,7 +219,7 @@ async def delete_tenant_completion_model(
 
     # Cannot delete global models
     if model.tenant_id is None:
-        raise ForbiddenException("Cannot delete global models")
+        raise UnauthorizedException("Cannot delete global models")
 
     # Delete the model (settings are now on the model itself)
     await session.delete(model)
