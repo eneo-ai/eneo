@@ -3519,7 +3519,7 @@ export interface components {
        * Actor Id
        * Format: uuid
        */
-      actor_id: string;
+      actor_id?: string | null;
       actor_type: components["schemas"]["ActorType"];
       action: components["schemas"]["ActionType"];
       entity_type: components["schemas"]["EntityType"];

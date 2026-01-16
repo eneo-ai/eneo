@@ -287,9 +287,7 @@ async def set_tenant_federation(
             return "client_secret_basic"
         return normalized[0] if normalized else "client_secret_post"
 
-    token_endpoint_auth_method = _select_token_auth_method(
-        token_auth_methods_supported
-    )
+    token_endpoint_auth_method = _select_token_auth_method(token_auth_methods_supported)
 
     # Encrypt client_secret
     encrypted_secret = encryption_service.encrypt(request.client_secret)
@@ -356,7 +354,7 @@ async def set_tenant_federation(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=tenant_id,
-        actor_id=tenant.id,  # Use tenant as actor for sysadmin
+        actor_id=None,  # System actor (no user)
         actor_type=ActorType.SYSTEM,
         action=ActionType.FEDERATION_UPDATED,
         entity_type=EntityType.FEDERATION_CONFIG,

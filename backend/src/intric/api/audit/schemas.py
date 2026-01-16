@@ -16,7 +16,7 @@ class AuditLogCreate(BaseModel):
     """Schema for creating an audit log."""
 
     tenant_id: UUID
-    actor_id: UUID
+    actor_id: Optional[UUID] = None
     actor_type: ActorType = ActorType.USER
     action: ActionType
     entity_type: EntityType
@@ -35,7 +35,7 @@ class AuditLogResponse(BaseModel):
 
     id: UUID
     tenant_id: UUID
-    actor_id: UUID
+    actor_id: Optional[UUID] = None
     actor_type: ActorType
     action: ActionType
     entity_type: EntityType
@@ -96,14 +96,18 @@ class ExportJobRequest(BaseModel):
     from_date: Optional[datetime] = Field(None, description="Filter from date")
     to_date: Optional[datetime] = Field(None, description="Filter to date")
     format: str = Field("csv", description="Export format: csv or jsonl")
-    max_records: Optional[int] = Field(None, ge=1, description="Maximum records to export")
+    max_records: Optional[int] = Field(
+        None, ge=1, description="Maximum records to export"
+    )
 
 
 class ExportJobResponse(BaseModel):
     """Schema for export job creation response."""
 
     job_id: UUID
-    status: str = Field(description="Job status: pending, processing, completed, failed, cancelled")
+    status: str = Field(
+        description="Job status: pending, processing, completed, failed, cancelled"
+    )
     message: Optional[str] = Field(None, description="Status message")
 
 
@@ -111,14 +115,22 @@ class ExportJobStatusResponse(BaseModel):
     """Schema for export job status response."""
 
     job_id: UUID
-    status: str = Field(description="Job status: pending, processing, completed, failed, cancelled")
+    status: str = Field(
+        description="Job status: pending, processing, completed, failed, cancelled"
+    )
     progress: int = Field(ge=0, le=100, description="Progress percentage")
     total_records: int = Field(ge=0, description="Total records to export")
     processed_records: int = Field(ge=0, description="Records processed so far")
     format: str = Field(description="Export format: csv or jsonl")
-    file_size_bytes: Optional[int] = Field(None, description="File size in bytes (when completed)")
-    error_message: Optional[str] = Field(None, description="Error message (when failed)")
-    download_url: Optional[str] = Field(None, description="Download URL (when completed)")
+    file_size_bytes: Optional[int] = Field(
+        None, description="File size in bytes (when completed)"
+    )
+    error_message: Optional[str] = Field(
+        None, description="Error message (when failed)"
+    )
+    download_url: Optional[str] = Field(
+        None, description="Download URL (when completed)"
+    )
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -128,12 +140,20 @@ class ExportJobStatusResponse(BaseModel):
 class AccessJustificationRequest(BaseModel):
     """Schema for creating audit access session with justification."""
 
-    category: str = Field(min_length=1, max_length=100, description="Justification category")
-    description: str = Field(min_length=10, max_length=500, description="Detailed access reason")
+    category: str = Field(
+        min_length=1, max_length=100, description="Justification category"
+    )
+    description: str = Field(
+        min_length=10, max_length=500, description="Detailed access reason"
+    )
 
 
 class AccessJustificationResponse(BaseModel):
     """Schema for access session creation response."""
 
-    status: str = Field(default="session_created", description="Status of session creation")
-    message: Optional[str] = Field(default=None, description="Additional message if needed")
+    status: str = Field(
+        default="session_created", description="Status of session creation"
+    )
+    message: Optional[str] = Field(
+        default=None, description="Additional message if needed"
+    )

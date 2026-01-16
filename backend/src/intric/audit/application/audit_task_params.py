@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
@@ -17,7 +17,7 @@ class AuditLogTaskParams(BaseModel):
     """Parameters for async audit log creation."""
 
     tenant_id: UUID
-    actor_id: UUID
+    actor_id: Optional[UUID] = None
     actor_type: ActorType = ActorType.USER
     action: ActionType
     entity_type: EntityType
@@ -30,6 +30,12 @@ class AuditLogTaskParams(BaseModel):
     user_agent: Optional[str] = None
     request_id: Optional[UUID] = None
     error_message: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_actor_id(self) -> "AuditLogTaskParams":
+        if self.actor_type != ActorType.SYSTEM and self.actor_id is None:
+            raise ValueError("actor_id required for non-system actions")
+        return self
 
 
 class ExportFormat(str, Enum):
@@ -56,7 +62,7 @@ class AuditExportTaskParams(BaseModel):
     tenant_id: UUID
     user_id: Optional[UUID] = None  # GDPR export filter
     actor_id: Optional[UUID] = None
-    action: Optional[str] = None  # ActionType value as string
+    action: Optional[ActionType] = None  # ActionType value
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None
     format: ExportFormat = ExportFormat.CSV
@@ -68,7 +74,7 @@ class AuditExportTaskParams(BaseModel):
             "tenant_id": str(self.tenant_id),
             "user_id": str(self.user_id) if self.user_id else None,
             "actor_id": str(self.actor_id) if self.actor_id else None,
-            "action": self.action,
+            "action": self.action.value if self.action else None,
             "from_date": self.from_date.isoformat() if self.from_date else None,
             "to_date": self.to_date.isoformat() if self.to_date else None,
             "format": self.format.value,
@@ -78,13 +84,21 @@ class AuditExportTaskParams(BaseModel):
     @classmethod
     def from_dict(cls, data: dict) -> "AuditExportTaskParams":
         """Create from dict received by ARQ worker."""
+        format_value = data.get("format", "csv")
+        if format_value == "json":
+            format_value = "jsonl"
+
         return cls(
             tenant_id=UUID(data["tenant_id"]),
             user_id=UUID(data["user_id"]) if data.get("user_id") else None,
             actor_id=UUID(data["actor_id"]) if data.get("actor_id") else None,
-            action=data.get("action"),
-            from_date=datetime.fromisoformat(data["from_date"]) if data.get("from_date") else None,
-            to_date=datetime.fromisoformat(data["to_date"]) if data.get("to_date") else None,
-            format=ExportFormat(data.get("format", "csv")),
+            action=ActionType(data["action"]) if data.get("action") else None,
+            from_date=datetime.fromisoformat(data["from_date"])
+            if data.get("from_date")
+            else None,
+            to_date=datetime.fromisoformat(data["to_date"])
+            if data.get("to_date")
+            else None,
+            format=ExportFormat(format_value),
             max_records=data.get("max_records"),
         )

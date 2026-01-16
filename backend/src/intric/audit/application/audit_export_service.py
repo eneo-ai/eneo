@@ -48,6 +48,7 @@ class ExportTooLargeError(Exception):
             f"Use streaming export methods or pass max_records parameter."
         )
 
+
 # CSV header row - defined once for consistency across all export methods
 CSV_HEADERS = [
     "Timestamp",
@@ -76,7 +77,7 @@ def _sanitize_csv_cell(value: str) -> str:
     Returns:
         Sanitized cell value
     """
-    if value and value[0] in ('=', '+', '-', '@', '\t', '\r'):
+    if value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
         return "'" + value
     return value
 
@@ -245,15 +246,20 @@ class AuditExportService:
         # Serialize metadata as JSON for consistent output format
         # Use orjson with _orjson_default to handle UUID/Decimal/datetime in metadata
         metadata = log_dict.get("metadata", {})
-        metadata_json = orjson.dumps(metadata, default=_orjson_default).decode("utf-8") if metadata else "{}"
+        metadata_json = (
+            orjson.dumps(metadata, default=_orjson_default).decode("utf-8")
+            if metadata
+            else "{}"
+        )
 
         # Handle None description - use explicit None check to preserve empty strings
         description = log_dict.get("description")
         description_value = description if description is not None else ""
+        actor_id_value = log_dict.get("actor_id") or ""
 
         return [
             ts,
-            log_dict["actor_id"],
+            actor_id_value,
             log_dict["actor_type"],
             log_dict["action"],
             log_dict["entity_type"],
@@ -411,7 +417,9 @@ class AuditExportService:
         total_exported = 0
         async for log in log_stream:
             # Use orjson for datetime support (stdlib json cannot serialize datetime)
-            output.write(orjson.dumps(log, default=_orjson_default).decode("utf-8") + "\n")
+            output.write(
+                orjson.dumps(log, default=_orjson_default).decode("utf-8") + "\n"
+            )
             total_exported += 1
 
             # Check max_records limit
@@ -545,7 +553,12 @@ class AuditExportService:
 
             # Yield batch when full - yield bytes directly (no decode overhead)
             if len(batch) >= self.STREAM_BATCH_SIZE:
-                chunk = b"\n".join(orjson.dumps(item, default=_orjson_default) for item in batch) + b"\n"
+                chunk = (
+                    b"\n".join(
+                        orjson.dumps(item, default=_orjson_default) for item in batch
+                    )
+                    + b"\n"
+                )
                 yield chunk
                 batch.clear()
 
@@ -555,7 +568,12 @@ class AuditExportService:
 
         # Yield remaining rows
         if batch:
-            chunk = b"\n".join(orjson.dumps(item, default=_orjson_default) for item in batch) + b"\n"
+            chunk = (
+                b"\n".join(
+                    orjson.dumps(item, default=_orjson_default) for item in batch
+                )
+                + b"\n"
+            )
             yield chunk
 
     async def stream_export_to_file(
@@ -599,7 +617,9 @@ class AuditExportService:
         """
         # Validate format before processing
         if format not in ("csv", "jsonl"):
-            raise ValueError(f"Unsupported export format: {format}. Use 'csv' or 'jsonl'.")
+            raise ValueError(
+                f"Unsupported export format: {format}. Use 'csv' or 'jsonl'."
+            )
 
         # Settings bounds validation to prevent memory spikes from misconfiguration
         MAX_BUFFER_SIZE = 10_000
@@ -610,10 +630,16 @@ class AuditExportService:
 
         settings = get_settings()
         # Clamp settings to reasonable bounds (min <= value <= max)
-        batch_size = max(MIN_BATCH_SIZE, min(settings.export_batch_size or 1000, MAX_BATCH_SIZE))
-        buffer_size = max(MIN_BUFFER_SIZE, min(settings.export_buffer_size or 1000, MAX_BUFFER_SIZE))
+        batch_size = max(
+            MIN_BATCH_SIZE, min(settings.export_batch_size or 1000, MAX_BATCH_SIZE)
+        )
+        buffer_size = max(
+            MIN_BUFFER_SIZE, min(settings.export_buffer_size or 1000, MAX_BUFFER_SIZE)
+        )
         # Guard against division-by-zero if progress_interval is 0 or None
-        progress_interval = max(settings.export_progress_interval or 100, MIN_PROGRESS_INTERVAL)
+        progress_interval = max(
+            settings.export_progress_interval or 100, MIN_PROGRESS_INTERVAL
+        )
 
         # Get total count for progress calculation using helper
         total_records = await self._get_total_count(
@@ -760,5 +786,10 @@ class AuditExportService:
         else:  # jsonl
             # Batch serialize with join - O(n) instead of O(n²) concatenation
             # Memory: ~45-50MB temporary allocation for 50k records, acceptable trade-off
-            chunk = b"\n".join(orjson.dumps(item, default=_orjson_default) for item in buffer) + b"\n"
+            chunk = (
+                b"\n".join(
+                    orjson.dumps(item, default=_orjson_default) for item in buffer
+                )
+                + b"\n"
+            )
             await file.write(chunk)

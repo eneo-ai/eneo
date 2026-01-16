@@ -4,6 +4,7 @@ const meta: MetaRecord = {
   index: 'Overview',
   'getting-started': 'Getting Started',
   architecture: 'Architecture',
+  'audit-logging': 'Audit Logging',
   api: 'API Reference',
 }
 

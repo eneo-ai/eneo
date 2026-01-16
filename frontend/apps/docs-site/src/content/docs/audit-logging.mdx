@@ -1,0 +1,163 @@
+# Audit Logging
+
+Audit logging records security- and compliance-relevant actions across the Eneo platform. Logs are immutable, tenant-scoped, and stored in PostgreSQL for review, retention, and export.
+
+## How audit logging works
+
+- All audit events are created through `AuditService`.
+- `log_async` enqueues a background job to persist the log via ARQ, keeping request latency low.
+- `log` writes immediately when you need a synchronous audit record.
+- Logging is gated by the `audit_logging_enabled` feature flag and per-tenant audit configuration (category and action overrides).
+- Audit entries store action, entity, actor, outcome, timestamps, and structured metadata.
+
+## Adding audit logging to a new feature
+
+### 1) Choose or add an action type
+
+If a matching action already exists, reuse it. Otherwise add a new action to:
+
+- `backend/src/intric/audit/domain/action_types.py`
+- `backend/src/intric/audit/domain/category_mappings.py` (so it appears in audit configuration)
+
+### 2) Choose the entity type
+
+Use an existing `EntityType` or add one in `backend/src/intric/audit/domain/entity_types.py`.
+
+### 3) Build standardized metadata
+
+Prefer `AuditMetadata` to keep metadata consistent across the codebase.
+
+### 4) Call `log_async` from your route/service
+
+Use `log_async` in API handlers and application services to avoid blocking requests.
+
+```python
+from intric.audit.domain.audit_metadata_schema import (
+    AuditMetadata,
+    AuditActor,
+    AuditTarget,
+    AuditChange,
+)
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
+# Example in a route handler
+async def update_space(...):
+    audit_service = container.audit_service()
+
+    metadata = AuditMetadata(
+        actor=AuditActor(
+            id=str(current_user.id),
+            name=current_user.username,
+            email=current_user.email,
+            type=ActorType.USER.value,
+        ),
+        target=AuditTarget(id=str(space.id), name=space.name),
+        changes={
+            "name": AuditChange(old=old_name, new=space.name),
+        },
+    ).to_dict()
+
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        actor_type=ActorType.USER,
+        action=ActionType.SPACE_UPDATED,
+        entity_type=EntityType.SPACE,
+        entity_id=space.id,
+        description="Updated space name",
+        metadata=metadata,
+    )
+```
+
+### System-initiated actions
+
+For background jobs or scheduled tasks, use `ActorType.SYSTEM` with `actor_id=None`:
+
+```python
+system_metadata = AuditMetadata(
+    actor=AuditActor(id="system", type=ActorType.SYSTEM.value, via="cron_job"),
+    target=AuditTarget(id=str(tenant_id), name="tenant"),
+).to_dict()
+
+await audit_service.log_async(
+    tenant_id=tenant_id,
+    actor_id=None,
+    actor_type=ActorType.SYSTEM,
+    action=ActionType.SYSTEM_MAINTENANCE,
+    entity_type=EntityType.TENANT_SETTINGS,
+    entity_id=tenant_id,
+    description="Nightly maintenance",
+    metadata=system_metadata,
+)
+```
+
+## Viewing audit logs
+
+Audit log access is restricted to admins. Common endpoints:
+
+- `GET /api/v1/audit/logs` with filters (`actor_id`, `actions`, `from_date`, `to_date`, `page`, `page_size`)
+- `GET /api/v1/audit/logs/user/{user_id}` for GDPR access (user as actor or target)
+- `POST /api/v1/audit/access-session` to create an access session with justification
+- `GET /api/v1/audit/config` and `GET /api/v1/audit/config/actions` to review audit configuration
+
+## Retention policies
+
+### Audit log retention
+
+Audit log retention is tenant-specific and enforced by a daily purge job.
+
+- `GET /api/v1/audit/retention-policy`
+- `PUT /api/v1/audit/retention-policy`
+
+Logs older than the configured retention period are permanently deleted.
+
+### Conversation retention hierarchy
+
+Conversation data (questions and app runs) has its own retention hierarchy:
+
+1. Assistant or App `data_retention_days` (if set)
+2. Space `data_retention_days`
+3. Tenant-level conversation retention (if enabled internally)
+4. `null` means keep forever
+
+Guidance:
+
+- Set `data_retention_days` on an assistant or app to override the space default.
+- Set `data_retention_days` on a space to apply to all assistants/apps without overrides.
+- Set `data_retention_days` to `null` to remove a space or assistant/app override.
+
+## Exporting audit logs
+
+### Synchronous export
+
+Use `GET /api/v1/audit/logs/export` for immediate exports.
+
+- Formats: `csv` or `json` (JSON Lines)
+- Use `max_records` to cap results and check response headers for truncation info
+
+Example:
+
+```http
+GET /api/v1/audit/logs/export?format=csv&from_date=2025-01-01&to_date=2025-01-31
+```
+
+### Asynchronous export
+
+Use `POST /api/v1/audit/logs/export` to create a background export job.
+
+- Formats: `csv` or `jsonl`
+- Check status: `GET /api/v1/audit/logs/export/{job_id}/status`
+- Download: `GET /api/v1/audit/logs/export/{job_id}/download`
+- Cancel: `POST /api/v1/audit/logs/export/{job_id}/cancel`
+
+Export files are retained for 24 hours before automatic cleanup.
+
+## FAQ
+
+- Why is `actor_id` sometimes `null`? System actions and deleted users use `actor_id=None`, while metadata stores the original actor snapshot when available.
+- Why didn’t my action show up? The global feature flag or per-category/action configuration may disable logging for that action.
+- When should I use `log_async` vs `log`? Use `log_async` in request paths to avoid latency; use `log` when you need the audit record immediately.
+- How do I add a new action? Update `ActionType`, map it in `category_mappings.py`, and add an audit call from the relevant service or route.
+- How do I export large datasets? Use the async export endpoints to avoid request timeouts and large in-memory responses.
