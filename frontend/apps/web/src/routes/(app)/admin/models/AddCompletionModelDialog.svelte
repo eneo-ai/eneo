@@ -9,9 +9,11 @@
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { writable, type Writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   export let openController: Writable<boolean>;
   export let providers: any[] = [];
+  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const intric = getIntric();
 
@@ -35,26 +37,41 @@
   let apiKey = "";
   let endpoint = "";
 
-  const providerTypes = [
-    { value: "openai", label: "OpenAI Compatible (Self-Hosted)" },
-    { value: "openai", label: "OpenAI" },
-    { value: "azure", label: "Azure OpenAI" },
-    { value: "anthropic", label: "Anthropic (Claude)" },
-    { value: "gemini", label: "Google Gemini" },
-    { value: "cohere", label: "Cohere" },
+  $: providerTypes = [
+    { value: "openai", label: m.provider_type_openai() },
+    { value: "azure", label: m.provider_type_azure() },
+    { value: "anthropic", label: m.provider_type_anthropic() },
+    { value: "gemini", label: m.provider_type_gemini() },
+    { value: "cohere", label: m.provider_type_cohere() },
   ];
 
   // Create options for provider select - add "Create New" option
   $: providerOptions = [
     ...providers.map(p => ({ value: p.id, label: p.name })),
-    { value: CREATE_NEW_PROVIDER, label: "+ Create New Provider" }
+    { value: CREATE_NEW_PROVIDER, label: m.create_new_provider() }
   ];
-  $: providerStore = writable(providerOptions[0] || { value: "", label: "Select provider" });
+
+  // Store for selected provider - initialized once
+  const providerStore = writable<{ value: string; label: string }>({ value: "", label: m.select_provider() });
+
+  // Initialize provider selection when dialog opens
+  $: if ($openController && providerOptions.length > 0) {
+    const preselectedId = preSelectedProviderId ? $preSelectedProviderId : null;
+    if (preselectedId) {
+      const matchingProvider = providerOptions.find(p => p.value === preselectedId);
+      if (matchingProvider) {
+        providerStore.set(matchingProvider);
+      }
+    } else if ($providerStore.value === "") {
+      // Only set default if no selection has been made
+      providerStore.set(providerOptions[0]);
+    }
+  }
 
   // Sync selected provider ID and show/hide provider form
   $: {
     if ($providerStore && $providerStore.value) {
-      const value = typeof $providerStore.value === 'object' ? $providerStore.value.value : $providerStore.value;
+      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as any).value : $providerStore.value;
       selectedProviderId = value;
       showProviderForm = value === CREATE_NEW_PROVIDER;
     }
@@ -62,10 +79,10 @@
 
   async function createProvider() {
     if (!providerName.trim()) {
-      throw new Error("Provider name is required");
+      throw new Error(m.provider_name_required());
     }
     if (!apiKey.trim()) {
-      throw new Error("API key is required");
+      throw new Error(m.api_key_required());
     }
 
     const providerData: any = {
@@ -101,17 +118,17 @@
       }
 
       if (!actualProviderId || actualProviderId === CREATE_NEW_PROVIDER) {
-        error = "Please select or create a provider";
+        error = m.please_select_or_create_provider();
         return;
       }
 
       if (!modelName.trim()) {
-        error = "Model name is required";
+        error = m.model_name_required();
         return;
       }
 
       if (!displayName.trim()) {
-        error = "Display name is required";
+        error = m.display_name_required();
         return;
       }
 
@@ -137,7 +154,7 @@
       // Reset form
       resetForm();
     } catch (e: any) {
-      error = e.message || "Failed to create model";
+      error = e.message || m.failed_to_create_model();
     } finally {
       isSubmitting = false;
     }
@@ -156,7 +173,8 @@
     apiKey = "";
     endpoint = "";
     showProviderForm = false;
-    providerStore.set(providerOptions[0]);
+    providerStore.set(providerOptions[0] || { value: "", label: m.select_provider() });
+    preSelectedProviderId?.set(null);
   }
 
   function handleCancel() {
@@ -170,7 +188,7 @@
 
 <Dialog.Root {openController}>
   <Dialog.Content width="large" form>
-    <Dialog.Title>Add Completion Model</Dialog.Title>
+    <Dialog.Title>{m.add_completion_model()}</Dialog.Title>
 
     <Dialog.Section>
       <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4">
@@ -183,8 +201,8 @@
         <!-- Provider Selection -->
         <div class="flex flex-col gap-2">
           <Select.Root customStore={providerStore} class="border-b border-dimmer">
-            <Select.Label>Provider</Select.Label>
-            <Select.Trigger placeholder="Select or create provider"></Select.Trigger>
+            <Select.Label>{m.provider()}</Select.Label>
+            <Select.Trigger placeholder={m.select_or_create_provider()}></Select.Trigger>
             <Select.Options>
               {#each providerOptions as provider}
                 <Select.Item value={provider} label={provider.label}>{provider.label}</Select.Item>
@@ -196,23 +214,23 @@
         <!-- Provider Creation Form (shown when "+ Create New Provider" is selected) -->
         {#if showProviderForm}
           <div class="rounded-lg border border-dimmer bg-surface-dimmer p-4 flex flex-col gap-4">
-            <h3 class="text-sm font-semibold">New Provider Details</h3>
+            <h3 class="text-sm font-semibold">{m.new_provider_details()}</h3>
 
             <div class="flex flex-col gap-2">
-              <label for="provider-name" class="text-sm font-medium">Provider Name</label>
+              <label for="provider-name" class="text-sm font-medium">{m.provider_name()}</label>
               <Input.Text
                 id="provider-name"
                 bind:value={providerName}
-                placeholder="e.g., My Azure Instance, GDM"
+                placeholder={m.provider_name_placeholder()}
                 required
               />
               <p class="text-muted-foreground text-xs">
-                A unique name to identify this provider instance
+                {m.provider_name_hint()}
               </p>
             </div>
 
             <div class="flex flex-col gap-2">
-              <label for="provider-type" class="text-sm font-medium">Provider Type</label>
+              <label for="provider-type" class="text-sm font-medium">{m.provider_type()}</label>
               <select
                 id="provider-type"
                 bind:value={providerType}
@@ -225,21 +243,21 @@
             </div>
 
             <div class="flex flex-col gap-2">
-              <label for="api-key" class="text-sm font-medium">API Key</label>
+              <label for="api-key" class="text-sm font-medium">{m.api_key()}</label>
               <Input.Text
                 id="api-key"
                 type="password"
                 bind:value={apiKey}
-                placeholder="Enter API key"
+                placeholder={m.enter_api_key()}
                 required
               />
               <p class="text-muted-foreground text-xs">
-                Will be encrypted before storage
+                {m.will_be_encrypted()}
               </p>
             </div>
 
             <div class="flex flex-col gap-2">
-              <label for="endpoint" class="text-sm font-medium">Endpoint URL</label>
+              <label for="endpoint" class="text-sm font-medium">{m.endpoint_url()}</label>
               <Input.Text
                 id="endpoint"
                 bind:value={endpoint}
@@ -252,15 +270,15 @@
               />
               {#if providerType === "openai"}
                 <p class="text-muted-foreground text-xs">
-                  For self-hosted (vLLM, Ollama, llama.cpp): Required. Common ports: 8000 (vLLM), 11434 (Ollama), 8080 (llama.cpp)
+                  {m.endpoint_hint_openai()}
                 </p>
               {:else if providerType === "azure"}
                 <p class="text-muted-foreground text-xs">
-                  Required. Your Azure OpenAI resource endpoint
+                  {m.endpoint_required_azure()}
                 </p>
               {:else}
                 <p class="text-muted-foreground text-xs">
-                  Optional. Leave empty to use default endpoint
+                  {m.endpoint_optional_default()}
                 </p>
               {/if}
             </div>
@@ -271,33 +289,33 @@
         {#if !showProviderForm || (showProviderForm && providerName && apiKey)}
           <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-2">
-              <label for="model-name" class="text-sm font-medium">Model Identifier</label>
+              <label for="model-name" class="text-sm font-medium">{m.model_identifier()}</label>
               <Input.Text
                 id="model-name"
                 bind:value={modelName}
-                placeholder="e.g., gpt-4o, meta-llama/Meta-Llama-3-70B-Instruct"
+                placeholder={m.model_identifier_placeholder_completion()}
                 required
               />
               <p class="text-muted-foreground text-xs">
-                Enter the exact model identifier from your provider (can contain slashes)
+                {m.model_identifier_hint()}
               </p>
             </div>
 
             <div class="flex flex-col gap-2">
-              <label for="display-name" class="text-sm font-medium">Display Name</label>
+              <label for="display-name" class="text-sm font-medium">{m.display_name()}</label>
               <Input.Text
                 id="display-name"
                 bind:value={displayName}
-                placeholder="e.g., GPT-4 Optimized, Llama 3 70B"
+                placeholder={m.display_name_placeholder_completion()}
                 required
               />
               <p class="text-muted-foreground text-xs">
-                User-friendly name shown in the UI
+                {m.display_name_hint()}
               </p>
             </div>
 
             <div class="flex flex-col gap-2">
-              <label for="token-limit" class="text-sm font-medium">Token Limit</label>
+              <label for="token-limit" class="text-sm font-medium">{m.token_limit()}</label>
               <Input.Text
                 id="token-limit"
                 type="number"
@@ -307,31 +325,31 @@
                 required
               />
               <p class="text-muted-foreground text-xs">
-                Maximum context window in tokens
+                {m.token_limit_hint()}
               </p>
             </div>
 
             <div class="flex gap-4">
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" bind:checked={vision} />
-                <span>Vision Support</span>
+                <span>{m.vision_support()}</span>
               </label>
 
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" bind:checked={reasoning} />
-                <span>Reasoning Support</span>
+                <span>{m.reasoning_support()}</span>
               </label>
             </div>
 
             <div class="flex gap-4">
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" bind:checked={isActive} />
-                <span>Enable in Organization</span>
+                <span>{m.enable_in_organization()}</span>
               </label>
 
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" bind:checked={isDefault} />
-                <span>Set as Default</span>
+                <span>{m.set_as_default()}</span>
               </label>
             </div>
           </div>
@@ -340,13 +358,13 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button variant="outlined" on:click={handleCancel}>Cancel</Button>
+      <Button variant="outlined" on:click={handleCancel}>{m.cancel()}</Button>
       <Button
         variant="primary"
         on:click={handleSubmit}
         disabled={isSubmitting}
       >
-        {isSubmitting ? (showProviderForm ? "Creating Provider & Model..." : "Creating Model...") : "Create"}
+        {isSubmitting ? (showProviderForm ? m.creating_provider_and_model() : m.creating_model()) : m.create()}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

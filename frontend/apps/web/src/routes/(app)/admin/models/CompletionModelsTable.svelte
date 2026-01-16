@@ -28,6 +28,7 @@
   export let completionModels: CompletionModel[];
   export let providers: ModelProviderPublic[] = [];
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
+  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const addProviderDialogOpen = writable(false);
 
@@ -155,8 +156,7 @@
    * Opens the add model dialog with this provider pre-selected.
    */
   function handleAddModelToProvider(providerId: string) {
-    // For now, just open the general add model dialog
-    // TODO: Pass providerId to pre-select the provider
+    preSelectedProviderId?.set(providerId);
     addModelDialogOpen?.set(true);
   }
 

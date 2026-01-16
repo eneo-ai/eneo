@@ -9,9 +9,11 @@
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { writable, type Writable } from "svelte/store";
+  import { m } from "$lib/paraglide/messages";
 
   export let openController: Writable<boolean>;
   export let providers: any[] = [];
+  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const intric = getIntric();
 
@@ -60,12 +62,28 @@
     ...providers.map(p => ({ value: p.id, label: p.name })),
     { value: CREATE_NEW_PROVIDER, label: "+ Create New Provider" }
   ];
-  $: providerStore = writable(providerOptions[0] || { value: "", label: "Select provider" });
+
+  // Store for selected provider - initialized once
+  const providerStore = writable<{ value: string; label: string }>({ value: "", label: m.select_provider() });
+
+  // Initialize provider selection when dialog opens
+  $: if ($openController && providerOptions.length > 0) {
+    const preselectedId = preSelectedProviderId ? $preSelectedProviderId : null;
+    if (preselectedId) {
+      const matchingProvider = providerOptions.find(p => p.value === preselectedId);
+      if (matchingProvider) {
+        providerStore.set(matchingProvider);
+      }
+    } else if ($providerStore.value === "") {
+      // Only set default if no selection has been made
+      providerStore.set(providerOptions[0]);
+    }
+  }
 
   // Sync selected provider ID and show/hide provider form
   $: {
     if ($providerStore && $providerStore.value) {
-      const value = typeof $providerStore.value === 'object' ? $providerStore.value.value : $providerStore.value;
+      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as any).value : $providerStore.value;
       selectedProviderId = value;
       showProviderForm = value === CREATE_NEW_PROVIDER;
     }
@@ -174,7 +192,8 @@
     apiVersion = "";
     deploymentName = "";
     showProviderForm = false;
-    providerStore.set(providerOptions[0]);
+    providerStore.set(providerOptions[0] || { value: "", label: m.select_provider() });
+    preSelectedProviderId?.set(null);
   }
 
   function handleCancel() {

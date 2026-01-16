@@ -27,6 +27,7 @@
   export let transcriptionModels: TranscriptionModel[];
   export let providers: ModelProviderPublic[] = [];
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
+  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const addProviderDialogOpen = writable(false);
 
@@ -146,8 +147,10 @@
 
   /**
    * Handle "Add Model" action from provider dropdown.
+   * Opens the add model dialog with this provider pre-selected.
    */
   function handleAddModelToProvider(providerId: string) {
+    preSelectedProviderId?.set(providerId);
     addModelDialogOpen?.set(true);
   }
 
