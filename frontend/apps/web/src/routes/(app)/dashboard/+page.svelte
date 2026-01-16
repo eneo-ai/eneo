@@ -11,6 +11,7 @@
 
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import SelectTheme from "$lib/components/SelectTheme.svelte";
 
   export let data;
@@ -72,7 +73,7 @@
           <SelectTheme></SelectTheme>
         </div>
         <div class="border-default my-1 border-b"></div>
-        <Button is={item} variant="destructive" href="/logout" padding="icon-leading">
+        <Button is={item} variant="destructive" href={localizeHref("/logout")} padding="icon-leading">
           <IconLogout />
           {m.logout()}</Button
         >

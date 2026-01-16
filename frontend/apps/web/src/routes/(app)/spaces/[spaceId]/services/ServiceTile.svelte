@@ -4,6 +4,7 @@
   import ServiceActions from "./ServiceActions.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { dynamicColour } from "$lib/core/colours";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let service: ServiceSparse;
 
@@ -15,7 +16,7 @@
 <a
   aria-label={service.name}
   {...dynamicColour({ basedOn: service.id })}
-  href="/spaces/{$currentSpace.routeId}/services/{service.id}?tab=playground"
+  href={localizeHref(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=playground`)}
   class="group border-dynamic-default bg-dynamic-dimmer text-dynamic-stronger hover:bg-dynamic-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
 >
   <h2 class="line-clamp-2 pt-1 font-mono text-sm">
