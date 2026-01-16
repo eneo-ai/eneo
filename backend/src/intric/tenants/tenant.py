@@ -98,7 +98,8 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             "gdm",
             "mistral",
             "ovhcloud",
-            "vllm",
+            "gemini",
+            "cohere",
         }
 
         for provider, cred in v.items():

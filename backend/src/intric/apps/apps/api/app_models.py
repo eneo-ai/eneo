@@ -49,11 +49,11 @@ class AppPublic(AppCreateRequest, InDB, ResourcePermissionsMixin):
     input_fields: list[InputFieldPublic]
     attachments: list[FilePublic]
     prompt: PromptPublic | None
-    completion_model: CompletionModelSparse
+    completion_model: CompletionModelSparse | None = None
     completion_model_kwargs: ModelKwargs
     allowed_attachments: FileRestrictions
     published: bool
-    transcription_model: TranscriptionModelPublic
+    transcription_model: TranscriptionModelPublic | None = None
     data_retention_days: Optional[int] = None
     icon_id: Optional[UUID] = Field(
         default=None,

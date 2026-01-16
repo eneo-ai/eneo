@@ -46,16 +46,6 @@
   </Dialog.Trigger>
 
   <Dialog.Content width="dynamic" form>
-    {#if $currentSpace.completion_models.length < 1}
-      <p
-        class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
-      >
-        <span class="font-bold">{m.warning()}:</span>
-        {m.completion_models_warning()}
-      </p>
-      <div class="border-dimmer border-b"></div>
-    {/if}
-
     <Dialog.Section class="relative mt-2 -mb-0.5">
       {#if $currentStep === "wizard"}
         <TemplateWizard></TemplateWizard>

@@ -541,12 +541,16 @@ async def test_create_completion_model_missing_required_fields(client, super_adm
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_completion_model_invalid_enum(client, super_admin_token):
-    """Test that creating a model with invalid enum values fails."""
-    invalid_data = {
-        "name": "invalid-enum-model",
-        "nickname": "Invalid Enum",
-        "family": "invalid_family",  # Invalid family
+async def test_create_completion_model_accepts_custom_family(client, super_admin_token):
+    """Test that creating a model with custom family string is accepted.
+
+    With per-tenant model architecture, family is Union[CompletionModelFamily, str]
+    to allow tenant-specific models with custom family values.
+    """
+    custom_family_data = {
+        "name": "custom-family-model",
+        "nickname": "Custom Family",
+        "family": "custom_provider",  # Custom family string (now allowed)
         "token_limit": 8000,
         "is_deprecated": False,
         "stability": "stable",
@@ -558,10 +562,10 @@ async def test_create_completion_model_invalid_enum(client, super_admin_token):
     response = await client.post(
         "/api/v1/sysadmin/completion-models/create",
         headers={"X-API-Key": super_admin_token},
-        json=invalid_data,
+        json=custom_family_data,
     )
 
-    assert response.status_code == 422  # Unprocessable Entity
+    assert response.status_code == 200  # Now accepts custom family strings
 
 
 @pytest.mark.integration

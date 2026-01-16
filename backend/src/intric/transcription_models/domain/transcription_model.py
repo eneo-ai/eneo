@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from intric.ai_models.ai_model import AIModel
 from intric.ai_models.model_enums import (
@@ -18,9 +18,6 @@ if TYPE_CHECKING:
     from intric.database.tables.ai_models_table import (
         TranscriptionModels as TranscriptionModelsDB,
     )
-    from intric.database.tables.ai_models_table import (
-        TranscriptionModelSettings,
-    )
     from intric.users.user import UserInDB
 
 
@@ -33,10 +30,10 @@ class TranscriptionModel(AIModel):
         updated_at: "datetime",
         nickname: str,
         name: str,
-        family: ModelFamily,
-        hosting: ModelHostingLocation,
-        org: Optional[ModelOrg],
-        stability: ModelStability,
+        family: Union[ModelFamily, str],
+        hosting: Union[ModelHostingLocation, str],
+        org: Optional[Union[ModelOrg, str]],
+        stability: Union[ModelStability, str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],
@@ -45,6 +42,8 @@ class TranscriptionModel(AIModel):
         is_org_enabled: bool,
         is_org_default: bool,
         security_classification: Optional["SecurityClassification"] = None,
+        tenant_id: Optional["UUID"] = None,
+        provider_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -67,52 +66,46 @@ class TranscriptionModel(AIModel):
         self.base_url = base_url
         self.is_org_default = is_org_default
         self.security_classification = security_classification
+        self.tenant_id = tenant_id
+        self.provider_id = provider_id
+
+    @property
+    def model_name(self) -> str:
+        """Return the actual model name (e.g., 'whisper-1', 'kb-whisper-large').
+
+        This is the model identifier used with the API, stored as 'name' in the domain
+        but as 'model_name' in the database.
+        """
+        return self.name
 
     @classmethod
     def create_from_db(
         cls,
         transcription_model_db: "TranscriptionModelsDB",
-        transcription_model_settings: Optional["TranscriptionModelSettings"],
         user: "UserInDB",
     ):
-        if transcription_model_settings is None:
-            is_org_enabled = False
-            is_org_default = False
-            updated_at = transcription_model_db.updated_at
-            security_classification = None
-        else:
-            is_org_enabled = transcription_model_settings.is_org_enabled
-            is_org_default = transcription_model_settings.is_org_default
-            updated_at = transcription_model_settings.updated_at
-            security_classification = (
-                transcription_model_settings.security_classification
-            )
-
-        org = (
-            None
-            if transcription_model_db.org is None
-            else ModelOrg(transcription_model_db.org)
-        )
-
+        # Settings are now directly on the model table
         return cls(
             user=user,
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
-            updated_at=updated_at,
+            updated_at=transcription_model_db.updated_at,
             nickname=transcription_model_db.name,
             name=transcription_model_db.model_name,
-            family=ModelFamily(transcription_model_db.family),
-            hosting=ModelHostingLocation(transcription_model_db.hosting),
-            org=org,
-            stability=ModelStability(transcription_model_db.stability),
+            family=transcription_model_db.family,
+            hosting=transcription_model_db.hosting,
+            org=transcription_model_db.org,
+            stability=transcription_model_db.stability,
             open_source=transcription_model_db.open_source,
             description=transcription_model_db.description,
             hf_link=transcription_model_db.hf_link,
             base_url=transcription_model_db.base_url,
             is_deprecated=transcription_model_db.is_deprecated,
-            is_org_enabled=is_org_enabled,
-            is_org_default=is_org_default,
+            is_org_enabled=transcription_model_db.is_enabled,
+            is_org_default=transcription_model_db.is_default,
             security_classification=SecurityClassification.to_domain(
-                db_security_classification=security_classification
+                db_security_classification=transcription_model_db.security_classification
             ),
+            tenant_id=transcription_model_db.tenant_id,
+            provider_id=transcription_model_db.provider_id,
         )

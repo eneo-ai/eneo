@@ -115,7 +115,7 @@ class SettingService:
             f"Templates successfully toggled to {enabled} for tenant {self.user.tenant_id}"
         )
 
-        # Get tenant_credentials_enabled from global config
+        # Get global config flags
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
 

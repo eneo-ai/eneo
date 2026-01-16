@@ -316,17 +316,19 @@ class Settings(BaseSettings):
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
-        
+
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
         - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+        - Tenant-specific model provider credentials (always enabled)
         - Worker/crawler HTTP authentication
         """
         encryption_required = (
-            self.tenant_credentials_enabled or 
-            self.federation_per_tenant_enabled
+            self.tenant_credentials_enabled or
+            self.federation_per_tenant_enabled or
+            True  # Tenant models are always enabled
         )
-        
+
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
                 logging.error(

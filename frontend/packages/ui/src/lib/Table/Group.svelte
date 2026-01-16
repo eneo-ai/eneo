@@ -79,29 +79,29 @@
   );
 </script>
 
-{#if $filteredRows.length > 0}
-  {#if $displayType === "list"}
-    <tbody {...$tableBodyAttrs}>
-      {#if title}
-        <tr>
-          <td colspan="99" class={tableCell({ groupHeader: true })}>
-            <div class="flex w-full items-center justify-between">
-              <Button
-                on:click={() => ($open = !$open)}
-                padding="icon-leading"
-                class="font-mono font-medium"
-              >
-                <div class="flex items-center gap-2">
-                  <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
-                  <span>{title}</span>
-                </div>
-              </Button>
-              <slot name="title-suffix" />
-            </div>
-          </td>
-        </tr>
-      {/if}
-      {#if $open && $filteredRows.length > 0}
+{#if $displayType === "list"}
+  <tbody {...$tableBodyAttrs}>
+    {#if title}
+      <tr>
+        <td colspan="99" class={tableCell({ groupHeader: true })}>
+          <div class="flex w-full items-center justify-between">
+            <Button
+              on:click={() => ($open = !$open)}
+              padding="icon-leading"
+              class="font-mono font-medium"
+            >
+              <div class="flex items-center gap-2">
+                <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+                <span>{title}</span>
+              </div>
+            </Button>
+            <slot name="title-suffix" />
+          </div>
+        </td>
+      </tr>
+    {/if}
+    {#if $open}
+      {#if $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
             <tr {...rowAttrs} class="hover:bg-hover-dimmer relative h-16">
@@ -129,25 +129,33 @@
             </tr>
           </Subscribe>
         {/each}
+      {:else}
+        <tr>
+          <td colspan="99" class="px-4 py-3">
+            <slot name="empty" />
+          </td>
+        </tr>
       {/if}
-    </tbody>
-  {:else}
-    {#if title}
-      <div class="!border-b-default flex w-full items-center justify-between border-b pt-4 pb-2 !pl-2.5 pr-4">
-        <Button
-          on:click={() => ($open = !$open)}
-          padding="icon-leading"
-          class="font-mono font-medium"
-        >
-          <div class="flex items-center gap-2">
-            <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
-            <span>{title}</span>
-          </div>
-        </Button>
-        <slot name="title-suffix" />
-      </div>
     {/if}
-    {#if $open && $filteredRows.length > 0}
+  </tbody>
+{:else}
+  {#if title}
+    <div class="!border-b-default flex w-full items-center justify-between border-b pt-4 pb-2 !pl-2.5 pr-4">
+      <Button
+        on:click={() => ($open = !$open)}
+        padding="icon-leading"
+        class="font-mono font-medium"
+      >
+        <div class="flex items-center gap-2">
+          <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+          <span>{title}</span>
+        </div>
+      </Button>
+      <slot name="title-suffix" />
+    </div>
+  {/if}
+  {#if $open}
+    {#if $filteredRows.length > 0}
       <div style="column-gap: {gapX}rem; row-gap: {gapY}rem;" class={cardLayout({ layout })}>
         {#each $filteredRows as row (row.id)}
           {@const cell = getCardCell(row)}
@@ -156,33 +164,35 @@
           {/if}
         {/each}
       </div>
+    {:else}
+      <div class="px-4 py-3">
+        <slot name="empty" />
+      </div>
     {/if}
   {/if}
-  {#if $pageCount > 1}
-    <div
-      class="bg-hover-dimmer my-4 flex h-12 w-fit items-center justify-start gap-6 rounded-lg border p-2"
+{/if}
+{#if $filteredRows.length > 0 && $pageCount > 1}
+  <div
+    class="bg-hover-dimmer my-4 flex h-12 w-fit items-center justify-start gap-6 rounded-lg border p-2"
+  >
+    <Button on:click={() => ($pageIndex -= 1)} disabled={!$hasPreviousPage} variant="outlined"
+      >←</Button
     >
-      <Button on:click={() => ($pageIndex -= 1)} disabled={!$hasPreviousPage} variant="outlined"
-        >←</Button
-      >
 
-      <div class="flex gap-2 font-mono">
-        <span>
-          {$pageIndex + 1}
-        </span>
-        <span> / </span>
-        <span>
-          {$pageCount}
-        </span>
-      </div>
-
-      <Button on:click={() => ($pageIndex += 1)} disabled={!$hasNextPage} variant="outlined"
-        >→</Button
-      >
+    <div class="flex gap-2 font-mono">
+      <span>
+        {$pageIndex + 1}
+      </span>
+      <span> / </span>
+      <span>
+        {$pageCount}
+      </span>
     </div>
-  {:else}
-    <svelte:element this={$displayType === "list" ? "tbody" : "div"} class="!h-6" />
-  {/if}
-{:else}
-  <svelte:element this={$displayType === "list" ? "tbody" : "div"} />
+
+    <Button on:click={() => ($pageIndex += 1)} disabled={!$hasNextPage} variant="outlined"
+      >→</Button
+    >
+  </div>
+{:else if $filteredRows.length > 0}
+  <svelte:element this={$displayType === "list" ? "tbody" : "div"} class="!h-6" />
 {/if}

@@ -483,8 +483,10 @@ class TestSlotCounterAccuracy:
         tenant_id = uuid4()
         slot_key = LuaScripts.slot_key(tenant_id)
 
-        # Clean state
+        # Clean state - ensure key is fully deleted before test
         await redis_client.delete(slot_key)
+        # Verify key is actually deleted
+        assert await redis_client.get(slot_key) is None, "Key should not exist"
 
         max_slots = 5
         ttl = 60
@@ -501,14 +503,18 @@ class TestSlotCounterAccuracy:
 
         # Exactly max_slots should succeed
         successes = sum(1 for r in results if r)
+
+        # Verify counter equals number of successful acquires
+        counter = await redis_client.get(slot_key)
+        counter_value = int(counter) if counter else 0
+
         assert successes == max_slots, (
-            f"Expected exactly {max_slots} successful acquires, got {successes}"
+            f"Expected exactly {max_slots} successful acquires, got {successes}. "
+            f"Counter value: {counter_value}"
         )
 
-        # Verify counter equals max_slots
-        counter = await redis_client.get(slot_key)
-        assert int(counter) == max_slots, (
-            f"Counter should be {max_slots}, got {counter}"
+        assert counter_value == max_slots, (
+            f"Counter should be {max_slots}, got {counter_value}"
         )
 
         # Cleanup

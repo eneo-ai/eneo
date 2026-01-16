@@ -130,6 +130,7 @@ class AppRepository:
         )
 
         template_id = app.source_template.id if app.source_template else None
+        completion_model_id = app.completion_model.id if app.completion_model else None
         stmt = (
             sa.insert(Apps)
             .values(
@@ -139,7 +140,7 @@ class AppRepository:
                 tenant_id=app.tenant_id,
                 user_id=app.user_id,
                 space_id=app.space_id,
-                completion_model_id=app.completion_model.id,
+                completion_model_id=completion_model_id,
                 published=app.published,
                 template_id=template_id,
                 transcription_model_id=transcription_model_id,
@@ -190,6 +191,7 @@ class AppRepository:
         transcription_model_id = (
             None if app.transcription_model is None else app.transcription_model.id
         )
+        completion_model_id = app.completion_model.id if app.completion_model else None
 
         stmt = (
             sa.update(Apps)
@@ -200,7 +202,7 @@ class AppRepository:
                 tenant_id=app.tenant_id,
                 user_id=app.user_id,
                 space_id=app.space_id,
-                completion_model_id=app.completion_model.id,
+                completion_model_id=completion_model_id,
                 transcription_model_id=transcription_model_id,
                 published=app.published,
                 data_retention_days=app.data_retention_days,

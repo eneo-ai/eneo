@@ -1094,6 +1094,94 @@ export interface paths {
     /** Update Transcription Model */
     post: operations["update_transcription_model_api_v1_transcription_models__id___post"];
   };
+  "/api/v1/admin/model-providers/": {
+    /**
+     * List Providers
+     * @description List all model providers for the tenant.
+     */
+    get: operations["list_providers_api_v1_admin_model_providers__get"];
+    /**
+     * Create Provider
+     * @description Create a new model provider.
+     */
+    post: operations["create_provider_api_v1_admin_model_providers__post"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/": {
+    /**
+     * Get Provider
+     * @description Get a specific model provider.
+     */
+    get: operations["get_provider_api_v1_admin_model_providers__provider_id___get"];
+    /**
+     * Update Provider
+     * @description Update an existing model provider.
+     */
+    put: operations["update_provider_api_v1_admin_model_providers__provider_id___put"];
+    /**
+     * Delete Provider
+     * @description Delete a model provider.
+     *
+     * Will fail if the provider has models attached to it.
+     */
+    delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/completion/": {
+    /**
+     * Create Tenant Completion Model
+     * @description Create a new tenant-specific completion model.
+     */
+    post: operations["create_tenant_completion_model_api_v1_admin_tenant_models_completion__post"];
+  };
+  "/api/v1/admin/tenant-models/completion/{model_id}/": {
+    /**
+     * Update Tenant Completion Model
+     * @description Update a tenant-specific completion model.
+     */
+    put: operations["update_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___put"];
+    /**
+     * Delete Tenant Completion Model
+     * @description Delete a tenant-specific completion model.
+     */
+    delete: operations["delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/embedding/": {
+    /**
+     * Create Tenant Embedding Model
+     * @description Create a new tenant-specific embedding model.
+     */
+    post: operations["create_tenant_embedding_model_api_v1_admin_tenant_models_embedding__post"];
+  };
+  "/api/v1/admin/tenant-models/embedding/{model_id}/": {
+    /**
+     * Update Tenant Embedding Model
+     * @description Update a tenant-specific embedding model.
+     */
+    put: operations["update_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___put"];
+    /**
+     * Delete Tenant Embedding Model
+     * @description Delete a tenant-specific embedding model.
+     */
+    delete: operations["delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/transcription/": {
+    /**
+     * Create Tenant Transcription Model
+     * @description Create a new tenant-specific transcription model.
+     */
+    post: operations["create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post"];
+  };
+  "/api/v1/admin/tenant-models/transcription/{model_id}/": {
+    /**
+     * Update Tenant Transcription Model
+     * @description Update a tenant-specific transcription model.
+     */
+    put: operations["update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put"];
+    /**
+     * Delete Tenant Transcription Model
+     * @description Delete a tenant-specific transcription model.
+     */
+    delete: operations["delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete"];
+  };
   "/api/v1/files/": {
     /** Get Files */
     get: operations["get_files_api_v1_files__get"];
@@ -2666,12 +2754,12 @@ export interface components {
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       prompt: components["schemas"]["PromptPublic"] | null;
-      completion_model: components["schemas"]["CompletionModelSparse"];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Published */
       published: boolean;
-      transcription_model: components["schemas"]["TranscriptionModelPublic"];
+      transcription_model?: components["schemas"]["TranscriptionModelPublic"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -3178,7 +3266,7 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
-      completion_model: components["schemas"]["CompletionModelSparse"];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
        * @default false
@@ -3266,6 +3354,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
+      /**
+       * Completion Model Id
+       * @description ID of the completion model, or None if not configured
+       */
+      completion_model_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -3819,7 +3912,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3828,15 +3922,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3855,6 +3952,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -3862,7 +3963,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3871,15 +3973,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3904,7 +4009,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3913,15 +4019,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3940,6 +4049,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -3987,7 +4100,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3996,15 +4110,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -4023,6 +4140,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -4056,7 +4177,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -4065,15 +4187,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -4840,6 +4965,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -4943,6 +5072,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -6132,6 +6265,115 @@ export interface components {
       | "Berget"
       | "GDM";
     /**
+     * ModelProviderCreate
+     * @description Request model for creating a model provider.
+     */
+    ModelProviderCreate: {
+      /**
+       * Name
+       * @description User-defined name for this provider instance
+       */
+      name: string;
+      /**
+       * Provider Type
+       * @description Provider type: openai, azure, or anthropic
+       */
+      provider_type: string;
+      /**
+       * Credentials
+       * @description Provider credentials (will be encrypted)
+       */
+      credentials: {
+        [key: string]: unknown;
+      };
+      /**
+       * Config
+       * @description Additional configuration
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Is Active
+       * @description Whether the provider is active
+       * @default true
+       */
+      is_active?: boolean;
+    };
+    /**
+     * ModelProviderPublic
+     * @description Public response model for a model provider (without credentials).
+     */
+    ModelProviderPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Name */
+      name: string;
+      /** Provider Type */
+      provider_type: string;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /** Is Active */
+      is_active: boolean;
+      /** Masked Api Key */
+      masked_api_key?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ModelProviderUpdate
+     * @description Request model for updating a model provider.
+     */
+    ModelProviderUpdate: {
+      /**
+       * Name
+       * @description User-defined name for this provider instance
+       */
+      name?: string | null;
+      /**
+       * Provider Type
+       * @description Provider type: openai, azure, or anthropic
+       */
+      provider_type?: string | null;
+      /**
+       * Credentials
+       * @description Provider credentials (will be encrypted)
+       */
+      credentials?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Config
+       * @description Additional configuration
+       */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Active
+       * @description Whether the provider is active
+       */
+      is_active?: boolean | null;
+    };
+    /**
      * ModelStability
      * @enum {string}
      */
@@ -7073,7 +7315,8 @@ export interface components {
       name?: string | null;
       /** Nickname */
       nickname?: string | null;
-      family?: components["schemas"]["ModelFamily"] | null;
+      /** Family */
+      family?: components["schemas"]["ModelFamily"] | string | null;
       /** Token Limit */
       token_limit?: number | null;
       /** Is Deprecated */
@@ -7082,15 +7325,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability?: components["schemas"]["ModelStability"] | null;
-      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Stability */
+      stability?: components["schemas"]["ModelStability"] | string | null;
+      /** Hosting */
+      hosting?: components["schemas"]["ModelHostingLocation"] | string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision?: boolean | null;
       /** Reasoning */
@@ -8513,6 +8759,188 @@ export interface components {
        */
       security_enabled?: boolean;
     };
+    /** TenantCompletionModelCreate */
+    TenantCompletionModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Token Limit
+       * @description Maximum context tokens
+       * @default 128000
+       */
+      token_limit?: number;
+      /**
+       * Vision
+       * @description Supports vision/image inputs
+       * @default false
+       */
+      vision?: boolean;
+      /**
+       * Reasoning
+       * @description Supports extended reasoning
+       * @default false
+       */
+      reasoning?: boolean;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantCompletionModelUpdate */
+    TenantCompletionModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Token Limit
+       * @description Maximum context tokens
+       */
+      token_limit?: number | null;
+      /**
+       * Vision
+       * @description Supports vision/image inputs
+       */
+      vision?: boolean | null;
+      /**
+       * Reasoning
+       * @description Supports extended reasoning
+       */
+      reasoning?: boolean | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
+    /** TenantEmbeddingModelCreate */
+    TenantEmbeddingModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'text-embedding-3-large', 'intfloat/multilingual-e5-large')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'huggingface_e5', 'cohere', 'voyage')
+       * @default openai
+       */
+      family?: string;
+      /**
+       * Dimensions
+       * @description Embedding dimensions
+       */
+      dimensions?: number | null;
+      /**
+       * Max Input
+       * @description Maximum input tokens
+       */
+      max_input?: number | null;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantEmbeddingModelUpdate */
+    TenantEmbeddingModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Family
+       * @description Model family
+       */
+      family?: string | null;
+      /**
+       * Dimensions
+       * @description Embedding dimensions
+       */
+      dimensions?: number | null;
+      /**
+       * Max Input
+       * @description Maximum input tokens
+       */
+      max_input?: number | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
     /** TenantInDB */
     TenantInDB: {
       /** Created At */
@@ -8754,6 +9182,65 @@ export interface components {
      * @enum {string}
      */
     TenantState: "active" | "suspended";
+    /** TenantTranscriptionModelCreate */
+    TenantTranscriptionModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'whisper-1', 'distil-whisper-large-v3-en')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantTranscriptionModelUpdate */
+    TenantTranscriptionModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
       /** Display Name */
@@ -8992,6 +9479,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -9041,6 +9532,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -11781,7 +12276,8 @@ export interface operations {
                 name: string;
                 /** Nickname */
                 nickname: string;
-                family: components["schemas"]["ModelFamily"];
+                /** Family */
+                family: components["schemas"]["ModelFamily"] | string;
                 /** Token Limit */
                 token_limit: number;
                 /** Is Deprecated */
@@ -11790,15 +12286,18 @@ export interface operations {
                 nr_billion_parameters?: number | null;
                 /** Hf Link */
                 hf_link?: string | null;
-                stability: components["schemas"]["ModelStability"];
-                hosting: components["schemas"]["ModelHostingLocation"];
+                /** Stability */
+                stability: components["schemas"]["ModelStability"] | string;
+                /** Hosting */
+                hosting: components["schemas"]["ModelHostingLocation"] | string;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
                 description?: string | null;
                 /** Deployment Name */
                 deployment_name?: string | null;
-                org?: components["schemas"]["ModelOrg"] | null;
+                /** Org */
+                org?: components["schemas"]["ModelOrg"] | string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -11817,6 +12316,10 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -12086,7 +12589,8 @@ export interface operations {
                 name: string;
                 /** Nickname */
                 nickname: string;
-                family: components["schemas"]["ModelFamily"];
+                /** Family */
+                family: components["schemas"]["ModelFamily"] | string;
                 /** Token Limit */
                 token_limit: number;
                 /** Is Deprecated */
@@ -12095,15 +12599,18 @@ export interface operations {
                 nr_billion_parameters?: number | null;
                 /** Hf Link */
                 hf_link?: string | null;
-                stability: components["schemas"]["ModelStability"];
-                hosting: components["schemas"]["ModelHostingLocation"];
+                /** Stability */
+                stability: components["schemas"]["ModelStability"] | string;
+                /** Hosting */
+                hosting: components["schemas"]["ModelHostingLocation"] | string;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
                 description?: string | null;
                 /** Deployment Name */
                 deployment_name?: string | null;
-                org?: components["schemas"]["ModelOrg"] | null;
+                /** Org */
+                org?: components["schemas"]["ModelOrg"] | string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -12122,6 +12629,10 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -14219,7 +14730,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     requestBody: {
@@ -15800,6 +16312,505 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Providers
+   * @description List all model providers for the tenant.
+   */
+  list_providers_api_v1_admin_model_providers__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"][];
+        };
+      };
+    };
+  };
+  /**
+   * Create Provider
+   * @description Create a new model provider.
+   */
+  create_provider_api_v1_admin_model_providers__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelProviderCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Provider
+   * @description Get a specific model provider.
+   */
+  get_provider_api_v1_admin_model_providers__provider_id___get: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Provider
+   * @description Update an existing model provider.
+   */
+  update_provider_api_v1_admin_model_providers__provider_id___put: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelProviderUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Provider
+   * @description Delete a model provider.
+   *
+   * Will fail if the provider has models attached to it.
+   */
+  delete_provider_api_v1_admin_model_providers__provider_id___delete: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Completion Model
+   * @description Create a new tenant-specific completion model.
+   */
+  create_tenant_completion_model_api_v1_admin_tenant_models_completion__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantCompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Completion Model
+   * @description Update a tenant-specific completion model.
+   */
+  update_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Completion Model
+   * @description Delete a tenant-specific completion model.
+   */
+  delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Embedding Model
+   * @description Create a new tenant-specific embedding model.
+   */
+  create_tenant_embedding_model_api_v1_admin_tenant_models_embedding__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantEmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Embedding Model
+   * @description Update a tenant-specific embedding model.
+   */
+  update_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Embedding Model
+   * @description Delete a tenant-specific embedding model.
+   */
+  delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Transcription Model
+   * @description Create a new tenant-specific transcription model.
+   */
+  create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantTranscriptionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Transcription Model
+   * @description Update a tenant-specific transcription model.
+   */
+  update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantTranscriptionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Transcription Model
+   * @description Delete a tenant-specific transcription model.
+   */
+  delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -19988,7 +20999,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     requestBody: {
@@ -20027,7 +21039,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     responses: {

@@ -17,13 +17,12 @@ Security Model:
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
@@ -594,7 +593,6 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     Each workflow uses ~2 connections, so 20 concurrent = ~40 potential
     connections. Using a semaphore ensures we stay within limits.
     """
-    import asyncio
 
     # Create two tenants with users
     tenant_a = await _create_tenant(client, super_admin_token, f"tenant-concurrent-a-{uuid4().hex[:6]}")

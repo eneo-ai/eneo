@@ -132,33 +132,33 @@ class CompletionModelMigrationService:
                     f"Migration requires different source and target models."
                 )
 
-            # For single-tenant deployment, we still check if models are enabled for the tenant
-            # This is done through CompletionModelSettings
-            from intric.database.tables.ai_models_table import CompletionModelSettings
+            # For single-tenant deployment, check if models are enabled for the tenant
+            # Settings are now stored directly on the model table
+            from intric.database.tables.ai_models_table import CompletionModels
 
-            from_settings_stmt = select(CompletionModelSettings).where(
+            from_model_stmt = select(CompletionModels).where(
                 and_(
-                    CompletionModelSettings.completion_model_id == from_model_id,
-                    CompletionModelSettings.tenant_id == user.tenant_id,
-                    CompletionModelSettings.is_org_enabled == True,
+                    CompletionModels.id == from_model_id,
+                    CompletionModels.tenant_id == user.tenant_id,
+                    CompletionModels.is_enabled == True,
                 )
             )
-            from_settings = await self.session.execute(from_settings_stmt)
-            if not from_settings.scalar_one_or_none():
+            from_model_result = await self.session.execute(from_model_stmt)
+            if not from_model_result.scalar_one_or_none():
                 raise ValidationException(
                     f"Source model not available: The model '{from_model.name}' is not enabled for your organization. "
                     f"Please contact your administrator to enable this model."
                 )
 
-            to_settings_stmt = select(CompletionModelSettings).where(
+            to_model_stmt = select(CompletionModels).where(
                 and_(
-                    CompletionModelSettings.completion_model_id == to_model_id,
-                    CompletionModelSettings.tenant_id == user.tenant_id,
-                    CompletionModelSettings.is_org_enabled == True,
+                    CompletionModels.id == to_model_id,
+                    CompletionModels.tenant_id == user.tenant_id,
+                    CompletionModels.is_enabled == True,
                 )
             )
-            to_settings = await self.session.execute(to_settings_stmt)
-            if not to_settings.scalar_one_or_none():
+            to_model_result = await self.session.execute(to_model_stmt)
+            if not to_model_result.scalar_one_or_none():
                 raise ValidationException(
                     f"Target model not available: The model '{to_model.name}' is not enabled for your organization. "
                     f"Please contact your administrator to enable this model."

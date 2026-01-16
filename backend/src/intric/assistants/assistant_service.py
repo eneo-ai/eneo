@@ -202,7 +202,7 @@ class AssistantService:
         self,
         space: "Space",
         template_data: "TemplateCreate",
-        completion_model: "CompletionModel",
+        completion_model: Optional["CompletionModel"],
         name: str | None = None,
     ):
         template = await self.assistant_template_service.get_assistant_template(
@@ -243,11 +243,12 @@ class AssistantService:
 
         return assistant
 
-    async def get_completion_model(self, space: "Space") -> "CompletionModel":
+    async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
+        """Get a completion model for the space. Returns None if no model is available."""
         model = space.get_default_completion_model()
         if model:
             return model
-        
+
         if space.completion_models:
             try:
                 model = space.get_latest_completion_model()
@@ -256,17 +257,13 @@ class AssistantService:
             except Exception:
                 pass
 
-        model = await self.completion_model_crud_service.get_default_completion_model()
-        if model is None:
-            raise BadRequestException(
-                "Can not create an assistant in a space without enabled completion models"
-            )
-        return model
+        # Try to get tenant default model
+        return await self.completion_model_crud_service.get_default_completion_model()
 
     async def create_default_assistant(self, name: str, space: "Space"):
-        cm = await self.get_completion_model(space)
+        cm = space.get_default_completion_model()
 
-        if not space.is_completion_model_in_space(cm.id):
+        if cm and not space.is_completion_model_in_space(cm.id):
             space.add_completion_model(cm)
             await self.space_repo.update(space)
 

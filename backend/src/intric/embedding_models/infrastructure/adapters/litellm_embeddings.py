@@ -138,11 +138,27 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
             # Inject tenant-specific API key if credential_resolver is provided
             if self.credential_resolver:
-                provider = self._detect_provider(self._original_model_name)
+                # Check if this is a TenantModelCredentialResolver or CredentialResolver
+                # TenantModelCredentialResolver has provider_type attribute and doesn't need provider argument
+                from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
+                    TenantModelCredentialResolver,
+                )
+
+                is_tenant_resolver = isinstance(self.credential_resolver, TenantModelCredentialResolver)
+
                 try:
-                    api_key = self.credential_resolver.get_api_key(provider)
+                    if is_tenant_resolver:
+                        # TenantModelCredentialResolver: no provider argument needed
+                        api_key = self.credential_resolver.get_api_key()
+                        provider = self.credential_resolver.provider_type
+                        logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting tenant model API key for {provider}")
+                    else:
+                        # CredentialResolver: needs provider argument
+                        provider = self._detect_provider(self._original_model_name)
+                        api_key = self.credential_resolver.get_api_key(provider)
+                        logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting tenant API key for {provider}")
+
                     params['api_key'] = api_key
-                    logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting tenant API key for {provider}")
                 except ValueError as e:
                     logger.error(f"[LiteLLM] {self.litellm_model}: Credential resolution failed: {e}")
                     raise HTTPException(
@@ -150,16 +166,29 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         detail=f"Embedding service unavailable: {str(e)}"
                     )
 
-                # Inject endpoint for VLLM and other providers with custom endpoints
-                # VLLM requires endpoint - fallback to global VLLM_MODEL_URL for single-tenant deployments
+                # Inject endpoint for VLLM, Infinity and other providers with custom endpoints
+                # These providers require endpoint - fallback to global settings for single-tenant deployments
                 settings = get_settings()
-                endpoint_fallback = settings.vllm_model_url if provider == "vllm" else None
-                endpoint = self.credential_resolver.get_credential_field(
-                    provider=provider,
-                    field="endpoint",
-                    fallback=endpoint_fallback,
-                    required=(provider in {"vllm", "azure"})  # endpoint is required for vLLM and Azure
-                )
+                if provider == "infinity":
+                    endpoint_fallback = settings.infinity_url
+                else:
+                    endpoint_fallback = None
+
+                if is_tenant_resolver:
+                    # TenantModelCredentialResolver: no provider argument needed
+                    endpoint = self.credential_resolver.get_credential_field(
+                        field="endpoint",
+                        fallback=endpoint_fallback,
+                        required=(provider in {"infinity", "azure"})  # endpoint is required for these providers
+                    )
+                else:
+                    # CredentialResolver: needs provider argument
+                    endpoint = self.credential_resolver.get_credential_field(
+                        provider=provider,
+                        field="endpoint",
+                        fallback=endpoint_fallback,
+                        required=(provider in {"infinity", "azure"})  # endpoint is required for these providers
+                    )
 
                 if endpoint:
                     params['api_base'] = endpoint
@@ -167,17 +196,26 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
                 # Inject api_version for Azure embeddings
                 if provider == "azure":
-                    # In strict mode, each tenant must configure their own api_version
-                    # In single-tenant mode, can fallback to global default
-                    api_version = self.credential_resolver.get_credential_field(
-                        "azure",
-                        "api_version",
-                        settings.azure_api_version,
-                        required=(
-                            self.credential_resolver.tenant is not None and
-                            self.credential_resolver.settings.tenant_credentials_enabled
-                        ),
-                    )
+                    if is_tenant_resolver:
+                        # TenantModelCredentialResolver: api_version is required for tenant models
+                        api_version = self.credential_resolver.get_credential_field(
+                            field="api_version",
+                            fallback=None,
+                            required=True,
+                        )
+                    else:
+                        # CredentialResolver: In strict mode, each tenant must configure their own api_version
+                        # In single-tenant mode, can fallback to global default
+                        api_version = self.credential_resolver.get_credential_field(
+                            "azure",
+                            "api_version",
+                            settings.azure_api_version,
+                            required=(
+                                self.credential_resolver.tenant is not None and
+                                self.credential_resolver.settings.tenant_credentials_enabled
+                            ),
+                        )
+
                     if api_version:
                         params["api_version"] = api_version
                         logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")

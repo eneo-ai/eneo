@@ -232,6 +232,7 @@ class SpaceAssembler:
             type="assistant",
             metadata_json=assistant.metadata_json,
             icon_id=assistant.icon_id,
+            completion_model_id=assistant.completion_model.id if assistant.completion_model else None,
         )
 
     def _get_group_chat_model(self, group_chat: "GroupChat"):

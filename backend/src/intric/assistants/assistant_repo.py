@@ -325,11 +325,14 @@ class AssistantRepository:
         ]
 
     async def update(self, assistant: Assistant):
+        completion_model_id = (
+            assistant.completion_model.id if assistant.completion_model is not None else None
+        )
         query = (
             sa.update(Assistants)
             .values(
                 name=assistant.name,
-                completion_model_id=assistant.completion_model.id,
+                completion_model_id=completion_model_id,
                 completion_model_kwargs=assistant.completion_model_kwargs.model_dump(),
                 logging_enabled=assistant.logging_enabled,
                 space_id=assistant.space_id,

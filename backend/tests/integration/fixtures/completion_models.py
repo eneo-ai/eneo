@@ -1,9 +1,10 @@
 """
 Fixtures for completion models (mirrors src/intric/completion_models/).
 
-These fixtures create completion models and their settings.
+These fixtures create completion models with settings stored directly on the model.
 """
 import pytest
+from sqlalchemy import select
 
 from intric.ai_models.model_enums import (
     ModelFamily,
@@ -11,10 +12,8 @@ from intric.ai_models.model_enums import (
     ModelOrg,
     ModelStability,
 )
-from intric.database.tables.ai_models_table import (
-    CompletionModels,
-    CompletionModelSettings,
-)
+from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.model_providers_table import ModelProviders
 
 
 @pytest.fixture
@@ -22,8 +21,8 @@ def completion_model_factory(admin_user):
     """
     Factory fixture for creating completion models dynamically.
 
-    Creates both the CompletionModel record and its associated settings
-    for the admin user's tenant.
+    Creates CompletionModel records for the admin user's tenant with
+    settings (is_enabled, is_default) stored directly on the model.
 
     Usage:
         async def test_migration(completion_model_factory, db_container):
@@ -41,14 +40,51 @@ def completion_model_factory(admin_user):
         vision: Vision support (defaults to False)
         reasoning: Reasoning support (defaults to False)
         is_deprecated: Whether model is deprecated (defaults to False)
-        is_org_enabled: Whether enabled for tenant (defaults to True)
-        is_org_default: Whether default for tenant (defaults to False)
+        is_enabled: Whether enabled for tenant (defaults to True)
+        is_default: Whether default for tenant (defaults to False)
         family: Model family (defaults to provider-based)
         **kwargs: Additional model properties (hosting, stability, etc.)
 
     Returns:
         CompletionModels: The created database model
     """
+    # Cache for providers per tenant/provider_type combo
+    _provider_cache = {}
+
+    async def _get_or_create_provider(session, tenant_id, provider_type: str):
+        """Get existing provider or create a new one for this tenant/provider combo."""
+        cache_key = (tenant_id, provider_type)
+        if cache_key in _provider_cache:
+            return _provider_cache[cache_key]
+
+        # Check if provider already exists
+        result = await session.execute(
+            select(ModelProviders).where(
+                ModelProviders.tenant_id == tenant_id,
+                ModelProviders.provider_type == provider_type,
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            _provider_cache[cache_key] = existing.id
+            return existing.id
+
+        # Create new provider
+        provider = ModelProviders(
+            tenant_id=tenant_id,
+            name=provider_type.title(),
+            provider_type=provider_type,
+            credentials={"api_key": "test-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        _provider_cache[cache_key] = provider.id
+        return provider.id
+
     async def _create_model(
         session,
         name: str,
@@ -58,8 +94,8 @@ def completion_model_factory(admin_user):
         vision: bool = False,
         reasoning: bool = False,
         is_deprecated: bool = False,
-        is_org_enabled: bool = True,
-        is_org_default: bool = False,
+        is_enabled: bool = True,
+        is_default: bool = False,
         family: ModelFamily = None,
         **kwargs
     ) -> CompletionModels:
@@ -87,8 +123,13 @@ def completion_model_factory(admin_user):
         }
         org = org_map.get(provider)
 
-        # Create the completion model
+        # Get or create provider for this tenant (required by check constraint)
+        provider_id = await _get_or_create_provider(session, admin_user.tenant_id, provider)
+
+        # Create the completion model with settings directly on it
         model = CompletionModels(
+            tenant_id=admin_user.tenant_id,
+            provider_id=provider_id,
             name=name,
             nickname=nickname,
             token_limit=token_limit,
@@ -106,20 +147,13 @@ def completion_model_factory(admin_user):
             deployment_name=kwargs.get("deployment_name"),
             base_url=kwargs.get("base_url"),
             litellm_model_name=kwargs.get("litellm_model_name"),
+            # Settings are now directly on the model
+            is_enabled=is_enabled,
+            is_default=is_default,
+            security_classification_id=kwargs.get("security_classification_id"),
         )
 
         session.add(model)
-        await session.flush()
-
-        # Create settings for the admin user's tenant
-        settings = CompletionModelSettings(
-            completion_model_id=model.id,
-            tenant_id=admin_user.tenant_id,
-            is_org_enabled=is_org_enabled,
-            is_org_default=is_org_default,
-        )
-
-        session.add(settings)
         await session.flush()
 
         return model

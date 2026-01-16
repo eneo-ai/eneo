@@ -13,9 +13,9 @@ from intric.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:
     from intric.database.tables.ai_models_table import (
-        CompletionModelSettings,
-        EmbeddingModelSettings,
-        TranscriptionModelSettings,
+        CompletionModels,
+        EmbeddingModels,
+        TranscriptionModels,
     )
     from intric.database.tables.spaces_table import Spaces
 
@@ -38,19 +38,17 @@ class SecurityClassification(BasePublic):
     tenant: Mapped["Tenants"] = relationship()
 
     # Relationships
-    completion_model_settings: Mapped[list["CompletionModelSettings"]] = relationship(
+    completion_models: Mapped[list["CompletionModels"]] = relationship(
         back_populates="security_classification",
-        order_by="CompletionModelSettings.created_at",
+        order_by="CompletionModels.created_at",
     )
-    embedding_model_settings: Mapped[list["EmbeddingModelSettings"]] = relationship(
+    embedding_models: Mapped[list["EmbeddingModels"]] = relationship(
         back_populates="security_classification",
-        order_by="EmbeddingModelSettings.created_at",
+        order_by="EmbeddingModels.created_at",
     )
-    transcription_model_settings: Mapped[list["TranscriptionModelSettings"]] = (
-        relationship(
-            back_populates="security_classification",
-            order_by="TranscriptionModelSettings.created_at",
-        )
+    transcription_models: Mapped[list["TranscriptionModels"]] = relationship(
+        back_populates="security_classification",
+        order_by="TranscriptionModels.created_at",
     )
     spaces: Mapped[list["Spaces"]] = relationship(
         back_populates="security_classification", order_by="Spaces.created_at"

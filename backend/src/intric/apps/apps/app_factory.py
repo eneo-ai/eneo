@@ -98,7 +98,11 @@ class AppFactory:
         prompt: Prompt = None,
         transcription_model: TranscriptionModel = None,
     ):
-        completion_model = CompletionModelSparse.model_validate(app_in_db.completion_model)
+        completion_model = (
+            CompletionModelSparse.model_validate(app_in_db.completion_model)
+            if app_in_db.completion_model is not None
+            else None
+        )
         input_fields = [
             InputField.model_validate(input_field) for input_field in app_in_db.input_fields
         ]

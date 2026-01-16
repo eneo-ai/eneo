@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel, ModelProviderPublic } from "@intric/intric-js";
   import { Table } from "@intric/ui";
   import { createRender } from "svelte-headless-table";
   import ModelEnabledSwitch from "./ModelEnableSwitch.svelte";
@@ -14,30 +14,41 @@
     getLabels
   } from "$lib/features/ai-models/components/ModelLabels.svelte";
   import ModelActions from "./ModelActions.svelte";
-  import ModelCardDialog from "$lib/features/ai-models/components/ModelCardDialog.svelte";
+  import ModelNameCell from "./ModelNameCell.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
+  import ProviderActions from "./ProviderActions.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { browser } from "$app/environment";
+
+  import { writable, type Writable } from "svelte/store";
+  import { Button } from "@intric/ui";
+  import { Plus } from "lucide-svelte";
+  import ProviderDialog from "./ProviderDialog.svelte";
 
   export let completionModels: CompletionModel[];
-  export let credentials:
-    | {
-        provider: string;
-        masked_key: string;
-        config: Record<string, any>;
-      }[]
-    | undefined = undefined;
-  export let tenantCredentialsEnabled: boolean = false;
+  export let providers: ModelProviderPublic[] = [];
+  export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
+  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
-  const table = Table.createWithResource(completionModels);
+  const addProviderDialogOpen = writable(false);
 
-  const viewModel = table.createViewModel([
+  // Track provider being edited (for credential icon click -> edit provider)
+  let editingProvider: ModelProviderPublic | null = null;
+  const editProviderDialogOpen = writable(false);
+
+  // Backend returns both global and tenant models
+  // Filter to show only tenant models in UI
+  $: filteredModels = completionModels.filter(m => m.provider_id != null);
+
+  const table = Table.createWithResource(filteredModels);
+
+  // Build columns dynamically based on feature flags
+  $: columns = [
     table.column({
       accessor: (model) => model,
       header: m.name(),
       cell: (item) => {
-        return createRender(ModelCardDialog, { model: item.value, includeTrigger: true });
+        return createRender(ModelNameCell, { model: item.value });
       },
       plugins: {
         sort: {
@@ -114,64 +125,89 @@
         return createRender(ModelActions, { model: item.value, type: "completionModel" });
       }
     })
-  ]);
+  ];
 
-  function createOrgFilter(org: string | null | undefined) {
+  $: viewModel = table.createViewModel(columns);
+
+  // Group by provider_id for tenant models
+  function createGroupFilter(groupKey: string) {
     return function (model: CompletionModel) {
-      return model.org === org;
+      return model.provider_id === groupKey;
     };
   }
 
-  function listOrgs(models: CompletionModel[]): string[] {
-    const uniqueOrgs = new Set<string>();
-    for (const model of models) {
-      if (model.org) uniqueOrgs.add(model.org);
-    }
-    return Array.from(uniqueOrgs);
+  function listGroups(providerList: ModelProviderPublic[]): Array<{ key: string; name: string }> {
+    // Show all providers, including those without models
+    return providerList.map(provider => ({
+      key: provider.id,
+      name: provider.name
+    }));
   }
 
   /**
-   * Get the credential provider ID for a given org.
-   * Uses the credential_provider field from the backend (authoritative source).
+   * Get the full provider object for a given group.
    */
-  function getProviderIdForOrg(org: string): string | undefined {
-    const model = completionModels.find((m) => m.org === org);
-    return model?.credential_provider;
+  function getProviderForGroup(groupKey: string): ModelProviderPublic | undefined {
+    return providers.find(p => p.id === groupKey);
   }
 
-  function getCredentialForProvider(provider: string) {
-    if (!credentials) return undefined;
-
-    const providerId = getProviderIdForOrg(provider);
-    if (!providerId) return undefined;
-
-    const cred = credentials.find((c) => c.provider.toLowerCase() === providerId.toLowerCase());
-    if (!cred) return undefined;
-    return {
-      masked_key: cred.masked_key,
-      config: cred.config
-    };
+  /**
+   * Handle "Add Model" action from provider dropdown.
+   * Opens the add model dialog with this provider pre-selected.
+   */
+  function handleAddModelToProvider(providerId: string) {
+    preSelectedProviderId?.set(providerId);
+    addModelDialogOpen?.set(true);
   }
 
-  $: uniqueOrgs = listOrgs(completionModels);
-  $: table.update(completionModels);
-</script>
+  /**
+   * Handle editing a provider (e.g., when clicking the credential icon).
+   * Opens the ProviderDialog in edit mode.
+   */
+  function handleEditProvider(provider: ModelProviderPublic) {
+    editingProvider = provider;
+    editProviderDialogOpen.set(true);
+  }
 
-<div>
+  $: groups = listGroups(providers);
+  $: table.update(filteredModels);</script>
+
+<div class="flex flex-col gap-4">
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
-    {#each uniqueOrgs as provider (provider)}
-      {@const providerId = getProviderIdForOrg(provider)}
-      <Table.Group filterFn={createOrgFilter(provider)} title={provider}>
+    {#each groups as group (group.key)}
+      {@const provider = getProviderForGroup(group.key)}
+      <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
         <svelte:fragment slot="title-suffix">
-          {#if browser && tenantCredentialsEnabled && providerId}
-            <ProviderCredentialIcon
-              provider={providerId}
-              displayName={provider}
-              credential={getCredentialForProvider(provider)}
-            />
-          {/if}
+          <div class="flex items-center gap-2">
+            {#if provider}
+              <ProviderCredentialIcon
+                {provider}
+                onEdit={() => handleEditProvider(provider)}
+              />
+              <ProviderActions
+                {provider}
+                onAddModel={handleAddModelToProvider}
+              />
+            {/if}
+          </div>
+        </svelte:fragment>
+        <svelte:fragment slot="empty">
+          <span class="text-sm text-muted">{m.no_models_in_provider()}</span>
         </svelte:fragment>
       </Table.Group>
     {/each}
   </Table.Root>
+
+  <div class="flex justify-center pb-4">
+    <Button variant="outlined" on:click={() => addProviderDialogOpen.set(true)}>
+      <Plus class="w-4 h-4 mr-2" />
+      {m.add_provider()}
+    </Button>
+  </div>
 </div>
+
+<!-- Add Provider Dialog -->
+<ProviderDialog openController={addProviderDialogOpen} />
+
+<!-- Edit Provider Dialog -->
+<ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />

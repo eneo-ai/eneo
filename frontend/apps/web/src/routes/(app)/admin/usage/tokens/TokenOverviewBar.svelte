@@ -27,7 +27,7 @@
             acc[org] = {
               label: org || m.unknown_organization(),
               tokenCount: 0,
-              colour: modelOrgs[org].chartColour,
+              colour: org && org in modelOrgs ? modelOrgs[org].chartColour : "chart-blue",
               org: org
             };
           }
