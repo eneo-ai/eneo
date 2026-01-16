@@ -144,8 +144,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for model in completion_models:
         model_id = str(uuid4())
         completion_model_ids[model["name"]] = model_id
-        # Note: At 20251127_add_icons level, tenant_id and provider_id columns
-        # don't exist yet - they are added by f7f7647d5327_add_model_providers
+        # Note: Before f7f7647d5327, tenant_id and provider_id columns
+        # don't exist yet - they are added by that migration
         cur.execute("""
             INSERT INTO completion_models (
                 id, name, nickname, family,
@@ -177,8 +177,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for model in embedding_models:
         model_id = str(uuid4())
         embedding_model_ids[model["name"]] = model_id
-        # Note: At 20251127_add_icons level, tenant_id and provider_id columns
-        # don't exist yet - they are added by f7f7647d5327_add_model_providers
+        # Note: Before f7f7647d5327, tenant_id and provider_id columns
+        # don't exist yet - they are added by that migration
         cur.execute("""
             INSERT INTO embedding_models (
                 id, name, family,
@@ -207,8 +207,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for model in transcription_models:
         model_id = str(uuid4())
         transcription_model_ids[model["name"]] = model_id
-        # Note: At 20251127_add_icons level, tenant_id and provider_id columns
-        # don't exist yet - they are added by f7f7647d5327_add_model_providers
+        # Note: Before f7f7647d5327, tenant_id and provider_id columns
+        # don't exist yet - they are added by that migration
         cur.execute("""
             INSERT INTO transcription_models (
                 id, name, model_name, family,
@@ -506,32 +506,37 @@ def migration_test_db(test_settings):
 
     alembic_cfg = get_alembic_config(test_settings.sync_database_url)
 
+    # Target revision: just before f7f7647d5327 which adds model_providers table
+    # At this point: model tables exist but WITHOUT tenant_id/provider_id columns,
+    # and completion_model_settings table exists
+    pre_migration_revision = "20260116_update_audit_actor_fk"
+
     try:
         # Stepwise downgrade to restore settings tables:
         # 1. First downgrade to migrate_global_to_tenant_models
         #    (this runs consolidate_model_settings downgrade, recreating settings tables)
-        # 2. Then downgrade to 20251127_add_icons (before migrate_global)
+        # 2. Then downgrade to pre_migration_revision (before f7f7647d5327)
         try:
             print("Downgrading stepwise to restore settings tables...")
             # This triggers consolidate_model_settings downgrade which recreates settings tables
             command.downgrade(alembic_cfg, "migrate_global_to_tenant_models")
             print("Downgraded past consolidate_model_settings (settings tables recreated)")
 
-            # Now downgrade to before migrate_global_to_tenant_models
-            command.downgrade(alembic_cfg, "20251127_add_icons")
-            print("Downgraded to 20251127_add_icons (before global-to-tenant migration)")
+            # Now downgrade to before f7f7647d5327 (which adds model_providers)
+            command.downgrade(alembic_cfg, pre_migration_revision)
+            print(f"Downgraded to {pre_migration_revision} (before model_providers migration)")
         except Exception as e:
             print(f"Downgrade not possible (may already be at base): {e}")
             # If downgrade fails, upgrade to that revision instead
-            command.upgrade(alembic_cfg, "20251127_add_icons")
-            print("Upgraded to 20251127_add_icons")
+            command.upgrade(alembic_cfg, pre_migration_revision)
+            print(f"Upgraded to {pre_migration_revision}")
 
         # Create legacy data
         now = datetime.now(timezone.utc)
         with conn.cursor() as cur:
             # Clear any existing data first (in case of rerun)
-            # Note: At 20251127_add_icons level, model_providers table doesn't exist yet
-            # (it's created in f7f7647d5327_add_model_providers migration)
+            # Note: Before f7f7647d5327, model_providers table doesn't exist yet
+            # (it's created by that migration)
             cur.execute("DELETE FROM completion_model_settings")
             cur.execute("DELETE FROM embedding_model_settings")
             cur.execute("DELETE FROM spaces_completion_models")
@@ -557,7 +562,7 @@ def migration_test_db(test_settings):
         print(f"  - {len(legacy_data['transcription_model_ids'])} transcription models")
 
         # Verify models and settings exist before migration
-        # Note: At 20251127_add_icons level, tenant_id column doesn't exist yet
+        # Note: Before f7f7647d5327, tenant_id column doesn't exist yet
         # so we just count all models (they are all "global" at this point)
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM completion_models")
@@ -591,7 +596,6 @@ def migration_test_db(test_settings):
         conn.close()
 
 
-@pytest.mark.integration
 class TestGlobalToTenantModelsMigration:
     """
     Test suite for the global-to-tenant-models migration.
@@ -808,7 +812,6 @@ class TestGlobalToTenantModelsMigration:
                     f"Tenant {tenant_id} should have at least one default completion model"
 
 
-@pytest.mark.integration
 class TestMigrationDataIntegrity:
     """
     Tests focused on data integrity after migration.
@@ -894,7 +897,6 @@ class TestMigrationDataIntegrity:
                     f"Assistant '{assistant_name}' using model from wrong tenant"
 
 
-@pytest.mark.integration
 class TestMigrationCredentialHandling:
     """
     Tests focused on credential handling during migration.
@@ -993,7 +995,6 @@ class TestMigrationCredentialHandling:
                 # (depends on how migration handles these)
 
 
-@pytest.mark.integration
 class TestConsolidateModelSettings:
     """
     Tests for consolidate_model_settings migration.
