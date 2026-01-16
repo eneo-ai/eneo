@@ -43,8 +43,8 @@
 
 <Dropdown.Root>
   <Dropdown.Trigger let:trigger asFragment>
-    <Button variant="simple" is={trigger} padding="icon" class="h-6 w-6">
-      <IconEllipsis class="h-4 w-4" />
+    <Button variant="on-fill" is={trigger} padding="icon">
+      <IconEllipsis />
     </Button>
   </Dropdown.Trigger>
   <Dropdown.Menu let:item>

@@ -1690,6 +1690,8 @@
   "model_family_hint": "Inbäddningsmodellens familj bestämmer inmatningsformat (t.ex. E5 kräver \"passage:\"-prefix)",
   "model_family_openai": "OpenAI (Standard)",
   "model_family_e5": "E5 (HuggingFace)",
+  "no_models_in_provider": "Inga modeller konfigurerade för denna leverantör.",
+  "add_model_to_provider": "Lägg till modell",
   "delete_provider_confirm": "Är du säker på att du vill ta bort {name}?",
   "delete_provider_warning": "Detta kommer också att ta bort alla modeller kopplade till denna leverantör. Denna åtgärd kan inte ångras.",
   "failed_to_delete_provider": "Misslyckades att ta bort leverantör",

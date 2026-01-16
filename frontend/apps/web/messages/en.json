@@ -1655,6 +1655,8 @@
   "model_family_hint": "The embedding model family determines input format (e.g., E5 requires \"passage:\" prefix)",
   "model_family_openai": "OpenAI (Standard)",
   "model_family_e5": "E5 (HuggingFace)",
+  "no_models_in_provider": "No models configured for this provider.",
+  "add_model_to_provider": "Add model",
   "delete_provider_confirm": "Are you sure you want to delete {name}?",
   "delete_provider_warning": "This will also delete all models associated with this provider. This action cannot be undone.",
   "failed_to_delete_provider": "Failed to delete provider",

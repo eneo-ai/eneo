@@ -191,6 +191,9 @@
             {/if}
           </div>
         </svelte:fragment>
+        <svelte:fragment slot="empty">
+          <span class="text-sm text-muted">{m.no_models_in_provider()}</span>
+        </svelte:fragment>
       </Table.Group>
     {/each}
   </Table.Root>
