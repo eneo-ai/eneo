@@ -7,7 +7,6 @@ const meta: MetaRecord = {
   'ai-providers': 'AI Provider Configuration',
   deployment: 'Deployment',
   'document-processing': 'Document Processing',
-  'security-compliance': 'Security & Compliance',
   'sharepoint-integration': 'SharePoint Integration',
 }
 
