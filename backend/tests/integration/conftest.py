@@ -6,6 +6,34 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip migration_isolation tests unless explicitly requested.
+
+    This hook ensures migration tests ONLY run when explicitly requested with:
+        pytest -m migration_isolation tests/
+
+    Any other pytest invocation will skip these tests:
+        pytest tests/                    → skipped
+        pytest -m integration tests/     → skipped
+        pytest -m "not integration" ...  → skipped
+    """
+    # Check if migration_isolation marker was explicitly requested
+    marker_expr = config.getoption("-m", default="")
+    if "migration_isolation" in marker_expr and "not migration_isolation" not in marker_expr:
+        # User explicitly requested migration_isolation tests, don't skip
+        return
+
+    # Skip all tests with migration_isolation marker
+    skip_migration = pytest.mark.skip(
+        reason="Migration tests only run with: pytest -m migration_isolation"
+    )
+    for item in items:
+        if "migration_isolation" in item.keywords:
+            item.add_marker(skip_migration)
+
 
 # IMPORTANT: Configure environment variables BEFORE importing testcontainers
 # Disable Ryuk (testcontainers cleanup container) in devcontainer environments
@@ -81,7 +109,6 @@ import contextlib
 from typing import AsyncGenerator, Generator
 
 import psycopg2
-import pytest
 from alembic import command
 from alembic.config import Config
 from dependency_injector import providers

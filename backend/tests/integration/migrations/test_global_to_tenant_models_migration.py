@@ -45,7 +45,12 @@ from uuid import uuid4
 # Mark tests to run only when explicitly selected (not as part of larger suite)
 # These tests downgrade/upgrade the database schema and must run in isolation.
 # Run with: pytest -m migration_isolation tests/integration/migrations/test_global_to_tenant_models_migration.py -v
-pytestmark = pytest.mark.migration_isolation
+#
+# NOTE: Tests have both 'integration' and 'migration_isolation' markers so they are:
+# - Excluded by default (addopts = -m "not migration_isolation")
+# - Excluded by -m "not integration" (unit test runs)
+# - Must be explicitly excluded in CI: -m "integration and not migration_isolation"
+pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 
 def get_alembic_config(database_url: str) -> Config:
