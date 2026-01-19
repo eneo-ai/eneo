@@ -221,6 +221,14 @@ async def crawl_website(ctx, url: str, max_depth: int):
 
 ---
 
+### Audit Logging
+
+Audit logging captures security- and compliance-relevant actions across tenants. Logs are persisted in PostgreSQL, exports are handled by the worker, and retention is enforced by a daily purge job.
+
+See [Audit Logging](/docs/audit-logging) for implementation details, retention hierarchy, and export options.
+
+---
+
 ### Redis (Cache & Queue)
 
 **Responsibilities:**

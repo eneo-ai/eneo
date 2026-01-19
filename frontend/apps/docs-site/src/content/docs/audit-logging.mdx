@@ -1,0 +1,149 @@
+# Audit Logging (Technical)
+
+Audit logging is a first-class subsystem in Eneo for security, compliance, and traceability. It records actions across the platform, stores them in PostgreSQL, and exposes controlled access for admins.
+
+For admin-facing guidance, see the [Audit Logging Guide](/guides/audit-logging).
+
+## High-level architecture
+
+Audit events are created through the `AuditService` application layer:
+
+1. API routes/services call `log_async` (preferred) or `log` (synchronous).
+2. `log_async` enqueues a background job in ARQ (Redis-backed).
+3. The worker persists the audit log in PostgreSQL.
+4. Retention is enforced by a scheduled purge job.
+5. Exports are generated via the `AuditExportService` (sync or async job).
+
+Audit logging is gated by:
+
+- A global feature toggle (`audit_logging_enabled`).
+- Per-tenant audit configuration (category-level and action-level overrides).
+
+## Storage model
+
+Audit logs are stored in PostgreSQL (table `audit_logs`) with structured JSON metadata.
+
+Key fields include:
+
+- `action`, `entity_type`, `entity_id`
+- `actor_id` (nullable for system actions or deleted users)
+- `description`
+- `metadata` (JSONB)
+- `outcome`, `timestamp`
+
+Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
+
+## Configuration model
+
+Configuration is layered to allow broad and precise control:
+
+- **Global toggle**: enable/disable all audit logging for the tenant.
+- **Category toggles**: enable/disable whole groups (admin actions, user actions, security events, file operations, integration events, system actions, audit access).
+- **Action overrides**: enable/disable specific actions within a category.
+
+Changes apply immediately for new audit events; historical logs are not modified.
+
+## Access model and justification
+
+Viewing audit logs requires an access justification session. The access event itself is logged, including:
+
+- reason category
+- justification text
+- access time and actor
+
+This provides traceability for who accessed audit logs and why.
+
+## Query and search behavior
+
+Audit queries support filters for:
+
+- actor (`actor_id`)
+- actions (single or multi-select)
+- date range
+
+Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata.
+
+## Retention
+
+### Audit log retention
+
+Audit log retention is tenant-specific. A daily purge job hard-deletes logs older than the configured retention period. This is independent from conversation retention.
+
+### Conversation retention hierarchy
+
+Conversation data (questions and app runs) follows a hierarchical retention policy:
+
+1. Assistant or App `data_retention_days` (if set)
+2. Space `data_retention_days`
+3. Tenant-level conversation retention (if enabled internally)
+4. `null` means keep forever
+
+Use assistant/app-level overrides when you need shorter retention than the space default.
+
+## Export formats
+
+### Synchronous export
+
+Endpoint: `GET /api/v1/audit/logs/export`
+
+- `format=csv` (default)
+- `format=json` (JSON Lines/NDJSON)
+
+Synchronous exports are best for small to medium exports.
+
+### Asynchronous export
+
+Endpoint: `POST /api/v1/audit/logs/export`
+
+- `format=csv` or `jsonl`
+- status: `GET /api/v1/audit/logs/export/{job_id}/status`
+- download: `GET /api/v1/audit/logs/export/{job_id}/download`
+
+Async exports are streamed and resilient for large datasets. Export files are retained for 24 hours before cleanup.
+
+## UI behavior notes
+
+- Free-text search matches the audit log description. Include names or identifiers in descriptions if you want them to be searchable.
+- Access to the audit log view is guarded by an access justification session.
+
+## Implementation example
+
+```python
+from intric.audit.domain.audit_metadata_schema import (
+    AuditMetadata,
+    AuditActor,
+    AuditTarget,
+    AuditChange,
+)
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
+metadata = AuditMetadata(
+    actor=AuditActor(
+        id=str(current_user.id),
+        name=current_user.username,
+        email=current_user.email,
+        type=ActorType.USER.value,
+    ),
+    target=AuditTarget(id=str(space.id), name=space.name),
+    changes={
+        "name": AuditChange(old=old_name, new=space.name),
+    },
+).to_dict()
+
+await audit_service.log_async(
+    tenant_id=current_user.tenant_id,
+    actor_id=current_user.id,
+    actor_type=ActorType.USER,
+    action=ActionType.SPACE_UPDATED,
+    entity_type=EntityType.SPACE,
+    entity_id=space.id,
+    description="Updated space name",
+    metadata=metadata,
+)
+```
+
+## Roadmap
+
+We plan to add optional external audit log storage (e.g., SIEM or analytics sink) to reduce long-term load on the primary database while keeping the same access controls and retention guarantees.

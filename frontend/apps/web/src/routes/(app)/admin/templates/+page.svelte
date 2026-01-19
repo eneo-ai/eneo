@@ -8,6 +8,7 @@
   import { Button } from "@intric/ui";
   import { Page } from "$lib/components/layout/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import AssistantTemplatesTable from "./AssistantTemplatesTable.svelte";
   import AppTemplatesTable from "./AppTemplatesTable.svelte";
   import DeletedTemplatesTable from "./DeletedTemplatesTable.svelte";
@@ -72,7 +73,7 @@
           <Button
             variant="primary"
             padding="icon-leading"
-            href="/admin/templates/new/assistant"
+            href={localizeHref("/admin/templates/new/assistant")}
           >
             <LayoutTemplate size={16} />
             {m.create_first_template()}
@@ -101,7 +102,7 @@
           <Button
             variant="primary"
             padding="icon-leading"
-            href="/admin/templates/new/app"
+            href={localizeHref("/admin/templates/new/app")}
           >
             <LayoutTemplate size={16} />
             {m.create_first_template()}
