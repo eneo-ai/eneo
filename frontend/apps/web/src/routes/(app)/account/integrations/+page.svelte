@@ -70,7 +70,14 @@
               {#each integrations as integration (`${integration.tenant_integration_id}-${integration.auth_type || 'user_oauth'}`)}
                 <IntegrationCard {integration}>
                   {#snippet action()}
-                    {#if integration.connected && integration.id}
+                    {#if integration.tenant_app_configured === false}
+                      <div class="flex flex-col gap-1">
+                        <Button disabled variant="secondary">{m.not_available()}</Button>
+                        <p class="text-secondary text-xs">
+                          {m.contact_admin_to_configure()}
+                        </p>
+                      </div>
+                    {:else if integration.connected && integration.id}
                       <UserConnectedSplitButton {integration} {onDisconnect}
                       ></UserConnectedSplitButton>
                     {:else}

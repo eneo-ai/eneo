@@ -9559,6 +9559,11 @@ export interface components {
       auth_type?: string;
       /** Tenant App Id */
       tenant_app_id?: string | null;
+      /**
+       * Tenant App Configured
+       * @default true
+       */
+      tenant_app_configured?: boolean;
     };
     /** UserIntegrationList */
     UserIntegrationList: {
