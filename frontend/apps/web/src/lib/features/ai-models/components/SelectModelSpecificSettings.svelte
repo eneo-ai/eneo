@@ -14,6 +14,9 @@
   $: showVerbosity =
     selectedModel?.litellm_model_name || selectedModel?.name?.toLowerCase().includes("gpt-5");
 
+  // Check if model supports "none" reasoning effort (GPT-5.x but not plain GPT-5)
+  $: supportsNoneReasoning = /gpt-5\.\d/i.test(selectedModel?.name || "");
+
   // Local state for the custom parameters
   let customReasoningEffort: string = "";
   let customVerbosity: string = "";
@@ -73,7 +76,12 @@
       class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
     >
       <option value="">Default</option>
-      <option value="minimal">Minimal</option>
+      {#if supportsNoneReasoning}
+        <option value="none">None</option>
+      {/if}
+      {#if !supportsNoneReasoning}
+        <option value="minimal">Minimal</option>
+      {/if}
       <option value="low">Low</option>
       <option value="medium">Medium</option>
       <option value="high">High</option>
