@@ -71,14 +71,20 @@ Click **Register**.
 
 After registration, the application needs the right permissions to read files from SharePoint. Navigate to **API permissions** → **Add a permission** → **Microsoft Graph**.
 
-Which permissions are needed depends on which authentication method you choose (see next section), but generally you need:
+**Delegated permissions (always required):**
 
-**For delegated permissions:**
+These permissions are used for personal spaces and the Service Account method. They only grant access to files that the authenticating user/account has access to.
+
 - `Files.Read.All` – read files the user has access to
 - `Sites.Read.All` – read SharePoint sites
 - `offline_access` – keep the session active without the user needing to log in again
 
-**For application permissions:**
+**Application permissions (only for Tenant App method):**
+
+These permissions are **only required if you choose the Tenant App authentication method** for shared spaces. If you use Service Account (recommended), you do not need application permissions.
+
+> **Warning:** Application permissions grant access to **all SharePoint sites in the entire organization**. Microsoft does not provide a way to limit application permissions to specific sites. If you want to restrict access to specific sites, use the Service Account method instead.
+
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
 
