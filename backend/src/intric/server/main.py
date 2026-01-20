@@ -117,6 +117,30 @@ class CrawlerHealthResponse(BaseModel):
     debug: DebugInfo = DebugInfo()
 
 
+def _remove_invalid_defaults(schema: dict) -> None:
+    """Remove invalid 'NOT_PROVIDED' defaults from OpenAPI schema recursively."""
+    if not isinstance(schema, dict):
+        return
+
+    if schema.get("default") == "NOT_PROVIDED":
+        del schema["default"]
+
+    if "properties" in schema and isinstance(schema["properties"], dict):
+        for prop_schema in schema["properties"].values():
+            _remove_invalid_defaults(prop_schema)
+
+    if "items" in schema and isinstance(schema["items"], dict):
+        _remove_invalid_defaults(schema["items"])
+
+    if "additionalProperties" in schema and isinstance(schema["additionalProperties"], dict):
+        _remove_invalid_defaults(schema["additionalProperties"])
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in schema and isinstance(schema[key], list):
+            for sub_schema in schema[key]:
+                _remove_invalid_defaults(sub_schema)
+
+
 def get_application():
     app = FastAPI(
         lifespan=lifespan,
@@ -166,6 +190,11 @@ def get_application():
                         for sec in operation["security"]
                         for k, v in sec.items()
                     ]
+
+        # WSO2 compatibility: Remove invalid "NOT_PROVIDED" defaults from schemas
+        if "components" in openapi_schema and "schemas" in openapi_schema["components"]:
+            for schema in openapi_schema["components"]["schemas"].values():
+                _remove_invalid_defaults(schema)
 
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
         if "components" not in openapi_schema:
