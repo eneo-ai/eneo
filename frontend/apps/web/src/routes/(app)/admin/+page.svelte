@@ -21,6 +21,7 @@
   // Initialize from server data
   let usingTemplates = $state(data.settings.using_templates);
   let auditLoggingEnabled = $state(data.settings.audit_logging_enabled);
+  let provisioningEnabled = $state(data.settings.provisioning ?? false);
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -71,6 +72,28 @@
       auditLoggingEnabled = previousValue; // Revert on error
     }
   }
+
+  // Handle provisioning toggle change
+  async function handleToggleProvisioning({ current, next }: { current: boolean; next: boolean }) {
+    console.log(`[Admin] Toggling provisioning from ${current} to ${next}`);
+
+    const previousValue = provisioningEnabled;
+    provisioningEnabled = next; // Optimistic UI update
+
+    try {
+      const updatedSettings = await intric.settings.updateProvisioning(next);
+      console.log(`[Admin] Backend returned provisioning:`, updatedSettings.provisioning);
+
+      // Update from server response
+      provisioningEnabled = updatedSettings.provisioning ?? false;
+
+      // Invalidate all page data
+      await invalidateAll();
+    } catch (error) {
+      console.error("[Admin] Error updating provisioning setting:", error);
+      provisioningEnabled = previousValue; // Revert on error
+    }
+  }
 </script>
 
 <svelte:head>
@@ -94,6 +117,9 @@
         </Settings.Row>
         <Settings.Row title={m.enable_audit_logging()} description={m.enable_audit_logging_description()}>
           <Input.Switch bind:value={auditLoggingEnabled} sideEffect={handleToggleAuditLogging} />
+        </Settings.Row>
+        <Settings.Row title={m.enable_provisioning()} description={m.enable_provisioning_description()}>
+          <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>
