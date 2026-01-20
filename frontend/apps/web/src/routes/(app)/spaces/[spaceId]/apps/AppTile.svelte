@@ -4,6 +4,7 @@
   import type { AppSparse } from "@intric/intric-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AppActions from "./AppActions.svelte";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let app: AppSparse;
 
@@ -15,7 +16,7 @@
 <a
   aria-label={app.name}
   {...dynamicColour({ basedOn: app.id })}
-  href="/spaces/{$currentSpace.routeId}/apps/{app.id}"
+  href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}`)}
   class="group border-dynamic-default bg-dynamic-dimmer text-dynamic-stronger hover:bg-dynamic-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
 >
   <h2 class="line-clamp-2 pt-1 font-mono text-sm">

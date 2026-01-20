@@ -72,7 +72,9 @@ async def update_model_usage_stats(job_id: str, params: dict, container: Contain
 
 
 @worker.function(with_user=False)
-async def recalculate_tenant_usage_stats_job(job_id: str, params: dict, container: Container):
+async def recalculate_tenant_usage_stats_job(
+    job_id: str, params: dict, container: Container
+):
     """Worker function for recalculating usage statistics for a specific tenant.
 
     Args:
@@ -188,14 +190,14 @@ async def cleanup_old_exports(container: Container):
             jobs_cleaned += 1
 
         except Exception as e:
-            errors.append({
-                "job_id": str(job.job_id),
-                "tenant_id": str(job.tenant_id),
-                "error": str(e),
-            })
-            logger.warning(
-                f"Failed to clean up export job {job.job_id}: {e}"
+            errors.append(
+                {
+                    "job_id": str(job.job_id),
+                    "tenant_id": str(job.tenant_id),
+                    "error": str(e),
+                }
             )
+            logger.warning(f"Failed to clean up export job {job.job_id}: {e}")
 
     # Also clean up any orphaned files (files without Redis entries)
     # This handles edge cases where Redis key expired but file remained
@@ -228,10 +230,12 @@ async def cleanup_old_exports(container: Container):
                             f"Deleted orphaned export file: {file_path} ({file_size} bytes)"
                         )
                 except Exception as e:
-                    errors.append({
-                        "file_path": str(file_path),
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "file_path": str(file_path),
+                            "error": str(e),
+                        }
+                    )
 
             # Remove empty tenant directories
             try:
@@ -299,20 +303,26 @@ async def purge_old_audit_logs(container: Container):
 
     from sqlalchemy import select
 
+    from intric.audit.application.audit_config_service import AuditConfigService
     from intric.audit.application.retention_service import RetentionService
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.actor_types import ActorType
     from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_config_repository import (
+        AuditConfigRepositoryImpl,
+    )
     from intric.database.database import sessionmanager
-    from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+    from intric.database.tables.tenant_table import Tenants
+    from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
     from intric.main.logging import get_logger
 
     logger = get_logger(__name__)
 
-    # Step 1: Get all tenant IDs with retention policies
+    # Step 1: Get all tenant IDs (retention policy will be created if missing)
     # Uses the container's session (provided by cron_job decorator) for read-only query
     session = container.session()
-    query = select(AuditRetentionPolicy.tenant_id)
+    query = select(Tenants.id)
     result = await session.execute(query)
     tenant_ids: list[UUID] = list(result.scalars().all())
 
@@ -330,7 +340,10 @@ async def purge_old_audit_logs(container: Container):
         try:
             # NEW session per tenant = true transaction isolation
             # If this tenant fails, only this transaction rolls back
-            async with sessionmanager.session() as tenant_session, tenant_session.begin():
+            async with (
+                sessionmanager.session() as tenant_session,
+                tenant_session.begin(),
+            ):
                 retention_service = RetentionService(tenant_session)
 
                 # Get THIS tenant's retention policy and purge ONLY their old logs
@@ -355,14 +368,18 @@ async def purge_old_audit_logs(container: Container):
                     )
 
                     audit_repo = AuditLogRepositoryImpl(tenant_session)
+                    audit_config_repo = AuditConfigRepositoryImpl(tenant_session)
+                    audit_config_service = AuditConfigService(audit_config_repo)
+                    feature_flag_repo = FeatureFlagRepository(tenant_session)
+                    feature_flag_service = FeatureFlagService(feature_flag_repo)
                     audit_service = AuditService(
                         repository=audit_repo,
-                        session=tenant_session,
-                        redis=container.redis(),
+                        audit_config_service=audit_config_service,
+                        feature_flag_service=feature_flag_service,
                     )
                     await audit_service.log_async(
                         tenant_id=tenant_id,
-                        actor_id=tenant_id,  # System actor
+                        actor_id=None,  # System actor (no user)
                         actor_type=ActorType.SYSTEM,
                         action=ActionType.RETENTION_POLICY_APPLIED,
                         entity_type=EntityType.TENANT_SETTINGS,
@@ -400,16 +417,18 @@ async def purge_old_audit_logs(container: Container):
 
     # Step 3: Log summary
     total_purged = sum(stats["purged_count"] for stats in purge_stats.values())
-    total_tenants = len(purge_stats)
+    total_tenants = len(tenant_ids)
+    successful_tenants = len(purge_stats)
     failed_tenants = len(errors)
 
     if failed_tenants > 0:
         logger.warning(
             f"Audit log retention purge completed with errors: "
-            f"{total_tenants} tenants processed, {failed_tenants} failed, "
+            f"{successful_tenants} tenants processed, {failed_tenants} failed, "
             f"{total_purged} total logs purged",
             extra={
                 "total_tenants": total_tenants,
+                "successful_tenants": successful_tenants,
                 "failed_tenants": failed_tenants,
                 "total_purged": total_purged,
                 "errors": errors,
@@ -420,6 +439,7 @@ async def purge_old_audit_logs(container: Container):
             "Audit log retention purge completed successfully",
             extra={
                 "total_tenants": total_tenants,
+                "successful_tenants": successful_tenants,
                 "total_purged": total_purged,
                 "purge_stats": purge_stats,
             },
@@ -429,6 +449,7 @@ async def purge_old_audit_logs(container: Container):
         "purge_stats": purge_stats,
         "errors": errors,
         "total_tenants": total_tenants,
+        "successful_tenants": successful_tenants,
         "total_purged": total_purged,
         "success": len(errors) == 0,
     }

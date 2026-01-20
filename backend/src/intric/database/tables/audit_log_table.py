@@ -19,11 +19,11 @@ class AuditLog(BasePublic):
         index=True,
     )
 
-    # WHO: Actor Information
+    # WHO: Actor Information (nullable for system events)
     actor_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
     )
     actor_type = Column(String(50), nullable=False, default="user")
 
@@ -46,7 +46,9 @@ class AuditLog(BasePublic):
 
     # WHY/CONTEXT: Business Context
     description = Column(Text, nullable=False)
-    log_metadata = Column("metadata", JSONB, nullable=False, default="{}", server_default="{}")
+    log_metadata = Column(
+        "metadata", JSONB, nullable=False, default="{}", server_default="{}"
+    )
 
     # Outcome
     outcome = Column(String(20), nullable=False, default="success")

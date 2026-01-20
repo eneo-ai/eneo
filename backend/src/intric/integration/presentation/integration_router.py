@@ -156,8 +156,16 @@ async def get_user_integrations(
         if integration.auth_type != "tenant_app"
     ]
 
+    # Check if tenant SharePoint app is configured and active
+    tenant_sharepoint_app_repo = container.tenant_sharepoint_app_repo()
+    tenant_app = await tenant_sharepoint_app_repo.one_or_none(tenant_id=user.tenant_id)
+    tenant_app_configured = tenant_app is not None and tenant_app.is_active
+
     assembler = container.user_integration_assembler()
-    return assembler.to_paginated_response(integrations=personal_integrations)
+    return assembler.to_paginated_response(
+        integrations=personal_integrations,
+        tenant_app_configured=tenant_app_configured
+    )
 
 
 @router.get(
@@ -176,12 +184,21 @@ async def get_available_integrations_for_space(
     """
     space_repo = container.space_repo()
     space = await space_repo.one(id=space_id)
+    user = container.user()
 
     service = container.user_integration_service()
     user_integrations = await service.get_available_integrations_for_space(space=space)
 
+    # Check if tenant SharePoint app is configured and active
+    tenant_sharepoint_app_repo = container.tenant_sharepoint_app_repo()
+    tenant_app = await tenant_sharepoint_app_repo.one_or_none(tenant_id=user.tenant_id)
+    tenant_app_configured = tenant_app is not None and tenant_app.is_active
+
     assembler = container.user_integration_assembler()
-    return assembler.to_paginated_response(integrations=user_integrations)
+    return assembler.to_paginated_response(
+        integrations=user_integrations,
+        tenant_app_configured=tenant_app_configured
+    )
 
 
 @router.delete(

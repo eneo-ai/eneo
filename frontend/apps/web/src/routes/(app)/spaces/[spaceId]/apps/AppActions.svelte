@@ -11,6 +11,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let app: AppSparse;
 
@@ -54,7 +55,7 @@
       {#if app.permissions?.includes("edit")}
         <Button
           is={item}
-          href="/spaces/{$currentSpace.routeId}/apps/{app.id}/edit"
+          href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}/edit`)}
           padding="icon-leading"
         >
           <IconEdit size="sm" />

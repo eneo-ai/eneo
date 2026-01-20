@@ -10,6 +10,7 @@
   import UserConnectedSplitButton from "$lib/features/integrations/components/UserConnectedSplitButton.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   const { data }: PageProps = $props();
 
@@ -69,7 +70,14 @@
               {#each integrations as integration (`${integration.tenant_integration_id}-${integration.auth_type || 'user_oauth'}`)}
                 <IntegrationCard {integration}>
                   {#snippet action()}
-                    {#if integration.connected && integration.id}
+                    {#if integration.tenant_app_configured === false}
+                      <div class="flex flex-col gap-1">
+                        <Button disabled variant="secondary">{m.not_available()}</Button>
+                        <p class="text-secondary text-xs">
+                          {m.contact_admin_to_configure()}
+                        </p>
+                      </div>
+                    {:else if integration.connected && integration.id}
                       <UserConnectedSplitButton {integration} {onDisconnect}
                       ></UserConnectedSplitButton>
                     {:else}
@@ -93,7 +101,7 @@
                 {m.no_integrations_enabled()}
                 {#if user.hasPermission("admin")}
                   <br />{m.enable_integrations_admin()}
-                  <a href="/admin/integrations?tab=providers" class="underline">{m.integrations_admin_menu()}</a>.
+                  <a href={localizeHref("/admin/integrations?tab=providers")} class="underline">{m.integrations_admin_menu()}</a>.
                 {/if}
               </div>
             </div>

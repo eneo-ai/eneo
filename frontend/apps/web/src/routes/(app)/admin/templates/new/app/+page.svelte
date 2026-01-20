@@ -4,6 +4,7 @@
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
@@ -138,7 +139,7 @@
     />
 
     <Page.Flex>
-      <Button variant="outlined" href="/admin/templates">{m.cancel()}</Button>
+      <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
       <Button
         variant="positive"
         class="w-32"

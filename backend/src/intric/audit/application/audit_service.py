@@ -59,9 +59,10 @@ class AuditService:
         # Stage 1: Check global feature flag
         if self.feature_flag_service:
             try:
-                audit_logging_enabled = await self.feature_flag_service.check_is_feature_enabled(
-                    feature_name="audit_logging_enabled",
-                    tenant_id=tenant_id
+                audit_logging_enabled = (
+                    await self.feature_flag_service.check_is_feature_enabled(
+                        feature_name="audit_logging_enabled", tenant_id=tenant_id
+                    )
                 )
                 if not audit_logging_enabled:
                     # Global audit logging disabled - skip logging entirely
@@ -84,7 +85,7 @@ class AuditService:
     async def log(
         self,
         tenant_id: UUID,
-        actor_id: UUID,
+        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
@@ -96,7 +97,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
-    ) -> AuditLog:
+    ) -> Optional[AuditLog]:
         """
         Create an audit log entry.
 
@@ -125,6 +126,9 @@ class AuditService:
         should_log = await self._should_log_action(tenant_id, action)
         if not should_log:
             return None
+
+        if actor_type != ActorType.SYSTEM and actor_id is None:
+            raise ValueError("actor_id required for non-system actions")
 
         audit_log = AuditLog(
             id=uuid4(),
@@ -222,7 +226,7 @@ class AuditService:
     async def log_async(
         self,
         tenant_id: UUID,
-        actor_id: UUID,
+        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
@@ -271,6 +275,9 @@ class AuditService:
         if not should_log:
             return None
 
+        if actor_type != ActorType.SYSTEM and actor_id is None:
+            raise ValueError("actor_id required for non-system actions")
+
         # Validate
         if outcome == Outcome.FAILURE and not error_message:
             raise ValueError("error_message required when outcome is failure")
@@ -281,7 +288,7 @@ class AuditService:
         # Prepare params for ARQ worker
         params = {
             "tenant_id": str(tenant_id),
-            "actor_id": str(actor_id),
+            "actor_id": str(actor_id) if actor_id else None,
             "actor_type": actor_type.value,
             "action": action.value,
             "entity_type": entity_type.value,
