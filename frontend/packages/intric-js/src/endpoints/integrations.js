@@ -40,7 +40,7 @@ export function initIntegrations(client) {
        */
       enable: async (integration) => {
         const { integration_id } = integration;
-        const res = await client.fetch("/api/v1/integrations/tenant/{integration_id}/", {
+        const res = await client.fetch("/api/v1/integrations/tenant/add/{integration_id}/", {
           method: "post",
           params: {
             path: { integration_id }
@@ -57,7 +57,7 @@ export function initIntegrations(client) {
        */
       disable: async (integration) => {
         const { id: tenant_integration_id } = integration;
-        const res = await client.fetch("/api/v1/integrations/tenant/{tenant_integration_id}/", {
+        const res = await client.fetch("/api/v1/integrations/tenant/remove/{tenant_integration_id}/", {
           method: "delete",
           params: {
             path: { tenant_integration_id }
@@ -102,7 +102,7 @@ export function initIntegrations(client) {
         const { id } = space;
         const { key, name, url, folder_id, folder_path, type, resource_type } = preview;
         const job = await client.fetch(
-          "/api/v1/spaces/{id}/integrations/{user_integration_id}/import/",
+          "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/",
           {
             method: "post",
             params: {
@@ -136,12 +136,15 @@ export function initIntegrations(client) {
       delete: async ({ knowledge, space }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;
-        await client.fetch("/api/v1/spaces/{id}/knowledge/{integration_knowledge_id}/", {
-          method: "delete",
-          params: {
-            path: { integration_knowledge_id, id }
+        await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
+          {
+            method: "delete",
+            params: {
+              path: { integration_knowledge_id, id }
+            }
           }
-        });
+        );
       },
 
       /**
