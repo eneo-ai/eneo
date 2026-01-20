@@ -47,8 +47,42 @@ cp env_db.template env_db.env
 docker network create proxy_tier
 docker compose up -d
 
-# 7. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
+# 7. Verify db-init completed successfully (wait ~30 seconds for startup)
+docker logs eneo_db_init
+# Should see: "Great! Your Tenant and User are all set up."
+
+# 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
 ```
+
+## Troubleshooting
+
+### Can't login with default credentials (401 error)
+
+1. **Check if db-init succeeded:**
+   ```bash
+   docker logs eneo_db_init
+   ```
+   You should see `"Great! Your Tenant and User are all set up."`
+
+2. **Check if user exists in database:**
+   ```bash
+   docker exec -it eneo_db psql -U postgres -d eneo -c "SELECT email, state FROM users;"
+   ```
+
+3. **If user doesn't exist**, the db-init likely failed. Reset and try again:
+   ```bash
+   docker compose down -v
+   docker compose up -d
+   sleep 30
+   docker logs eneo_db_init
+   ```
+
+### db-init fails with migration errors
+
+This usually means db-init started before PostgreSQL was ready. The docker-compose.yml includes healthchecks to prevent this, but if you're using a custom configuration, ensure:
+
+- `db` service has a healthcheck
+- `db-init` depends on `db` with `condition: service_healthy`
 
 ## Full Documentation
 

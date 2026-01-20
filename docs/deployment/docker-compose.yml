@@ -13,6 +13,12 @@
 #   This is a reference configuration. Customize for your organization's
 #   security requirements, network topology, and infrastructure needs.
 #
+# STARTUP ORDER (handled automatically via healthchecks):
+#   1. db + redis start and become healthy
+#   2. db-init runs migrations and creates default user
+#   3. backend + worker start (only after db-init succeeds)
+#   4. frontend starts
+#
 # VOLUME MANAGEMENT:
 #   The "name: eneo" ensures consistent volume names (eneo_postgres_data, etc.)
 #   regardless of which directory you run commands from.
@@ -42,7 +48,7 @@ services:
       - "443:443"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "letsencrypt:/letsencrypt"
+      - "traefik_letsencrypt:/letsencrypt"
     networks:
       - proxy_tier
     labels:
@@ -99,9 +105,12 @@ services:
       - "traefik.http.services.eneo-backend-svc.loadbalancer.server.port=8000"
       - "traefik.http.routers.eneo-backend-secure.priority=10"
     depends_on:
-      - db
-      - redis
-      - db-init
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
 
   worker:
     # Background task processor (crawls, uploads, integrations)
@@ -129,20 +138,32 @@ services:
     env_file:
       - env_db.env
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - eneo_postgres_data:/var/lib/postgresql/data
     networks:
       - proxy_tier
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: eneo_redis
     restart: unless-stopped
     volumes:
-      - redis_data:/data
+      - eneo_redis_data:/data
     networks:
       - proxy_tier
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   db-init:
+    # Runs database migrations and creates default tenant/user on first startup
+    # Only runs once - exits after completion (restart: "no")
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_db_init
     command: ["python", "init_db.py"]
@@ -151,7 +172,11 @@ services:
     networks:
       - proxy_tier
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
 
 networks:
   proxy_tier:

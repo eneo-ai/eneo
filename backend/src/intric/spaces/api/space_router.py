@@ -629,7 +629,7 @@ async def create_space_websites(
 
 
 @router.post(
-    "/{id}/knowledge/integrations/{user_integration_id}/",
+    "/{id}/integrations/{user_integration_id}/import/",
     response_model=JobPublic,
     status_code=202,  # Changed to 202 Accepted since job is queued
 )

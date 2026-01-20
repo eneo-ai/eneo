@@ -13,6 +13,9 @@
   // Show verbosity for GPT-5.x models that support it
   $: showVerbosity = selectedModel?.name?.toLowerCase().includes("gpt-5");
 
+  // Check if model supports "none" reasoning effort (GPT-5.x but not plain GPT-5)
+  $: supportsNoneReasoning = /gpt-5\.\d/i.test(selectedModel?.name || "");
+
   // Local state for the custom parameters
   let customReasoningEffort: string = "";
   let customVerbosity: string = "";

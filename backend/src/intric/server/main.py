@@ -150,6 +150,23 @@ def get_application():
             routes=app.routes,
         )
 
+        # WSO2 compatibility: Rename "default" security scheme to "APIKeyAuth"
+        # WSO2 API Manager treats "default" as a reserved keyword expecting a boolean
+        if "components" in openapi_schema and "securitySchemes" in openapi_schema["components"]:
+            schemes = openapi_schema["components"]["securitySchemes"]
+            if "default" in schemes:
+                schemes["APIKeyAuth"] = schemes.pop("default")
+
+        # Update all security references from "default" to "APIKeyAuth"
+        for path in openapi_schema.get("paths", {}).values():
+            for operation in path.values():
+                if isinstance(operation, dict) and "security" in operation:
+                    operation["security"] = [
+                        {"APIKeyAuth" if k == "default" else k: v}
+                        for sec in operation["security"]
+                        for k, v in sec.items()
+                    ]
+
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
         if "components" not in openapi_schema:
             openapi_schema["components"] = {}

@@ -18,10 +18,15 @@
 
   // Check if integration has auth_type property (UserIntegration)
   const authType = $derived('auth_type' in integration ? integration.auth_type : undefined);
+
+  // Check if tenant app is configured (for SharePoint user_oauth integrations)
+  const isTenantAppConfigured = $derived(
+    'tenant_app_configured' in integration ? integration.tenant_app_configured !== false : true
+  );
 </script>
 
 <div
-  class="border-default flex flex-col overflow-y-auto rounded-lg border p-4 shadow-md hover:shadow-lg"
+  class="border-default flex flex-col overflow-y-auto rounded-lg border p-4 shadow-md hover:shadow-lg {!isTenantAppConfigured ? 'opacity-60' : ''}"
 >
   <div
     class="from-accent-dimmer -mx-4 -mt-4 bg-gradient-to-b to-[var(--background-primary)] px-4 pt-4"
