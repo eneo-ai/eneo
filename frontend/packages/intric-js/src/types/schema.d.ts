@@ -1225,9 +1225,9 @@ export interface paths {
      */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
   };
-  "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/": {
+  "/api/v1/spaces/{id}/integrations/{user_integration_id}/import/": {
     /** Create Space Integration Knowledge */
-    post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations__user_integration_id___post"];
+    post: operations["create_space_integration_knowledge_api_v1_spaces__id__integrations__user_integration_id__import__post"];
   };
   "/api/v1/spaces/{id}/knowledge/{integration_knowledge_id}/": {
     /** Delete Space Integration Knowledge */
@@ -16632,7 +16632,7 @@ export interface operations {
     };
   };
   /** Create Space Integration Knowledge */
-  create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations__user_integration_id___post: {
+  create_space_integration_knowledge_api_v1_spaces__id__integrations__user_integration_id__import__post: {
     parameters: {
       path: {
         id: string;
