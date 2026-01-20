@@ -18,6 +18,7 @@
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import ProviderActions from "./ProviderActions.svelte";
+  import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { m } from "$lib/paraglide/messages";
 
   import { writable, type Writable } from "svelte/store";
@@ -177,6 +178,12 @@
     {#each groups as group (group.key)}
       {@const provider = getProviderForGroup(group.key)}
       <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
+        <svelte:fragment slot="title-prefix">
+          <div
+            class="h-3 w-3 rounded-full border border-stronger mr-2"
+            style="background: var(--{getChartColour(group.name)})"
+          ></div>
+        </svelte:fragment>
         <svelte:fragment slot="title-suffix">
           <div class="flex items-center gap-2">
             {#if provider}

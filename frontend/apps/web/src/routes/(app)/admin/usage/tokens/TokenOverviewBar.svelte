@@ -8,7 +8,7 @@
   import { Settings } from "$lib/components/layout";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
-  import { modelOrgs } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
+  import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import type { TokenUsageSummary } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
 
@@ -22,19 +22,19 @@
     return Object.values(
       tokenStats.models.reduce(
         (acc, info) => {
-          const org = info.model_org ?? "";
-          if (!acc[org]) {
-            acc[org] = {
-              label: org || m.unknown_organization(),
+          const provider = info.model_provider ?? info.model_org ?? "";
+          if (!acc[provider]) {
+            acc[provider] = {
+              label: provider || m.unknown_organization(),
               tokenCount: 0,
-              colour: org && org in modelOrgs ? modelOrgs[org].chartColour : "chart-blue",
-              org: org
+              colour: getChartColour(provider),
+              provider: provider
             };
           }
-          acc[org].tokenCount += info.total_token_usage;
+          acc[provider].tokenCount += info.total_token_usage;
           return acc;
         },
-        {} as Record<string, { label: string; tokenCount: number; colour: string; org: string }>
+        {} as Record<string, { label: string; tokenCount: number; colour: string; provider: string }>
       )
     ).sort((a, b) => b.tokenCount - a.tokenCount);
   });

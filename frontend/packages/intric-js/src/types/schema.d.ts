@@ -6398,6 +6398,11 @@ export interface components {
        */
       model_org?: string | null;
       /**
+       * Model Provider
+       * @description Provider name for the model
+       */
+      model_provider?: string | null;
+      /**
        * Input Token Usage
        * @description Number of tokens used for input prompts
        */

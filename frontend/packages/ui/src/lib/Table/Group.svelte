@@ -92,6 +92,7 @@
             >
               <div class="flex items-center gap-2">
                 <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+                <slot name="title-prefix" />
                 <span>{title}</span>
               </div>
             </Button>
@@ -148,6 +149,7 @@
       >
         <div class="flex items-center gap-2">
           <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+          <slot name="title-prefix" />
           <span>{title}</span>
         </div>
       </Button>
