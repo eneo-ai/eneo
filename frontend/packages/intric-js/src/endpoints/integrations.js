@@ -102,7 +102,7 @@ export function initIntegrations(client) {
         const { id } = space;
         const { key, name, url, folder_id, folder_path, type, resource_type } = preview;
         const job = await client.fetch(
-          "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/",
+          "/api/v1/spaces/{id}/integrations/{user_integration_id}/import/",
           {
             method: "post",
             params: {

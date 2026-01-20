@@ -70,6 +70,7 @@ class UserIntegration(Integration):
     connected: bool
     auth_type: str = "user_oauth"  # "user_oauth" or "tenant_app"
     tenant_app_id: Optional[UUID] = None
+    tenant_app_configured: bool = True  # Whether tenant SharePoint app is configured
 
 
 class UserIntegrationList(BaseListModel[UserIntegration]):
