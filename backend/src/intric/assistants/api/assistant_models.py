@@ -239,7 +239,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]
     integration_knowledge_list: list[IntegrationKnowledgePublic]
-    completion_model: CompletionModelSparse
+    completion_model: Optional[CompletionModelSparse] = None
     published: bool = False
     user: UserSparse
     tools: UseTools

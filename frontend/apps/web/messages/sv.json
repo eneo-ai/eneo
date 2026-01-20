@@ -179,6 +179,7 @@
   "create_app": "Skapa app",
   "open_app_editor_after_creation": "Öppna appredigerare efter skapande",
   "completion_models_warning_app": "Denna yta har för närvarande inga completion-modeller aktiverade. Aktivera minst en completion-modell för att kunna skapa en app.",
+  "transcription_models_warning_app": "Denna yta har för närvarande inga transkriptionsmodeller aktiverade. Aktivera minst en transkriptionsmodell för att kunna skapa en app.",
   "move": "Flytta",
   "delete_assistant": "Radera assistent",
   "confirm_delete_assistant": "Är du säker på att du vill radera denna assistent? Denna åtgärd kan inte ångras.",

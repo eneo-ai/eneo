@@ -52,7 +52,10 @@ async def forbid_org_space(
 ):
     space = await container.space_service().get_space(id)
     if space.user_id is None and space.tenant_space_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is not allowed in organization spaces. Please use a personal or shared space."
+        )
     return True
     
 @router.post("/", response_model=SpacePublic, status_code=201)
@@ -411,7 +414,6 @@ async def create_app(
     assembler = container.app_assembler()
     current_user = container.user()
 
-    # Create app (space is fetched first for the creation process)
     space = await space_service.get_space(id)
     app, permissions = await app_service.create_app(
         name=create_service_req.name,

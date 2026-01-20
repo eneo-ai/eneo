@@ -180,9 +180,9 @@ class Space:
 
         return sorted_completion_models[0]  # type: ignore
 
-    def get_latest_transcription_model(self) -> TranscriptionModel:
+    def get_latest_transcription_model(self) -> Optional[TranscriptionModel]:
         if not self.transcription_models:
-            return
+            return None
 
         sorted_transcription_models = sorted(
             [
@@ -195,7 +195,7 @@ class Space:
         )
 
         if not sorted_transcription_models:
-            raise NotFoundException("No transcription models found in the space")
+            return None
 
         return sorted_transcription_models[0]  # type: ignore
 

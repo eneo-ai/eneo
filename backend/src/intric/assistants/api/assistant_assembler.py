@@ -40,6 +40,8 @@ class AssistantAssembler:
         """
         Convert any completion model type to a CompletionModelSparse.
         """
+        if model is None:
+            return None
 
         return CompletionModelAssembler.from_completion_model_to_sparse(completion_model=model)
 

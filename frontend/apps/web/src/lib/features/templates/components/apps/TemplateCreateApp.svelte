@@ -26,6 +26,11 @@
   let openAppAfterCreation = $state(false);
   let userTouchedToggle = $state(false);
 
+  // Disable creation if required models are missing
+  const canCreateApp = $derived(
+    $currentSpace.completion_models.length > 0 && $currentSpace.transcription_models.length > 0
+  );
+
   function disableEditorOnTemplate(creationMode: "blank" | "template") {
     if (userTouchedToggle) return;
     openAppAfterCreation = creationMode === "blank";
@@ -52,6 +57,15 @@
       >
         <span class="font-bold">{m.warning()}:</span>
         {m.completion_models_warning_app()}
+      </p>
+      <div class="border-dimmer border-b"></div>
+    {/if}
+    {#if $currentSpace.transcription_models.length < 1}
+      <p
+        class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
+      >
+        <span class="font-bold">{m.warning()}:</span>
+        {m.transcription_models_warning_app()}
       </p>
       <div class="border-dimmer border-b"></div>
     {/if}
@@ -90,6 +104,7 @@
       <Button
         variant="primary"
         class="w-48"
+        disabled={!canCreateApp}
         on:click={() => {
           createOrContinue({
             onResourceCreated({ id }) {
