@@ -174,7 +174,7 @@
   $: table.update(filteredModels);</script>
 
 <div class="flex flex-col gap-4">
-  <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list">
+  <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list" showEmptyGroups>
     {#each groups as group (group.key)}
       {@const provider = getProviderForGroup(group.key)}
       <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
