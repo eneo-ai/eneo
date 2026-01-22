@@ -15,7 +15,7 @@ from intric.security_classifications.application.security_classification_service
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from intric.tenants.tenant import TenantInDB, TenantUpdate
+from intric.tenants.tenant import TenantInDB
 
 
 @pytest.fixture
@@ -55,26 +55,26 @@ def security_repo():
 
 
 @pytest.fixture
-def tenant_repo():
-    repo = AsyncMock()
-    return repo
+def tenant_service():
+    service = AsyncMock()
+    return service
 
 
 @pytest.fixture
-def service(user, security_repo, tenant_repo):
+def service(user, security_repo, tenant_service):
     return SecurityClassificationService(
         user=user,
         repo=security_repo,
-        tenant_repo=tenant_repo,
+        tenant_service=tenant_service,
     )
 
 
 @pytest.fixture
-def service_without_permissions(user_without_permissions, security_repo, tenant_repo):
+def service_without_permissions(user_without_permissions, security_repo, tenant_service):
     return SecurityClassificationService(
         user=user_without_permissions,
         repo=security_repo,
-        tenant_repo=tenant_repo,
+        tenant_service=tenant_service,
     )
 
 
@@ -145,55 +145,51 @@ class TestSecurityClassificationService:
         # And no updates should be performed
         service.repo.update.assert_not_called()
 
-    async def test_toggle_security_enabled_to_true(self, service, user, tenant_repo, tenant_id):
+    async def test_toggle_security_enabled_to_true(self, service, user, tenant_service, tenant_id):
         # Given the tenant has security_enabled=False (set in fixture)
-        # And the tenant_repo update_tenant method returns a tenant with security_enabled=True
+        # And the tenant_service toggle_security method returns a tenant with security_enabled=True
         updated_tenant = TenantInDB(
             id=tenant_id, name="Test Tenant", quota_limit=1000000, security_enabled=True
         )
-        tenant_repo.update_tenant.return_value = updated_tenant
+        tenant_service.toggle_security.return_value = updated_tenant
 
         # When toggling security to enabled
         result = await service.toggle_security_on_tenant(True)
 
-        # Then tenant_repo.update_tenant should be called with correct parameters
-        expected_tenant_update = TenantUpdate(id=tenant_id, security_enabled=True)
-        tenant_repo.update_tenant.assert_called_once()
-        call_args = tenant_repo.update_tenant.call_args[0][0]
-        assert call_args.id == expected_tenant_update.id
-        assert call_args.security_enabled == expected_tenant_update.security_enabled
+        # Then tenant_service.toggle_security should be called with correct parameters
+        tenant_service.toggle_security.assert_called_once_with(
+            tenant_id=tenant_id, enabled=True
+        )
 
         # And the result should be the updated tenant with security_enabled=True
         assert result.security_enabled is True
 
-    async def test_toggle_security_enabled_to_false(self, service, user, tenant_repo, tenant_id):
+    async def test_toggle_security_enabled_to_false(self, service, user, tenant_service, tenant_id):
         # Given the tenant has security_enabled=True
         user.tenant.security_enabled = True
 
-        # And the tenant_repo update_tenant method returns a tenant with security_enabled=False
+        # And the tenant_service toggle_security method returns a tenant with security_enabled=False
         updated_tenant = TenantInDB(
             id=tenant_id,
             name="Test Tenant",
             quota_limit=1000000,
             security_enabled=False,
         )
-        tenant_repo.update_tenant.return_value = updated_tenant
+        tenant_service.toggle_security.return_value = updated_tenant
 
         # When toggling security to disabled
         result = await service.toggle_security_on_tenant(False)
 
-        # Then tenant_repo.update_tenant should be called with correct parameters
-        expected_tenant_update = TenantUpdate(id=tenant_id, security_enabled=False)
-        tenant_repo.update_tenant.assert_called_once()
-        call_args = tenant_repo.update_tenant.call_args[0][0]
-        assert call_args.id == expected_tenant_update.id
-        assert call_args.security_enabled == expected_tenant_update.security_enabled
+        # Then tenant_service.toggle_security should be called with correct parameters
+        tenant_service.toggle_security.assert_called_once_with(
+            tenant_id=tenant_id, enabled=False
+        )
 
         # And the result should be the updated tenant with security_enabled=False
         assert result.security_enabled is False
 
     async def test_toggle_security_without_required_permission(
-        self, service_without_permissions, tenant_repo, tenant_id
+        self, service_without_permissions, tenant_service, tenant_id
     ):
         # Given a user without admin permissions
         # When trying to toggle security settings
@@ -205,4 +201,4 @@ class TestSecurityClassificationService:
         assert "Need permission admin in order to access" in str(excinfo.value)
 
         # And no tenant update should have been attempted
-        tenant_repo.update_tenant.assert_not_called()
+        tenant_service.toggle_security.assert_not_called()

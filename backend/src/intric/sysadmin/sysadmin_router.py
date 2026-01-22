@@ -167,7 +167,7 @@ async def delete_user(
     user_service = container.user_service()
 
     # Get user details BEFORE deletion
-    user_to_delete = await user_service.get_user_by_id(user_id)
+    user_to_delete = await user_service.get_user(user_id)
 
     # Delete user
     success = await user_service.delete_user(user_id)
@@ -207,7 +207,7 @@ async def update_user(
     user_service = container.user_service()
 
     # Get old state
-    old_user = await user_service.get_user_by_id(user_id)
+    old_user = await user_service.get_user(user_id)
 
     # Update user
     updated_user = await user_service.update_user(user_id, user_update)
@@ -248,10 +248,10 @@ async def update_user(
 async def get_access_token(
     user_id: UUID, container: Container = Depends(get_container())
 ):
-    user_repo = container.user_repo()
+    user_service = container.user_service()
     auth_service = container.auth_service()
 
-    user = await user_repo.get_user_by_id(user_id)
+    user = await user_service.get_user(user_id)
 
     return auth_service.create_access_token_for_user(user)
 
@@ -333,7 +333,7 @@ async def update_tenant(
     tenant_service = container.tenant_service()
 
     # Get old state
-    old_tenant = await tenant_service.get_tenant(id)
+    old_tenant = await tenant_service.get_tenant_by_id(id)
 
     # Update tenant
     updated_tenant = await tenant_service.update_tenant(tenant, id)
@@ -385,7 +385,7 @@ async def delete_tenant_by_id(
     tenant_service = container.tenant_service()
 
     # Get tenant BEFORE deletion
-    tenant_to_delete = await tenant_service.get_tenant(id)
+    tenant_to_delete = await tenant_service.get_tenant_by_id(id)
 
     # Delete tenant
     deleted_tenant = await tenant_service.delete_tenant(id)
