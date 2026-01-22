@@ -8816,6 +8816,11 @@ export interface components {
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
       /**
+       * Name
+       * @description Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')
+       */
+      name?: string | null;
+      /**
        * Display Name
        * @description User-friendly display name
        */

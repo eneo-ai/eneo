@@ -32,6 +32,7 @@ class TenantCompletionModelCreate(BaseModel):
 
 
 class TenantCompletionModelUpdate(BaseModel):
+    name: str | None = Field(None, description="Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')")
     display_name: str | None = Field(None, description="User-friendly display name")
     description: str | None = Field(None, description="Model description")
     token_limit: int | None = Field(None, description="Maximum context tokens")
@@ -163,6 +164,8 @@ async def update_tenant_completion_model(
         raise UnauthorizedException("Cannot update global models")
 
     # Update fields that were provided
+    if model_update.name is not None:
+        model.name = model_update.name
     if model_update.display_name is not None:
         model.nickname = model_update.display_name
     if model_update.description is not None:

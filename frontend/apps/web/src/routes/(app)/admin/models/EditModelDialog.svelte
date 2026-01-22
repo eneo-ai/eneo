@@ -26,6 +26,7 @@
   const intric = getIntric();
 
   // Form state - initialized from model
+  let modelIdentifier = "";
   let displayName = "";
   let description = "";
   let tokenLimitStr = "128000";
@@ -49,6 +50,7 @@
   }
 
   function initializeForm() {
+    modelIdentifier = model.name;
     displayName = "nickname" in model ? (model.nickname || "") : model.name;
     description = model.description || "";
     hosting = model.hosting as "eu" | "usa";
@@ -81,6 +83,7 @@
     try {
       if (type === "completionModel") {
         const update: TenantCompletionModelUpdate = {
+          name: modelIdentifier.trim(),
           display_name: displayName.trim(),
           description: description.trim(),
           hosting,
@@ -139,18 +142,26 @@
           </div>
         {/if}
 
-        <!-- Model identifier (read-only) -->
+        <!-- Model identifier (editable for completion models, read-only for others) -->
         <div class="flex flex-col gap-2">
           <label for="model-identifier" class="text-sm font-medium">{m.model_identifier()}</label>
-          <Input.Text
-            id="model-identifier"
-            value={model.name}
-            disabled
-            class="opacity-60"
-          />
-          <p class="text-muted-foreground text-xs">
-            {m.model_identifier_readonly()}
-          </p>
+          {#if type === "completionModel"}
+            <Input.Text
+              id="model-identifier"
+              bind:value={modelIdentifier}
+              required
+            />
+          {:else}
+            <Input.Text
+              id="model-identifier"
+              value={model.name}
+              disabled
+              class="opacity-60"
+            />
+            <p class="text-muted-foreground text-xs">
+              {m.model_identifier_readonly()}
+            </p>
+          {/if}
         </div>
 
         <!-- Display name (editable) -->

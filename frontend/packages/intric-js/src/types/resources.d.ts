@@ -113,7 +113,8 @@ export type ModelKwargs = components["schemas"]["ModelKwargs"];
 // Tenant model update types
 export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];
 export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
-export type TenantTranscriptionModelUpdate = components["schemas"]["TenantTranscriptionModelUpdate"];
+export type TenantTranscriptionModelUpdate =
+  components["schemas"]["TenantTranscriptionModelUpdate"];
 
 // Federation types
 export type TenantInfo = {
