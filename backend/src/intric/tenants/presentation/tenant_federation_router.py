@@ -166,15 +166,11 @@ async def set_tenant_federation(
         HTTPException 400: Invalid configuration
     """
     tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
     encryption_service = container.encryption_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
-        )
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
 
     # Fetch OIDC discovery to validate config
     import aiohttp
@@ -394,14 +390,10 @@ async def delete_tenant_federation(
 ) -> DeleteFederationResponse:
     """Delete federation config for tenant (revert to global IdP)."""
     tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
-        )
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
 
     # Delete federation config
     await tenant_repo.delete_federation_config(tenant_id=tenant_id)
@@ -447,14 +439,10 @@ async def get_tenant_federation(
 ) -> FederationInfo:
     """Get federation config for tenant (masked secrets)."""
     tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
-        )
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
 
     # Get config with metadata
     metadata = await tenant_repo.get_federation_config_with_metadata(tenant_id)
@@ -497,11 +485,11 @@ async def test_tenant_federation(
         HTTPException 404: Tenant not found or no config
         HTTPException 500: Discovery endpoint unreachable or invalid
     """
-    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant or not tenant.federation_config:
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    if not tenant.federation_config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No federation config found for tenant",

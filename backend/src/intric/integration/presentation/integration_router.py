@@ -63,7 +63,7 @@ async def get_tenant_integrations(
 
 
 @router.post(
-    "/tenant/{integration_id}/",
+    "/tenant/add/{integration_id}/",
     response_model=TenantIntegration,
     status_code=200,
 )
@@ -98,7 +98,7 @@ async def add_tenant_integration(
 
 
 @router.delete(
-    "/tenant/{tenant_integration_id}/",
+    "/tenant/remove/{tenant_integration_id}/",
     status_code=204,
 )
 async def remove_tenant_integration(

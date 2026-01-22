@@ -1313,13 +1313,13 @@ export interface paths {
      */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
   };
-  "/api/v1/spaces/{id}/integrations/{user_integration_id}/import/": {
+  "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/": {
     /** Create Space Integration Knowledge */
-    post: operations["create_space_integration_knowledge_api_v1_spaces__id__integrations__user_integration_id__import__post"];
+    post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post"];
   };
-  "/api/v1/spaces/{id}/knowledge/{integration_knowledge_id}/": {
+  "/api/v1/spaces/{id}/knowledge/integrations/remove/{integration_knowledge_id}/": {
     /** Delete Space Integration Knowledge */
-    delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge__integration_knowledge_id___delete"];
+    delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
   };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     /** Update Integration Knowledge */
@@ -3060,15 +3060,11 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       transcription_model?: components["schemas"]["ModelId"] | null;
-      /**
-       * Data Retention Days
-       * @default NOT_PROVIDED
-       */
+      /** Data Retention Days */
       data_retention_days?: number | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
-       * @default NOT_PROVIDED
        */
       icon_id?: string | null;
     };
@@ -4214,10 +4210,7 @@ export interface components {
       is_org_enabled?: boolean | null;
       /** Is Org Default */
       is_org_default?: boolean | null;
-      /**
-       * Security Classification
-       * @default NOT_PROVIDED
-       */
+      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /**
@@ -5115,15 +5108,9 @@ export interface components {
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
-      /**
-       * Is Org Enabled
-       * @default NOT_PROVIDED
-       */
+      /** Is Org Enabled */
       is_org_enabled?: boolean;
-      /**
-       * Security Classification
-       * @default NOT_PROVIDED
-       */
+      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** EmbeddingModelUpdateFlags */
@@ -5617,7 +5604,6 @@ export interface components {
       /**
        * Metadata Json
        * @description Metadata for the group chat.
-       * @default NOT_PROVIDED
        */
       metadata_json?: {
         [key: string]: unknown;
@@ -7813,13 +7799,11 @@ export interface components {
       /**
        * Name
        * @description Name of the security classification
-       * @default NOT_PROVIDED
        */
       name?: string;
       /**
        * Description
        * @description Description of the security classification
-       * @default NOT_PROVIDED
        */
       description?: string | null;
     };
@@ -9555,10 +9539,7 @@ export interface components {
       is_org_enabled?: boolean | null;
       /** Is Org Default */
       is_org_default?: boolean | null;
-      /**
-       * Security Classification
-       * @default NOT_PROVIDED
-       */
+      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TransferApplicationRequest */
@@ -10498,41 +10479,24 @@ export interface components {
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
-      /**
-       * Url
-       * @default NOT_PROVIDED
-       */
+      /** Url */
       url?: string;
-      /**
-       * Name
-       * @default NOT_PROVIDED
-       */
+      /** Name */
       name?: string | null;
-      /**
-       * Download Files
-       * @default NOT_PROVIDED
-       */
+      /** Download Files */
       download_files?: boolean;
-      /**
-       * Crawl Type
-       * @default NOT_PROVIDED
-       */
+      /** Crawl Type */
       crawl_type?: components["schemas"]["CrawlType"];
-      /**
-       * Update Interval
-       * @default NOT_PROVIDED
-       */
+      /** Update Interval */
       update_interval?: components["schemas"]["UpdateInterval"];
       /**
        * Http Auth Username
        * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.
-       * @default NOT_PROVIDED
        */
       http_auth_username?: string | null;
       /**
        * Http Auth Password
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
-       * @default NOT_PROVIDED
        */
       http_auth_password?: string | null;
     };
@@ -17653,7 +17617,7 @@ export interface operations {
     };
   };
   /** Create Space Integration Knowledge */
-  create_space_integration_knowledge_api_v1_spaces__id__integrations__user_integration_id__import__post: {
+  create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post: {
     parameters: {
       path: {
         id: string;
@@ -17681,7 +17645,7 @@ export interface operations {
     };
   };
   /** Delete Space Integration Knowledge */
-  delete_space_integration_knowledge_api_v1_spaces__id__knowledge__integration_knowledge_id___delete: {
+  delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete: {
     parameters: {
       path: {
         id: string;

@@ -629,7 +629,7 @@ async def create_space_websites(
 
 
 @router.post(
-    "/{id}/integrations/{user_integration_id}/import/",
+    "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
     status_code=202,  # Changed to 202 Accepted since job is queued
 )
@@ -691,7 +691,7 @@ async def create_space_integration_knowledge(
 
 
 @router.delete(
-    "/{id}/knowledge/{integration_knowledge_id}/",
+    "/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
     status_code=204,
 )
 async def delete_space_integration_knowledge(
