@@ -340,8 +340,7 @@ async def update_tenant(
 
     # Track changes
     changes = {}
-    if tenant.name and tenant.name != old_tenant.name:
-        changes["name"] = {"old": old_tenant.name, "new": tenant.name}
+
     if tenant.display_name and tenant.display_name != old_tenant.display_name:
         changes["display_name"] = {
             "old": old_tenant.display_name,
