@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Table, text
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Table, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import Base, BasePublic
@@ -24,7 +24,7 @@ class Users(BasePublic):
     state: Mapped[str] = mapped_column()
     used_tokens: Mapped[int] = mapped_column(default=0)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
-    quota_limit: Mapped[Optional[int]] = mapped_column()
+    quota_limit: Mapped[Optional[int]] = mapped_column(BigInteger)
 
     tenant: Mapped[Tenants] = relationship()
     api_key: Mapped["ApiKeys"] = relationship(cascade="all, delete-orphan")

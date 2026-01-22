@@ -14,8 +14,7 @@ from intric.roles.permissions import Permission, validate_permissions
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from intric.tenants.tenant import TenantUpdate
-from intric.tenants.tenant_repo import TenantRepository
+from intric.tenants.tenant_service import TenantService
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -31,11 +30,11 @@ class SecurityClassificationService:
         self,
         user: UserInDB,
         repo: "SecurityClassificationRepoImpl",
-        tenant_repo: TenantRepository,
+        tenant_service: TenantService,
     ):
         self.user = user
         self.repo = repo
-        self.tenant_repo = tenant_repo
+        self.tenant_service = tenant_service
 
     @validate_permissions(Permission.ADMIN)
     async def create_security_classification(
@@ -118,8 +117,10 @@ class SecurityClassificationService:
 
     @validate_permissions(Permission.ADMIN)
     async def toggle_security_on_tenant(self, enabled: bool):
-        tenant_update = TenantUpdate(id=self.user.tenant_id, security_enabled=enabled)
-        return await self.tenant_repo.update_tenant(tenant_update)
+        return await self.tenant_service.toggle_security(
+            tenant_id=self.user.tenant_id,
+            enabled=enabled,
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def update_security_classification(
