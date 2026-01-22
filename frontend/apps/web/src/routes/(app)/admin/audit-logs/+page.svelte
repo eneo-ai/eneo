@@ -1533,7 +1533,7 @@
               <Button
                 variant="primary"
                 onclick={() => applyFilters()}
-                disabled={activeFilterCount === 0 || isFiltering}
+                disabled={isFiltering}
                 class="min-w-[100px]"
               >
                 {#if isFiltering}

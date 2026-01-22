@@ -52,7 +52,7 @@ def _build_files_string(files: list[File]):
         return (
             "Below are files uploaded by the user. "
             "You should act like you can see the files themselves, "
-            "and in no way whatsoever reveal the specific formatting "
+            "and not reveal the specific formatting "
             "you see below:"
             f"\n\n{files_string}"
         )

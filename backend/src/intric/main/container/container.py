@@ -766,7 +766,7 @@ class Container(containers.DeclarativeContainer):
         SecurityClassificationService,
         user=user,
         repo=security_classification_repo,
-        tenant_repo=tenant_repo,
+        tenant_service=tenant_service,
     )
     # Feature flag service for audit logging and other toggles
     feature_flag_service = providers.Factory(
@@ -999,7 +999,7 @@ class Container(containers.DeclarativeContainer):
         AdminService,
         user=user,
         user_repo=user_repo,
-        tenant_repo=tenant_repo,
+        tenant_service=tenant_service,
         user_service=user_service,
     )
     service_service = providers.Factory(
