@@ -667,7 +667,7 @@ async def update_user(
     current_user = container.user()
 
     # Get old state for change tracking
-    old_user = await user_service.get_user_by_id(id)
+    old_user = await user_service.get_user(id)
 
     # Update user
     updated_user = await user_service.update_user(user_id=id, prop_user_update=user_update)
@@ -768,7 +768,7 @@ async def delete_user(
     current_user = container.user()
 
     # Get user details BEFORE deletion (snapshot pattern)
-    user_to_delete = await user_service.get_user_by_id(id)
+    user_to_delete = await user_service.get_user(id)
 
     # Build extra context capturing what was deleted
     extra = {
