@@ -59,14 +59,14 @@
     }
   }
 
-  let copyButtonText = "Copy to clipboard";
+  let copyButtonText = m.copy_to_clipboard();
   async function copyText() {
     await loadBlob();
     if (loadedBlobText && browser) {
       navigator.clipboard.writeText(loadedBlobText);
-      copyButtonText = "Copied!";
+      copyButtonText = m.copied_to_clipboard();
       setTimeout(() => {
-        copyButtonText = "Copy to clipboard";
+        copyButtonText = m.copy_to_clipboard();
       }, 2000);
     }
   }
@@ -135,7 +135,7 @@
               d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
             />
           </svg>
-          Download extracted text
+          {m.download_extracted_text()}
         </Button>
 
         <Button variant="simple" padding="icon-leading" on:click={copyText}>
@@ -157,7 +157,7 @@
         >
         <div class="flex-grow"></div>
       {/if}
-      <Button variant="primary" is={close}>Done</Button>
+      <Button variant="primary" is={close}>{m.done()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

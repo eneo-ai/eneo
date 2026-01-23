@@ -163,12 +163,19 @@
     }),
 
     table.column({
-      accessor: "update_interval",
+      accessor: (item) => item,
       header: m.auto_updates(),
       cell: (item) => {
         return createRender(WebsiteSync, {
-          updateInterval: item.value
+          website: item.value
         });
+      },
+      plugins: {
+        sort: {
+          getSortValue(value) {
+            return value.update_interval ?? "";
+          }
+        }
       }
     }),
 
