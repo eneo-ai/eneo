@@ -863,29 +863,6 @@ def upgrade() -> None:
     conn.execute(text("ALTER TABLE transcription_models DROP CONSTRAINT IF EXISTS transcription_models_name_key"))
     print("  Dropped transcription_models_name_key (if existed)")
 
-    # Create tenant-scoped unique constraints (name must be unique within a tenant)
-    print("\nCreating tenant-scoped unique constraints...")
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_completion_models_tenant_name
-        ON completion_models (tenant_id, name)
-        WHERE tenant_id IS NOT NULL
-    """))
-    print("  Created idx_completion_models_tenant_name")
-
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_embedding_models_tenant_name
-        ON embedding_models (tenant_id, name)
-        WHERE tenant_id IS NOT NULL
-    """))
-    print("  Created idx_embedding_models_tenant_name")
-
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_transcription_models_tenant_name
-        ON transcription_models (tenant_id, name)
-        WHERE tenant_id IS NOT NULL
-    """))
-    print("  Created idx_transcription_models_tenant_name")
-
     # Get data
     tenants = get_active_tenants(conn)
     global_completion_models = get_global_completion_models(conn)
