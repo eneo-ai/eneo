@@ -808,6 +808,8 @@
   "upload_image_file": "Upload image file",
   "upload_text_document": "Upload text document",
   "upload_files": "Upload files",
+  "upload_files_description": "Upload files to send to this app.",
+  "supported_formats": "Supported formats",
   "duplicate_files_warning": "The following files already exist on the server:\\n- {fileList}\\nProceeding will replace them with the newly uploaded file(s).",
   "uploading": "Uploading...",
   "uploading_files": "Uploading files...",

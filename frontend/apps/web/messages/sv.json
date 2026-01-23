@@ -791,6 +791,8 @@
   "upload_image_file": "Ladda upp bildfil",
   "upload_text_document": "Ladda upp textdokument",
   "upload_files": "Ladda upp filer",
+  "upload_files_description": "Ladda upp filer att skicka till denna app.",
+  "supported_formats": "Format som stöds",
   "duplicate_files_warning": "Följande filer finns redan på servern:\\n- {fileList}\\nAtt fortsätta kommer att ersätta dem med de nyuppladdade filerna.",
   "uploading": "Laddar upp...",
   "uploading_files": "Laddar upp filer...",

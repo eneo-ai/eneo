@@ -1,6 +1,8 @@
 <script lang="ts">
   import { IconTrash } from "@intric/icons/trash";
   import { IconDownload } from "@intric/icons/download";
+  import { IconInfo } from "@intric/icons/info";
+  import { IconCheck } from "@intric/icons/check";
   import { Button } from "@intric/ui";
   import { onDestroy, onMount } from "svelte";
   import { browser } from "$app/environment";
@@ -9,6 +11,7 @@
   import AudioRecorder from "./AudioRecorder.svelte";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { fade } from "svelte/transition";
 
   export let description = m.record_audio_device();
 
@@ -24,6 +27,7 @@
   let maxRecordingBytes: number | null = null;
   let recordingQueued = false;
   let shouldWarnOnNavigate = false;
+  let showSuccess = false;
 
   $: maxRecordingBytes = $attachmentRules.maxTotalSize ?? null;
   $: recordingQueued = audioFile
@@ -86,10 +90,16 @@
 
 {#if audioFile && audioURL}
   {#if recordingWarning}
-    <div
-      class="border-warning-default/40 bg-warning-dimmer text-warning-default w-[60ch] rounded-lg border p-3 text-sm"
-    >
-      {recordingWarning}
+    <div class="alert-warning">
+      <IconInfo class="text-warning-default min-w-5 flex-shrink-0" />
+      <span>{recordingWarning}</span>
+    </div>
+  {/if}
+
+  {#if showSuccess}
+    <div class="success-flash" transition:fade={{ duration: 200 }}>
+      <IconCheck class="text-positive-default" />
+      <span>{m.recording_queued ? m.recording_queued() : "Recording queued"}</span>
     </div>
   {/if}
 
@@ -106,24 +116,7 @@
     ></audio>
   {/if}
 
-  <div class="flex items-center gap-4">
-    {#if $attachments.length === 0}
-      <Button
-        variant="destructive"
-        padding="icon-leading"
-        on:click={() => {
-          if (confirm(m.confirm_discard_recording())) {
-            audioFile = undefined;
-            audioURL = undefined;
-            recordingWarning = null;
-          }
-        }}
-      >
-        <IconTrash />
-        {m.discard()}</Button
-      >
-    {/if}
-    <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button>
+  <div class="action-row">
     {#if $attachments.length === 0}
       <Button
         variant="primary"
@@ -135,10 +128,35 @@
           const errors = queueValidUploads([audioFile]);
           if (errors) {
             alert(errors);
+          } else {
+            showSuccess = true;
+            setTimeout(() => (showSuccess = false), 1500);
           }
         }}>{m.use_this_recording()}</Button
       >
     {/if}
+
+    <div class="secondary-actions">
+      <Button variant="outlined" on:click={saveAudioFile}
+        ><IconDownload />{m.save_as_file()}</Button
+      >
+      {#if $attachments.length === 0}
+        <Button
+          variant="destructive"
+          padding="icon-leading"
+          on:click={() => {
+            if (confirm(m.confirm_discard_recording())) {
+              audioFile = undefined;
+              audioURL = undefined;
+              recordingWarning = null;
+            }
+          }}
+        >
+          <IconTrash />
+          {m.discard()}</Button
+        >
+      {/if}
+    </div>
   </div>
 {:else}
   <AudioRecorder
@@ -163,3 +181,39 @@
     }}
   ></AudioRecorder>
 {/if}
+
+<style lang="postcss">
+  @reference "@intric/ui/styles";
+
+  /* Warning alert with icon and left border accent */
+  .alert-warning {
+    @apply flex items-start gap-3 rounded-lg p-4;
+    @apply border-l-4 border-yellow-500 bg-yellow-50;
+    @apply text-sm text-yellow-800;
+    max-width: 60ch;
+  }
+
+  :global(.dark) .alert-warning {
+    @apply border-yellow-500/70 bg-yellow-900/20 text-yellow-200;
+  }
+
+  /* Success flash for queued recording */
+  .success-flash {
+    @apply flex items-center gap-2 rounded-lg p-3;
+    @apply bg-green-50 text-green-700;
+    max-width: 60ch;
+  }
+
+  :global(.dark) .success-flash {
+    @apply bg-green-900/20 text-green-300;
+  }
+
+  /* Action button row with clear hierarchy */
+  .action-row {
+    @apply flex flex-wrap items-center gap-3;
+  }
+
+  .secondary-actions {
+    @apply flex items-center gap-2;
+  }
+</style>
