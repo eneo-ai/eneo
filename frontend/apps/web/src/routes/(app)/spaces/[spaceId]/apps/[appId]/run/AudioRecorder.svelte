@@ -7,7 +7,15 @@
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
 
-  export let onRecordingDone: (params: { blob: Blob; mimeType: string }) => void;
+  type RecordingStopReason = "manual" | "limit" | "stall" | "error";
+
+  export let onRecordingDone: (params: {
+    blob: Blob;
+    mimeType: string;
+    reason: RecordingStopReason;
+  }) => void;
+  export let onRecordingStateChange: (isRecording: boolean) => void = () => {};
+  export let maxBytes: number | null = null;
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
@@ -26,9 +34,19 @@
   let recordingBuffer: Blob[] = [];
   let recordedBlob: Blob | null = null;
   let audioURL: string | null = null;
+  let stopReason: RecordingStopReason = "manual";
+  let handleStreamEnded: ((event: Event) => void) | null = null;
 
   // Constants
   const TIMESLICE_MS = 10000; // Save chunks every 10 seconds
+  const STALL_TIMEOUT_MS = TIMESLICE_MS * 2;
+
+  const formatMegabytes = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
+  let maxSizeLabel: string | null = null;
+  $: maxSizeLabel =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? formatMegabytes(maxBytes)
+      : null;
 
   // Stats for diagnostics
   let recordingStats = {
@@ -44,6 +62,8 @@
       recordingError = null;
       recordingState = "recording";
       isRecording = true;
+      stopReason = "manual";
+      onRecordingStateChange(true);
       startedRecordingAt = dayjs();
 
       // Reset stats
@@ -65,12 +85,35 @@
 
         mediaRecorder.addEventListener("dataavailable", (event) => {
           if (event.data.size > 0) {
+            const maxBytesValue =
+              typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+                ? maxBytes
+                : null;
+            const nextTotalBytes = recordingStats.totalBytes + event.data.size;
+
+            if (maxBytesValue && nextTotalBytes > maxBytesValue) {
+              recordingStats.errors.push(
+                "Recording stopped after reaching size limit at " + new Date().toISOString()
+              );
+              stopReason = "limit";
+              stopRecording();
+              return;
+            }
+
             recordingBuffer.push(event.data);
 
             // Update stats
             recordingStats.chunks++;
-            recordingStats.totalBytes += event.data.size;
+            recordingStats.totalBytes = nextTotalBytes;
             recordingStats.lastChunkTime = Date.now();
+
+            if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
+              recordingStats.errors.push(
+                "Recording stopped after reaching size limit at " + new Date().toISOString()
+              );
+              stopReason = "limit";
+              stopRecording();
+            }
           } else {
             console.warn("Received empty data chunk");
             recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
@@ -84,6 +127,7 @@
           recordingError = errorMsg;
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
+          stopReason = "error";
           stopRecording();
         });
 
@@ -96,12 +140,15 @@
               recordingError = errorMsg;
               recordingStats.errors.push(errorMsg);
               recordingState = "error";
+              stopReason = "error";
               return;
             }
 
             recordedBlob = new Blob(recordingBuffer, { type: mimeType });
             audioURL = URL.createObjectURL(recordedBlob);
-            onRecordingDone({ blob: recordedBlob, mimeType });
+            const reason = stopReason;
+            stopReason = "manual";
+            onRecordingDone({ blob: recordedBlob, mimeType, reason });
             recordingState = "complete";
           } catch (error) {
             const errorMsg =
@@ -111,6 +158,7 @@
             recordingError = errorMsg;
             recordingStats.errors.push(errorMsg);
             recordingState = "error";
+            stopReason = "error";
           }
         });
 
@@ -130,6 +178,7 @@
         recordingError = errorMsg;
         recordingStats.errors.push(errorMsg);
         isRecording = false;
+        onRecordingStateChange(false);
         recordingState = "error";
       }
     } catch (error) {
@@ -139,12 +188,16 @@
       recordingError = errorMsg;
       recordingStats.errors.push(errorMsg);
       isRecording = false;
+      onRecordingStateChange(false);
       recordingState = "error";
     }
   }
 
   function stopRecording() {
-    isRecording = false;
+    if (isRecording) {
+      isRecording = false;
+      onRecordingStateChange(false);
+    }
 
     try {
       // Only call stop if the mediaRecorder is actually recording
@@ -179,6 +232,18 @@
       }
       volumeMeter.value = Math.sqrt(sumSquares / levelBuffer.length);
     }
+
+    if (
+      isRecording &&
+      recordingStats.lastChunkTime > 0 &&
+      Date.now() - recordingStats.lastChunkTime > STALL_TIMEOUT_MS
+    ) {
+      recordingStats.errors.push(
+        "Recording stopped due to stalled data at " + new Date().toISOString()
+      );
+      stopReason = "stall";
+      stopRecording();
+    }
     elapsedTime = formatElapsed(dayjs().diff(startedRecordingAt, "seconds"));
     window.requestAnimationFrame(onAnimationFrame);
   };
@@ -202,6 +267,21 @@
           echoCancellation: true,
           autoGainControl: true
         }
+      });
+
+      const streamEndedHandler = (_event: Event) => {
+        if (!isRecording) return;
+        const errorMsg = m.recording_device_disconnected();
+        recordingError = errorMsg;
+        recordingStats.errors.push(errorMsg + " at " + new Date().toISOString());
+        stopReason = "error";
+        stopRecording();
+      };
+
+      handleStreamEnded = streamEndedHandler;
+      mediaStream.addEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.addEventListener("ended", streamEndedHandler);
       });
 
       audioContext = new AudioContext();
@@ -235,6 +315,14 @@
       }
     }
 
+    if (mediaStream && handleStreamEnded) {
+      const streamEndedHandler = handleStreamEnded;
+      mediaStream.removeEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.removeEventListener("ended", streamEndedHandler);
+      });
+    }
+
     mediaStream?.getAudioTracks().forEach((track) => {
       track.stop();
     });
@@ -264,8 +352,16 @@
       <div class="px-6 py-2 font-mono">
         <div>{m.time_label()}{elapsedTime}</div>
         <div class="text-xs">
-          {(recordingStats.totalBytes / (1024 * 1024)).toFixed(2)}
-          MB
+          {#if maxSizeLabel}
+            {m.recording_size_of({
+              current: formatMegabytes(recordingStats.totalBytes),
+              max: maxSizeLabel
+            })}
+          {:else}
+            {m.recording_size_label({
+              size: formatMegabytes(recordingStats.totalBytes)
+            })}
+          {/if}
         </div>
       </div>
     {:else if recordingState === "processing"}

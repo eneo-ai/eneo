@@ -2,6 +2,8 @@
   import { IconTrash } from "@intric/icons/trash";
   import { IconDownload } from "@intric/icons/download";
   import { Button } from "@intric/ui";
+  import { onDestroy, onMount } from "svelte";
+  import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import dayjs from "dayjs";
   import AudioRecorder from "./AudioRecorder.svelte";
@@ -12,11 +14,42 @@
 
   const {
     queueValidUploads,
-    state: { attachments }
+    state: { attachments, attachmentRules, isUploading }
   } = getAttachmentManager();
 
   let audioURL: string | undefined;
   let audioFile: File | undefined;
+  let recordingWarning: string | null = null;
+  let isRecording = false;
+  let maxRecordingBytes: number | null = null;
+  let recordingQueued = false;
+  let shouldWarnOnNavigate = false;
+
+  $: maxRecordingBytes = $attachmentRules.maxTotalSize ?? null;
+  $: recordingQueued = audioFile
+    ? $attachments.some((attachment) => attachment.file === audioFile)
+    : false;
+  $: shouldWarnOnNavigate =
+    isRecording || (!!audioFile && !recordingQueued) || $isUploading;
+  $: if (!audioFile) {
+    recordingWarning = null;
+  }
+
+  const beforeUnloadHandler = (event: BeforeUnloadEvent) => {
+    if (!shouldWarnOnNavigate) return;
+    event.preventDefault();
+    event.returnValue = m.recording_unsaved_warning();
+  };
+
+  onMount(() => {
+    if (!browser) return;
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+  });
+
+  onDestroy(() => {
+    if (!browser) return;
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+  });
 
   async function saveAudioFile() {
     if (!audioFile) {
@@ -25,10 +58,18 @@
     }
     const suggestedName = audioFile.name + (audioFile.type.includes("webm") ? ".webm" : ".mp4");
     if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName });
-      const writable = await handle.createWritable();
-      await writable.write(audioFile);
-      writable.close();
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName });
+        const writable = await handle.createWritable();
+        await writable.write(audioFile);
+        await writable.close();
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        console.error("Failed to save recording:", error);
+        alert(m.recording_save_failed());
+      }
     } else {
       const a = document.createElement("a");
       a.download = suggestedName;
@@ -44,6 +85,14 @@
 <span class="text-secondary">{description}</span>
 
 {#if audioFile && audioURL}
+  {#if recordingWarning}
+    <div
+      class="border-warning-default/40 bg-warning-dimmer text-warning-default w-[60ch] rounded-lg border p-3 text-sm"
+    >
+      {recordingWarning}
+    </div>
+  {/if}
+
   {#if $attachments.length > 0}
     {#each $attachments as attachment (attachment.id)}
       <div class="border-stronger bg-primary w-[60ch] rounded-lg border p-2">
@@ -55,8 +104,10 @@
   {:else}
     <audio controls src={audioURL} class="border-stronger ml-2 h-12 rounded-full border shadow-sm"
     ></audio>
+  {/if}
 
-    <div class="flex items-center gap-4">
+  <div class="flex items-center gap-4">
+    {#if $attachments.length === 0}
       <Button
         variant="destructive"
         padding="icon-leading"
@@ -64,14 +115,16 @@
           if (confirm(m.confirm_discard_recording())) {
             audioFile = undefined;
             audioURL = undefined;
+            recordingWarning = null;
           }
         }}
       >
         <IconTrash />
         {m.discard()}</Button
       >
-      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button
-      >
+    {/if}
+    <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button>
+    {#if $attachments.length === 0}
       <Button
         variant="primary"
         on:click={() => {
@@ -85,15 +138,28 @@
           }
         }}>{m.use_this_recording()}</Button
       >
-    </div>
-  {/if}
+    {/if}
+  </div>
 {:else}
   <AudioRecorder
-    onRecordingDone={({ blob, mimeType }) => {
+    maxBytes={maxRecordingBytes}
+    onRecordingStateChange={(active) => {
+      isRecording = active;
+    }}
+    onRecordingDone={({ blob, mimeType, reason }) => {
       const extension = mimeType.replaceAll("audio/", "").split(";")[0] ?? "";
       const fileName = `${m.recording_filename_template({ datetime: dayjs().format("YYYY-MM-DD HH:mm:ss") })}.${extension}`;
       audioFile = new File([blob], fileName, { type: mimeType });
       audioURL = URL.createObjectURL(blob);
+      if (reason === "limit") {
+        recordingWarning = m.recording_limit_reached();
+      } else if (reason === "stall") {
+        recordingWarning = m.recording_stalled();
+      } else if (reason === "error") {
+        recordingWarning = m.recording_saved_after_error();
+      } else {
+        recordingWarning = null;
+      }
     }}
   ></AudioRecorder>
 {/if}
