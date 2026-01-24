@@ -144,20 +144,14 @@
 
 <div class="flex flex-col gap-6">
   <!-- Header -->
-  <div class="flex items-center justify-between">
-    <div>
-      <h3 class="font-medium text-primary">{m.add_models()}</h3>
-      <p class="text-sm text-muted">{m.add_models_description()}</p>
-    </div>
-
-    <Button variant="ghost" on:click={handleSkip} class="text-sm">
-      {m.skip_for_now()}
-    </Button>
+  <div>
+    <h3 class="font-medium text-primary">{m.add_models()}</h3>
+    <p class="text-sm text-muted">{m.add_models_description()}</p>
   </div>
 
   <!-- Suggestions (if available) -->
   {#if suggestions.length > 0}
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2 text-sm text-muted">
         <Sparkles class="h-4 w-4" />
         <span>{m.suggested_models()}</span>
@@ -179,98 +173,106 @@
   {/if}
 
   <!-- Model Form -->
-  <div class="rounded-lg border border-dimmer bg-surface-dimmer p-4">
-    <form on:submit|preventDefault={addModel} class="flex flex-col gap-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <!-- Model Identifier -->
+  <form on:submit|preventDefault={addModel} class="flex flex-col gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <!-- Model Identifier -->
+      <div class="flex flex-col gap-2">
+        <label for="model-name" class="text-sm font-medium">{m.model_identifier()}</label>
+        <Input.Text
+          id="model-name"
+          bind:value={currentModel.name}
+          placeholder={modelType === "completion"
+            ? m.model_identifier_placeholder_completion()
+            : modelType === "embedding"
+              ? m.model_identifier_placeholder_embedding()
+              : m.model_identifier_placeholder_transcription()}
+        />
+      </div>
+
+      <!-- Display Name -->
+      <div class="flex flex-col gap-2">
+        <label for="display-name" class="text-sm font-medium">{m.display_name()}</label>
+        <Input.Text
+          id="display-name"
+          bind:value={currentModel.displayName}
+          placeholder={m.display_name_placeholder_completion()}
+        />
+      </div>
+    </div>
+
+    <!-- Completion-specific fields -->
+    {#if modelType === "completion"}
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="flex flex-col gap-2">
-          <label for="model-name" class="text-sm font-medium">{m.model_identifier()}</label>
+          <label for="token-limit" class="text-sm font-medium">{m.token_limit()}</label>
           <Input.Text
-            id="model-name"
-            bind:value={currentModel.name}
-            placeholder={modelType === "completion"
-              ? m.model_identifier_placeholder_completion()
-              : modelType === "embedding"
-                ? m.model_identifier_placeholder_embedding()
-                : m.model_identifier_placeholder_transcription()}
+            id="token-limit"
+            type="number"
+            bind:value={currentModel.tokenLimit}
+            min="1024"
+            max="10000000"
           />
         </div>
 
-        <!-- Display Name -->
+        <div class="flex items-center gap-6 col-span-2">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              bind:checked={currentModel.vision}
+              class="rounded accent-accent-default h-4 w-4"
+            />
+            <span>{m.vision_support()}</span>
+          </label>
+
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              bind:checked={currentModel.reasoning}
+              class="rounded accent-accent-default h-4 w-4"
+            />
+            <span>{m.reasoning_support()}</span>
+          </label>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Embedding-specific fields -->
+    {#if modelType === "embedding"}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div class="flex flex-col gap-2">
-          <label for="display-name" class="text-sm font-medium">{m.display_name()}</label>
+          <label for="dimensions" class="text-sm font-medium">{m.dimensions()}</label>
           <Input.Text
-            id="display-name"
-            bind:value={currentModel.displayName}
-            placeholder={m.display_name_placeholder_completion()}
+            id="dimensions"
+            type="number"
+            bind:value={currentModel.dimensions}
+            placeholder="1536"
+          />
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label for="max-input" class="text-sm font-medium">{m.max_input_tokens()}</label>
+          <Input.Text
+            id="max-input"
+            type="number"
+            bind:value={currentModel.maxInput}
+            placeholder="8191"
           />
         </div>
       </div>
+    {/if}
 
-      <!-- Completion-specific fields -->
-      {#if modelType === "completion"}
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div class="flex flex-col gap-2">
-            <label for="token-limit" class="text-sm font-medium">{m.token_limit()}</label>
-            <Input.Text
-              id="token-limit"
-              type="number"
-              bind:value={currentModel.tokenLimit}
-              min="1024"
-              max="10000000"
-            />
-          </div>
-
-          <div class="flex items-end gap-4 pb-2">
-            <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" bind:checked={currentModel.vision} class="rounded" />
-              <span>{m.vision_support()}</span>
-            </label>
-
-            <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" bind:checked={currentModel.reasoning} class="rounded" />
-              <span>{m.reasoning_support()}</span>
-            </label>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Embedding-specific fields -->
-      {#if modelType === "embedding"}
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div class="flex flex-col gap-2">
-            <label for="dimensions" class="text-sm font-medium">{m.dimensions()}</label>
-            <Input.Text
-              id="dimensions"
-              type="number"
-              bind:value={currentModel.dimensions}
-              placeholder="1536"
-            />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <label for="max-input" class="text-sm font-medium">{m.max_input_tokens()}</label>
-            <Input.Text
-              id="max-input"
-              type="number"
-              bind:value={currentModel.maxInput}
-              placeholder="8191"
-            />
-          </div>
-        </div>
-      {/if}
-
+    <div class="border-t border-dimmer/40 pt-4 mt-2">
       <Button
         type="submit"
         variant="outlined"
-        class="self-start gap-2"
+        class="gap-2"
         disabled={!canAddModel}
       >
         <Plus class="h-4 w-4" />
         {m.add_to_list()}
       </Button>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <!-- Added Models List -->
   {#if models.length > 0}
@@ -303,17 +305,27 @@
 
   <!-- Navigation -->
   <div class="flex items-center justify-between border-t border-dimmer pt-4">
-    <Button variant="ghost" on:click={handleBack} class="gap-2">
-      <ArrowLeft class="h-4 w-4" />
-      {m.back()}
-    </Button>
+    <div class="flex items-center gap-4">
+      <Button variant="ghost" on:click={handleBack} class="gap-2">
+        <ArrowLeft class="h-4 w-4" />
+        {m.back()}
+      </Button>
 
-    <span class="text-sm text-muted">
-      {#if models.length === 0}
-        {m.add_at_least_one_model()}
-      {:else}
-        {models.length === 1 ? m.models_ready_one({ count: models.length }) : m.models_ready_other({ count: models.length })}
-      {/if}
-    </span>
+      <span class="text-sm text-muted/70">
+        {#if models.length === 0}
+          {m.add_at_least_one_model()}
+        {:else}
+          {models.length === 1 ? m.models_ready_one({ count: models.length }) : m.models_ready_other({ count: models.length })}
+        {/if}
+      </span>
+    </div>
+
+    <button
+      type="button"
+      class="text-sm text-muted hover:text-primary transition-colors duration-150 underline decoration-muted/50 underline-offset-2"
+      on:click={handleSkip}
+    >
+      {m.skip_for_now()}
+    </button>
   </div>
 </div>

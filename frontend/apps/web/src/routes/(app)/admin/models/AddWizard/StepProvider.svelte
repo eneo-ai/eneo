@@ -87,7 +87,7 @@
 
   {#if viewMode === "select" && providers.length > 0}
     <!-- Existing Providers List -->
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-4">
       <h3 class="text-sm font-medium text-muted">{m.select_provider()}</h3>
 
       <div class="flex flex-col gap-3">
@@ -96,9 +96,7 @@
           <button
             type="button"
             class="group flex items-center gap-4 rounded-lg border p-4 text-left transition-all duration-150
-              {isSelected
-                ? 'border-accent-default bg-accent-dimmer ring-1 ring-accent-default'
-                : 'border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer'}"
+              border-dimmer hover:border-stronger hover:bg-hover-dimmer active:bg-accent-dimmer"
             on:click={() => selectExistingProvider(provider)}
             on:mouseenter={() => hoveredProvider = provider.id}
             on:mouseleave={() => hoveredProvider = null}

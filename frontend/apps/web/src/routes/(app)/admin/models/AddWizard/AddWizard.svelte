@@ -3,7 +3,8 @@
 <script lang="ts">
   import { Button, Dialog } from "@intric/ui";
   import { writable, type Writable } from "svelte/store";
-  import { fly } from "svelte/transition";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
@@ -113,7 +114,10 @@
 
   function previousStep() {
     stepDirection = "backward";
-    if ($currentStep > 1) {
+    if ($currentStep === 3 && !$wizardData.isCreatingNewProvider) {
+      // Skip credentials step when going back if using existing provider
+      $currentStep = 1;
+    } else if ($currentStep > 1) {
       $currentStep = ($currentStep - 1) as WizardStep;
     }
   }
@@ -228,15 +232,15 @@
     closeWizard();
   }
 
-  // Transition config
-  const transitionDuration = 200;
-  $: flyX = stepDirection === "forward" ? 40 : -40;
+  // Transition config - smooth crossfade with subtle slide
+  const transitionDuration = 250;
+  $: flyX = stepDirection === "forward" ? 24 : -24;
 </script>
 
 <Dialog.Root {openController}>
   <Dialog.Content width="large" form>
-    <!-- Progress Header -->
-    <Dialog.Title class="!pb-0">
+    <!-- Progress Header with subtle gradient -->
+    <Dialog.Title class="!pb-0 bg-gradient-to-b from-surface-dimmer/50 to-transparent">
       <div class="flex flex-col gap-6">
         <span>{m.add_provider_and_models()}</span>
 
@@ -255,7 +259,7 @@
                   ? 'text-primary font-medium'
                   : isCompleted
                     ? 'text-positive-stronger cursor-pointer hover:text-positive-default'
-                    : 'text-muted cursor-default'}"
+                    : 'text-muted cursor-default tracking-wide'}"
               disabled={!isClickable}
               on:click={() => isClickable && goToStep(step)}
               aria-current={isActive ? 'step' : undefined}
@@ -282,21 +286,23 @@
       </div>
     </Dialog.Title>
 
-    <Dialog.Section>
-      <div class="relative min-h-[320px] overflow-hidden px-2 py-6">
+    <Dialog.Section class="!px-8">
+      <div class="relative py-6">
         {#if error}
           <div class="border-error bg-error-dimmer text-error-stronger mb-4 border-l-2 px-4 py-2 text-sm">
             {error}
           </div>
         {/if}
 
-        <!-- Step Content with Transitions -->
-        {#key $currentStep}
-          <div
-            in:fly={{ x: flyX, duration: transitionDuration, delay: transitionDuration }}
-            out:fly={{ x: -flyX, duration: transitionDuration }}
-            class="w-full"
-          >
+        <!-- Step Content - Grid overlay technique for smooth crossfade without jumping -->
+        <div class="grid min-h-[380px] items-start overflow-hidden" style="grid-template: 1fr / 1fr;">
+          {#key $currentStep}
+            <div
+              in:fly={{ x: flyX, duration: transitionDuration, delay: transitionDuration * 0.4, easing: cubicOut, opacity: 0 }}
+              out:fade={{ duration: transitionDuration * 0.35 }}
+              class="w-full"
+              style="grid-area: 1 / 1;"
+            >
             {#if $currentStep === 1}
               <StepProvider
                 {providers}
