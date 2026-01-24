@@ -27,7 +27,7 @@
   const showEditDialog = writable(false);
 </script>
 
-<div class="flex items-center gap-2">
+<div class="flex items-center gap-3">
   {#if isTenantModel}
     <Button on:click={() => showEditDialog.set(true)}>
       <ModelNameAndVendor {model} />
@@ -41,13 +41,17 @@
   {#if "is_org_default" in model && model.is_org_default}
     <Tooltip text={m.default_model_tooltip()}>
       <div
-        class="border-positive-stronger text-positive-stronger w-20 cursor-default rounded-full border text-center text-sm"
+        class="
+          inline-flex items-center px-2.5 py-[3px]
+          rounded-full text-xs font-medium tracking-wide cursor-default
+          bg-[oklch(93%_0.07_78)] dark:bg-[oklch(26%_0.07_78)]
+          text-[oklch(38%_0.11_78)] dark:text-[oklch(84%_0.11_78)]
+          border border-[oklch(84%_0.09_78)] dark:border-[oklch(36%_0.09_78)]
+        "
       >
         {m.default_model()}
       </div>
     </Tooltip>
-  {:else}
-    <div class="w-20"></div>
   {/if}
 </div>
 

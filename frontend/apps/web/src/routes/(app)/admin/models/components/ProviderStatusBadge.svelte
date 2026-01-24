@@ -4,6 +4,7 @@
   import type { ModelProviderPublic } from "@intric/intric-js";
   import { Tooltip } from "@intric/ui";
   import { CheckCircle2, AlertCircle, XCircle, CircleOff } from "lucide-svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let provider: ModelProviderPublic;
 
@@ -25,13 +26,21 @@
 
   $: status = getStatus(provider);
 
-  // Status label mapping
-  const labels: Record<StatusType, string> = {
-    connected: "Connected",
-    needs_credentials: "Needs credentials",
-    error: "Error",
-    inactive: "Inactive"
-  };
+  // Status label mapping - using translations
+  function getLabel(s: StatusType): string {
+    switch (s) {
+      case "connected":
+        return m.provider_status_connected();
+      case "needs_credentials":
+        return m.provider_status_needs_credentials();
+      case "error":
+        return m.provider_status_error();
+      case "inactive":
+        return m.provider_status_inactive();
+      default:
+        return "";
+    }
+  }
 
   // Status color mapping - WCAG 2.1 AA compliant (4.5:1 contrast for text)
   // Light mode: text 35-45% L on 94-95% L bg
@@ -67,21 +76,21 @@
     inactive: CircleOff
   };
 
-  $: label = labels[status];
+  $: label = getLabel(status);
   $: color = colors[status];
   $: Icon = icons[status];
 
-  // Build tooltip content
+  // Build tooltip content - using translations
   $: tooltipContent = (() => {
     switch (status) {
       case "connected":
-        return `API key verified: ${provider.masked_api_key || "***"}`;
+        return m.provider_status_tooltip_connected({ maskedKey: provider.masked_api_key || "***" });
       case "needs_credentials":
-        return "Add your API key to enable this provider";
+        return m.provider_status_tooltip_needs_credentials();
       case "error":
-        return "Connection error - check your API key";
+        return m.provider_status_tooltip_error();
       case "inactive":
-        return "Manually disabled by admin";
+        return m.provider_status_tooltip_inactive();
       default:
         return "";
     }

@@ -111,7 +111,7 @@
       {#if $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
-            <tr {...rowAttrs} class="hover:bg-hover-dimmer relative h-16">
+            <tr {...rowAttrs} class="hover:bg-hover-dimmer relative h-16 transition-colors duration-150">
               {#each row.cells as cell (cell.id)}
                 {#if cell.id !== "table-card-key"}
                   <Subscribe attrs={cell.attrs()} let:attrs>
