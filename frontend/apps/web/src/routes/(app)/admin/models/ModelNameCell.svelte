@@ -42,11 +42,11 @@
     <Tooltip text={m.default_model_tooltip()}>
       <div
         class="
-          inline-flex items-center px-2.5 py-[3px]
-          rounded-full text-xs font-medium tracking-wide cursor-default
-          bg-[oklch(93%_0.07_78)] dark:bg-[oklch(26%_0.07_78)]
-          text-[oklch(38%_0.11_78)] dark:text-[oklch(84%_0.11_78)]
-          border border-[oklch(84%_0.09_78)] dark:border-[oklch(36%_0.09_78)]
+          inline-flex items-center px-2 py-[2px]
+          rounded-full text-[11px] font-medium tracking-wide cursor-default
+          bg-transparent
+          text-[oklch(50%_0.08_78)] dark:text-[oklch(70%_0.08_78)]
+          border border-[oklch(75%_0.06_78)] dark:border-[oklch(40%_0.06_78)]
         "
       >
         {m.default_model()}

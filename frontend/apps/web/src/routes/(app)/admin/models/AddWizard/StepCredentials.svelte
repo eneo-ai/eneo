@@ -2,11 +2,20 @@
 
 <script lang="ts">
   import { Button, Input } from "@intric/ui";
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
   import { ArrowLeft, Loader2, CheckCircle2, XCircle } from "lucide-svelte";
+
+  // Auto-focus first input on mount
+  onMount(() => {
+    setTimeout(() => {
+      const input = document.getElementById("cred-provider-name") as HTMLInputElement;
+      input?.focus();
+    }, 100);
+  });
 
   export let providerType: string;
   export let providerName: string = "";
@@ -122,9 +131,11 @@
 
       const provider = await intric.modelProviders.create(providerData);
 
+      toast.success(m.provider_created_success());
       dispatch("complete", { providerId: provider.id });
     } catch (e: any) {
       error = e.message || m.failed_to_create_provider();
+      toast.error(m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
     }
@@ -243,7 +254,7 @@
         variant="outlined"
         on:click={testConnection}
         disabled={!isValid || isTesting}
-        class="gap-2"
+        class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
       >
         {#if isTesting}
           <Loader2 class="h-4 w-4 animate-spin" />
@@ -267,7 +278,7 @@
 
   <!-- Navigation -->
   <div class="flex items-center justify-between border-t border-dimmer pt-4">
-    <Button variant="ghost" on:click={handleBack} class="gap-2">
+    <Button variant="ghost" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
       <ArrowLeft class="h-4 w-4" />
       {m.back()}
     </Button>
@@ -276,6 +287,7 @@
       variant="primary"
       on:click={handleSubmit}
       disabled={!isValid || isSubmitting}
+      class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
     >
       {#if isSubmitting}
         <Loader2 class="h-4 w-4 animate-spin mr-2" />

@@ -23,14 +23,17 @@
   import { Plus } from "lucide-svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
   import { AddWizard } from "./AddWizard/index.js";
+  import PageEmptyState from "./components/PageEmptyState.svelte";
+  import ProviderEmptyState from "./components/ProviderEmptyState.svelte";
 
   export let completionModels: CompletionModel[];
   export let providers: ModelProviderPublic[] = [];
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
-  const addProviderDialogOpen = writable(false);
   const addWizardOpen = writable(false);
+  // Pre-selected provider for "Add Model" from provider dropdown
+  let wizardPreSelectedProviderId: string | null = null;
 
   // Track provider being edited (for credential icon click -> edit provider)
   let editingProvider: ModelProviderPublic | null = null;
@@ -163,8 +166,8 @@
    * Opens the add model dialog with this provider pre-selected.
    */
   function handleAddModelToProvider(providerId: string) {
-    preSelectedProviderId?.set(providerId);
-    addModelDialogOpen?.set(true);
+    wizardPreSelectedProviderId = providerId;
+    addWizardOpen.set(true);
   }
 
   /**
@@ -179,25 +182,37 @@
   $: groups = listGroups(providers);
   $: table.update(filteredModels);</script>
 
+{#if providers.length === 0}
+  <PageEmptyState on:addProvider={() => { wizardPreSelectedProviderId = null; addWizardOpen.set(true); }} />
+{:else}
 <div class="flex flex-col gap-4">
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list" showEmptyGroups>
     {#each groups as group (group.key)}
       {@const provider = getProviderForGroup(group.key)}
-      <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
+      <Table.Group filterFn={createGroupFilter(group.key)} title=" ">
         <svelte:fragment slot="title-prefix">
           {#if provider}
+            <!-- Glyph + Name as unified clickable button to edit provider -->
             <button
-              class="mr-3 group cursor-pointer rounded-lg transition-transform duration-150 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-accent-default focus:ring-offset-2"
+              class="flex items-center gap-3 mr-1 group cursor-pointer rounded-lg transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-accent-default focus:ring-offset-2"
               on:click|stopPropagation={() => handleEditProvider(provider)}
-              title="Edit provider"
+              title={m.edit_provider()}
             >
-              <ProviderGlyph providerType={provider.provider_type} size="md" />
+              <span class="transition-transform duration-150 group-hover:scale-105">
+                <ProviderGlyph providerType={provider.provider_type} size="md" />
+              </span>
+              <span class="font-medium text-primary group-hover:text-accent-default group-hover:underline underline-offset-2 decoration-accent-default/50 transition-colors">
+                {provider.name}
+              </span>
             </button>
           {:else}
-            <div
-              class="h-3 w-3 rounded-full border border-stronger mr-2"
-              style="background: var(--{getChartColour(group.name)})"
-            ></div>
+            <div class="flex items-center gap-2 mr-2">
+              <div
+                class="h-3 w-3 rounded-full border border-stronger"
+                style="background: var(--{getChartColour(group.name)})"
+              ></div>
+              <span class="font-medium text-primary">{group.name}</span>
+            </div>
           {/if}
         </svelte:fragment>
         <svelte:fragment slot="title-suffix">
@@ -219,25 +234,36 @@
           </div>
         </svelte:fragment>
         <svelte:fragment slot="empty">
-          <span class="text-sm text-muted">{m.no_models_in_provider()}</span>
+          {#if provider}
+            <ProviderEmptyState
+              providerId={provider.id}
+              on:addModel={(e) => handleAddModelToProvider(e.detail.providerId)}
+            />
+          {:else}
+            <div class="text-sm text-muted/80 py-3 px-4 bg-surface-dimmer/50 rounded-lg border border-dashed border-dimmer">
+              {m.no_models_in_provider()}
+            </div>
+          {/if}
         </svelte:fragment>
       </Table.Group>
     {/each}
   </Table.Root>
 
-  <div class="flex justify-center pb-4">
-    <Button variant="outlined" on:click={() => addWizardOpen.set(true)}>
+  <div class="flex justify-center pt-8 pb-6 mt-4 border-t border-dimmer">
+    <Button variant="outlined" on:click={() => { wizardPreSelectedProviderId = null; addWizardOpen.set(true); }}>
       <Plus class="w-4 h-4 mr-2" />
       {m.add_provider()}
     </Button>
   </div>
 </div>
+{/if}
 
 <!-- Add Provider & Models Wizard -->
 <AddWizard
   openController={addWizardOpen}
   {providers}
   modelType="completion"
+  preSelectedProviderId={wizardPreSelectedProviderId}
 />
 
 <!-- Edit Provider Dialog -->

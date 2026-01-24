@@ -8,7 +8,8 @@
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
-  import { Check } from "lucide-svelte";
+  import { toast } from "$lib/components/toast";
+  import { Check, Loader2 } from "lucide-svelte";
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
   import StepModels from "./StepModels.svelte";
@@ -201,9 +202,14 @@
 
       await invalidate("admin:model-providers:load");
       await invalidate("admin:models:load");
+
+      const modelCount = $wizardData.models.length;
+      toast.success(modelCount === 1 ? m.model_created_success() : m.models_created_success({ count: modelCount }));
+
       closeWizard();
     } catch (e: any) {
       error = e.message || m.failed_to_create_model();
+      toast.error(m.failed_to_create_model());
     } finally {
       isSubmitting = false;
     }
@@ -254,7 +260,8 @@
             <!-- Step Label -->
             <button
               type="button"
-              class="relative flex items-center gap-2 px-1 py-2 text-sm transition-all duration-150
+              class="relative flex items-center gap-2 px-1 py-2 text-sm transition-all duration-150 rounded-sm
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface
                 {isActive
                   ? 'text-primary font-medium'
                   : isCompleted
@@ -337,14 +344,18 @@
 
     <!-- Footer with visual separation -->
     <Dialog.Controls class="border-t border-dimmer pt-4">
-      <Button variant="outlined" on:click={handleCancel}>{m.cancel()}</Button>
+      <Button variant="outlined" on:click={handleCancel} class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">{m.cancel()}</Button>
 
       {#if $currentStep === 3}
         <Button
           variant="primary"
           on:click={() => handleComplete(new CustomEvent("complete", { detail: { skip: false } }))}
           disabled={isSubmitting || $wizardData.models.length === 0}
+          class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
         >
+          {#if isSubmitting}
+            <Loader2 class="h-4 w-4 animate-spin" />
+          {/if}
           {isSubmitting ? m.creating() : m.finish()}
         </Button>
       {/if}

@@ -59,6 +59,7 @@
       <button
         type="button"
         class="relative px-4 py-2.5 text-sm font-medium transition-all duration-150
+          focus-visible:outline-none focus-visible:text-primary
           {viewMode === 'select'
             ? 'text-primary'
             : 'text-muted hover:text-primary'}"
@@ -72,6 +73,7 @@
       <button
         type="button"
         class="relative px-4 py-2.5 text-sm font-medium transition-all duration-150
+          focus-visible:outline-none focus-visible:text-primary
           {viewMode === 'create'
             ? 'text-primary'
             : 'text-muted hover:text-primary'}"
@@ -96,7 +98,8 @@
           <button
             type="button"
             class="group flex items-center gap-4 rounded-lg border p-4 text-left transition-all duration-150
-              border-dimmer hover:border-stronger hover:bg-hover-dimmer active:bg-accent-dimmer"
+              border-dimmer hover:border-stronger hover:bg-hover-dimmer active:bg-accent-dimmer
+              focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80 focus-visible:ring-offset-0"
             on:click={() => selectExistingProvider(provider)}
             on:mouseenter={() => hoveredProvider = provider.id}
             on:mouseleave={() => hoveredProvider = null}
@@ -132,6 +135,7 @@
           <button
             type="button"
             class="group flex items-start gap-3 rounded-lg border p-4 text-left transition-all duration-150
+              focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80 focus-visible:ring-offset-0
               {isSelected
                 ? 'border-accent-default bg-accent-dimmer ring-1 ring-accent-default'
                 : 'border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer'}"

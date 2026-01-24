@@ -16,6 +16,7 @@
   import ModelClassificationDialog from "$lib/features/security-classifications/components/ModelClassificationDialog.svelte";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
@@ -36,7 +37,7 @@
       );
       invalidate("admin:models:load");
     } catch (e) {
-      alert(`${m.error_changing_model_status()} ${model.name}`);
+      toast.error(`${m.error_changing_model_status()} ${model.name}`);
     }
   }
 
@@ -53,7 +54,7 @@
       );
       invalidate("admin:models:load");
     } catch (e) {
-      alert(`${m.error_changing_model_status()} ${model.name}`);
+      toast.error(`${m.error_changing_model_status()} ${model.name}`);
     }
   }
 

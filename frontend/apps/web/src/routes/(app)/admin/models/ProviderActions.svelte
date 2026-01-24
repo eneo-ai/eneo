@@ -39,7 +39,7 @@
 
 <Dropdown.Root>
   <Dropdown.Trigger let:trigger asFragment>
-    <Button variant="on-fill" is={trigger} padding="icon">
+    <Button variant="on-fill" is={trigger} padding="icon" class="transition-colors duration-150 hover:bg-hover-dimmer rounded-md">
       <IconEllipsis />
     </Button>
   </Dropdown.Trigger>

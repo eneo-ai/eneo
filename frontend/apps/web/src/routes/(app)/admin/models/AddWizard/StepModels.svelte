@@ -2,9 +2,18 @@
 
 <script lang="ts">
   import { Button, Input } from "@intric/ui";
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { ArrowLeft, Plus, Trash2, Sparkles } from "lucide-svelte";
+  import HelpTooltip from "../components/HelpTooltip.svelte";
+
+  // Auto-focus first input on mount
+  onMount(() => {
+    setTimeout(() => {
+      const input = document.getElementById("model-name") as HTMLInputElement;
+      input?.focus();
+    }, 100);
+  });
 
   export let modelType: "completion" | "embedding" | "transcription" = "completion";
   export let providerType: string;
@@ -162,7 +171,8 @@
           <button
             type="button"
             class="rounded-full border border-dimmer px-3 py-1.5 text-sm transition-all duration-150
-              hover:border-accent-default hover:bg-accent-dimmer"
+              hover:border-accent-default hover:bg-accent-dimmer
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
             on:click={() => useSuggestion(suggestion)}
           >
             {suggestion.displayName}
@@ -177,7 +187,10 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <!-- Model Identifier -->
       <div class="flex flex-col gap-2">
-        <label for="model-name" class="text-sm font-medium">{m.model_identifier()}</label>
+        <label for="model-name" class="text-sm font-medium flex items-center gap-1.5">
+          {m.model_identifier()}
+          <HelpTooltip text={m.model_identifier_help()} />
+        </label>
         <Input.Text
           id="model-name"
           bind:value={currentModel.name}
@@ -204,7 +217,10 @@
     {#if modelType === "completion"}
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="flex flex-col gap-2">
-          <label for="token-limit" class="text-sm font-medium">{m.token_limit()}</label>
+          <label for="token-limit" class="text-sm font-medium flex items-center gap-1.5">
+            {m.token_limit()}
+            <HelpTooltip text={m.token_limit_help()} />
+          </label>
           <Input.Text
             id="token-limit"
             type="number"
@@ -221,7 +237,10 @@
               bind:checked={currentModel.vision}
               class="rounded accent-accent-default h-4 w-4"
             />
-            <span>{m.vision_support()}</span>
+            <span class="flex items-center gap-1">
+              {m.vision_support()}
+              <HelpTooltip text={m.vision_help()} />
+            </span>
           </label>
 
           <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -230,7 +249,10 @@
               bind:checked={currentModel.reasoning}
               class="rounded accent-accent-default h-4 w-4"
             />
-            <span>{m.reasoning_support()}</span>
+            <span class="flex items-center gap-1">
+              {m.reasoning_support()}
+              <HelpTooltip text={m.reasoning_help()} />
+            </span>
           </label>
         </div>
       </div>
@@ -240,7 +262,10 @@
     {#if modelType === "embedding"}
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div class="flex flex-col gap-2">
-          <label for="dimensions" class="text-sm font-medium">{m.dimensions()}</label>
+          <label for="dimensions" class="text-sm font-medium flex items-center gap-1.5">
+            {m.dimensions()}
+            <HelpTooltip text={m.dimensions_help()} />
+          </label>
           <Input.Text
             id="dimensions"
             type="number"
@@ -265,7 +290,7 @@
       <Button
         type="submit"
         variant="outlined"
-        class="gap-2"
+        class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
         disabled={!canAddModel}
       >
         <Plus class="h-4 w-4" />
@@ -293,7 +318,7 @@
               variant="ghost"
               padding="icon"
               on:click={() => removeModel(index)}
-              class="text-muted hover:text-negative-default"
+              class="text-muted hover:text-negative-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-negative-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
             >
               <Trash2 class="h-4 w-4" />
             </Button>
@@ -306,7 +331,7 @@
   <!-- Navigation -->
   <div class="flex items-center justify-between border-t border-dimmer pt-4">
     <div class="flex items-center gap-4">
-      <Button variant="ghost" on:click={handleBack} class="gap-2">
+      <Button variant="ghost" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
         <ArrowLeft class="h-4 w-4" />
         {m.back()}
       </Button>
@@ -322,7 +347,8 @@
 
     <button
       type="button"
-      class="text-sm text-muted hover:text-primary transition-colors duration-150 underline decoration-muted/50 underline-offset-2"
+      class="text-sm text-muted hover:text-primary transition-colors duration-150 underline decoration-muted/50 underline-offset-2 rounded-sm
+        focus-visible:outline-none focus-visible:text-primary focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
       on:click={handleSkip}
     >
       {m.skip_for_now()}

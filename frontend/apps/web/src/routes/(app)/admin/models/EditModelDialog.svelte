@@ -1,8 +1,4 @@
-<!--
-    Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
--->
+<!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
   import type {
@@ -18,6 +14,8 @@
   import { getIntric } from "$lib/core/Intric";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { Loader2 } from "lucide-svelte";
+  import { toast } from "$lib/components/toast";
 
   export let openController: Writable<boolean>;
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -115,10 +113,14 @@
       // Invalidate to reload data
       await invalidate("admin:model-providers:load");
 
+      // Show success toast
+      toast.success(m.model_updated_success());
+
       // Close dialog
       openController.set(false);
     } catch (e: any) {
       error = e.message || m.failed_to_update_model();
+      toast.error(m.failed_to_update_model());
     } finally {
       isSubmitting = false;
     }
@@ -137,14 +139,14 @@
     <Dialog.Section>
       <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4">
         {#if error}
-          <div class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm">
+          <div class="border-negative-default bg-negative-dimmer text-negative-stronger border-l-2 px-4 py-2 text-sm rounded-r">
             {error}
           </div>
         {/if}
 
         <!-- Model identifier (editable for completion models, read-only for others) -->
         <div class="flex flex-col gap-2">
-          <label for="model-identifier" class="text-sm font-medium">{m.model_identifier()}</label>
+          <label for="model-identifier" class="text-sm font-medium text-secondary">{m.model_identifier()}</label>
           {#if type === "completionModel"}
             <Input.Text
               id="model-identifier"
@@ -152,13 +154,10 @@
               required
             />
           {:else}
-            <Input.Text
-              id="model-identifier"
-              value={model.name}
-              disabled
-              class="opacity-60"
-            />
-            <p class="text-muted-foreground text-xs">
+            <div class="flex items-center rounded-lg px-4 py-3 border border-dimmer bg-secondary transition-colors duration-150 hover:border-default">
+              <span class="text-sm font-mono text-muted">{model.name}</span>
+            </div>
+            <p class="text-muted-foreground text-xs mt-1">
               {m.model_identifier_readonly()}
             </p>
           {/if}
@@ -166,34 +165,34 @@
 
         <!-- Display name (editable) -->
         <div class="flex flex-col gap-2">
-          <label for="display-name" class="text-sm font-medium">{m.display_name()}</label>
+          <label for="display-name" class="text-sm font-medium text-secondary">{m.display_name()}</label>
           <Input.Text
             id="display-name"
             bind:value={displayName}
             placeholder={m.display_name_placeholder_completion()}
             required
           />
-          <p class="text-muted-foreground text-xs">
+          <p class="text-muted-foreground text-xs mt-1">
             {m.display_name_hint()}
           </p>
         </div>
 
         <!-- Description -->
         <div class="flex flex-col gap-2">
-          <label for="description" class="text-sm font-medium">{m.description()}</label>
+          <label for="description" class="text-sm font-medium text-secondary">{m.description()}</label>
           <textarea
             id="description"
             bind:value={description}
             placeholder={m.model_description_placeholder()}
             rows="3"
-            class="rounded border border-dimmer bg-surface px-3 py-2 text-sm resize-none"
+            class="rounded-lg border border-stronger bg-primary px-3 py-2 text-sm resize-none shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 ring-default transition-shadow"
           ></textarea>
         </div>
 
         <!-- Completion model specific fields -->
         {#if type === "completionModel"}
           <div class="flex flex-col gap-2">
-            <label for="token-limit" class="text-sm font-medium">{m.token_limit()}</label>
+            <label for="token-limit" class="text-sm font-medium text-secondary">{m.token_limit()}</label>
             <Input.Text
               id="token-limit"
               type="number"
@@ -202,20 +201,28 @@
               max="1000000"
               required
             />
-            <p class="text-muted-foreground text-xs">
+            <p class="text-muted-foreground text-xs mt-1">
               {m.token_limit_hint()}
             </p>
           </div>
 
-          <div class="flex gap-4">
-            <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" bind:checked={vision} />
-              <span>{m.vision_support()}</span>
+          <div class="flex gap-6">
+            <label class="flex items-center gap-2 text-sm cursor-pointer group">
+              <input
+                type="checkbox"
+                bind:checked={vision}
+                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
+              />
+              <span class="group-hover:text-primary transition-colors">{m.vision_support()}</span>
             </label>
 
-            <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" bind:checked={reasoning} />
-              <span>{m.reasoning_support()}</span>
+            <label class="flex items-center gap-2 text-sm cursor-pointer group">
+              <input
+                type="checkbox"
+                bind:checked={reasoning}
+                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
+              />
+              <span class="group-hover:text-primary transition-colors">{m.reasoning_support()}</span>
             </label>
           </div>
         {/if}
@@ -223,29 +230,29 @@
         <!-- Embedding model specific fields -->
         {#if type === "embeddingModel"}
           <div class="flex flex-col gap-2">
-            <label for="family" class="text-sm font-medium">{m.embedding_family()}</label>
+            <label for="family" class="text-sm font-medium text-secondary">{m.embedding_family()}</label>
             <Input.Text
               id="family"
               bind:value={family}
               placeholder={m.embedding_family_placeholder()}
             />
-            <p class="text-muted-foreground text-xs">
+            <p class="text-muted-foreground text-xs mt-1">
               {m.embedding_family_hint()}
             </p>
           </div>
         {/if}
 
         <!-- Common detail fields -->
-        <div class="border-t border-dimmer pt-4 mt-2">
-          <h3 class="text-sm font-semibold mb-3">{m.model_details()}</h3>
+        <div class="border-t border-dimmer pt-5 mt-4">
+          <h3 class="text-sm font-semibold mb-4 text-secondary">{m.model_details()}</h3>
 
           <!-- Hosting -->
           <div class="flex flex-col gap-2">
-            <label for="hosting" class="text-sm font-medium">{m.hosting_region()}</label>
+            <label for="hosting" class="text-sm font-medium text-secondary">{m.hosting_region()}</label>
             <select
               id="hosting"
               bind:value={hosting}
-              class="rounded border border-dimmer bg-surface px-3 py-2 text-sm"
+              class="rounded-lg border border-stronger bg-primary px-3 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 ring-default transition-shadow cursor-pointer"
             >
               {#each hostingOptions as option}
                 <option value={option.value}>{option.label}</option>
@@ -255,9 +262,13 @@
 
           <!-- Open source -->
           <div class="mt-4">
-            <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" bind:checked={openSource} />
-              <span>{m.model_label_open_source()}</span>
+            <label class="flex items-center gap-2 text-sm cursor-pointer group">
+              <input
+                type="checkbox"
+                bind:checked={openSource}
+                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
+              />
+              <span class="group-hover:text-primary transition-colors">{m.model_label_open_source()}</span>
             </label>
           </div>
         </div>
@@ -270,8 +281,14 @@
         variant="primary"
         on:click={handleSubmit}
         disabled={isSubmitting}
+        class="min-w-[120px]"
       >
-        {isSubmitting ? m.saving() : m.save()}
+        {#if isSubmitting}
+          <Loader2 class="w-4 h-4 mr-2 animate-spin" />
+          {m.saving()}
+        {:else}
+          {m.save()}
+        {/if}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>
