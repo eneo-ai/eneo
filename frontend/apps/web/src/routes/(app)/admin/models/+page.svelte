@@ -48,24 +48,18 @@
       <CompletionModelsTable
         completionModels={data.models.completionModels}
         providers={data.providers}
-        addModelDialogOpen={addCompletionModelDialogOpen}
-        preSelectedProviderId={preSelectedCompletionProviderId}
       />
     </Page.Tab>
     <Page.Tab id="embedding_models">
       <EmbeddingModelsTable
         embeddingModels={data.models.embeddingModels}
         providers={data.providers}
-        addModelDialogOpen={addEmbeddingModelDialogOpen}
-        preSelectedProviderId={preSelectedEmbeddingProviderId}
       />
     </Page.Tab>
     <Page.Tab id="transcription_models">
       <TranscriptionModelsTable
         transcriptionModels={data.models.transcriptionModels}
         providers={data.providers}
-        addModelDialogOpen={addTranscriptionModelDialogOpen}
-        preSelectedProviderId={preSelectedTranscriptionProviderId}
       />
     </Page.Tab>
   </Page.Main>
