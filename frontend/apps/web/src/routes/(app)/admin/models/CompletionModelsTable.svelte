@@ -22,6 +22,7 @@
   import { Button } from "@intric/ui";
   import { Plus } from "lucide-svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
+  import { AddWizard } from "./AddWizard/index.js";
 
   export let completionModels: CompletionModel[];
   export let providers: ModelProviderPublic[] = [];
@@ -29,6 +30,7 @@
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const addProviderDialogOpen = writable(false);
+  const addWizardOpen = writable(false);
 
   // Track provider being edited (for credential icon click -> edit provider)
   let editingProvider: ModelProviderPublic | null = null;
@@ -224,15 +226,19 @@
   </Table.Root>
 
   <div class="flex justify-center pb-4">
-    <Button variant="outlined" on:click={() => addProviderDialogOpen.set(true)}>
+    <Button variant="outlined" on:click={() => addWizardOpen.set(true)}>
       <Plus class="w-4 h-4 mr-2" />
       {m.add_provider()}
     </Button>
   </div>
 </div>
 
-<!-- Add Provider Dialog -->
-<ProviderDialog openController={addProviderDialogOpen} />
+<!-- Add Provider & Models Wizard -->
+<AddWizard
+  openController={addWizardOpen}
+  {providers}
+  modelType="completion"
+/>
 
 <!-- Edit Provider Dialog -->
 <ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />
