@@ -48,11 +48,16 @@
     </h4>
   </div>
 {:else}
-  <div class="flex items-center justify-start gap-3">
+  <div class="flex flex-col gap-0.5">
     <Tooltip text={model.description ?? model.name}>
-      <h4 class=" text-primary">
+      <h4 class="text-primary leading-tight">
         {"nickname" in model ? model.nickname : model.name}
       </h4>
     </Tooltip>
+    {#if "nickname" in model && model.name !== model.nickname}
+      <span class="text-xs text-muted leading-tight truncate max-w-48" title={model.name}>
+        {model.name}
+      </span>
+    {/if}
   </div>
 {/if}

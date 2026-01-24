@@ -1,8 +1,4 @@
-<!--
-    Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
--->
+<!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
   import type { TranscriptionModel, ModelProviderPublic } from "@intric/intric-js";
@@ -16,9 +12,10 @@
   import ModelNameCell from "./ModelNameCell.svelte";
   import ModelActions from "./ModelActions.svelte";
   import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
-  import ProviderCredentialIcon from "$lib/features/credentials/components/ProviderCredentialIcon.svelte";
   import ProviderActions from "./ProviderActions.svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
+  import ProviderGlyph from "./components/ProviderGlyph.svelte";
+  import ProviderStatusBadge from "./components/ProviderStatusBadge.svelte";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { m } from "$lib/paraglide/messages";
   import { writable, type Writable } from "svelte/store";
@@ -147,6 +144,13 @@
   }
 
   /**
+   * Get the model count for a given provider.
+   */
+  function getModelCountForProvider(providerId: string): number {
+    return filteredModels.filter(model => model.provider_id === providerId).length;
+  }
+
+  /**
    * Handle "Add Model" action from provider dropdown.
    * Opens the add model dialog with this provider pre-selected.
    */
@@ -173,18 +177,32 @@
       {@const provider = getProviderForGroup(group.key)}
       <Table.Group filterFn={createGroupFilter(group.key)} title={group.name}>
         <svelte:fragment slot="title-prefix">
-          <div
-            class="h-3 w-3 rounded-full border border-stronger mr-2"
-            style="background: var(--{getChartColour(group.name)})"
-          ></div>
+          {#if provider}
+            <button
+              class="mr-3 group cursor-pointer rounded-lg transition-transform duration-150 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-accent-default focus:ring-offset-2"
+              on:click|stopPropagation={() => handleEditProvider(provider)}
+              title="Edit provider"
+            >
+              <ProviderGlyph providerType={provider.provider_type} size="md" />
+            </button>
+          {:else}
+            <div
+              class="h-3 w-3 rounded-full border border-stronger mr-2"
+              style="background: var(--{getChartColour(group.name)})"
+            ></div>
+          {/if}
         </svelte:fragment>
         <svelte:fragment slot="title-suffix">
           <div class="flex items-center gap-2">
             {#if provider}
-              <ProviderCredentialIcon
-                {provider}
-                onEdit={() => handleEditProvider(provider)}
-              />
+              {@const modelCount = getModelCountForProvider(provider.id)}
+              <!-- Model count with bullet separator -->
+              <span class="text-xs text-muted tabular-nums opacity-70">
+                •  {modelCount === 1 ? m.provider_model_count_one({ count: modelCount }) : m.provider_model_count_other({ count: modelCount })}
+              </span>
+              <!-- Visual separator between info and actions -->
+              <span class="w-px h-4 bg-border-dimmer"></span>
+              <ProviderStatusBadge {provider} />
               <ProviderActions
                 {provider}
                 onAddModel={handleAddModelToProvider}

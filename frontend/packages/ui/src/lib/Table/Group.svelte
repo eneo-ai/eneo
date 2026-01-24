@@ -85,17 +85,23 @@
       <tr>
         <td colspan="99" class={tableCell({ groupHeader: true })}>
           <div class="flex w-full items-center justify-between">
-            <Button
-              on:click={() => ($open = !$open)}
-              padding="icon-leading"
-              class="font-mono font-medium"
-            >
-              <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2">
+              <Button
+                on:click={() => ($open = !$open)}
+                padding="icon-leading"
+                class="font-mono font-medium"
+              >
                 <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
-                <slot name="title-prefix" />
+              </Button>
+              <slot name="title-prefix" />
+              <Button
+                on:click={() => ($open = !$open)}
+                padding="text"
+                class="font-mono font-medium -ml-2"
+              >
                 <span>{title}</span>
-              </div>
-            </Button>
+              </Button>
+            </div>
             <slot name="title-suffix" />
           </div>
         </td>

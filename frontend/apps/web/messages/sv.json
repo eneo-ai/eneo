@@ -1316,6 +1316,8 @@
   "resource_users": "användare",
   "resource_model": "modell",
   "resource_models": "modeller",
+  "provider_model_count_one": "{count} modell",
+  "provider_model_count_other": "{count} modeller",
   "resource_space": "yta",
   "resource_spaces": "ytor",
   "resource_assistant": "assistent",

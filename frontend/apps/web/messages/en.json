@@ -1281,6 +1281,8 @@
   "resource_users": "users",
   "resource_model": "model",
   "resource_models": "models",
+  "provider_model_count_one": "{count} model",
+  "provider_model_count_other": "{count} models",
   "resource_space": "space",
   "resource_spaces": "spaces",
   "resource_assistant": "assistant",

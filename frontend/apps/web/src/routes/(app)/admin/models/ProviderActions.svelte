@@ -1,8 +1,4 @@
-<!--
-    Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
--->
+<!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
   import type { ModelProviderPublic } from "@intric/intric-js";
