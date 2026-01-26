@@ -15,7 +15,8 @@ export const actions: Actions = {
       return fail(400, { error: "Missing required fields" });
     }
 
-    const backendUrl = env.INTRIC_BACKEND_URL;
+    // Use internal Docker URL if available, otherwise fall back to external URL
+    const backendUrl = env.INTRIC_BACKEND_SERVER_URL || env.INTRIC_BACKEND_URL;
     if (!backendUrl) {
       return fail(500, { error: "Backend URL not configured" });
     }

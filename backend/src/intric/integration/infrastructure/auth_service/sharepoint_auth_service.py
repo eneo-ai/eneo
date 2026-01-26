@@ -42,8 +42,8 @@ class SharepointAuthService(BaseOauthService):
 
         redirect_uri = settings.oauth_callback_url
         if not redirect_uri:
-            logger.warning("OAUTH_CALLBACK_URL not set in .env, using default")
-            redirect_uri = f"{settings.server_url}/integrations/callback/token/"
+            logger.warning("OAUTH_CALLBACK_URL not set in .env, using public_origin fallback")
+            redirect_uri = f"{settings.public_origin}/integrations/callback/token/"
 
         return {
             "client_id": tenant_app.client_id,
