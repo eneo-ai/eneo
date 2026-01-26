@@ -287,7 +287,7 @@ export function initIntegrations(client) {
          * @throws {IntricError}
          * */
         listSubscriptions: async () => {
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/", {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions", {
             method: "get"
           });
           return res;
@@ -298,7 +298,7 @@ export function initIntegrations(client) {
          * @throws {IntricError}
          * */
         renewExpiredSubscriptions: async () => {
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/renew-expired/", {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/renew-expired", {
             method: "post"
           });
           return res;
@@ -311,7 +311,7 @@ export function initIntegrations(client) {
          * */
         recreateSubscription: async (subscription) => {
           const { id } = subscription;
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{id}/recreate/", {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{id}/recreate", {
             method: "post",
             params: {
               path: { id }
