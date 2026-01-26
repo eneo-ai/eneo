@@ -55,9 +55,9 @@
   const isActive = $derived(user.state === 'active' || user.state === 'invited');
   const isInactive = $derived(user.state === 'inactive');
 
-  let isProcessing = false;
-  let showEditDialog: Dialog.OpenState;
-  let showDeleteDialog: Dialog.OpenState;
+  let isProcessing = $state(false);
+  let showEditDialog = $state<Dialog.OpenState>();
+  let showDeleteDialog = $state<Dialog.OpenState>();
 </script>
 
 <Dropdown.Root>

@@ -57,12 +57,15 @@ export function initIntegrations(client) {
        */
       disable: async (integration) => {
         const { id: tenant_integration_id } = integration;
-        const res = await client.fetch("/api/v1/integrations/tenant/remove/{tenant_integration_id}/", {
-          method: "delete",
-          params: {
-            path: { tenant_integration_id }
+        const res = await client.fetch(
+          "/api/v1/integrations/tenant/remove/{tenant_integration_id}/",
+          {
+            method: "delete",
+            params: {
+              path: { tenant_integration_id }
+            }
           }
-        });
+        );
 
         return res;
       }

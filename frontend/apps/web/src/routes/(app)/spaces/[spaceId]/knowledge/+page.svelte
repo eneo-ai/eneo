@@ -35,7 +35,7 @@
   });
 
   let selectedTab = writable<string>();
-  let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+  let showIntegrationsNotice = $state(data.environment.integrationRequestFormUrl !== undefined);
   let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
   let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
@@ -52,8 +52,8 @@
   }
 
   // Website selection state (shared with WebsiteTable)
-  let selectedWebsiteIds = writable<Set<string>>(new Set());
-  let isBulkRecrawling = false;
+  const selectedWebsiteIds = writable<Set<string>>(new Set());
+  let isBulkRecrawling = $state(false);
 
   // Bulk recrawl handler
   async function bulkRecrawl() {
@@ -171,7 +171,7 @@
     {/if}
     {#if userCanSeeWebsites}
       <Page.Tab id="websites">
-        <WebsiteTable bind:selectedWebsiteIds></WebsiteTable>
+        <WebsiteTable {selectedWebsiteIds}></WebsiteTable>
       </Page.Tab>
     {/if}
     {#if userCanSeeIntegrations}

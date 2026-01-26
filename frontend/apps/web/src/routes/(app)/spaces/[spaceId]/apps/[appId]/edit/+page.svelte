@@ -37,7 +37,7 @@
     }
   });
 
-  let cancelUploadsAndClearQueue: () => void;
+  let cancelUploadsAndClearQueue = $state<() => void>(() => {});
 
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id);
@@ -98,13 +98,13 @@
     discardChanges();
   });
 
-  let previousRoute = `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`;
+  let previousRoute = $state(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`);
   afterNavigate(({ from }) => {
     if (page.url.searchParams.get("next") === "default") return;
     if (from) previousRoute = from.url.toString();
   });
 
-  let showSavesChangedNotice = false;
+  let showSavesChangedNotice = $state(false);
 </script>
 
 <svelte:head>
@@ -242,7 +242,7 @@
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
-            on:change={() => {
+            onchange={() => {
               $update.prompt.description = "";
             }}
             class="border-stronger bg-primary text-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"

@@ -42,7 +42,7 @@
     }
   });
 
-  let cancelUploadsAndClearQueue: () => void;
+  let cancelUploadsAndClearQueue = $state<() => void>(() => {});
 
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id);
@@ -125,9 +125,9 @@
     discardChanges();
   });
 
-  let showSavesChangedNotice = false;
+  let showSavesChangedNotice = $state(false);
 
-  let previousRoute = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`;
+  let previousRoute = $state(`/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`);
   afterNavigate(({ from }) => {
     if (page.url.searchParams.get("next") === "default") return;
     if (from) previousRoute = from.url.toString();
@@ -292,7 +292,7 @@
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
-            on:change={() => {
+            onchange={() => {
               $update.prompt.description = "";
             }}
             class="border-default bg-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
