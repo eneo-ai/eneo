@@ -111,6 +111,10 @@ class Settings(BaseSettings):
 
     app_version: str = _set_app_version()
 
+    # Environment setting (development, staging, production)
+    # Controls error detail exposure in API responses
+    environment: str = "production"
+
     # OpenAPI-only mode flag
     openapi_only_mode: bool = False
 
