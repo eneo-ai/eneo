@@ -146,6 +146,10 @@
     nextStep();
   }
 
+  // Reference to StepModels for accessing pending model data
+  let stepModelsRef: StepModels;
+  let canFinishModels = false;
+
   // Handle wizard completion
   let isSubmitting = false;
   let error: string | null = null;
@@ -168,8 +172,19 @@
         throw new Error(m.no_provider_selected());
       }
 
+      // Check for pending model in form that hasn't been added to list yet
+      const pendingModel = stepModelsRef?.getPendingModel?.();
+      const modelsToCreate = [...$wizardData.models];
+      if (pendingModel) {
+        modelsToCreate.push(pendingModel);
+      }
+
+      if (modelsToCreate.length === 0) {
+        throw new Error(m.add_at_least_one_model());
+      }
+
       // Create models based on type
-      for (const model of $wizardData.models) {
+      for (const model of modelsToCreate) {
         if (modelType === "completion") {
           await intric.tenantModels.createCompletion({
             provider_id: providerId,
@@ -203,7 +218,7 @@
       await invalidate("admin:model-providers:load");
       await invalidate("admin:models:load");
 
-      const modelCount = $wizardData.models.length;
+      const modelCount = modelsToCreate.length;
       toast.success(modelCount === 1 ? m.model_created_success() : m.models_created_success({ count: modelCount }));
 
       closeWizard();
@@ -329,10 +344,12 @@
               />
             {:else if $currentStep === 3}
               <StepModels
+                bind:this={stepModelsRef}
                 {modelType}
                 providerType={$wizardData.selectedProviderType}
                 providerId={$wizardData.selectedProviderId}
                 bind:models={$wizardData.models}
+                bind:canFinish={canFinishModels}
                 on:complete={handleComplete}
                 on:back={previousStep}
               />
@@ -350,7 +367,7 @@
         <Button
           variant="primary"
           on:click={() => handleComplete(new CustomEvent("complete", { detail: { skip: false } }))}
-          disabled={isSubmitting || $wizardData.models.length === 0}
+          disabled={isSubmitting || !canFinishModels}
           class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
         >
           {#if isSubmitting}

@@ -162,7 +162,7 @@
     </div>
   {/if}
 
-  <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4">
+  <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4 rounded-lg border border-dimmer bg-surface-dimmer/30">
     <!-- Provider Name -->
     <div class="flex flex-col gap-2">
       <label for="cred-provider-name" class="text-sm font-medium">{m.provider_name()}</label>

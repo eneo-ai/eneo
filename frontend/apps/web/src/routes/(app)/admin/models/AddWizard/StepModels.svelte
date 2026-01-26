@@ -4,7 +4,7 @@
   import { Button, Input } from "@intric/ui";
   import { createEventDispatcher, onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowLeft, Plus, Trash2, Sparkles } from "lucide-svelte";
+  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
 
   // Auto-focus first input on mount
@@ -30,7 +30,7 @@
   }> = [];
 
   const dispatch = createEventDispatcher<{
-    complete: { skip: boolean };
+    complete: { skip: boolean; pendingModel?: typeof currentModel };
     back: void;
   }>();
 
@@ -38,11 +38,11 @@
   const modelSuggestions: Record<string, Record<string, Array<{ name: string; displayName: string; tokenLimit?: number; vision?: boolean; reasoning?: boolean }>>> = {
     openai: {
       completion: [
+        { name: "gpt-5.2", displayName: "GPT-5.2", tokenLimit: 200000, vision: true },
+        { name: "gpt-5.1", displayName: "GPT-5.1", tokenLimit: 200000, vision: true, reasoning: true },
+        { name: "gpt-5-mini", displayName: "GPT-5 Mini", tokenLimit: 128000, vision: true },
         { name: "gpt-4o", displayName: "GPT-4o", tokenLimit: 128000, vision: true },
-        { name: "gpt-4o-mini", displayName: "GPT-4o Mini", tokenLimit: 128000, vision: true },
-        { name: "o1", displayName: "o1", tokenLimit: 200000, reasoning: true },
-        { name: "o1-mini", displayName: "o1 Mini", tokenLimit: 128000, reasoning: true },
-        { name: "gpt-4-turbo", displayName: "GPT-4 Turbo", tokenLimit: 128000, vision: true }
+        { name: "gpt-4o-mini", displayName: "GPT-4o Mini", tokenLimit: 128000, vision: true }
       ],
       embedding: [
         { name: "text-embedding-3-large", displayName: "Text Embedding 3 Large" },
@@ -55,18 +55,22 @@
     },
     anthropic: {
       completion: [
+        { name: "claude-opus-4-5-20251101", displayName: "Claude Opus 4.5", tokenLimit: 200000, vision: true, reasoning: true },
+        { name: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4", tokenLimit: 200000, vision: true },
+        { name: "claude-3-7-sonnet-20250219", displayName: "Claude 3.7 Sonnet", tokenLimit: 200000, vision: true, reasoning: true },
         { name: "claude-3-5-sonnet-20241022", displayName: "Claude 3.5 Sonnet", tokenLimit: 200000, vision: true },
-        { name: "claude-3-5-haiku-20241022", displayName: "Claude 3.5 Haiku", tokenLimit: 200000, vision: true },
-        { name: "claude-3-opus-20240229", displayName: "Claude 3 Opus", tokenLimit: 200000, vision: true }
+        { name: "claude-3-5-haiku-20241022", displayName: "Claude 3.5 Haiku", tokenLimit: 200000, vision: true }
       ],
       embedding: [],
       transcription: []
     },
     gemini: {
       completion: [
-        { name: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro", tokenLimit: 2000000, vision: true },
-        { name: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash", tokenLimit: 1000000, vision: true },
-        { name: "gemini-2.0-flash-exp", displayName: "Gemini 2.0 Flash", tokenLimit: 1000000, vision: true }
+        { name: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", tokenLimit: 1048576, vision: true, reasoning: true },
+        { name: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", tokenLimit: 1048576, vision: true, reasoning: true },
+        { name: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash", tokenLimit: 1048576, vision: true },
+        { name: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro", tokenLimit: 2097152, vision: true },
+        { name: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash", tokenLimit: 1048576, vision: true }
       ],
       embedding: [
         { name: "text-embedding-004", displayName: "Text Embedding 004" }
@@ -149,6 +153,18 @@
   }
 
   $: canAddModel = currentModel.name.trim() !== "" && currentModel.displayName.trim() !== "";
+
+  // Export for parent to bind and track
+  export let canFinish = false;
+  $: canFinish = models.length > 0 || canAddModel;
+
+  // Export pending model for parent to check
+  export function getPendingModel() {
+    if (canAddModel) {
+      return { ...currentModel };
+    }
+    return null;
+  }
 </script>
 
 <div class="flex flex-col gap-6">
@@ -286,16 +302,24 @@
       </div>
     {/if}
 
+    <!-- Action Buttons -->
     <div class="border-t border-dimmer/40 pt-4 mt-2">
-      <Button
-        type="submit"
-        variant="outlined"
-        class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-        disabled={!canAddModel}
-      >
-        <Plus class="h-4 w-4" />
-        {m.add_to_list()}
-      </Button>
+      <div class="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="ghost"
+          class="gap-2 text-muted hover:text-primary focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+          disabled={!canAddModel}
+        >
+          <ListPlus class="h-4 w-4" />
+          {m.add_another_model()}
+        </Button>
+        {#if canAddModel && models.length === 0}
+          <span class="text-xs text-muted">
+            {m.or_click_finish_directly()}
+          </span>
+        {/if}
+      </div>
     </div>
   </form>
 
@@ -337,8 +361,10 @@
       </Button>
 
       <span class="text-sm text-muted/70">
-        {#if models.length === 0}
+        {#if models.length === 0 && !canAddModel}
           {m.add_at_least_one_model()}
+        {:else if models.length === 0 && canAddModel}
+          <span class="text-positive-default">{m.model_ready_to_add()}</span>
         {:else}
           {models.length === 1 ? m.models_ready_one({ count: models.length }) : m.models_ready_other({ count: models.length })}
         {/if}
