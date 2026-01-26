@@ -73,15 +73,11 @@ async def create_tenant_transcription_model(
         )
         await session.execute(stmt)
 
-    # Create unique name for tenant model
-    # Since name must be unique globally, prefix with tenant ID
-    unique_name = f"tenant_{user.tenant_id}_{model_create.name}"
-
     # Create the transcription model with settings directly on it
     new_model = TranscriptionModels(
         tenant_id=user.tenant_id,
         provider_id=model_create.provider_id,
-        name=unique_name,  # Unique identifier
+        name=model_create.display_name,  # User-friendly display name
         model_name=model_create.name,  # Actual model name from provider
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
         family=ModelFamily.OPEN_AI.value,
@@ -89,7 +85,7 @@ async def create_tenant_transcription_model(
         org=None,
         stability=ModelStability.STABLE.value,
         open_source=False,
-        description=f"Tenant model: {model_create.display_name}",
+        description=None,
         hf_link=None,
         is_deprecated=False,
         base_url="",  # Will be set from provider config at runtime
@@ -146,7 +142,7 @@ async def update_tenant_transcription_model(
 
     # Update fields that were provided
     if model_update.display_name is not None:
-        model.description = f"Tenant model: {model_update.display_name}"
+        model.name = model_update.display_name
     if model_update.description is not None:
         model.description = model_update.description
     if model_update.hosting is not None:
