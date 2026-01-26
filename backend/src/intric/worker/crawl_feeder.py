@@ -22,6 +22,7 @@ import redis.asyncio as aioredis
 
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.redis.connection import build_redis_pool_kwargs
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.election import LeaderElection
@@ -314,10 +315,10 @@ class CrawlFeeder:
         # Create own Redis client (long-running service manages its own lifecycle)
         try:
             redis_url = f"redis://{self.settings.redis_host}:{self.settings.redis_port}"
-            redis_kwargs = {"decode_responses": False}  # Raw bytes for LREM matching
-            redis_db = getattr(self.settings, "redis_db", None)
-            if redis_db is not None:
-                redis_kwargs["db"] = redis_db
+            redis_kwargs = build_redis_pool_kwargs(
+                self.settings,
+                decode_responses=False,
+            )
 
             self._redis_client = aioredis.Redis.from_url(redis_url, **redis_kwargs)
             redis_client = self._redis_client
