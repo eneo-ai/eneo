@@ -3,6 +3,9 @@ from fastapi.responses import JSONResponse
 
 from intric.main.exceptions import EXCEPTION_MAP
 from intric.main.models import GeneralError
+from intric.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def add_exception_handlers(app: FastAPI):
@@ -16,6 +19,19 @@ def add_exception_handlers(app: FastAPI):
             error_code=error_code,
         ):
             message = error_message or str(exc)
+
+            # Log authentication failures at INFO level for debugging
+            if status_code == 401:
+                logger.info(
+                    f"[Auth] Authentication failed: {request.method} {request.url.path} - {str(exc)}",
+                    extra={
+                        "method": request.method,
+                        "path": request.url.path,
+                        "error_code": error_code,
+                        "client_host": request.client.host if request.client else "unknown",
+                    }
+                )
+
             return JSONResponse(
                 status_code=status_code,
                 content=GeneralError(

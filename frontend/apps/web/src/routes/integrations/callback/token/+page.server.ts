@@ -23,11 +23,23 @@ export const actions: Actions = {
 
     // Get auth token from locals (set by hooks.server.ts)
     const idToken = locals.id_token;
+    console.log("[SharePoint Callback] Auth check:", {
+      hasIdToken: !!idToken,
+      localsKeys: Object.keys(locals),
+      cookieHeader: request.headers.get("cookie")?.substring(0, 100) + "..."
+    });
     if (!idToken) {
       return fail(401, { error: "Not authenticated. Please log in and try again." });
     }
 
     try {
+      console.log("[SharePoint Callback] Making backend request:", {
+        url: `${backendUrl}/api/v1/admin/sharepoint/service-account/auth/callback`,
+        hasAuthHeader: !!idToken,
+        tokenLength: idToken?.length,
+        tokenPreview: idToken?.substring(0, 50) + "..."
+      });
+
       const response = await fetch(
         `${backendUrl}/api/v1/admin/sharepoint/service-account/auth/callback`,
         {
@@ -46,8 +58,15 @@ export const actions: Actions = {
         }
       );
 
+      console.log("[SharePoint Callback] Backend response:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.log("[SharePoint Callback] Error response body:", errorData);
         return fail(response.status, {
           error: errorData.detail || `HTTP ${response.status}`,
         });

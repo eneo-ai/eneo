@@ -482,7 +482,12 @@ class UserService:
 
     async def _get_user_from_token(self, token: str):
         username = self.auth_service.get_username_from_token(token, get_settings().jwt_secret)
-        return await self.repo.get_user_by_username(username)
+        user = await self.repo.get_user_by_username(username)
+        if user is None:
+            logger.warning(
+                f"[Auth] Token valid but user not found: username={username}"
+            )
+        return user
 
     async def _get_user_from_api_key(self, api_key: str):
         key = await self.auth_service.get_api_key(api_key)
@@ -516,6 +521,11 @@ class UserService:
         api_key: str | None = None,
         with_quota_used: bool = False,
     ):
+        logger.info(
+            f"[Auth] Authenticating request: has_token={token is not None}, "
+            f"has_api_key={api_key is not None}, "
+            f"token_length={len(token) if token else 0}"
+        )
         user_in_db = None
         if token is not None:
             user_in_db = await self._get_user_from_token(token)
@@ -524,6 +534,10 @@ class UserService:
             user_in_db = await self._get_user_from_api_key(api_key)
 
         if user_in_db is None:
+            logger.warning(
+                f"[Auth] Authentication failed - no user found: "
+                f"has_token={token is not None}, has_api_key={api_key is not None}"
+            )
             raise AuthenticationException("No authenticated user.")
 
         await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
