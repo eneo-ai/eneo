@@ -553,7 +553,7 @@ async def ask_assistant(
     )
 
     # Audit logging for new session started
-    session_id = response.session_id
+    session_id = response.session.id
     assistant, _ = await service.get_assistant(id)
 
     # Get space for context
