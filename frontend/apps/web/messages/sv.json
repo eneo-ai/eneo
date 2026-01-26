@@ -1697,6 +1697,7 @@
   "vision_help": "Modellen kan analysera och förstå bilder utöver text.",
   "reasoning_help": "Modellen har avancerade resonemangsförmågor för komplexa uppgifter.",
   "dimensions_help": "Storleken på inbäddningsvektorn som modellen producerar. Vanliga värden är 768, 1024, 1536 eller 3072.",
+  "model_family_help": "E5-modeller kräver speciell inmatningsformatering (passage:/query:-prefix). Välj E5 för HuggingFace E5-modeller.",
   "token_limit_hint": "Maximalt kontextfönster i tokens",
   "token_limit_context": "{limit} kontext",
   "vision_support": "Bildstöd",

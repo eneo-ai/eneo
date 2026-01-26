@@ -1662,6 +1662,7 @@
   "vision_help": "The model can analyze and understand images in addition to text.",
   "reasoning_help": "The model has advanced reasoning capabilities for complex tasks.",
   "dimensions_help": "The size of the embedding vector the model produces. Common values are 768, 1024, 1536, or 3072.",
+  "model_family_help": "E5 models require special input formatting (passage:/query: prefixes). Select E5 for HuggingFace E5 models.",
   "token_limit_hint": "Maximum context window in tokens",
   "token_limit_context": "{limit} context",
   "vision_support": "Vision Support",

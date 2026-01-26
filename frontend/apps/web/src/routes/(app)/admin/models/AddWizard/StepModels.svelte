@@ -276,7 +276,23 @@
 
     <!-- Embedding-specific fields -->
     {#if modelType === "embedding"}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="flex flex-col gap-2">
+          <label for="model-family" class="text-sm font-medium flex items-center gap-1.5">
+            {m.model_family()}
+            <HelpTooltip text={m.model_family_help()} />
+          </label>
+          <select
+            id="model-family"
+            bind:value={currentModel.family}
+            class="h-10 rounded-md border border-dimmer bg-surface px-3 text-sm text-primary
+              focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
+          >
+            <option value="openai">OpenAI (Standard)</option>
+            <option value="e5">E5 (HuggingFace)</option>
+          </select>
+        </div>
+
         <div class="flex flex-col gap-2">
           <label for="dimensions" class="text-sm font-medium flex items-center gap-1.5">
             {m.dimensions()}

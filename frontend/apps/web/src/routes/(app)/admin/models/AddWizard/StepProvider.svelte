@@ -18,13 +18,13 @@
 
   // Provider types available for creation
   const providerTypes = [
-    { type: "openai", label: "OpenAI", description: "GPT-4, GPT-4o, o1, embeddings" },
+    { type: "openai", label: "OpenAI", description: "OpenAI and compatible cloud APIs (Together, Groq, Fireworks)" },
     { type: "azure", label: "Azure OpenAI", description: "Enterprise Azure deployments" },
-    { type: "anthropic", label: "Anthropic", description: "Claude 3.5, Claude 3" },
+    { type: "anthropic", label: "Anthropic", description: "Claude 4, Claude 3.5" },
     { type: "gemini", label: "Google Gemini", description: "Gemini Pro, Gemini Flash" },
     { type: "cohere", label: "Cohere", description: "Command, Embed models" },
     { type: "mistral", label: "Mistral AI", description: "Mistral, Mixtral models" },
-    { type: "vllm", label: "vLLM", description: "Self-hosted open models" }
+    { type: "vllm", label: "vLLM", description: "Self-hosted vLLM inference server" }
   ] as const;
 
   type ViewMode = "select" | "create";

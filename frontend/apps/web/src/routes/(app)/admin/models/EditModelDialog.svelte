@@ -230,14 +230,17 @@
         <!-- Embedding model specific fields -->
         {#if type === "embeddingModel"}
           <div class="flex flex-col gap-2">
-            <label for="family" class="text-sm font-medium text-secondary">{m.embedding_family()}</label>
-            <Input.Text
+            <label for="family" class="text-sm font-medium text-secondary">{m.model_family()}</label>
+            <select
               id="family"
               bind:value={family}
-              placeholder={m.embedding_family_placeholder()}
-            />
+              class="rounded-lg border border-stronger bg-primary px-3 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 ring-default transition-shadow cursor-pointer"
+            >
+              <option value="openai">{m.model_family_openai()}</option>
+              <option value="e5">{m.model_family_e5()}</option>
+            </select>
             <p class="text-muted-foreground text-xs mt-1">
-              {m.embedding_family_hint()}
+              {m.model_family_hint()}
             </p>
           </div>
         {/if}
