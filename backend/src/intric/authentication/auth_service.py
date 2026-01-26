@@ -178,20 +178,7 @@ class AuthService:
             decoded_token = jwt.decode(token, key=key, audience=aud, algorithms=algs)
             payload = JWTPayload(**decoded_token)
 
-        except jwt.ExpiredSignatureError as e:
-            logger.error(f"JWT token expired: {e}")
-            raise AuthenticationException("Token has expired. Please log in again.")
-        except jwt.InvalidAudienceError as e:
-            logger.error(f"JWT audience mismatch: {e}, expected: {aud}")
-            raise AuthenticationException("Could not validate token credentials.")
-        except jwt.InvalidSignatureError as e:
-            logger.error(f"JWT signature invalid: {e}")
-            raise AuthenticationException("Could not validate token credentials.")
-        except jwt.PyJWTError as e:
-            logger.error(f"JWT validation failed: {type(e).__name__}: {e}")
-            raise AuthenticationException("Could not validate token credentials.")
-        except ValidationError as e:
-            logger.error(f"JWT payload validation failed: {e}")
+        except (jwt.PyJWTError, ValidationError):
             raise AuthenticationException("Could not validate token credentials.")
 
         return payload
