@@ -48,12 +48,14 @@ from intric.database.tables.spaces_table import (
     SpacesCompletionModels,
     SpacesEmbeddingModels,
     SpacesTranscriptionModels,
+    SpacesUserGroups,
     SpacesUsers,
 )
+from intric.database.tables.user_groups_table import UserGroups
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
 from intric.main.exceptions import NotFoundException, UniqueException
-from intric.spaces.api.space_models import SpaceMember
+from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.database.tables.websites_spaces_table import WebsitesSpaces
@@ -108,6 +110,9 @@ class SpaceRepository:
     def _options(self):
         return [
             selectinload(Spaces.members).selectinload(SpacesUsers.user),
+            selectinload(Spaces.group_members)
+            .selectinload(SpacesUserGroups.user_group)
+            .selectinload(UserGroups.users),
             selectinload(Spaces.services).selectinload(Services.user),
             selectinload(Spaces.integration_knowledge_list).selectinload(
                 IntegrationKnowledge.embedding_model
@@ -312,6 +317,31 @@ class SpaceRepository:
             await self.session.execute(stmt)
 
         # This allows the newly added members to be reflected in the space
+        await self.session.refresh(space_in_db)
+
+    async def _set_group_members(
+        self, space_in_db: Spaces, group_members: dict[UUID, SpaceGroupMember]
+    ):
+        """Persist group members for a space."""
+        # Delete all existing group members
+        stmt = sa.delete(SpacesUserGroups).where(SpacesUserGroups.space_id == space_in_db.id)
+        await self.session.execute(stmt)
+
+        # Add group members
+        if group_members:
+            spaces_user_groups = [
+                dict(
+                    space_id=space_in_db.id,
+                    user_group_id=group_member.id,
+                    role=group_member.role.value,
+                )
+                for group_member in group_members.values()
+            ]
+
+            stmt = sa.insert(SpacesUserGroups).values(spaces_user_groups)
+            await self.session.execute(stmt)
+
+        # Refresh to reflect changes
         await self.session.refresh(space_in_db)
 
     async def _set_assistants(self, space_in_db: Spaces, assistants: list["Assistant"]):
@@ -836,6 +866,7 @@ class SpaceRepository:
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)
         await self._set_members(entry_in_db, space.members)
+        await self._set_group_members(entry_in_db, space.group_members)
         await self._set_default_assistant(entry_in_db, space.default_assistant)
         await self._set_collections(entry_in_db, space.collections)
         await self._set_websites(entry_in_db, space.websites)
@@ -878,6 +909,7 @@ class SpaceRepository:
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)
         await self._set_members(entry_in_db, space.members)
+        await self._set_group_members(entry_in_db, space.group_members)
         await self._set_default_assistant(entry_in_db, space.default_assistant)
         await self._set_collections(entry_in_db, space.collections)
         await self._set_websites(entry_in_db, space.websites)
@@ -897,12 +929,32 @@ class SpaceRepository:
         raise NotImplementedError()
 
     async def get_spaces_for_member(
-        self, user_id: UUID, include_applications: bool = False
+        self, include_applications: bool = False
     ) -> list[Space]:
-        query = (
-            sa.select(Spaces)
+        user_id = self.user.id
+        user_group_ids = list(self.user.user_groups_ids) if self.user.user_groups_ids else []
+
+        direct_member_query = (
+            sa.select(Spaces.id)
             .join(SpacesUsers, Spaces.members)
             .where(SpacesUsers.user_id == user_id)
+        )
+
+        # Query for group membership (if user belongs to any groups)
+        if user_group_ids:
+            group_member_query = (
+                sa.select(Spaces.id)
+                .join(SpacesUserGroups, Spaces.group_members)
+                .where(SpacesUserGroups.user_group_id.in_(user_group_ids))
+            )
+            # Union of both membership types
+            combined_query = sa.union(direct_member_query, group_member_query).subquery()
+        else:
+            combined_query = direct_member_query.subquery()
+
+        query = (
+            sa.select(Spaces)
+            .where(Spaces.id.in_(sa.select(combined_query.c.id)))
             .distinct()
             .order_by(Spaces.created_at)
         )

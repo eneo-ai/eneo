@@ -12,7 +12,7 @@ from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from intric.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.transcription_models.domain.transcription_model import TranscriptionModel
 
 if TYPE_CHECKING:
@@ -67,6 +67,7 @@ class Space:
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
+        group_members: Optional[dict[UUID, SpaceGroupMember]] = None,
     ):
         self.id = id
         self.tenant_id = tenant_id
@@ -91,6 +92,7 @@ class Space:
         self.security_classification = security_classification
         self.data_retention_days = data_retention_days
         self.icon_id = icon_id
+        self.group_members = group_members if group_members is not None else {}
 
     def _get_member_ids(self):
         return self.members.keys()
@@ -372,6 +374,40 @@ class Space:
             raise BadRequestException("User is not a member of the space")
 
         self.members[user_id].role = new_role
+
+    def _get_group_member_ids(self):
+        return self.group_members.keys()
+
+    def add_group_member(self, group: SpaceGroupMember):
+        """Add a user group as a member of this space.
+
+        Groups cannot be added to personal spaces.
+        """
+        if self.is_personal():
+            raise BadRequestException("Cannot add group members to personal spaces")
+
+        if group.id in self._get_group_member_ids():
+            raise BadRequestException("Group is already a member of the space")
+
+        self.group_members[group.id] = group
+
+    def remove_group_member(self, group_id: UUID):
+        """Remove a user group from this space."""
+        if group_id not in self._get_group_member_ids():
+            raise BadRequestException("Group is not a member of the space")
+
+        del self.group_members[group_id]
+
+    def change_group_member_role(self, group_id: UUID, new_role: SpaceRoleValue):
+        """Change the role of a user group in this space."""
+        if group_id not in self._get_group_member_ids():
+            raise BadRequestException("Group is not a member of the space")
+
+        self.group_members[group_id].role = new_role
+
+    def get_group_member(self, group_id: UUID) -> SpaceGroupMember:
+        """Get a group member by ID."""
+        return self.group_members[group_id]
 
     def add_website(self, website: "Website"):
         if not self.is_embedding_model_in_space(website.embedding_model.id):
