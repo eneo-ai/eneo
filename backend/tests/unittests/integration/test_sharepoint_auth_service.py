@@ -65,7 +65,7 @@ class TestGetCredentials:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             creds = await service.get_credentials(tenant_id)
@@ -96,7 +96,7 @@ class TestGetCredentials:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = None
-            settings.server_url = "https://myapp.example.com"
+            settings.public_origin = "https://myapp.example.com"
             mock_settings.return_value = settings
 
             creds = await service.get_credentials(tenant_id)
@@ -115,7 +115,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state=state, tenant_id=tenant_id)
@@ -131,7 +131,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state="state", tenant_id=tenant_id)
@@ -149,7 +149,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state=state, tenant_id=tenant_id)
@@ -163,7 +163,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state="state", tenant_id=tenant_id)
@@ -185,7 +185,7 @@ class TestExchangeToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -214,7 +214,7 @@ class TestExchangeToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -251,7 +251,7 @@ class TestExchangeToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -282,7 +282,7 @@ class TestRefreshAccessToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -311,7 +311,7 @@ class TestRefreshAccessToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -344,7 +344,7 @@ class TestRefreshAccessToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
