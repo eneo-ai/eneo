@@ -1850,13 +1850,13 @@ export interface paths {
     /** Get Tenant Integrations */
     get: operations["get_tenant_integrations_api_v1_integrations_tenant__get"];
   };
-  "/api/v1/integrations/tenant/{integration_id}/": {
+  "/api/v1/integrations/tenant/add/{integration_id}/": {
     /** Add Tenant Integration */
-    post: operations["add_tenant_integration_api_v1_integrations_tenant__integration_id___post"];
+    post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
   };
-  "/api/v1/integrations/tenant/{tenant_integration_id}/": {
+  "/api/v1/integrations/tenant/remove/{tenant_integration_id}/": {
     /** Remove Tenant Integration */
-    delete: operations["remove_tenant_integration_api_v1_integrations_tenant__tenant_integration_id___delete"];
+    delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
   };
   "/api/v1/integrations/me/": {
     /**
@@ -16444,6 +16444,12 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         content: {
@@ -16552,6 +16558,12 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -16670,6 +16682,12 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         content: {
@@ -16784,6 +16802,12 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -19382,7 +19406,7 @@ export interface operations {
     };
   };
   /** Add Tenant Integration */
-  add_tenant_integration_api_v1_integrations_tenant__integration_id___post: {
+  add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post: {
     parameters: {
       path: {
         integration_id: string;
@@ -19404,7 +19428,7 @@ export interface operations {
     };
   };
   /** Remove Tenant Integration */
-  remove_tenant_integration_api_v1_integrations_tenant__tenant_integration_id___delete: {
+  remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete: {
     parameters: {
       path: {
         tenant_integration_id: string;

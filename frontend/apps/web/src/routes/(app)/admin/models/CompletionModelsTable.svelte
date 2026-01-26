@@ -125,7 +125,11 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(ModelActions, { model: item.value, type: "completionModel" });
+        return createRender(ModelActions, {
+          model: item.value,
+          type: "completionModel",
+          completionModels: filteredModels
+        });
       }
     })
   ];
