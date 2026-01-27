@@ -294,7 +294,7 @@
               {/if}
               <div>
                 <span class="font-medium">{m.status()}:</span>
-                <span class={existingConfig.is_active ? "text-green-600" : "text-red-600"}>
+                <span class={existingConfig.is_active ? "text-positive-default" : "text-negative-default"}>
                   {existingConfig.is_active ? m.active() : m.inactive()}
                 </span>
               </div>
@@ -303,8 +303,8 @@
 
           {#if isUpdatingSecret}
             <!-- Update secret form -->
-            <div class="rounded-md border border-blue-500 bg-blue-50 p-4">
-              <div class="text-sm font-medium text-blue-800 mb-3">{m.update_client_secret()}</div>
+            <div class="rounded-md border border-accent-default bg-accent-dimmer p-4">
+              <div class="text-sm font-medium text-accent-stronger mb-3">{m.update_client_secret()}</div>
               <Input.Text
                 label={m.new_client_secret()}
                 bind:value={newClientSecret}
@@ -317,10 +317,10 @@
             </div>
           {:else}
             <!-- Warning about changing auth method -->
-            <div class="rounded-lg border border-amber-500 bg-amber-50 px-4 py-3">
+            <div class="rounded-lg border border-warning-default bg-warning-dimmer px-4 py-3">
               <div class="flex items-start gap-3">
-                <AlertTriangle class="text-amber-600 shrink-0 mt-0.5" size={18} />
-                <p class="text-sm text-amber-800">
+                <AlertTriangle class="text-warning-stronger shrink-0 mt-0.5" size={18} />
+                <p class="text-sm text-warning-stronger">
                   {m.sharepoint_change_auth_warning()}
                 </p>
               </div>
@@ -340,8 +340,8 @@
             <label
               class="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors
                 {authMethod === 'service_account'
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-default hover:border-gray-400'}"
+                  ? 'border-accent-default bg-accent-dimmer'
+                  : 'border-default hover:border-stronger'}"
             >
               <input
                 type="radio"
@@ -355,7 +355,7 @@
                   <span class="font-medium text-primary">
                     {m.service_account_option()}
                   </span>
-                  <span class="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                  <span class="rounded bg-accent-dimmer px-2 py-0.5 text-xs font-medium text-accent-stronger">
                     {m.recommended()}
                   </span>
                 </div>
@@ -369,8 +369,8 @@
             <label
               class="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors
                 {authMethod === 'tenant_app'
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-default hover:border-gray-400'}"
+                  ? 'border-accent-default bg-accent-dimmer'
+                  : 'border-default hover:border-stronger'}"
             >
               <input
                 type="radio"
@@ -428,8 +428,8 @@
           {#if testResult}
             <div
               class="rounded-md border p-3 {testResult.success
-                ? 'border-green-500 bg-green-50 text-green-800'
-                : 'border-red-500 bg-red-50 text-red-800'}"
+                ? 'border-positive-default bg-positive-dimmer text-positive-stronger'
+                : 'border-negative-default bg-negative-dimmer text-negative-stronger'}"
             >
               <div class="text-sm font-medium">
                 {testResult.success ? m.connection_successful() : m.connection_failed()}
