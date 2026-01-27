@@ -81,15 +81,15 @@
                     {#if isSharePoint(integration)}
                       <!-- SharePoint: Show config status and configure button -->
                       {#if sharePointConfigStatus === "loading"}
-                        <span class="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                        <span class="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary">
                           {m.integration_status_loading()}
                         </span>
                       {:else if sharePointConfigStatus === "configured"}
-                        <span class="inline-flex items-center rounded-md bg-green-100 dark:bg-green-900 px-2 py-1 text-xs font-medium text-green-800 dark:text-green-200">
+                        <span class="inline-flex items-center rounded-md bg-positive-dimmer px-2 py-1 text-xs font-medium text-positive-stronger">
                           {m.integration_status_configured()}
                         </span>
                       {:else}
-                        <span class="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                        <span class="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary">
                           {m.integration_status_not_configured()}
                         </span>
                       {/if}
@@ -118,20 +118,20 @@
                         >
                           {m.delete_sharepoint_app()}
                         </Button>
-                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        <p class="text-xs text-secondary mt-1">
                           {m.organization_access_enabled()}
                         </p>
                       {:else}
-                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        <p class="text-xs text-secondary mt-1">
                           {m.configure_azure_ad_app()}
                         </p>
                       {/if}
                     {:else}
                       <!-- Other integrations: Coming soon -->
-                      <span class="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                      <span class="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary">
                         {m.coming_soon()}
                       </span>
-                      <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      <p class="text-xs text-secondary mt-1">
                         {m.configuration_options_available_soon()}
                       </p>
                     {/if}
@@ -155,16 +155,16 @@
           title={m.personal_integrations()}
           description={m.personal_integrations_description()}
         >
-          <div class="rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950 p-4">
+          <div class="rounded-md border border-accent-default bg-accent-dimmer p-4">
             <div class="flex items-start gap-3">
               <div class="flex-shrink-0">
-                <svg class="h-5 w-5 text-blue-600 dark:text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                <svg class="h-5 w-5 text-accent-default" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd" />
                 </svg>
               </div>
               <div class="flex-1 text-sm">
-                <h3 class="font-medium text-blue-800 dark:text-blue-200">{m.how_integrations_work()}</h3>
-                <ul class="mt-2 space-y-1 text-blue-700 dark:text-blue-300 list-disc list-inside">
+                <h3 class="font-medium text-accent-stronger">{m.how_integrations_work()}</h3>
+                <ul class="mt-2 space-y-1 text-accent-default list-disc list-inside">
                   <li>{m.personal_spaces_description()}</li>
                   <li>{m.shared_spaces_description()}</li>
                   <li>{m.no_person_dependency_description()}</li>
