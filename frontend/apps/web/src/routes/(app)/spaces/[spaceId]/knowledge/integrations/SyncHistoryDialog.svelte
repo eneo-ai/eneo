@@ -209,7 +209,7 @@
             <span class="ml-2">{m.loading_available_sites()}...</span>
           </div>
         {:else if error}
-          <div class="flex items-center gap-2 text-red-600 bg-red-50 p-4 rounded">
+          <div class="flex items-center gap-2 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 p-4 rounded">
             <IconXMark size="md" />
             <span>{error}</span>
           </div>
@@ -246,7 +246,7 @@
               </div>
               <div class="flex justify-between">
                 <span class="text-secondary">{m.files_deleted()}:</span>
-                <span class="font-medium text-red-600">{getPageStats().pageDeleted}</span>
+                <span class="font-medium text-red-600 dark:text-red-400">{getPageStats().pageDeleted}</span>
               </div>
               <div class="flex justify-between col-span-2">
                 <span class="text-secondary">{m.pages_synced()}:</span>
@@ -260,11 +260,11 @@
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center gap-2">
                     {#if log.status === "success"}
-                      <IconCheck size="sm" class="text-green-600 flex-shrink-0" />
+                      <IconCheck size="sm" class="text-green-600 dark:text-green-400 flex-shrink-0" />
                     {:else if log.status === "error"}
-                      <IconXMark size="sm" class="text-red-600 flex-shrink-0" />
+                      <IconXMark size="sm" class="text-red-600 dark:text-red-400 flex-shrink-0" />
                     {:else}
-                      <IconLoadingSpinner size="sm" class="text-yellow-600 animate-spin flex-shrink-0" />
+                      <IconLoadingSpinner size="sm" class="text-yellow-600 dark:text-yellow-400 animate-spin flex-shrink-0" />
                     {/if}
                     <span class="font-medium text-sm">
                       {getSyncTypeLabel(log.sync_type)}
@@ -272,11 +272,17 @@
                     <span
                       class="text-xs px-2 py-0.5 rounded-full font-medium"
                       class:bg-green-100={log.status === "success"}
+                      class:dark:bg-green-900={log.status === "success"}
                       class:text-green-800={log.status === "success"}
+                      class:dark:text-green-200={log.status === "success"}
                       class:bg-red-100={log.status === "error"}
+                      class:dark:bg-red-900={log.status === "error"}
                       class:text-red-800={log.status === "error"}
+                      class:dark:text-red-200={log.status === "error"}
                       class:bg-yellow-100={log.status === "in_progress"}
+                      class:dark:bg-yellow-900={log.status === "in_progress"}
                       class:text-yellow-800={log.status === "in_progress"}
+                      class:dark:text-yellow-200={log.status === "in_progress"}
                     >
                       {log.status}
                     </span>
@@ -293,7 +299,7 @@
                 <div class="flex items-center gap-4 text-xs text-secondary-muted">
                   <span>{m.duration()}: {getDuration(log)}</span>
                   {#if log.error_message}
-                    <span class="text-red-600 font-medium">{m.error()}: {log.error_message}</span>
+                    <span class="text-red-600 dark:text-red-400 font-medium">{m.error()}: {log.error_message}</span>
                   {/if}
                 </div>
               </div>
