@@ -88,7 +88,9 @@ These permissions are **only required if you choose the Tenant App authenticatio
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
 
-After adding the permissions, click **Grant admin consent** to approve them at the organization level.
+After adding the permissions, click **Grant admin consent for [your tenant]** to approve them at the organization level.
+
+> **Important:** The delegated permissions `Files.Read.All` and `Sites.Read.All` require admin consent before regular users can authenticate. Without granting admin consent, only Azure AD administrators will be able to use the integration – other users will receive a consent error (AADSTS65001) when trying to sign in.
 
 ### Create a Client Secret
 
@@ -121,6 +123,8 @@ With the service account method, an administrator logs in with a dedicated Micro
 - A dedicated service account in Azure AD (for example `eneo-service@contoso.com`)
 - The account must have read permission to the SharePoint sites to be imported
 - Delegated permissions in the Azure AD application
+
+> **Note:** The Azure AD app permissions define what the app *can* do on behalf of the service account, but the service account must also have actual access to the SharePoint sites. Add the service account as a **Member** or **Visitor** on each SharePoint site via **Site settings** → **Site permissions** → **Add members**. Without this, the integration will receive 403 Forbidden errors when trying to read files.
 
 ### Tenant App
 
@@ -258,6 +262,24 @@ If connection testing fails, check:
 - That the client secret hasn't expired (they have limited validity periods)
 - That admin consent has been granted for all permissions
 - That the correct permission type is used (delegated for service account, application for tenant app)
+
+### Non-Admin Users Cannot Authenticate
+
+If administrators can authenticate but regular users receive errors like "AADSTS65001" (consent required) or "AADSTS50105" (user not assigned):
+
+**Check admin consent is granted:**
+1. Go to **Azure Portal** → **App registrations** → your app
+2. Navigate to **API permissions**
+3. Verify the Status column shows **"Granted for [tenant name]"** (green checkmark)
+4. If not, click **Grant admin consent for [tenant]**
+
+**Check user assignment settings:**
+1. Go to **Azure Portal** → **Enterprise applications** (not App registrations)
+2. Search for and select your application
+3. Navigate to **Properties**
+4. Ensure **"User assignment required?"** is set to **No**
+
+If "User assignment required" is set to Yes, only users explicitly added under **Users and groups** can authenticate with the application.
 
 ### Files Don't Synchronize
 
