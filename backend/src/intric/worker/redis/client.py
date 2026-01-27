@@ -1,11 +1,13 @@
 """Redis client connection management for worker operations."""
 
 import re
-import redis.asyncio as aioredis
 from datetime import datetime, timezone
 from typing import NamedTuple
 
+import redis.asyncio as aioredis
+
 from intric.main.config import get_settings
+from intric.redis.connection import build_redis_pool_kwargs
 
 
 def _get_redis_connection() -> aioredis.Redis:
@@ -16,13 +18,7 @@ def _get_redis_connection() -> aioredis.Redis:
     """
     settings = get_settings()
     redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
-    redis_kwargs: dict = {}
-
-    # Use configured DB if set (default is 0)
-    redis_db = getattr(settings, "redis_db", None)
-    if redis_db is not None:
-        redis_kwargs["db"] = redis_db
-
+    redis_kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
     pool = aioredis.ConnectionPool.from_url(redis_url, **redis_kwargs)
     return aioredis.Redis(connection_pool=pool)
 

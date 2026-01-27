@@ -11,6 +11,7 @@
 
   const successPages = (crawl.pages_crawled ?? 0) - (crawl.pages_failed ?? 0);
   const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
+  const SKIPPED_PREFIX = "skipped duplicate crawl";
 
   function totalLabel(): { label: string; color: Label.LabelColor } {
     if ((crawl.files_downloaded ?? 0) > 0) {
@@ -67,18 +68,48 @@
     }
   }
 
-  function crawlStatus(): { label: string; color: Label.LabelColor } {
-    if (crawl.status === "failed") {
+  function crawlStatus(): { label: string; color: Label.LabelColor; tooltip?: string } {
+    const reason = crawl.result_location ?? undefined;
+    const skipTooltip = crawl.result_location?.toLowerCase().startsWith(SKIPPED_PREFIX)
+      ? m.crawl_skipped_duplicate()
+      : reason;
+    if (
+      crawl.status === "failed" &&
+      crawl.result_location?.toLowerCase().startsWith(SKIPPED_PREFIX)
+    ) {
       return {
-        color: "orange",
-        label: m.crawl_failed()
-      };
-    } else {
-      return {
-        color: "blue",
-        label: m.crawl_still_running()
+        color: "gray",
+        label: m.crawl_skipped(),
+        tooltip: skipTooltip
       };
     }
+
+    if (crawl.status === "failed" || crawl.status === "not found") {
+      return {
+        color: "orange",
+        label: m.crawl_failed(),
+        tooltip: reason
+      };
+    }
+
+    if (crawl.status === "queued") {
+      return {
+        color: "blue",
+        label: m.queued()
+      };
+    }
+
+    if (crawl.status === "in progress") {
+      return {
+        color: "yellow",
+        label: m.in_progress()
+      };
+    }
+
+    return {
+      color: "blue",
+      label: m.crawl_still_running()
+    };
   }
 </script>
 

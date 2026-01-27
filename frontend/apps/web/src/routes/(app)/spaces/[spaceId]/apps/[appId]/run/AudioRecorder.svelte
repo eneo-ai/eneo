@@ -7,14 +7,24 @@
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
 
-  export let onRecordingDone: (params: { blob: Blob; mimeType: string }) => void;
+  type RecordingStopReason = "manual" | "limit" | "stall" | "error";
+
+  export let onRecordingDone: (params: {
+    blob: Blob;
+    mimeType: string;
+    reason: RecordingStopReason;
+  }) => void;
+  export let onRecordingStateChange: (isRecording: boolean) => void = () => {};
+  export let maxBytes: number | null = null;
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
   let elapsedTime = "";
-  let volumeMeter: HTMLMeterElement | undefined;
   let recordingError: string | null = null;
   let recordingState: "idle" | "recording" | "processing" | "error" | "complete" = "idle";
+
+  // Volume level for smooth visualizer (0-1)
+  let volumeLevel: number = 0;
 
   let mediaStream: MediaStream | null;
   let mediaStreamNode: MediaStreamAudioSourceNode | null;
@@ -26,9 +36,26 @@
   let recordingBuffer: Blob[] = [];
   let recordedBlob: Blob | null = null;
   let audioURL: string | null = null;
+  let stopReason: RecordingStopReason = "manual";
+  let handleStreamEnded: ((event: Event) => void) | null = null;
 
   // Constants
   const TIMESLICE_MS = 10000; // Save chunks every 10 seconds
+  const STALL_TIMEOUT_MS = TIMESLICE_MS * 2;
+
+  const formatMegabytes = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
+  let maxSizeLabel: string | null = null;
+  $: maxSizeLabel =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? formatMegabytes(maxBytes)
+      : null;
+
+  // Size progress percentage for limit indicator
+  let sizePercent: number = 0;
+  $: sizePercent =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? Math.min(100, (recordingStats.totalBytes / maxBytes) * 100)
+      : 0;
 
   // Stats for diagnostics
   let recordingStats = {
@@ -44,6 +71,8 @@
       recordingError = null;
       recordingState = "recording";
       isRecording = true;
+      stopReason = "manual";
+      onRecordingStateChange(true);
       startedRecordingAt = dayjs();
 
       // Reset stats
@@ -65,12 +94,35 @@
 
         mediaRecorder.addEventListener("dataavailable", (event) => {
           if (event.data.size > 0) {
+            const maxBytesValue =
+              typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+                ? maxBytes
+                : null;
+            const nextTotalBytes = recordingStats.totalBytes + event.data.size;
+
+            if (maxBytesValue && nextTotalBytes > maxBytesValue) {
+              recordingStats.errors.push(
+                "Recording stopped after reaching size limit at " + new Date().toISOString()
+              );
+              stopReason = "limit";
+              stopRecording();
+              return;
+            }
+
             recordingBuffer.push(event.data);
 
             // Update stats
             recordingStats.chunks++;
-            recordingStats.totalBytes += event.data.size;
+            recordingStats.totalBytes = nextTotalBytes;
             recordingStats.lastChunkTime = Date.now();
+
+            if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
+              recordingStats.errors.push(
+                "Recording stopped after reaching size limit at " + new Date().toISOString()
+              );
+              stopReason = "limit";
+              stopRecording();
+            }
           } else {
             console.warn("Received empty data chunk");
             recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
@@ -84,6 +136,7 @@
           recordingError = errorMsg;
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
+          stopReason = "error";
           stopRecording();
         });
 
@@ -96,12 +149,15 @@
               recordingError = errorMsg;
               recordingStats.errors.push(errorMsg);
               recordingState = "error";
+              stopReason = "error";
               return;
             }
 
             recordedBlob = new Blob(recordingBuffer, { type: mimeType });
             audioURL = URL.createObjectURL(recordedBlob);
-            onRecordingDone({ blob: recordedBlob, mimeType });
+            const reason = stopReason;
+            stopReason = "manual";
+            onRecordingDone({ blob: recordedBlob, mimeType, reason });
             recordingState = "complete";
           } catch (error) {
             const errorMsg =
@@ -111,6 +167,7 @@
             recordingError = errorMsg;
             recordingStats.errors.push(errorMsg);
             recordingState = "error";
+            stopReason = "error";
           }
         });
 
@@ -130,6 +187,7 @@
         recordingError = errorMsg;
         recordingStats.errors.push(errorMsg);
         isRecording = false;
+        onRecordingStateChange(false);
         recordingState = "error";
       }
     } catch (error) {
@@ -139,12 +197,16 @@
       recordingError = errorMsg;
       recordingStats.errors.push(errorMsg);
       isRecording = false;
+      onRecordingStateChange(false);
       recordingState = "error";
     }
   }
 
   function stopRecording() {
-    isRecording = false;
+    if (isRecording) {
+      isRecording = false;
+      onRecordingStateChange(false);
+    }
 
     try {
       // Only call stop if the mediaRecorder is actually recording
@@ -171,13 +233,29 @@
   }
 
   const onAnimationFrame = () => {
-    if (volumeMeter) {
-      analyserNode?.getFloatTimeDomainData(levelBuffer);
+    // Update volume level for visualizer
+    if (analyserNode && levelBuffer.length > 0) {
+      analyserNode.getFloatTimeDomainData(levelBuffer);
       let sumSquares = 0.0;
       for (const amplitude of levelBuffer) {
         sumSquares += amplitude * amplitude;
       }
-      volumeMeter.value = Math.sqrt(sumSquares / levelBuffer.length);
+      // Normalize RMS to 0-1 range - speech RMS is typically 0.01-0.1
+      // Using 0.15 as max gives good sensitivity for speech
+      const rms = Math.sqrt(sumSquares / levelBuffer.length);
+      volumeLevel = Math.min(1, rms / 0.15);
+    }
+
+    if (
+      isRecording &&
+      recordingStats.lastChunkTime > 0 &&
+      Date.now() - recordingStats.lastChunkTime > STALL_TIMEOUT_MS
+    ) {
+      recordingStats.errors.push(
+        "Recording stopped due to stalled data at " + new Date().toISOString()
+      );
+      stopReason = "stall";
+      stopRecording();
     }
     elapsedTime = formatElapsed(dayjs().diff(startedRecordingAt, "seconds"));
     window.requestAnimationFrame(onAnimationFrame);
@@ -202,6 +280,21 @@
           echoCancellation: true,
           autoGainControl: true
         }
+      });
+
+      const streamEndedHandler = (_event: Event) => {
+        if (!isRecording) return;
+        const errorMsg = m.recording_device_disconnected();
+        recordingError = errorMsg;
+        recordingStats.errors.push(errorMsg + " at " + new Date().toISOString());
+        stopReason = "error";
+        stopRecording();
+      };
+
+      handleStreamEnded = streamEndedHandler;
+      mediaStream.addEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.addEventListener("ended", streamEndedHandler);
       });
 
       audioContext = new AudioContext();
@@ -235,6 +328,14 @@
       }
     }
 
+    if (mediaStream && handleStreamEnded) {
+      const streamEndedHandler = handleStreamEnded;
+      mediaStream.removeEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.removeEventListener("ended", streamEndedHandler);
+      });
+    }
+
     mediaStream?.getAudioTracks().forEach((track) => {
       track.stop();
     });
@@ -261,12 +362,21 @@
     </Tooltip>
 
     {#if isRecording}
-      <div class="px-6 py-2 font-mono">
-        <div>{m.time_label()}{elapsedTime}</div>
-        <div class="text-xs">
-          {(recordingStats.totalBytes / (1024 * 1024)).toFixed(2)}
-          MB
+      <div class="recording-stats">
+        <div class="stats-row">
+          <div class="time-display">{elapsedTime}</div>
+          <div class="volume-indicator">
+            <div class="volume-bar" style="transform: scaleX({volumeLevel})"></div>
+          </div>
         </div>
+        {#if maxSizeLabel}
+          <div class="size-row">
+            <span class="size-display">{formatMegabytes(recordingStats.totalBytes)} / {maxSizeLabel} MB</span>
+            <div class="size-progress-track">
+              <div class="size-progress-bar" style="width: {sizePercent}%"></div>
+            </div>
+          </div>
+        {/if}
       </div>
     {:else if recordingState === "processing"}
       <div class="px-6 py-2 font-mono">{m.processing_recording()}</div>
@@ -285,11 +395,18 @@
         </button>
       </div>
     {:else if audioURL}
-      <audio controls src={audioURL} class="border-stronger ml-2 h-12 rounded-full border shadow-sm"
+      <audio
+        controls
+        preload="metadata"
+        src={audioURL}
+        class="audio-player"
+        dir="ltr"
       ></audio>
     {:else}
-      <div class="flex flex-col items-center justify-center px-6">
-        <meter bind:this={volumeMeter} min="0" high="0.7" optimum="0.5" max="0.8" value="0"></meter>
+      <div class="volume-container">
+        <div class="volume-track">
+          <div class="volume-level" style="transform: scaleX({volumeLevel})"></div>
+        </div>
       </div>
     {/if}
   </div>
@@ -297,12 +414,62 @@
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
+
+  /* Breathing pulse animation for active recording */
+  @keyframes breathe-ring {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.4;
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 0;
+    }
+  }
+
+  /* Subtle glow for recording state */
+  @keyframes subtle-glow {
+    0%,
+    100% {
+      box-shadow:
+        0 10px 15px -3px rgb(0 0 0 / 0.1),
+        0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+    50% {
+      box-shadow:
+        0 10px 15px -3px rgb(0 0 0 / 0.1),
+        0 4px 6px -4px rgb(0 0 0 / 0.1),
+        0 0 20px 2px rgb(239 68 68 / 0.15);
+    }
+  }
+
   .record-button {
-    @apply bg-negative-default text-on-fill hover:bg-negative-stronger flex h-12 w-12 items-center justify-center rounded-full;
+    @apply bg-negative-default text-on-fill hover:bg-negative-stronger relative flex h-12 w-12 items-center justify-center rounded-full transition-all duration-200;
   }
 
   .record-button[data-is-recording="true"] {
     @apply bg-primary text-negative-stronger hover:bg-negative-dimmer hover:text-negative-stronger;
+  }
+
+  /* Breathing pulse ring during recording */
+  .record-button[data-is-recording="true"]::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    border: 2px solid currentColor;
+    animation: breathe-ring 2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .record-button[data-is-recording="true"]::before {
+      animation: none;
+      opacity: 0;
+    }
+    .recording-widget[data-is-recording="true"] {
+      animation: none;
+    }
   }
 
   .record-button:disabled {
@@ -310,11 +477,12 @@
   }
 
   .recording-widget {
-    @apply border-stronger bg-primary flex items-center rounded-full border p-2 shadow-lg;
+    @apply border-stronger bg-primary flex items-center rounded-full border p-2 shadow-lg transition-all duration-300 ease-out;
   }
 
   .recording-widget[data-is-recording="true"] {
     @apply bg-negative-default text-on-fill;
+    animation: subtle-glow 2s ease-in-out infinite;
   }
 
   .recording-widget[data-state="error"] {
@@ -329,11 +497,89 @@
     @apply text-on-fill text-sm;
   }
 
-  meter::-webkit-meter-inner-element {
-    @apply !h-4 overflow-clip rounded-full;
+  /* Recording stats display - compact layout */
+  .recording-stats {
+    @apply flex flex-col gap-1 px-4 py-1 font-mono;
   }
 
-  meter::-webkit-meter-bar {
-    @apply !h-4 overflow-clip rounded-full;
+  .stats-row {
+    @apply flex items-center gap-3;
+  }
+
+  .time-display {
+    @apply text-base font-medium tabular-nums;
+  }
+
+  /* Live volume indicator during recording */
+  .volume-indicator {
+    @apply h-2 w-16 overflow-hidden rounded-full bg-white/20;
+  }
+
+  .volume-bar {
+    @apply h-full origin-left rounded-full;
+    background: linear-gradient(90deg, #4ade80 0%, #facc15 70%, #f87171 100%);
+    transition: transform 50ms linear;
+  }
+
+  .size-row {
+    @apply flex items-center gap-2;
+  }
+
+  .size-display {
+    @apply text-xs opacity-80 whitespace-nowrap;
+  }
+
+  /* Size limit progress bar */
+  .size-progress-track {
+    @apply h-1 flex-1 overflow-hidden rounded-full bg-white/20;
+  }
+
+  .size-progress-bar {
+    @apply h-full rounded-full bg-white/60 transition-[width] duration-300 ease-out;
+  }
+
+  /* Volume visualizer in idle state */
+  .volume-container {
+    @apply flex items-center justify-center px-4;
+  }
+
+  .volume-track {
+    @apply h-3 w-20 overflow-hidden rounded-full;
+    background: linear-gradient(90deg, #e5e7eb 0%, #d1d5db 100%);
+  }
+
+  :global(.dark) .volume-track {
+    background: linear-gradient(90deg, #374151 0%, #4b5563 100%);
+  }
+
+  .volume-level {
+    @apply h-full origin-left rounded-full;
+    background: linear-gradient(90deg, #22c55e 0%, #84cc16 50%, #eab308 100%);
+    transition: transform 50ms linear;
+  }
+
+  /* Audio player - ensure LTR rendering and consistent styling */
+  .audio-player {
+    @apply border-stronger ml-2 h-12 rounded-full border shadow-sm;
+    direction: ltr !important;
+    unicode-bidi: bidi-override;
+  }
+
+  /* Force LTR on all audio player internal elements */
+  .audio-player::-webkit-media-controls {
+    direction: ltr !important;
+  }
+
+  .audio-player::-webkit-media-controls-panel {
+    direction: ltr !important;
+  }
+
+  .audio-player::-webkit-media-controls-timeline {
+    direction: ltr !important;
+  }
+
+  .audio-player::-webkit-media-controls-current-time-display,
+  .audio-player::-webkit-media-controls-time-remaining-display {
+    direction: ltr !important;
   }
 </style>

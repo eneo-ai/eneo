@@ -16,7 +16,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # - Local dev: __file__ points to source tree, so we traverse up from this file's location
 #   (src/intric/main/config.py -> 4 levels up -> backend/.release-please-manifest.json)
 _DOCKER_MANIFEST = Path("/app/.release-please-manifest.json")
-_LOCAL_MANIFEST = Path(__file__).resolve().parent.parent.parent.parent / ".release-please-manifest.json"
+_LOCAL_MANIFEST = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / ".release-please-manifest.json"
+)
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -67,15 +70,11 @@ def validate_public_origin(origin: str | None) -> str | None:
 
     # Validate no path (except "/" which we'll strip)
     if parsed.path not in ("", "/"):
-        raise ValueError(
-            f"public_origin must not include path: {origin}"
-        )
+        raise ValueError(f"public_origin must not include path: {origin}")
 
     # Validate no query or fragment
     if parsed.query or parsed.fragment:
-        raise ValueError(
-            f"public_origin must not include query or fragment: {origin}"
-        )
+        raise ValueError(f"public_origin must not include query or fragment: {origin}")
 
     # Normalize: lowercase hostname, preserve non-default port
     host = parsed.hostname.lower()
@@ -140,18 +139,35 @@ class Settings(BaseSettings):
     postgres_db: str
     redis_host: str
     redis_port: int
+    # Redis connection resilience defaults
+    # Safe defaults avoid aggressive timeouts during transient network blips
+    redis_conn_timeout: int = 5
+    redis_conn_retries: int = 5
+    redis_conn_retry_delay: int = 2
+    redis_retry_on_timeout: bool = True
+    redis_socket_keepalive: bool = True
+    redis_health_check_interval: int = 30
+    redis_max_connections: int | None = None
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
     # See pool exhaustion analysis in plans/fuzzy-skipping-cray.md
     # NOTE: Defaults preserve current behavior (20/10/30). Change via env vars:
     #   DB_POOL_SIZE=25 DB_POOL_TIMEOUT=60 DB_POOL_PRE_PING=true DB_POOL_RECYCLE=3600
-    db_pool_size: int = 20  # Base pool size (permanent connections) - default: current behavior
+    db_pool_size: int = (
+        20  # Base pool size (permanent connections) - default: current behavior
+    )
     db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
     db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
-    db_pool_pre_ping: bool = True  # Verify connections before use - prevents stale connection errors
-    db_pool_recycle: int = -1  # Recycle connections after N seconds (-1 = never) - default: SQLAlchemy default
-    db_pool_debug: bool = False  # Enable checkout duration logging (overhead; use for debugging only)
+    db_pool_pre_ping: bool = (
+        True  # Verify connections before use - prevents stale connection errors
+    )
+    db_pool_recycle: int = (
+        -1
+    )  # Recycle connections after N seconds (-1 = never) - default: SQLAlchemy default
+    db_pool_debug: bool = (
+        False  # Enable checkout duration logging (overhead; use for debugging only)
+    )
 
     # Background worker configuration
     worker_max_jobs: int = 15
@@ -160,7 +176,9 @@ class Settings(BaseSettings):
     # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
     # See validate_worker_settings() which enforces this constraint
     # Configurable per-tenant via crawler_settings API
-    tenant_worker_semaphore_ttl_seconds: int = 60 * 60 * 11  # 11 hour safety window (10h crawl + 1h buffer)
+    tenant_worker_semaphore_ttl_seconds: int = (
+        60 * 60 * 11
+    )  # 11 hour safety window (10h crawl + 1h buffer)
 
     # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
     crawl_feeder_enabled: bool = True  # Enabled by default - meters job enqueue rate
@@ -168,16 +186,28 @@ class Settings(BaseSettings):
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
-    orphan_crawl_run_timeout_hours: int = 12  # Must be > crawl_max_length (10h) to avoid killing valid long crawls
-    crawl_stale_threshold_minutes: int = 30  # Safe preemption: jobs older than this can be preempted on recrawl
-    crawl_heartbeat_interval_seconds: int = 300  # Heartbeat every 5 minutes (time-based, not count-based)
-    crawl_heartbeat_max_failures: int = 3  # Terminate after N consecutive heartbeat failures (3 * 5min = 15min max)
-    crawl_page_batch_size: int = 100  # Commit after every N pages during crawl (bounds data loss)
+    orphan_crawl_run_timeout_hours: int = (
+        12  # Must be > crawl_max_length (10h) to avoid killing valid long crawls
+    )
+    crawl_stale_threshold_minutes: int = (
+        30  # Safe preemption: jobs older than this can be preempted on recrawl
+    )
+    crawl_heartbeat_interval_seconds: int = (
+        300  # Heartbeat every 5 minutes (time-based, not count-based)
+    )
+    crawl_heartbeat_max_failures: int = (
+        3  # Terminate after N consecutive heartbeat failures (3 * 5min = 15min max)
+    )
+    crawl_page_batch_size: int = (
+        100  # Commit after every N pages during crawl (bounds data loss)
+    )
 
     # Audit log export configuration
     export_batch_size: int = 20000  # Records per DB fetch for streaming exports
     export_buffer_size: int = 50000  # Records to buffer before disk write
-    export_dir: Path = Path("/tmp/exports")  # Default: /tmp/exports (writable in Docker without special permissions)
+    export_dir: Path = Path(
+        "/tmp/exports"
+    )  # Default: /tmp/exports (writable in Docker without special permissions)
     export_max_age_hours: int = 24  # File retention period before cleanup
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
@@ -202,6 +232,8 @@ class Settings(BaseSettings):
     # May be a proxy URL (e.g., https://m00-https-eneo-test.login.sundsvall.se)
     # or a direct URL (e.g., https://eneo.sundsvall.se)
     # Must match what users see in their browser and what's registered in IdP
+
+    # Used for sharepoint integration so dont remove if you restructure logic for OIDC
     public_origin: Optional[str] = None
 
     # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
@@ -258,7 +290,6 @@ class Settings(BaseSettings):
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
-
 
     # Crawl retry configuration
     crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
@@ -320,13 +351,10 @@ class Settings(BaseSettings):
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
         - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
-        - Tenant-specific model provider credentials (always enabled)
         - Worker/crawler HTTP authentication
         """
         encryption_required = (
-            self.tenant_credentials_enabled or
-            self.federation_per_tenant_enabled or
-            True  # Tenant models are always enabled
+            self.tenant_credentials_enabled or self.federation_per_tenant_enabled
         )
 
         if encryption_required:
@@ -337,10 +365,11 @@ class Settings(BaseSettings):
                     "Generate key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)
-            
+
             # Validate Fernet key format
             try:
                 from cryptography.fernet import Fernet
+
                 Fernet(self.encryption_key.encode("utf-8"))
             except Exception as e:
                 logging.error(
@@ -349,15 +378,17 @@ class Settings(BaseSettings):
                     f"Generate a valid key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)
-        
+
         # Warn if crawling is enabled but no encryption key (HTTP auth will be disabled)
-        if self.using_crawl and (not self.encryption_key or not self.encryption_key.strip()):
+        if self.using_crawl and (
+            not self.encryption_key or not self.encryption_key.strip()
+        ):
             logging.warning(
                 "⚠️  ENCRYPTION_KEY not set. HTTP authentication for crawling will be disabled.\n"
                 "To enable HTTP auth for protected websites, generate key:\n"
                 "  uv run python -m intric.cli.generate_encryption_key"
             )
-        
+
         return self
 
     @model_validator(mode="before")
@@ -420,6 +451,7 @@ class Settings(BaseSettings):
         # The flag stores tenant_id for slot release - if it expires before watchdog
         # can kill the job, the slot becomes permanently leaked
         from intric.tenants.crawler_settings_helper import TTL_MAX_AGE_BUFFER_SECONDS
+
         min_required_ttl = self.crawl_job_max_age_seconds + TTL_MAX_AGE_BUFFER_SECONDS
         if self.tenant_worker_semaphore_ttl_seconds < min_required_ttl:
             logging.error(
@@ -462,6 +494,46 @@ class Settings(BaseSettings):
                 self.oidc_redirect_grace_period_seconds,
                 self.oidc_state_ttl_seconds,
             )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_redis_settings(self):
+        """Ensure Redis connection settings are sane."""
+        if self.redis_conn_timeout <= 0:
+            logging.error(
+                "REDIS_CONN_TIMEOUT must be greater than zero. Current value: %s",
+                self.redis_conn_timeout,
+            )
+            sys.exit(1)
+
+        if self.redis_conn_retries < 0:
+            logging.error(
+                "REDIS_CONN_RETRIES cannot be negative. Current value: %s",
+                self.redis_conn_retries,
+            )
+            sys.exit(1)
+
+        if self.redis_conn_retry_delay < 0:
+            logging.error(
+                "REDIS_CONN_RETRY_DELAY cannot be negative. Current value: %s",
+                self.redis_conn_retry_delay,
+            )
+            sys.exit(1)
+
+        if self.redis_health_check_interval < 0:
+            logging.error(
+                "REDIS_HEALTH_CHECK_INTERVAL cannot be negative. Current value: %s",
+                self.redis_health_check_interval,
+            )
+            sys.exit(1)
+
+        if self.redis_max_connections is not None and self.redis_max_connections <= 0:
+            logging.error(
+                "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
+                self.redis_max_connections,
+            )
+            sys.exit(1)
 
         return self
 

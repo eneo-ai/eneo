@@ -12,11 +12,28 @@
   dayjs.extend(utc);
 
   export let website: WebsiteSparse;
+  const SKIPPED_PREFIX = "skipped duplicate crawl";
 
   // Set dayjs locale based on paraglide locale
   $: dayjs.locale(getLocale());
   /* TODO colours */
   function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
+    const skipReason = website.latest_crawl?.result_location;
+    const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
+      ? m.crawl_skipped_duplicate()
+      : skipReason;
+
+    if (
+      website.latest_crawl?.status === "failed" &&
+      skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
+    ) {
+      return {
+        color: "gray",
+        label: m.sync_skipped(),
+        tooltip: skipTooltip
+      };
+    }
+
     switch (website.latest_crawl?.status) {
       case "complete": {
         const completed = dayjs(website.latest_crawl?.finished_at);
@@ -38,12 +55,14 @@
       case "failed":
         return {
           color: "orange",
-          label: m.sync_failed()
+          label: m.sync_failed(),
+          tooltip: skipTooltip
         };
       case "not found":
         return {
           color: "orange",
-          label: m.sync_failed()
+          label: m.sync_failed(),
+          tooltip: skipTooltip
         };
       case "queued":
         return {

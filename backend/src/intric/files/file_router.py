@@ -111,7 +111,7 @@ async def delete_file(
     current_user = container.user()
 
     # Get file details BEFORE deletion (snapshot pattern)
-    file = await service.get_file(id)
+    file = await service.get_file_by_id(file_id=id)
 
     # Build extra context capturing what was deleted
     extra = {

@@ -12,7 +12,9 @@ from intric.audit.application.audit_config_service import AuditConfigService
 from intric.audit.application.audit_export_service import AuditExportService
 from intric.audit.application.audit_service import AuditService
 from intric.audit.application.retention_service import RetentionService
-from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
+from intric.audit.infrastructure.audit_config_repository import (
+    AuditConfigRepositoryImpl,
+)
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.ai_models.completion_models.completion_models_repo import (
@@ -123,13 +125,27 @@ from intric.integration.infrastructure.auth_service.service_account_auth_service
     ServiceAccountAuthService,
 )
 from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
-from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
-from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import TenantSharePointAppRepositoryImpl
-from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import TenantSharePointAppMapper
-from intric.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
-from intric.integration.infrastructure.office_change_key_service import OfficeChangeKeyService
-from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
-from intric.integration.infrastructure.sharepoint_subscription_repo_impl import SharePointSubscriptionRepositoryImpl
+from intric.integration.application.tenant_sharepoint_app_service import (
+    TenantSharePointAppService,
+)
+from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import (
+    TenantSharePointAppRepositoryImpl,
+)
+from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
+    TenantSharePointAppMapper,
+)
+from intric.integration.infrastructure.sharepoint_webhook_service import (
+    SharepointWebhookService,
+)
+from intric.integration.infrastructure.office_change_key_service import (
+    OfficeChangeKeyService,
+)
+from intric.integration.infrastructure.sharepoint_subscription_service import (
+    SharePointSubscriptionService,
+)
+from intric.integration.infrastructure.sharepoint_subscription_repo_impl import (
+    SharePointSubscriptionRepositoryImpl,
+)
 from intric.integration.infrastructure.content_service.confluence_content_service import (
     ConfluenceContentService,
 )
@@ -296,6 +312,7 @@ from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 from intric.workflows.step_repo import StepRepository
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.redis.connection import build_redis_pool_kwargs
 
 _logger = get_logger(__name__)
 
@@ -303,14 +320,7 @@ _logger = get_logger(__name__)
 def _create_redis_client() -> aioredis.Redis:
     settings = get_settings()
     url = f"redis://{settings.redis_host}:{settings.redis_port}"
-    kwargs: dict[str, object] = {
-        "decode_responses": False,
-    }
-
-    # Support optional redis_db attribute on settings (used in tests)
-    redis_db = getattr(settings, "redis_db", None)
-    if redis_db is not None:
-        kwargs["db"] = redis_db
+    kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
 
     return aioredis.Redis.from_url(url, **kwargs)
 
@@ -503,8 +513,7 @@ class Container(containers.DeclarativeContainer):
 
     # SharePoint app mapper uses the same encryption service as tenant credentials
     tenant_sharepoint_app_mapper = providers.Factory(
-        TenantSharePointAppMapper,
-        encryption_service=encryption_service
+        TenantSharePointAppMapper, encryption_service=encryption_service
     )
 
     # HTTP auth encryption service
@@ -633,9 +642,7 @@ class Container(containers.DeclarativeContainer):
     assistant_template_repo = providers.Factory(
         AssistantTemplateRepository, factory=assistant_template_factory, session=session
     )
-    feature_flag_repo = providers.Factory(
-        FeatureFlagRepository, db_session=session
-    )
+    feature_flag_repo = providers.Factory(FeatureFlagRepository, db_session=session)
 
     module_repo = providers.Factory(ModuleRepository, session=session)
 
@@ -822,7 +829,9 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         file_size_service=file_size_service,
     )
-    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
+    quota_service = providers.Factory(
+        QuotaService, user=user, info_blob_repo=info_blob_repo
+    )
     task_service = providers.Factory(
         TaskService,
         user=user,
@@ -850,7 +859,9 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         group_service=group_service,
     )
-    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
+    quota_service = providers.Factory(
+        QuotaService, user=user, info_blob_repo=info_blob_repo
+    )
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
         user=user,
@@ -1084,7 +1095,7 @@ class Container(containers.DeclarativeContainer):
     sharepoint_subscription_service = providers.Factory(
         SharePointSubscriptionService,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
-        oauth_token_service=oauth_token_service
+        oauth_token_service=oauth_token_service,
     )
 
     integration_knowledge_service = providers.Factory(
