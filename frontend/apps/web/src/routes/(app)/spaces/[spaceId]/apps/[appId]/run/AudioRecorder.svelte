@@ -21,6 +21,7 @@
   let startedRecordingAt = dayjs();
   let elapsedTime = "";
   let recordingError: string | null = null;
+  let recordingErrorHint: string | null = null;
   let recordingState: "idle" | "recording" | "processing" | "error" | "complete" = "idle";
 
   // Volume level for smooth visualizer (0-1)
@@ -65,10 +66,136 @@
     errors: [] as string[]
   };
 
+  const audioConstraints: MediaTrackConstraints = {
+    noiseSuppression: true,
+    echoCancellation: true,
+    autoGainControl: true
+  };
+
+  const isFallbackCandidate = (error: unknown) =>
+    error instanceof DOMException &&
+    (error.name === "NotFoundError" || error.name === "OverconstrainedError");
+
+  const formatMediaError = (error: unknown) => {
+    if (error instanceof DOMException) {
+      return `${error.name}: ${error.message}`;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  };
+
+  const getFriendlyErrorMessage = (errorName: string | null) => {
+    switch (errorName) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+        return m.recording_error_permission();
+      case "NotFoundError":
+        return m.recording_error_not_found();
+      case "NotReadableError":
+        return m.recording_error_not_readable();
+      case "OverconstrainedError":
+        return m.recording_error_overconstrained();
+      case "SecurityError":
+        return m.recording_error_security();
+      case "NotSupportedError":
+        return m.recording_error_not_supported();
+      default:
+        return m.recording_error_generic();
+    }
+  };
+
+  const setRecordingErrorState = (message: string, error?: unknown) => {
+    // Store only the raw technical error for diagnostics (developer-facing)
+    recordingError = error ? formatMediaError(error) : message;
+
+    // Set user-friendly localized hint
+    if (error instanceof DOMException) {
+      recordingErrorHint = getFriendlyErrorMessage(error.name);
+    } else if (message.includes("MediaDevices API is not available")) {
+      recordingErrorHint = m.recording_error_not_supported();
+    } else {
+      recordingErrorHint = m.recording_error_generic();
+    }
+  };
+
+  const collectMediaDiagnostics = async (context: string, error?: unknown) => {
+    try {
+      const hasMediaDevices = !!navigator.mediaDevices;
+      const supportsGetUserMedia = !!navigator.mediaDevices?.getUserMedia;
+      const supportsEnumerateDevices = !!navigator.mediaDevices?.enumerateDevices;
+      const secureContext = window.isSecureContext;
+      const protocol = window.location?.protocol ?? "unknown";
+
+      recordingStats.errors.push(
+        `${context} | secureContext=${secureContext} protocol=${protocol} mediaDevices=${supportsGetUserMedia}`
+      );
+
+      if (hasMediaDevices && supportsEnumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter((device) => device.kind === "audioinput");
+        const labeledInputs = audioInputs.filter((device) => device.label?.trim().length);
+        recordingStats.errors.push(
+          `Audio inputs detected: ${audioInputs.length} (${labeledInputs.length} labeled)`
+        );
+        console.warn("AudioRecorder diagnostics", {
+          context,
+          error,
+          secureContext,
+          protocol,
+          devices
+        });
+      }
+    } catch (diagnosticsError) {
+      console.warn("AudioRecorder diagnostics failed", diagnosticsError);
+    }
+  };
+
+  const requestAudioStream = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const errorMsg = "MediaDevices API is not available";
+      recordingStats.errors.push(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints
+      });
+    } catch (error) {
+      await collectMediaDiagnostics("Primary getUserMedia failed", error);
+      if (!isFallbackCandidate(error)) {
+        throw error;
+      }
+
+      recordingStats.errors.push("Retrying getUserMedia with relaxed audio constraints");
+
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const track = fallbackStream.getAudioTracks()[0];
+        if (track?.applyConstraints) {
+          try {
+            await track.applyConstraints(audioConstraints);
+          } catch (applyError) {
+            const applyErrorMsg = `Failed to apply audio constraints: ${formatMediaError(applyError)}`;
+            recordingStats.errors.push(applyErrorMsg);
+            console.warn(applyErrorMsg, applyError);
+          }
+        }
+        return fallbackStream;
+      } catch (fallbackError) {
+        await collectMediaDiagnostics("Fallback getUserMedia failed", fallbackError);
+        throw fallbackError;
+      }
+    }
+  };
+
   function startRecording() {
     try {
       recordingBuffer = [];
       recordingError = null;
+      recordingErrorHint = null;
       recordingState = "recording";
       isRecording = true;
       stopReason = "manual";
@@ -133,7 +260,7 @@
         mediaRecorder.addEventListener("error", (event) => {
           const errorMsg = "MediaRecorder error: " + (event.error?.message || "Unknown error");
           console.error(errorMsg, event);
-          recordingError = errorMsg;
+          setRecordingErrorState(errorMsg, event.error);
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
           stopReason = "error";
@@ -146,7 +273,7 @@
 
             if (recordingBuffer.length === 0) {
               const errorMsg = m.no_audio_data_captured();
-              recordingError = errorMsg;
+              setRecordingErrorState(errorMsg);
               recordingStats.errors.push(errorMsg);
               recordingState = "error";
               stopReason = "error";
@@ -164,7 +291,7 @@
               "Failed to process recording: " +
               (error instanceof Error ? error.message : String(error));
             console.error(errorMsg, error);
-            recordingError = errorMsg;
+            setRecordingErrorState(errorMsg, error);
             recordingStats.errors.push(errorMsg);
             recordingState = "error";
             stopReason = "error";
@@ -184,7 +311,7 @@
         });
       } else {
         const errorMsg = "No media stream available";
-        recordingError = errorMsg;
+        setRecordingErrorState(errorMsg);
         recordingStats.errors.push(errorMsg);
         isRecording = false;
         onRecordingStateChange(false);
@@ -194,7 +321,7 @@
       const errorMsg =
         "Failed to start recording: " + (error instanceof Error ? error.message : String(error));
       console.error(errorMsg, error);
-      recordingError = errorMsg;
+      setRecordingErrorState(errorMsg, error);
       recordingStats.errors.push(errorMsg);
       isRecording = false;
       onRecordingStateChange(false);
@@ -217,7 +344,7 @@
       const errorMsg =
         "Failed to stop recording: " + (error instanceof Error ? error.message : String(error));
       console.error(errorMsg, error);
-      recordingError = errorMsg;
+      setRecordingErrorState(errorMsg, error);
       recordingStats.errors.push(errorMsg);
       recordingState = "error";
     }
@@ -274,18 +401,12 @@
 
   onMount(async () => {
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          noiseSuppression: true,
-          echoCancellation: true,
-          autoGainControl: true
-        }
-      });
+      mediaStream = await requestAudioStream();
 
       const streamEndedHandler = (_event: Event) => {
         if (!isRecording) return;
         const errorMsg = m.recording_device_disconnected();
-        recordingError = errorMsg;
+        setRecordingErrorState(errorMsg);
         recordingStats.errors.push(errorMsg + " at " + new Date().toISOString());
         stopReason = "error";
         stopRecording();
@@ -304,11 +425,12 @@
       mediaStreamNode.connect(analyserNode);
       window.requestAnimationFrame(onAnimationFrame);
     } catch (error) {
+      await collectMediaDiagnostics("Failed to access microphone", error);
       const errorMsg = m.failed_to_access_microphone({
-        error: error instanceof Error ? error.message : String(error)
+        error: formatMediaError(error)
       });
       console.error(errorMsg, error);
-      recordingError = errorMsg;
+      setRecordingErrorState(errorMsg, error);
       recordingState = "error";
     }
   });
@@ -381,18 +503,37 @@
     {:else if recordingState === "processing"}
       <div class="px-6 py-2 font-mono">{m.processing_recording()}</div>
     {:else if recordingState === "error"}
-      <div class="error-message px-6 py-2">
-        <div>{m.recording_error()}</div>
-        <div class="text-xs">{recordingError}</div>
-        <button
-          class="cursor-pointer text-xs underline"
-          on:click={() => {
-            console.warn("Recording diagnostics:", recordingStats);
-            alert(m.diagnostics_logged_console());
-          }}
-        >
-          {m.view_diagnostics()}
-        </button>
+      <div class="flex flex-col gap-2 px-4 py-3">
+        <div class="flex flex-col gap-0.5">
+          <div class="text-sm font-semibold text-negative-stronger">
+            {m.recording_error()}
+          </div>
+          {#if recordingErrorHint}
+            <div class="text-sm leading-snug text-negative-stronger/90">
+              {recordingErrorHint}
+            </div>
+          {/if}
+        </div>
+        {#if recordingError}
+          <details class="error-details-collapse">
+            <summary class="cursor-pointer select-none list-none text-xs font-medium text-negative-default hover:text-negative-stronger transition-colors underline underline-offset-2">
+              {m.view_diagnostics()}
+            </summary>
+            <div class="mt-2 rounded-md px-3 py-2 font-mono text-xs leading-relaxed break-words bg-negative-default/15 text-negative-stronger/80 border border-negative-default/25">
+              {recordingError}
+            </div>
+          </details>
+        {:else}
+          <button
+            class="cursor-pointer text-xs font-medium underline underline-offset-2 transition-colors text-negative-default hover:text-negative-stronger text-left"
+            on:click={() => {
+              console.warn("Recording diagnostics:", recordingStats);
+              alert(m.diagnostics_logged_console());
+            }}
+          >
+            {m.view_diagnostics()}
+          </button>
+        {/if}
       </div>
     {:else if audioURL}
       <audio
@@ -486,15 +627,28 @@
   }
 
   .recording-widget[data-state="error"] {
-    @apply bg-negative-stronger text-on-fill rounded-lg;
+    @apply bg-negative-dimmer border-negative-default/40 rounded-2xl max-w-sm border;
   }
 
   .recording-widget[data-state="processing"] {
     @apply bg-accent-dimmer text-on-fill;
   }
 
-  .error-message {
-    @apply text-on-fill text-sm;
+  /* Custom disclosure marker for details element */
+  .error-details-collapse summary::before {
+    content: "▶ ";
+    display: inline;
+    font-size: 0.6em;
+    vertical-align: middle;
+    margin-right: 0.25em;
+  }
+
+  .error-details-collapse[open] summary::before {
+    content: "▼ ";
+  }
+
+  .error-details-collapse summary::-webkit-details-marker {
+    display: none;
   }
 
   /* Recording stats display - compact layout */
