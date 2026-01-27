@@ -70,7 +70,10 @@ class SharePointSubscriptionService:
             SharePointSubscription if successful, None if subscription creation failed
         """
         if not self.notification_url:
-            logger.debug("SharePoint webhook notification URL not configured; skipping subscription")
+            logger.warning(
+                "SharePoint webhook notification URL not configured; skipping subscription. "
+                "Set PUBLIC_ORIGIN or SHAREPOINT_WEBHOOK_NOTIFICATION_URL in environment."
+            )
             return None
 
         # Check if subscription already exists for this user+site/drive
