@@ -349,6 +349,15 @@ class UserService:
                 )
 
             # The hack continues
+            if self.predefined_roles_repo is None:
+                logger.error(
+                    "Predefined roles repository is not configured",
+                    extra={"correlation_id": correlation_id},
+                )
+                raise AuthenticationException(
+                    "System configuration error: Predefined roles repository not configured"
+                )
+
             user_role = await self.predefined_roles_repo.get_predefined_role_by_name(
                 PredefinedRoleName.USER
             )
@@ -633,7 +642,8 @@ class UserService:
     async def get_total_count(
         self, tentant_id: Optional[UUID] = None, filters: Optional[str] = None
     ) -> int:
-        return await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
+        count = await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
+        return count or 0
 
     async def get_all_users(
         self,

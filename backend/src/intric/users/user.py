@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Generic, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import EmailStr, Field, computed_field, field_serializer, field_validator
@@ -26,6 +26,7 @@ class UserState(str, Enum):
 
 class SortField(str, Enum):
     """Allowed fields for sorting user lists"""
+
     EMAIL = "email"
     USERNAME = "username"
     CREATED_AT = "created_at"
@@ -33,6 +34,7 @@ class SortField(str, Enum):
 
 class SortOrder(str, Enum):
     """Sort direction for user lists"""
+
     ASC = "asc"
     DESC = "desc"
 
@@ -51,6 +53,7 @@ class PaginationParams:
         >>> params = PaginationParams(page=3, page_size=50)
         >>> params.offset  # 100
     """
+
     page: int = 1
     page_size: int = 100
 
@@ -65,11 +68,17 @@ class PaginationParams:
         if self.page < self.MIN_PAGE:
             raise ValueError(f"page must be >= {self.MIN_PAGE}, got {self.page}")
         if self.page > self.MAX_PAGE:
-            raise ValueError(f"page must be <= {self.MAX_PAGE} (max depth limit), got {self.page}")
+            raise ValueError(
+                f"page must be <= {self.MAX_PAGE} (max depth limit), got {self.page}"
+            )
         if self.page_size < self.MIN_PAGE_SIZE:
-            raise ValueError(f"page_size must be >= {self.MIN_PAGE_SIZE}, got {self.page_size}")
+            raise ValueError(
+                f"page_size must be >= {self.MIN_PAGE_SIZE}, got {self.page_size}"
+            )
         if self.page_size > self.MAX_PAGE_SIZE:
-            raise ValueError(f"page_size must be <= {self.MAX_PAGE_SIZE}, got {self.page_size}")
+            raise ValueError(
+                f"page_size must be <= {self.MAX_PAGE_SIZE}, got {self.page_size}"
+            )
 
     @property
     def offset(self) -> int:
@@ -93,13 +102,18 @@ class SearchFilters:
         >>> filters = SearchFilters(state_filter="active")
         >>> filters.has_filters()  # True
     """
+
     email: str | None = None
     name: str | None = None
     state_filter: str | None = None  # "active" (includes invited) or "inactive"
 
     def has_filters(self) -> bool:
         """Check if any search filters are active"""
-        return self.email is not None or self.name is not None or self.state_filter is not None
+        return (
+            self.email is not None
+            or self.name is not None
+            or self.state_filter is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -114,11 +128,12 @@ class SortOptions:
         >>> sort = SortOptions()  # Default: created_at DESC
         >>> sort = SortOptions(field=SortField.EMAIL, order=SortOrder.ASC)
     """
+
     field: SortField = SortField.CREATED_AT
     order: SortOrder = SortOrder.DESC
 
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -136,6 +151,7 @@ class PaginatedResult(Generic[T]):
         >>> result.has_previous  # False
         >>> result.counts  # {'active': 2828, 'inactive': 3}
     """
+
     items: list[T]
     total_count: int
     page: int
@@ -166,13 +182,12 @@ class UserBase(BaseModel):
     """
 
     email: EmailStr = Field(
-        description="Valid email address",
-        examples=["john.doe@municipality.se"]
+        description="Valid email address", examples=["john.doe@municipality.se"]
     )
     username: Optional[str] = Field(
         default=None,
         description="Unique username (optional, will use email prefix if not provided)",
-        examples=["john.doe"]
+        examples=["john.doe"],
     )
 
     @field_validator("username")
@@ -246,7 +261,7 @@ class UserInDB(InDB, UserAdd):
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(
         default=None,
-        description="Timestamp when user was soft-deleted (null for active users)"
+        description="Timestamp when user was soft-deleted (null for active users)",
     )
 
     @computed_field
@@ -305,25 +320,28 @@ class UserLogin(BaseModel):
 
 class UserAddAdmin(UserBase):
     password: Optional[str] = Field(
-        min_length=7, max_length=100, default=None,
+        min_length=7,
+        max_length=100,
+        default=None,
         description="User password (minimum 7 characters)",
-        examples=["SecurePassword123!"]
+        examples=["SecurePassword123!"],
     )
     quota_limit: Optional[int] = Field(
-        description="Storage limit in bytes (minimum 1000 bytes = 1KB)", 
-        ge=1e3, default=None,
-        examples=[50000000]  # 50MB
+        description="Storage limit in bytes (minimum 1000 bytes = 1KB)",
+        ge=1e3,
+        default=None,
+        examples=[50000000],  # 50MB
     )
 
     roles: list[ModelId] = Field(
-        default=[], 
+        default=[],
         description="List of custom role IDs to assign to the user",
-        examples=[[]]
+        examples=[[]],
     )
     predefined_roles: list[ModelId] = Field(
         default=[],
-        description="List of predefined role IDs to assign to the user", 
-        examples=[[]]
+        description="List of predefined role IDs to assign to the user",
+        examples=[[]],
     )
 
 
@@ -351,36 +369,38 @@ class UserUpdatePublic(BaseModel):
     email: Optional[EmailStr] = Field(
         default=None,
         description="New email address (must be unique within tenant)",
-        examples=["updated.email@municipality.se"]
+        examples=["updated.email@municipality.se"],
     )
     username: Optional[str] = Field(
-        default=None,
-        description="Username cannot be updated after creation"
+        default=None, description="Username cannot be updated after creation"
     )
     password: Optional[str] = Field(
-        default=None, min_length=7, max_length=100,
+        default=None,
+        min_length=7,
+        max_length=100,
         description="New password (minimum 7 characters)",
-        examples=["NewSecurePassword456!"]
+        examples=["NewSecurePassword456!"],
     )
     quota_limit: Optional[int] = Field(
-        description="New storage limit in bytes (minimum 1000 bytes = 1KB)", 
-        ge=1e3, default=None,
-        examples=[100000000]  # 100MB
+        description="New storage limit in bytes (minimum 1000 bytes = 1KB)",
+        ge=1e3,
+        default=None,
+        examples=[100000000],  # 100MB
     )
     roles: Optional[list[ModelId]] = Field(
         default=None,
         description="List of custom role IDs to assign (replaces existing roles)",
-        examples=[[]]
+        examples=[[]],
     )
     predefined_roles: list[ModelId] = Field(
         default=None,
         description="List of predefined role IDs to assign (replaces existing predefined roles)",
-        examples=[[]]
+        examples=[[]],
     )
     state: Optional[UserState] = Field(
         default=None,
         description="User state (invited/active/inactive)",
-        examples=["active"]
+        examples=["active"],
     )
 
 
@@ -393,14 +413,23 @@ class UserSparse(InDB):
         return email.lower()
 
 
-@partial_model
-class PropUserUpdate(BaseModel):
-    predefined_role: ModelId
-    state: UserState
+if TYPE_CHECKING:
 
+    class PropUserUpdate(BaseModel):
+        predefined_role: Optional[ModelId] = None
+        state: Optional[UserState] = None
 
-class PropUserInvite(PropUserUpdate):
-    email: EmailStr
+    class PropUserInvite(PropUserUpdate):
+        email: EmailStr
+else:
+
+    @partial_model
+    class PropUserUpdate(BaseModel):
+        predefined_role: ModelId
+        state: UserState
+
+    class PropUserInvite(PropUserUpdate):
+        email: EmailStr
 
 
 class UserProvision(BaseModel):

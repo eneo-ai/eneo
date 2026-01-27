@@ -1,7 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union, cast
 from uuid import UUID
 
 from pydantic import (
@@ -65,14 +65,17 @@ def partial_model(model: Type[BaseModel]):
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 
-    return create_model(
-        f"Partial{model.__name__}",
-        __base__=model,
-        __module__=model.__module__,
-        **{
-            field_name: make_field_optional(field_info)
-            for field_name, field_info in model.model_fields.items()
-        },
+    return cast(
+        type[BaseModel],
+        cast(Any, create_model)(
+            f"Partial{model.__name__}",
+            __base__=model,
+            __module__=model.__module__,
+            **{
+                field_name: make_field_optional(field_info)
+                for field_name, field_info in model.model_fields.items()
+            },
+        ),
     )
 
 
