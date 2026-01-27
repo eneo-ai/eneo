@@ -115,6 +115,7 @@ class JobRepository:
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
+        twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
         five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
 
         stmt = (
@@ -122,9 +123,13 @@ class JobRepository:
             .where(Jobs.user_id == user_id)
             .where(Jobs.created_at >= one_week_ago)
             .where(
-                # Include running, queued, failed, OR recently completed jobs
+                # Include running, queued, recently failed, OR recently completed jobs
                 sa.or_(
-                    Jobs.status.in_(["in progress", "queued", "failed"]),
+                    Jobs.status.in_(["in progress", "queued"]),
+                    sa.and_(
+                        Jobs.status == "failed",
+                        Jobs.finished_at >= twenty_four_hours_ago
+                    ),
                     sa.and_(
                         Jobs.status == "complete",
                         Jobs.finished_at >= five_minutes_ago
