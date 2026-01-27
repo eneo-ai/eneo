@@ -237,7 +237,7 @@ class UserUpdate(UserBase):
     salt: Optional[str] = None
 
     roles: Optional[list[ModelId]] = None
-    predefined_roles: list[ModelId] = None
+    predefined_roles: Optional[list[ModelId]] = None
 
 
 class UserInDBBase(InDB, UserBase):
@@ -271,7 +271,7 @@ class UserInDB(InDB, UserAdd):
 
     @computed_field
     @property
-    def user_groups_ids(self) -> set[int]:
+    def user_groups_ids(self) -> set[UUID]:
         return {user_group.id for user_group in self.user_groups}
 
     @computed_field
@@ -392,7 +392,7 @@ class UserUpdatePublic(BaseModel):
         description="List of custom role IDs to assign (replaces existing roles)",
         examples=[[]],
     )
-    predefined_roles: list[ModelId] = Field(
+    predefined_roles: Optional[list[ModelId]] = Field(
         default=None,
         description="List of predefined role IDs to assign (replaces existing predefined roles)",
         examples=[[]],
