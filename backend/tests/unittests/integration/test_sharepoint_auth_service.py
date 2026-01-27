@@ -90,7 +90,7 @@ class TestGetCredentials:
     async def test_uses_default_redirect_uri_if_not_configured(
         self, service, mock_tenant_app_service
     ):
-        """Uses server_url + default path if oauth_callback_url not set."""
+        """Uses public_origin + default path if oauth_callback_url not set."""
         tenant_id = uuid4()
 
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
@@ -102,6 +102,21 @@ class TestGetCredentials:
             creds = await service.get_credentials(tenant_id)
 
         assert creds["redirect_uri"] == "https://myapp.example.com/integrations/callback/token/"
+
+    async def test_raises_error_if_no_redirect_uri_configured(
+        self, service, mock_tenant_app_service
+    ):
+        """Raises ValueError if neither oauth_callback_url nor public_origin is set."""
+        tenant_id = uuid4()
+
+        with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.oauth_callback_url = None
+            settings.public_origin = None
+            mock_settings.return_value = settings
+
+            with pytest.raises(ValueError, match="OAUTH_CALLBACK_URL or PUBLIC_ORIGIN"):
+                await service.get_credentials(tenant_id)
 
 
 class TestGenAuthUrl:
