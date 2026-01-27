@@ -115,3 +115,30 @@ jobs:
       - name: Skip message
         if: steps.changed-files.outputs.skip == 'true'
         run: echo "✅ No Python files changed in backend/ - skipping ruff checks"
+
+  backend-type-check:
+    runs-on: ubuntu-latest
+    name: Backend type check (Pyright baseline)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: uv sync --group dev
+
+      - name: Run pyright on changed files
+        working-directory: ./backend
+        run: ./scripts/typecheck_changed.sh

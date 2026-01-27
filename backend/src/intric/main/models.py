@@ -57,7 +57,9 @@ class ResourcePermission(Enum):
 
 # Taken from https://stackoverflow.com/questions/67699451/make-every-field-as-optional-with-pydantic
 def partial_model(model: Type[BaseModel]):
-    def make_field_optional(field: FieldInfo, default: Any = None) -> Tuple[Any, FieldInfo]:
+    def make_field_optional(
+        field: FieldInfo, default: Any = None
+    ) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
         new.annotation = Optional[field.annotation]  # type: ignore
@@ -104,7 +106,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
         return len(self.items)
 
 
-class CursorPaginatedResponse(PaginatedResponse):
+class CursorPaginatedResponse(PaginatedResponse[T], Generic[T]):
     limit: Optional[int] = None
     next_cursor: Optional[Union[datetime, str]] = None
     previous_cursor: Optional[Union[datetime, str]] = None

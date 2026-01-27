@@ -59,7 +59,7 @@ class FileRepository:
         file = await self._delegate.get(id=file_id)
         return File.model_validate(file)
 
-    async def get_list_by_user(self, user_id: UUID) -> File:
+    async def get_list_by_user(self, user_id: UUID) -> list[File]:
         return await self._delegate.filter_by(conditions={Files.user_id: user_id})
 
     async def get_by_checksum(self, checksum: str) -> File:

@@ -84,7 +84,7 @@ class FileService:
             include_transcription=include_transcription,
         )
 
-    async def get_files(self):
+    async def get_files(self) -> list[File]:
         return await self.repo.get_list_by_user(user_id=self.user.id)
 
     async def get_file_infos(self, file_ids: list[UUID]):
@@ -117,7 +117,7 @@ class FileService:
             raise UnauthorizedException()
 
         if file.text is None and file.blob is None:
-            raise NotFoundException(detail="File content not found")
+            raise NotFoundException("File content not found")
 
         return file
 
@@ -130,6 +130,6 @@ class FileService:
         file = await self.repo.get_by_id(file_id=file_id)
 
         if file.text is None and file.blob is None:
-            raise NotFoundException(detail="File content not found")
+            raise NotFoundException("File content not found")
 
         return file

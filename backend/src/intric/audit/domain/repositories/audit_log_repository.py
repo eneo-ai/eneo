@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from collections.abc import AsyncIterator
 from typing import Optional
 from uuid import UUID
 
@@ -18,7 +19,9 @@ class AuditLogRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_by_id(self, audit_log_id: UUID, tenant_id: UUID) -> Optional[AuditLog]:
+    async def get_by_id(
+        self, audit_log_id: UUID, tenant_id: UUID
+    ) -> Optional[AuditLog]:
         """Get audit log by ID with tenant isolation."""
         pass
 
@@ -72,6 +75,54 @@ class AuditLogRepository(ABC):
         Returns:
             Tuple of (logs, total_count)
         """
+        pass
+
+    @abstractmethod
+    def stream_logs_raw(
+        self,
+        tenant_id: UUID,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        batch_size: int = 20000,
+    ) -> AsyncIterator[dict]:
+        """Stream audit logs as raw dicts for export."""
+        pass
+
+    @abstractmethod
+    def stream_user_logs_raw(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        batch_size: int = 20000,
+    ) -> AsyncIterator[dict]:
+        """Stream audit logs for a user (actor or target) as raw dicts."""
+        pass
+
+    @abstractmethod
+    async def count_logs(
+        self,
+        tenant_id: UUID,
+        actor_id: Optional[UUID] = None,
+        action: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> int:
+        """Count logs matching filters for export progress."""
+        pass
+
+    @abstractmethod
+    async def count_user_logs(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> int:
+        """Count user logs matching filters for export progress."""
         pass
 
     @abstractmethod

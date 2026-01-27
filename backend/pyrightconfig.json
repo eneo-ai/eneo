@@ -1,0 +1,24 @@
+{
+  "include": ["src/intric"],
+  "exclude": [
+    ".venv",
+    "**/__pycache__",
+    "**/node_modules",
+    "tests",
+    "alembic/**"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportAttributeAccessIssue": "error",
+  "reportCallIssue": "error",
+  "reportGeneralTypeIssues": "warning",
+  "reportOptionalMemberAccess": "error",
+  "reportArgumentType": "warning",
+  "reportMissingTypeStubs": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportUndefinedVariable": "error"
+}
