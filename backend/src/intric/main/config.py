@@ -232,6 +232,8 @@ class Settings(BaseSettings):
     # May be a proxy URL (e.g., https://m00-https-eneo-test.login.sundsvall.se)
     # or a direct URL (e.g., https://eneo.sundsvall.se)
     # Must match what users see in their browser and what's registered in IdP
+
+    # Used for sharepoint integration so dont remove if you restructure logic for OIDC
     public_origin: Optional[str] = None
 
     # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
