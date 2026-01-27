@@ -15,6 +15,10 @@ from intric.main.config import get_settings
 
 T = TypeVar("T")
 
+# Buffer time (5 minutes) between semaphore TTL and job max age
+# This ensures the flag doesn't expire before watchdog can kill stale jobs
+TTL_MAX_AGE_BUFFER_SECONDS = 300
+
 # Single source of truth for all crawler settings
 # Used by: get_crawler_setting(), get_all_crawler_settings(), tenant.py validator, router
 CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
@@ -82,7 +86,14 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "min": 5,
         "max": 1440,
         "env_attr": "crawl_stale_threshold_minutes",
-        "description": "Minutes without activity before job is considered stale (5 min to 24 hours)",
+        "description": "Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)",
+    },
+    "queued_stale_threshold_minutes": {
+        "type": int,
+        "min": 1,
+        "max": 60,
+        "default": 5,
+        "description": "Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)",
     },
     "crawl_heartbeat_interval_seconds": {
         "type": int,
@@ -116,6 +127,20 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "max": 7200,
         "env_attr": "crawl_job_max_age_seconds",
         "description": "Maximum job retry age before permanent failure (5 min to 2 hours)",
+    },
+    "tenant_worker_semaphore_ttl_seconds": {
+        "type": int,
+        "min": 3600,       # 1 hour minimum
+        "max": 86400,      # 24 hours maximum
+        "env_attr": "tenant_worker_semaphore_ttl_seconds",
+        "description": "Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)",
+    },
+    "crawl_page_batch_size": {
+        "type": int,
+        "min": 10,
+        "max": 1000,
+        "env_attr": "crawl_page_batch_size",
+        "description": "Commit after every N pages during crawl (10 to 1000)",
     },
 }
 

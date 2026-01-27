@@ -39,7 +39,8 @@ function initAssistantEditor(data: {
       integration_knowledge_list: ["id"],
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"],
-      attachments: ["id"]
+      attachments: ["id"],
+      data_retention_days: true
     },
     manageAttachements: "attachments"
   });

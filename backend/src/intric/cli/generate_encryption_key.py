@@ -2,7 +2,7 @@
 
 Usage:
     cd backend
-    poetry run python -m intric.cli.generate_encryption_key
+    uv run python -m intric.cli.generate_encryption_key
 """
 
 from cryptography.fernet import Fernet

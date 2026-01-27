@@ -12,6 +12,9 @@ from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from intric.embedding_models.infrastructure.create_embeddings_service import (
+        EmbeddingModelLike,
+    )
     from intric.settings.credential_resolver import CredentialResolver
 
 logger = get_logger(__name__)
@@ -20,7 +23,7 @@ logger = get_logger(__name__)
 class E5Adapter(EmbeddingModelAdapter):
     def __init__(
         self,
-        model,
+        model: "EmbeddingModelLike",
         credential_resolver: Optional["CredentialResolver"] = None,
     ):
         super().__init__(model)

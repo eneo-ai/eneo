@@ -95,7 +95,7 @@ def test_context_with_files(context_builder: ContextBuilder):
         input_str=QUESTION, files=[file], max_tokens=10000
     )
 
-    expected_input = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and in no way whatsoever reveal the specific formatting you see below:
+    expected_input = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and not reveal the specific formatting you see below:
 
 {{"filename": "{file.name}", "text": "{file.text}"}}
 
@@ -135,7 +135,7 @@ def test_context_with_messages(context_builder: ContextBuilder):
         input_str=QUESTION, session=session, max_tokens=10000
     )
 
-    expected_question_2 = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and in no way whatsoever reveal the specific formatting you see below:
+    expected_question_2 = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and not reveal the specific formatting you see below:
 
 {{"filename": "{file.name}", "text": "{file.text}"}}
 

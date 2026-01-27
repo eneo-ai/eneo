@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import AsyncIterable, Optional
+from typing import AsyncIterable, Optional, Union
 from uuid import UUID
 
 from pydantic import (
@@ -32,6 +32,7 @@ from intric.main.models import (
     InDB,
     MCPToolSetting,
     ModelId,
+    NotProvided,
     ResourcePermissionsMixin,
     partial_model,
 )
@@ -161,6 +162,10 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         default=NOT_PROVIDED,
         description="Metadata for the assistant",
     )
+    icon_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Icon ID referencing an uploaded icon. Set to null to remove.",
+    )
 
 
 class AssistantCreate(AssistantBase):
@@ -222,6 +227,10 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
         description="Metadata for the assistant",
     )
     type: AssistantType
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
+    )
 
 
 class AssistantPublic(InDB, ResourcePermissionsMixin):
@@ -250,6 +259,10 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "as default description in GroupChatAssistantPublic"
         ),
         example="This is a helpful AI assistant",
+    )
+    icon_id: Optional[UUID] = Field(
+        default=None,
+        description="Icon ID referencing an uploaded icon",
     )
     insight_enabled: bool = Field(
         description=(

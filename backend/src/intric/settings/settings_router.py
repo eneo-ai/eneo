@@ -111,3 +111,50 @@ async def update_template_setting(
     """
     service = container.settings_service()
     return await service.update_template_setting(enabled=data.enabled)
+
+
+@router.patch(
+    "/audit-logging",
+    response_model=SettingsPublic,
+    summary="Toggle global audit logging",
+    description="""
+Enable or disable global audit logging for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `audit_logging_enabled` feature flag for your tenant
+- When disabled: No audit logs are created for any action (global kill switch)
+- When enabled: Audit logging resumes with category and action-level filtering
+- This is independent from category/action configuration
+- Change takes effect immediately for all workers
+
+**Example Request:**
+```json
+{
+  "enabled": false
+}
+```
+
+**Example Response:**
+```json
+{
+  "chatbot_widget": {},
+  "audit_logging_enabled": false,
+  "using_templates": true
+}
+```
+    """,
+)
+async def update_audit_logging_setting(
+    data: TemplateSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """
+    Toggle global audit logging for tenant.
+
+    Enables or disables all audit logging for the entire tenant (global kill switch).
+    Only admin users can modify this setting.
+    """
+    service = container.settings_service()
+    return await service.update_audit_logging_setting(enabled=data.enabled)

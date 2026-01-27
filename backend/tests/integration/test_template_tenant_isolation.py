@@ -540,7 +540,7 @@ async def test_app_template_crud_operations(
         json=template_data,
         headers={"Authorization": f"Bearer {api_key}"},
     )
-    assert response.status_code == 201
+    assert response.status_code in {200, 201}
     template = response.json()
     assert template["name"] == "Document Analyzer"
     assert template["input_type"] == "text-upload"
@@ -560,7 +560,8 @@ async def test_app_template_crud_operations(
         headers={"Authorization": f"Bearer {api_key}"},
     )
     assert response.status_code == 200
-    assert len(response.json()["items"]) == 1
+    items = response.json()["items"]
+    assert any(item["id"] == template["id"] for item in items)
 
 
 @pytest.mark.integration

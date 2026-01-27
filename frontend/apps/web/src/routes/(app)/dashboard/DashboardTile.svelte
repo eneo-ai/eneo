@@ -1,17 +1,18 @@
 <script lang="ts">
   import type { AssistantSparse } from "@intric/intric-js";
   import { dynamicColour } from "$lib/core/colours";
+  import { localizeHref } from "$lib/paraglide/runtime";
   export let assistant: AssistantSparse;
 </script>
 
 <a
   aria-label={assistant.name}
-  href="/dashboard/{assistant.id}?tab=chat"
+  href={localizeHref(`/dashboard/${assistant.id}?tab=chat`)}
   {...dynamicColour({ basedOn: assistant.id })}
   class="group border-dynamic-default bg-dynamic-dimmer text-dynamic-stronger hover:bg-dynamic-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
 >
   <h2 class="line-clamp-2 pt-1 font-mono text-sm">
-    {assistant.name}
+    Assistant: {assistant.name}
   </h2>
 
   <span

@@ -29,13 +29,18 @@ MIN_PERCENTAGE_KNOWLEDGE = (
     0.8  # Strive towards a minimum of 80% of the context as knowledge
 )
 
+# Cache tiktoken encoder to avoid expensive re-instantiation on every call
+_TIKTOKEN_ENCODING = None
+
 
 def count_tokens(text: str):
+    global _TIKTOKEN_ENCODING
     # ensure we're always passing a string to the encoder
     if text is None:
         return 0
-    encoding = tiktoken.get_encoding("cl100k_base")
-    return len(encoding.encode(text))
+    if _TIKTOKEN_ENCODING is None:
+        _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+    return len(_TIKTOKEN_ENCODING.encode(text))
 
 
 def _build_files_string(files: list[File]):
@@ -47,7 +52,7 @@ def _build_files_string(files: list[File]):
         return (
             "Below are files uploaded by the user. "
             "You should act like you can see the files themselves, "
-            "and in no way whatsoever reveal the specific formatting "
+            "and not reveal the specific formatting "
             "you see below:"
             f"\n\n{files_string}"
         )

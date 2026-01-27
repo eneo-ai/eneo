@@ -10,6 +10,7 @@ from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.files_table import Files
+from intric.database.tables.icons_table import Icons
 from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.mcp_server_table import MCPServers
 from intric.database.tables.spaces_table import Spaces
@@ -46,6 +47,9 @@ class Assistants(BasePublic):
     )
     template_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(AssistantTemplates.id, ondelete="SET NULL")
+    )
+    icon_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
     )
 
     # relationships

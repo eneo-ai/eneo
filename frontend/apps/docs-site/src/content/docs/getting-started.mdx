@@ -1,0 +1,162 @@
+# Getting Started
+
+Welcome to Eneo! This guide will help you get started whether you're a municipal organization evaluating the platform or a developer looking to contribute.
+
+## Choose Your Path
+
+### 🏛️ For Municipal Organizations
+
+If you're a public sector organization interested in deploying Eneo:
+
+#### 1. Learn & Evaluate
+- Explore the [key features](/) and understand what Eneo can do
+- Review our [audit logging](/guides/audit-logging) capabilities
+- Check out the [deployment guide](/guides/deployment) for infrastructure requirements
+- Contact us at digitalisering@sundsvall.se for guidance from other municipalities
+
+#### 2. Test Drive
+Set up a development instance to explore the platform:
+
+```bash
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo && code .
+# Click "Reopen in Container" when prompted in VS Code
+```
+
+Access your instance at http://localhost:3000 with default credentials:
+- Email: `user@example.com`
+- Password: `Password1!`
+
+#### 3. Deploy to Production
+When you're ready to deploy:
+
+1. Review the [deployment guide](/guides/deployment)
+2. Configure [authentication](/guides/authentication) with your identity provider
+3. Set up your [AI providers](/guides/ai-providers)
+4. Review audit logging practices in our [audit logging guide](/guides/audit-logging)
+
+---
+
+### 💻 For Developers
+
+Contributing to Eneo? Here's how to get started:
+
+#### Prerequisites
+- Docker Desktop with DevContainers support
+- VS Code with Dev Containers extension
+- Git
+
+#### Quick Setup (DevContainer - Recommended)
+
+The fastest way to get started:
+
+```bash
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo
+code .
+# Click "Reopen in Container" when prompted
+```
+
+The DevContainer includes:
+- Pre-configured Python environment
+- Node.js and pnpm
+- PostgreSQL with pgvector
+- Redis
+- All necessary dependencies
+
+#### Manual Setup
+
+If you prefer manual setup or need more control:
+
+**Requirements:**
+- Python ≥ 3.10
+- Node.js ≥ v20
+- pnpm 8.9.0
+- Docker (for PostgreSQL and Redis)
+
+```bash
+# Clone the repository
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo
+
+# Backend setup
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -e ".[dev]"
+
+# Frontend setup
+cd ../frontend
+pnpm install
+
+# Start services (requires 3 terminals)
+# Terminal 1: Backend
+cd backend && uvicorn app.main:app --reload --port 8123
+
+# Terminal 2: Frontend
+cd frontend/apps/client && pnpm dev
+
+# Terminal 3: Worker
+cd backend && python -m app.worker
+```
+
+#### Access Your Development Environment
+- **Platform**: http://localhost:3000
+- **API Documentation**: http://localhost:8123/docs
+- **Default Login**: `user@example.com` / `Password1!`
+
+#### Next Steps for Developers
+
+1. **Read the Documentation**
+   - [Architecture Overview](/docs/architecture)
+   - [Contributing Guide](https://github.com/eneo-ai/eneo/blob/main/docs/CONTRIBUTING.md)
+   - [Code Standards](https://github.com/eneo-ai/eneo/blob/main/docs/CONTRIBUTING.md#coding-standards)
+
+2. **Explore the Codebase**
+   - Backend: FastAPI with Python 3.11+
+   - Frontend: SvelteKit with TypeScript
+   - Database: PostgreSQL with pgvector
+   - Cache/Queue: Redis with ARQ
+
+3. **Make Your First Contribution**
+   - Find issues labeled "good first issue" on [GitHub](https://github.com/eneo-ai/eneo/issues)
+   - Fork the repository
+   - Create a feature branch
+   - Submit a pull request
+
+---
+
+## Common Issues
+
+### DevContainer Issues
+If the DevContainer fails to start:
+1. Ensure Docker Desktop is running
+2. Check you have enough disk space (5GB+ recommended)
+3. Try rebuilding the container: `Dev Containers: Rebuild Container`
+
+### Database Connection Issues
+If you can't connect to the database:
+1. Ensure PostgreSQL is running
+2. Check environment variables in `.env` files
+3. Verify port 5432 is not in use by another service
+
+### File Upload Issues
+File uploads require the worker service to be running:
+```bash
+cd backend && python -m app.worker
+```
+
+## Get Help
+
+- **Documentation**: [GitHub docs folder](https://github.com/eneo-ai/eneo/tree/main/docs)
+- **Issues**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
+- **Email**: digitalisering@sundsvall.se (public sector organizations)
+- **Forum**: [forum.eneo.ai](https://forum.eneo.ai) (requires government/municipality email)
+
+## What's Next?
+
+- [Configure authentication](/guides/authentication) with OIDC
+- [Set up AI providers](/guides/ai-providers)
+- [Deploy to production](/guides/deployment)
+- [Learn about architecture](/docs/architecture)

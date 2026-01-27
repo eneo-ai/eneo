@@ -4,8 +4,8 @@
 # Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
 #
 # BEFORE DEPLOYING:
-#   1. Replace "your-email@domain.com" (line 23) with your email
-#   2. Replace "your-domain.com" (lines 47, 50, 73, 76) with your domain
+#   1. Replace "your-email@domain.com" (line 38) with your email
+#   2. Replace "your-domain.com" (lines 65, 68, 91, 94) with your domain
 #   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
 #   4. Create external network: docker network create proxy_tier
 #
@@ -13,10 +13,21 @@
 #   This is a reference configuration. Customize for your organization's
 #   security requirements, network topology, and infrastructure needs.
 #
+# STARTUP ORDER (handled automatically via healthchecks):
+#   1. db + redis start and become healthy
+#   2. db-init runs migrations and creates default user
+#   3. backend + worker start (only after db-init succeeds)
+#   4. frontend starts
+#
+# VOLUME MANAGEMENT:
+#   The "name: eneo" ensures consistent volume names (eneo_postgres_data, etc.)
+#   regardless of which directory you run commands from.
+#   To completely reset: docker compose down -v && docker compose up -d
+#
 # Full documentation: ../DEPLOYMENT.md
 # ============================================================================
 
-version: '3.8'
+name: eneo
 
 services:
   traefik:
@@ -41,6 +52,9 @@ services:
     networks:
       - proxy_tier
     labels:
+      # IMPORTANT: traefik.enable=true is required for Traefik to read these labels
+      # (because exposedbydefault=false is set above)
+      - "traefik.enable=true"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
@@ -75,7 +89,7 @@ services:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
-      - eneo_temp_files:/tmp
+      - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
     networks:
       - proxy_tier
     labels:
@@ -91,9 +105,12 @@ services:
       - "traefik.http.services.eneo-backend-svc.loadbalancer.server.port=8000"
       - "traefik.http.routers.eneo-backend-secure.priority=10"
     depends_on:
-      - db
-      - redis
-      - db-init
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
 
   worker:
     # Background task processor (crawls, uploads, integrations)
@@ -108,7 +125,7 @@ services:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
-      - eneo_temp_files:/tmp
+      - eneo_temp_files:/tmp  # Shared with backend for audit log exports (/tmp/exports)
     networks:
       - proxy_tier
     depends_on:
@@ -124,6 +141,11 @@ services:
       - eneo_postgres_data:/var/lib/postgresql/data
     networks:
       - proxy_tier
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -133,8 +155,15 @@ services:
       - eneo_redis_data:/data
     networks:
       - proxy_tier
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   db-init:
+    # Runs database migrations and creates default tenant/user on first startup
+    # Only runs once - exits after completion (restart: "no")
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_db_init
     command: ["python", "init_db.py"]
@@ -143,7 +172,11 @@ services:
     networks:
       - proxy_tier
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
 
 networks:
   proxy_tier:
@@ -154,4 +187,4 @@ volumes:
   eneo_redis_data:
   eneo_backend_data:
   traefik_letsencrypt:
-  eneo_temp_files:
+  eneo_temp_files:  # Also stores audit log exports (/tmp/exports, auto-cleaned after 24h)

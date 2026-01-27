@@ -2,6 +2,7 @@
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { Button } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   const { data } = $props();
 </script>
@@ -28,8 +29,8 @@
     <div class="h-16"></div>
 
     <div class="flex w-full justify-between">
-      <Button href="/logout" variant="outlined">{m.logout()}</Button>
-      <Button href="/" variant="primary">{m.retry()}</Button>
+      <Button href={localizeHref("/logout")} variant="outlined">{m.logout()}</Button>
+      <Button href={localizeHref("/")} variant="primary">{m.retry()}</Button>
     </div>
   </div>
 </div>

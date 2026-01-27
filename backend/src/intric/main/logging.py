@@ -5,8 +5,6 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from rich.logging import RichHandler
-
 from intric.main.config import get_loglevel
 from intric.main.request_context import get_request_context
 
@@ -41,12 +39,21 @@ class ContextJSONFormatter(logging.Formatter):
         "message",
     }
 
-    DEFAULT_KEYS = ("correlation_id", "tenant_slug", "user_email", "error_code", "status_code")
+    DEFAULT_KEYS = (
+        "correlation_id",
+        "tenant_slug",
+        "user_email",
+        "error_code",
+        "status_code",
+    )
 
-    def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - formatting logic
+    def format(
+        self, record: logging.LogRecord
+    ) -> str:  # pragma: no cover - formatting logic
         log: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc)
-            .isoformat(timespec="milliseconds"),
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
@@ -78,6 +85,7 @@ class ContextJSONFormatter(logging.Formatter):
 
         return json.dumps(log, default=str)
 
+
 # Disable loggers from other packages if loglevel is INFO or above
 for _logger in logging.root.manager.loggerDict:
     if get_loglevel() <= logging.DEBUG:
@@ -102,7 +110,7 @@ for logger_name in sqlalchemy_loggers:
 
 # noqa Copied from https://dev.to/taikedz/simple-python-logging-and-a-digression-on-dependencies-trust-and-copypasting-code-229o
 class SimpleLogger(logging.Logger):
-    FORMAT_STRING = '%(asctime)s | %(levelname)s | %(name)s : %(message)s'
+    FORMAT_STRING = "%(asctime)s | %(levelname)s | %(name)s : %(message)s"
     ERROR = logging.ERROR
     WARN = logging.WARN
     INFO = logging.INFO
@@ -135,14 +143,7 @@ class SimpleLogger(logging.Logger):
             self.addHandler(handler)
 
         if console is True:
-            if JSON_LOGS_ENABLED:
-                _add_stream(logging.StreamHandler, stream=sys.stdout)
-            else:
-                # Use Rich for prettier console output when not using JSON logs
-                rich_handler = RichHandler(rich_tracebacks=True, markup=True, show_path=True)
-                rich_handler.setLevel(level)
-                # RichHandler has its own formatting, so only use custom formatter for JSON
-                self.addHandler(rich_handler)
+            _add_stream(logging.StreamHandler, stream=sys.stdout)
 
         for filepath in files:
             _add_stream(logging.FileHandler, filename=filepath)

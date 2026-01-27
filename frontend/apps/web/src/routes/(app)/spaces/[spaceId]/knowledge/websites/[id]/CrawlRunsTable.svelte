@@ -17,19 +17,42 @@
   // Set dayjs locale based on paraglide locale
   $: dayjs.locale(getLocale());
 
+  const SKIPPED_PREFIX = "skipped";
+
+  function isSkipped(crawl: CrawlRun): boolean {
+    const reason = (crawl.result_location ?? "").toLowerCase();
+    return crawl.status?.toLowerCase() === "failed" && reason.startsWith(SKIPPED_PREFIX);
+  }
+
+  function hasWarnings(crawl: CrawlRun): boolean {
+    return (
+      crawl.status?.toLowerCase() === "complete" &&
+      ((crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0)
+    );
+  }
+
   // Map crawl status to translated strings
-  function translateStatus(status: string): string {
-    switch (status?.toLowerCase()) {
+  function translateStatus(crawl: CrawlRun): string {
+    if (!crawl?.status) {
+      return m.no_status_found();
+    }
+
+    if (isSkipped(crawl)) {
+      return m.crawl_skipped();
+    }
+
+    switch (crawl.status?.toLowerCase()) {
       case "complete":
-        return m.complete();
+        return hasWarnings(crawl) ? m.crawl_completed_with_warnings() : m.complete();
       case "in progress":
         return m.in_progress();
       case "queued":
         return m.queued();
       case "failed":
+      case "not found":
         return m.failed();
       default:
-        return status ?? m.no_status_found();
+        return crawl.status ?? m.no_status_found();
     }
   }
 
@@ -49,13 +72,20 @@
     }),
 
     table.column({
-      accessor: "status",
+      accessor: (item) => item,
       header: m.status(),
       cell: (item) => {
         return createRender(Table.FormattedCell, {
           value: translateStatus(item.value),
-          class: "capitalize"
+          class: ""
         });
+      },
+      plugins: {
+        sort: {
+          getSortValue(value) {
+            return value.status ?? "";
+          }
+        }
       }
     }),
 

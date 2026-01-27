@@ -302,8 +302,13 @@ async def test_credential_decryption_failure_raises_clear_error(
                 )
                 await session.execute(stmt)
 
-    # Refresh tenant object
-    tenant = await repo.get(tenant_id)
+    # Refresh tenant object using a new session to avoid stale identity map
+    from intric.database.database import sessionmanager
+
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            fresh_repo = TenantRepository(session)
+            tenant = await fresh_repo.get(tenant_id)
 
     # Attempt to decrypt
     resolver = CredentialResolver(

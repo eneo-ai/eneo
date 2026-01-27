@@ -1,0 +1,623 @@
+---
+title: Eneo - Democratic AI Platform
+---
+
+import { Callout, Tabs, Steps } from 'nextra/components'
+
+{/* ═══════════════════════════════════════════════════════════════════════════
+    HERO SECTION - Bold statement with ambient glow
+    ═══════════════════════════════════════════════════════════════════════════ */}
+
+<div className="relative overflow-hidden">
+  {/* Ambient background glow */}
+  <div className="pointer-events-none absolute inset-0 -z-10">
+    <div className="absolute left-1/4 top-0 h-96 w-96 rounded-full bg-gradient-to-r from-teal-500/20 via-cyan-500/15 to-blue-500/20 blur-3xl dark:from-teal-500/10 dark:via-cyan-500/8 dark:to-blue-500/10" />
+    <div className="absolute right-1/4 top-20 h-72 w-72 rounded-full bg-gradient-to-l from-amber-500/15 via-orange-500/10 to-rose-500/15 blur-3xl dark:from-amber-500/8 dark:via-orange-500/5 dark:to-rose-500/8" />
+  </div>
+
+  <div className="mx-auto max-w-4xl py-12 text-center">
+    {/* Badge - Premium glass effect with gradient border */}
+    <div className="group mb-6 inline-flex items-center gap-2.5 rounded-full border border-teal-500/30 bg-gradient-to-r from-white/80 via-teal-50/50 to-white/80 px-5 py-2.5 text-sm font-semibold shadow-lg shadow-teal-500/10 backdrop-blur-md transition-all duration-300 hover:border-teal-500/50 hover:shadow-teal-500/20 dark:border-teal-400/30 dark:from-slate-900/90 dark:via-teal-950/50 dark:to-slate-900/90 dark:shadow-teal-400/5 dark:hover:border-teal-400/50">
+      <span className="relative flex h-2.5 w-2.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75"></span>
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500"></span>
+      </span>
+      <span className="bg-gradient-to-r from-teal-700 via-cyan-600 to-teal-700 bg-clip-text text-transparent dark:from-teal-300 dark:via-cyan-300 dark:to-teal-300">Open Source AI Platform</span>
+    </div>
+
+    {/* Main heading with gradient */}
+    <h1 className="text-5xl font-bold tracking-tight md:text-6xl">
+      <span className="bg-gradient-to-r from-slate-900 via-slate-700 to-slate-900 bg-clip-text text-transparent dark:from-white dark:via-slate-200 dark:to-white">{"Democratic AI for the"}</span>
+      <br />
+      <span className="bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 bg-clip-text text-transparent dark:from-teal-400 dark:via-cyan-400 dark:to-blue-400">{"Public Sector"}</span>
+    </h1>
+
+    <div className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 dark:text-slate-400">
+      {"Deploy governed AI assistants with complete data sovereignty, audit trails, and compliance built-in. Your data never leaves your infrastructure."}
+    </div>
+
+    {/* CTA Buttons */}
+    <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+      <a href="/docs/getting-started" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 px-6 py-3 font-semibold text-white shadow-lg shadow-teal-500/25 transition-all hover:shadow-xl hover:shadow-teal-500/30 dark:shadow-teal-500/15 dark:hover:shadow-teal-500/20">
+        <span className="relative z-10">Get Started</span>
+        <svg className="relative z-10 h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+        <div className="absolute inset-0 bg-gradient-to-r from-teal-500 to-cyan-500 opacity-0 transition-opacity group-hover:opacity-100" />
+      </a>
+      <a href="/docs/architecture" className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-6 py-3 font-semibold text-slate-700 backdrop-blur-sm transition-all hover:border-slate-400 hover:bg-white hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-900">
+        View Architecture
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>
+
+{/* Hero Screenshot with floating card effect */}
+<div className="relative mx-auto my-8 max-w-5xl px-4">
+  <div className="absolute inset-0 bg-gradient-to-r from-teal-500/20 via-transparent to-blue-500/20 blur-3xl dark:from-teal-500/10 dark:to-blue-500/10" />
+  <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/50 p-2 shadow-2xl shadow-slate-900/10 backdrop-blur-sm dark:border-slate-700/80 dark:bg-slate-900/50 dark:shadow-black/20">
+
+![Eneo AI Assistant Interface](/eneo_startpage.png)
+
+  </div>
+</div>
+
+---
+
+{/* ═══════════════════════════════════════════════════════════════════════════
+    GET STARTED - Three paths with custom card design
+    ═══════════════════════════════════════════════════════════════════════════ */}
+
+<div className="mx-auto max-w-6xl py-8">
+  <div className="mb-8 text-center">
+    <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+      Choose Your Path
+    </h2>
+    <div className="mt-2 text-slate-600 dark:text-slate-400">
+      {"From quick evaluation to production deployment"}
+    </div>
+  </div>
+
+  <div className="grid gap-6 md:grid-cols-3">
+    {/* Card 1: Try Locally */}
+    <a href="/docs/getting-started" className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-teal-500/10 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/80">
+      {/* Gradient border effect on hover */}
+      <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, transparent 50%, rgba(6,182,212,0.15) 100%)'}} />
+
+      {/* Icon */}
+      <div className="mb-4 inline-flex rounded-xl bg-gradient-to-br from-teal-500 to-cyan-500 p-3 shadow-lg shadow-teal-500/20">
+        <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
+        </svg>
+      </div>
+
+      <h3 className="text-xl font-semibold text-slate-900 dark:text-white">
+        Try Locally
+      </h3>
+      <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+        {"Run Eneo on your machine in minutes with Docker. Perfect for evaluation and testing."}
+      </div>
+
+      <div className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-teal-600 dark:text-teal-400">
+        5 minute setup
+        <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+        </svg>
+      </div>
+    </a>
+
+    {/* Card 2: Production - Featured */}
+    <a href="/guides/deployment" className="group relative overflow-hidden rounded-2xl border-2 border-teal-500/50 bg-gradient-to-b from-slate-900 to-slate-800 p-6 shadow-lg shadow-teal-500/10 transition-all duration-300 hover:-translate-y-1 hover:border-teal-400 hover:shadow-xl hover:shadow-teal-500/20 dark:from-slate-950 dark:to-slate-900">
+      {/* Featured badge */}
+      <div className="absolute right-4 top-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2.5 py-0.5 text-xs font-semibold text-white shadow-lg shadow-amber-500/30">
+        <span>Recommended</span>
+      </div>
+
+      {/* Ambient glow */}
+      <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-500/20 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-12 -left-12 h-40 w-40 rounded-full bg-cyan-500/20 blur-3xl" />
+
+      {/* Icon */}
+      <div className="relative mb-4 inline-flex rounded-xl bg-gradient-to-br from-teal-400 to-cyan-400 p-3 shadow-lg shadow-teal-400/30">
+        <svg className="h-6 w-6 text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" />
+        </svg>
+      </div>
+
+      <h3 className="relative text-xl font-semibold text-white">
+        Deploy to Production
+      </h3>
+      <div className="relative mt-2 text-sm leading-relaxed text-slate-300">
+        {"Docker Compose with SSL, authentication, reverse proxy, and full AI provider setup."}
+      </div>
+
+      <div className="relative mt-4 inline-flex items-center gap-1 text-sm font-medium text-teal-400">
+        Complete guide
+        <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+        </svg>
+      </div>
+    </a>
+
+    {/* Card 3: Architecture */}
+    <a href="/docs/architecture" className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/80">
+      <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, transparent 50%, rgba(139,92,246,0.15) 100%)'}} />
+
+      {/* Icon */}
+      <div className="mb-4 inline-flex rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 p-3 shadow-lg shadow-blue-500/20">
+        <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0l4.179 2.25L12 21.75 2.25 16.5l4.179-2.25m11.142 0l-5.571 3-5.571-3" />
+        </svg>
+      </div>
+
+      <h3 className="text-xl font-semibold text-slate-900 dark:text-white">
+        Architecture
+      </h3>
+      <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+        {"Technical deep-dive into services, data flow, security, and integration points."}
+      </div>
+
+      <div className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-blue-600 dark:text-blue-400">
+        Explore system design
+        <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+        </svg>
+      </div>
+    </a>
+  </div>
+</div>
+
+---
+
+## Quick Start
+
+Get Eneo running locally in under 5 minutes.
+
+<Tabs items={['Docker Compose', 'DevContainer']}>
+  <Tabs.Tab>
+    ```bash
+    # Clone the repository
+    git clone https://github.com/eneo-ai/eneo.git
+    cd eneo/docs/deployment/
+
+    # Copy environment templates
+    cp env_backend.template env_backend.env
+    cp env_frontend.template env_frontend.env
+    cp env_db.template env_db.env
+
+    # Add your AI provider key (e.g., OpenAI)
+    echo "OPENAI_API_KEY=sk-..." >> env_backend.env
+
+    # Create network and start
+    docker network create proxy_tier
+    docker compose up -d
+    ```
+
+    **Access:** https://localhost (or your configured domain)
+
+    **Default login:** `user@example.com` / `Password1!`
+  </Tabs.Tab>
+  <Tabs.Tab>
+    ```bash
+    # Clone the repository
+    git clone https://github.com/eneo-ai/eneo.git
+    cd eneo
+
+    # Open in VS Code
+    code .
+    # Click "Reopen in Container" when prompted
+    ```
+
+    The DevContainer includes all dependencies pre-configured for development.
+
+    **Access:**
+    - Platform: http://localhost:3000
+    - API Docs: http://localhost:8000/docs
+  </Tabs.Tab>
+</Tabs>
+
+<Callout type="info">
+  **Next steps after install:**
+  Configure your AI provider in Admin → Models, then create your first Space and Assistant.
+  [Full deployment guide →](/guides/deployment)
+</Callout>
+
+---
+
+{/* ═══════════════════════════════════════════════════════════════════════════
+    COLLABORATIVE SPACES - Screenshot + Features
+    ═══════════════════════════════════════════════════════════════════════════ */}
+
+<div className="relative py-8">
+  {/* Section background */}
+  <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-slate-50 via-white to-white dark:from-slate-950 dark:via-slate-950 dark:to-slate-950" />
+
+  <div className="mx-auto max-w-6xl">
+    <div className="mb-8 text-center">
+      <div className="group mb-4 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-gradient-to-r from-white/80 via-blue-50/50 to-white/80 px-4 py-1.5 text-xs font-semibold shadow-md shadow-blue-500/10 backdrop-blur-sm transition-all duration-300 hover:border-blue-500/50 hover:shadow-blue-500/20 dark:border-blue-400/30 dark:from-slate-900/90 dark:via-blue-950/50 dark:to-slate-900/90 dark:shadow-blue-400/5">
+        <svg className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+        </svg>
+        <span className="bg-gradient-to-r from-blue-700 via-indigo-600 to-blue-700 bg-clip-text text-transparent dark:from-blue-300 dark:via-indigo-300 dark:to-blue-300">Team Collaboration</span>
+      </div>
+      <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+        Collaborative Spaces
+      </h2>
+      <div className="mt-2 text-slate-600 dark:text-slate-400">
+        {"Organize AI assistants and knowledge bases into team workspaces"}
+      </div>
+    </div>
+
+    {/* Screenshot */}
+    <div className="relative mx-auto mb-10 max-w-4xl px-4">
+      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-transparent to-violet-500/10 blur-3xl" />
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/50 p-2 shadow-xl dark:border-slate-700/80 dark:bg-slate-900/50">
+
+![Eneo Spaces Interface](/eneo_space.png)
+
+      </div>
+    </div>
+
+    {/* Feature Grid */}
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="rounded-xl border border-slate-200 bg-white/80 p-5 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="mb-3 inline-flex rounded-lg bg-teal-100 p-2 dark:bg-teal-900/30">
+          <svg className="h-5 w-5 text-teal-600 dark:text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+          </svg>
+        </div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Create Spaces"}</h4>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Isolate projects per team or department"}</div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white/80 p-5 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="mb-3 inline-flex rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30">
+          <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+        </div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Add Knowledge"}</h4>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Upload PDFs, Word, Excel or crawl websites"}</div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white/80 p-5 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="mb-3 inline-flex rounded-lg bg-violet-100 p-2 dark:bg-violet-900/30">
+          <svg className="h-5 w-5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+          </svg>
+        </div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Build Assistants"}</h4>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Custom prompts, models, and knowledge bases"}</div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white/80 p-5 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="mb-3 inline-flex rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30">
+          <svg className="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+          </svg>
+        </div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Secure Access"}</h4>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Role-based permissions with audit trails"}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+---
+
+{/* ═══════════════════════════════════════════════════════════════════════════
+    WHY ENEO - Three pillars with distinctive cards
+    ═══════════════════════════════════════════════════════════════════════════ */}
+
+<div className="mx-auto max-w-6xl py-8">
+  <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div>
+      <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+        Why Eneo?
+      </h2>
+      <div className="mt-2 text-slate-600 dark:text-slate-400">
+        {"Built for real-world, regulated environments"}
+      </div>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      <span className="rounded-full border border-emerald-500/30 bg-gradient-to-r from-emerald-50 to-teal-50 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm dark:border-emerald-500/30 dark:from-emerald-950/50 dark:to-teal-950/50 dark:text-emerald-400">GDPR Ready</span>
+      <span className="rounded-full border border-blue-500/30 bg-gradient-to-r from-blue-50 to-indigo-50 px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm dark:border-blue-500/30 dark:from-blue-950/50 dark:to-indigo-950/50 dark:text-blue-400">EU AI Act</span>
+      <span className="rounded-full border border-violet-500/30 bg-gradient-to-r from-violet-50 to-purple-50 px-3 py-1 text-xs font-semibold text-violet-700 shadow-sm dark:border-violet-500/30 dark:from-violet-950/50 dark:to-purple-950/50 dark:text-violet-400">On-Prem</span>
+    </div>
+  </div>
+
+  <div className="grid gap-6 md:grid-cols-3">
+    {/* Data Sovereignty */}
+    <a href="/guides/audit-logging" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-teal-300 hover:shadow-xl hover:shadow-teal-500/10 dark:border-slate-800 dark:hover:border-teal-700">
+      <div className="absolute inset-0 bg-gradient-to-br from-teal-50 to-white opacity-0 transition-opacity group-hover:opacity-100 dark:from-teal-950/30 dark:to-slate-900" />
+
+      <div className="relative">
+        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-emerald-500 shadow-lg shadow-teal-500/20">
+          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+          </svg>
+        </div>
+
+        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">
+          {"Data Sovereignty"}
+        </h3>
+        <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+          {"Your data never leaves your infrastructure. Self-host on-premises or in your approved cloud environment."}
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 text-sm font-medium text-teal-600 dark:text-teal-400">
+          Audit Logging Guide
+          <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    {/* Model Agnostic */}
+    <a href="/guides/ai-providers" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800 dark:hover:border-blue-700">
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-white opacity-0 transition-opacity group-hover:opacity-100 dark:from-blue-950/30 dark:to-slate-900" />
+
+      <div className="relative">
+        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 shadow-lg shadow-blue-500/20">
+          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+          </svg>
+        </div>
+
+        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">
+          {"Model Agnostic"}
+        </h3>
+        <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+          {"Use OpenAI, Anthropic, Azure, Google, Mistral, or local models. Switch providers without re-architecting."}
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400">
+          AI Provider Setup
+          <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    {/* Public Sector Ready */}
+    <a href="/guides/audit-logging" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-500/10 dark:border-slate-800 dark:hover:border-violet-700">
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-50 to-white opacity-0 transition-opacity group-hover:opacity-100 dark:from-violet-950/30 dark:to-slate-900" />
+
+      <div className="relative">
+        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 shadow-lg shadow-violet-500/20">
+          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" />
+          </svg>
+        </div>
+
+        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">
+          {"Public Sector Ready"}
+        </h3>
+        <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+          {"Built for government: GDPR compliance, EU AI Act support, audit logging, and security classifications."}
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 text-sm font-medium text-violet-600 dark:text-violet-400">
+          Audit Logging Guide
+          <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+---
+
+{/* ═══════════════════════════════════════════════════════════════════════════
+    POPULAR GUIDES - Featured + Grid Layout
+    ═══════════════════════════════════════════════════════════════════════════ */}
+
+<div className="mx-auto max-w-6xl py-8">
+  <div className="mb-8 flex items-center justify-between">
+    <div>
+      <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+        Popular Guides
+      </h2>
+      <div className="mt-2 text-slate-600 dark:text-slate-400">
+        {"Common deployment and integration paths"}
+      </div>
+    </div>
+    <a href="/guides" className="hidden text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white md:inline-flex md:items-center md:gap-1">
+      View all guides
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+      </svg>
+    </a>
+  </div>
+
+  <div className="grid gap-6 lg:grid-cols-12">
+    {/* Featured Guide - Production Deployment */}
+    <a href="/guides/deployment" className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 shadow-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl lg:col-span-5">
+      {/* Ambient effects */}
+      <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-gradient-to-br from-teal-500/30 to-cyan-500/30 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 blur-3xl" />
+
+      <div className="relative">
+        <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
+          <svg className="h-3.5 w-3.5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401z" clipRule="evenodd" />
+          </svg>
+          <span className="bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-300 bg-clip-text text-transparent">Most Popular</span>
+        </div>
+
+        <h3 className="text-2xl font-bold text-white">
+          Production Deployment
+        </h3>
+        <div className="mt-3 text-sm leading-relaxed text-slate-300">
+          {"Complete guide to deploying Eneo with Docker Compose, SSL certificates, Traefik reverse proxy, backups, and version pinning."}
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <span className="rounded-full border border-teal-400/30 bg-teal-500/10 px-2.5 py-1 text-xs font-medium text-teal-300">Docker</span>
+          <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-2.5 py-1 text-xs font-medium text-cyan-300">SSL/TLS</span>
+          <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-300">Traefik</span>
+          <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-300">Backups</span>
+        </div>
+
+        <div className="mt-6 inline-flex items-center gap-2 font-medium text-teal-400 transition-colors group-hover:text-teal-300">
+          Read the guide
+          <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    {/* Other Guides Grid */}
+    <div className="grid gap-4 lg:col-span-7 md:grid-cols-2">
+      {/* AI Provider Setup */}
+      <a href="/guides/ai-providers" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-teal-700">
+        <div className="mb-3 inline-flex rounded-lg bg-gradient-to-br from-amber-100 to-orange-100 p-2.5 dark:from-amber-900/30 dark:to-orange-900/30">
+          <svg className="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+          </svg>
+        </div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"AI Provider Setup"}</h4>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Configure OpenAI, Anthropic, Azure, or self-hosted models"}</div>
+        <div className="mt-3 flex items-center gap-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+          Configure
+          <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </a>
+
+      {/* Enterprise SSO */}
+      <a href="/guides/oidc-federation/multi-tenant" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700">
+        <div className="mb-3 inline-flex rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 p-2.5 dark:from-blue-900/30 dark:to-indigo-900/30">
+          <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+          </svg>
+        </div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Enterprise SSO (OIDC)"}</h4>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Integrate with Entra ID, MobilityGuard, or other IdPs"}</div>
+        <div className="mt-3 flex items-center gap-1 text-sm font-medium text-blue-600 dark:text-blue-400">
+          Set up SSO
+          <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </a>
+
+      {/* SharePoint Integration */}
+      <a href="/guides/sharepoint-integration" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-violet-700 md:col-span-2">
+        <div className="flex gap-4">
+          <div className="inline-flex h-fit rounded-lg bg-gradient-to-br from-violet-100 to-purple-100 p-2.5 dark:from-violet-900/30 dark:to-purple-900/30">
+            <svg className="h-5 w-5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h4 className="font-semibold text-slate-900 dark:text-white">{"SharePoint Integration"}</h4>
+            <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Import documents from SharePoint and OneDrive with automatic sync and permissions handling"}</div>
+            <div className="mt-3 flex items-center gap-1 text-sm font-medium text-violet-600 dark:text-violet-400">
+              Connect SharePoint
+              <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+</div>
+
+---
+
+## Key Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| **AI Assistants** | Create custom assistants with specific system prompts and knowledge bases |
+| **Knowledge Management** | Process PDFs, Word, Excel, and web content with semantic search |
+| **Multi-tenant** | Isolate organizations with separate credentials, IdPs, and quotas |
+| **Real-time Chat** | Streaming responses via SSE with conversation history |
+| **Background Processing** | Async document ingestion and web crawling with ARQ workers |
+| **API-first** | Full REST API with OpenAPI documentation |
+
+---
+
+{/* ═══════════════════════════════════════════════════════════════════════════
+    COMMUNITY & SUPPORT
+    ═══════════════════════════════════════════════════════════════════════════ */}
+
+<div className="mx-auto max-w-6xl py-8">
+  <div className="mb-8 text-center">
+    <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+      Community & Support
+    </h2>
+    <div className="mt-2 text-slate-600 dark:text-slate-400">
+      {"Governed by public sector organizations, ensuring development aligns with public interest"}
+    </div>
+  </div>
+
+  <div className="grid gap-4 md:grid-cols-3">
+    <a href="https://github.com/eneo-ai/eneo" className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
+      <div className="rounded-xl bg-slate-900 p-3 dark:bg-white">
+        <svg className="h-6 w-6 text-white dark:text-slate-900" fill="currentColor" viewBox="0 0 24 24">
+          <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
+        </svg>
+      </div>
+      <div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"GitHub"}</h4>
+        <div className="text-sm text-slate-600 dark:text-slate-400">{"Source code, issues, contributions"}</div>
+      </div>
+    </a>
+
+    <a href="https://forum.eneo.ai" className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
+      <div className="rounded-xl bg-gradient-to-br from-teal-500 to-cyan-500 p-3">
+        <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+        </svg>
+      </div>
+      <div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Forum"}</h4>
+        <div className="text-sm text-slate-600 dark:text-slate-400">{"Community discussions"}</div>
+      </div>
+    </a>
+
+    <a href="https://eneo.ai" className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
+      <div className="rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 p-3">
+        <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+        </svg>
+      </div>
+      <div>
+        <h4 className="font-semibold text-slate-900 dark:text-white">{"Website"}</h4>
+        <div className="text-sm text-slate-600 dark:text-slate-400">{"Official news and updates"}</div>
+      </div>
+    </a>
+  </div>
+
+  <div className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">
+    {"Contact: "}
+    <a href="mailto:digitalisering@sundsvall.se" className="text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300">{"digitalisering@sundsvall.se"}</a>
+    {" (for public sector organizations)"}
+  </div>
+</div>
+
+---
+
+<div className="py-8 text-center">
+  <div className="mx-auto max-w-2xl">
+    <div className="text-lg font-medium italic text-slate-700 dark:text-slate-300">
+      {'"Generative AI must not be a technology for the few, but a technology for everyone."'}
+    </div>
+    <div className="mt-4 text-sm text-slate-500 dark:text-slate-500">
+      {"Originally developed by Sundsvall Municipality & Ånge Municipality"}
+    </div>
+  </div>
+</div>

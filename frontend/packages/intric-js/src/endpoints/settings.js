@@ -29,6 +29,20 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Update audit logging feature setting for the tenant
+     * @param {boolean} enabled Whether to enable audit logging
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateAuditLogging: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/audit-logging", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
     }
   };
 }

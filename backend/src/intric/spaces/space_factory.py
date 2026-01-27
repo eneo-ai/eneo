@@ -190,10 +190,24 @@ class SpaceFactory:
 
         integration_knowledge_list = []
         for i in ik_source:
+            # Check if sharepoint_subscription was eager loaded via selectinload
+            # We need to use sqlalchemy.inspect to check if the attribute was loaded
+            # without triggering a lazy load (which causes greenlet errors in async context)
+            from sqlalchemy import inspect
+            sharepoint_subscription = None
+            try:
+                insp = inspect(i)
+                if "sharepoint_subscription" not in insp.unloaded:
+                    sharepoint_subscription = i.sharepoint_subscription
+            except Exception:
+                # If inspection fails (e.g., not a SQLAlchemy model), fall back to None
+                pass
+
             integration_knowledge_list.append(
                 IntegrationKnowledge(
                     name=i.name,
-                    user_integration=getattr(i, "user_integration", None), 
+                    original_name=getattr(i, "original_name", None),
+                    user_integration=getattr(i, "user_integration", None),
                     embedding_model=next(
                         (em for em in embedding_models if em.id == i.embedding_model_id),
                         None,
@@ -201,8 +215,19 @@ class SpaceFactory:
                     tenant_id=i.tenant_id,
                     space_id=i.space_id,
                     id=i.id,
-                    url=getattr(i, "url", None),
-                    size=getattr(i, "size", None),
+                    url=i.url,
+                    size=i.size,
+                    site_id=getattr(i, "site_id", None),
+                    last_synced_at=i.last_synced_at,
+                    last_sync_summary=i.last_sync_summary,
+                    sharepoint_subscription_id=getattr(i, "sharepoint_subscription_id", None),
+                    sharepoint_subscription=sharepoint_subscription,
+                    delta_token=getattr(i, "delta_token", None),
+                    folder_id=getattr(i, "folder_id", None),
+                    folder_path=getattr(i, "folder_path", None),
+                    selected_item_type=getattr(i, "selected_item_type", None),
+                    resource_type=getattr(i, "resource_type", None),
+                    drive_id=getattr(i, "drive_id", None),
                 )
             )
 
@@ -298,4 +323,6 @@ class SpaceFactory:
             websites=space_websites,
             members=members,
             security_classification=security_classification,
+            data_retention_days=space_in_db.data_retention_days,
+            icon_id=space_in_db.icon_id,
         )

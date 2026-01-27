@@ -66,6 +66,7 @@ def setup_fixture():
         integration_knowledge_repo=AsyncMock(),
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
     )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
@@ -86,6 +87,7 @@ async def assistant_service():
         factory=AsyncMock(),
         prompt_repo=AsyncMock(),
         integration_knowledge_repo=AsyncMock(),
+        icon_repo=AsyncMock(),
     )
 
 

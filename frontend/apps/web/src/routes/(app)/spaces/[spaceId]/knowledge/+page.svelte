@@ -6,14 +6,18 @@
   import WebsiteTable from "./websites/WebsiteTable.svelte";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getIntric } from "$lib/core/Intric";
   import { Button } from "@intric/ui";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
+  import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric";
-  export let data;
+  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
+
+  let { data } = $props<{ data: any }>();
 
   const intric = getIntric();
   const {
@@ -21,10 +25,31 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
+  // Listen for job completion events and refresh knowledge
+  $effect(() => {
+    const event = $jobCompletionEvents;
+    if (event) {
+      console.log("Knowledge page: Job completion event received, refreshing knowledge");
+      refreshCurrentSpace("knowledge");
+    }
+  });
+
   let selectedTab = writable<string>();
   let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+  let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
+  let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
   let isPersonalSpace = $currentSpace.personal;
+
+  // Check if user has admin permission
+  let isAdmin = data.user?.predefined_roles?.some((role: any) =>
+    role.permissions?.includes('admin')
+  ) ?? false;
+
+  function handleSelectIntegration(integration: IntegrationKnowledge) {
+    selectedIntegrationForSyncHistory = integration;
+    showSyncHistoryDialog = true;
+  }
 
   // Website selection state (shared with WebsiteTable)
   let selectedWebsiteIds = writable<Set<string>>(new Set());
@@ -62,11 +87,20 @@
   }
 
 
-  $: userCanSeeCollections = $currentSpace.hasPermission("read", "collection");
-  $: userCanSeeWebsites = $currentSpace.hasPermission("read", "website");
-  $: userCanSeeIntegrations =
+  let userCanSeeCollections = $derived($currentSpace.hasPermission("read", "collection"));
+  let userCanSeeWebsites = $derived($currentSpace.hasPermission("read", "website"));
+  // Only show integrations in personal and organization spaces, not in shared spaces
+  let userCanSeeIntegrations = $derived(
     $currentSpace.hasPermission("read", "integrationKnowledge") &&
-    data.availableIntegrations.length > 0;
+    (isPersonalSpace || isOrgSpace)
+  );
+
+  // Reset selected integration when dialog closes
+  $effect(() => {
+    if (!showSyncHistoryDialog) {
+      selectedIntegrationForSyncHistory = null;
+    }
+  });
 </script>
 
 <svelte:head>
@@ -82,7 +116,7 @@
       {#if userCanSeeCollections}
         <Page.TabTrigger tab="collections">{m.collections()}</Page.TabTrigger>
       {/if}
-      {#if userCanSeeWebsites && !isPersonalSpace}
+      {#if userCanSeeWebsites}
         <Page.TabTrigger tab="websites">{m.websites()}</Page.TabTrigger>
       {/if}
       {#if userCanSeeIntegrations}
@@ -101,13 +135,33 @@
             disabled={isBulkRecrawling}
           >
             <IconRefresh size="sm" />
-            {isBulkRecrawling ? 'Syncing...' : `Sync selected (${$selectedWebsiteIds.size})`}
+            {isBulkRecrawling
+              ? m.syncing()
+              : m.sync_selected({ count: $selectedWebsiteIds.size })}
           </Button>
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
-      {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge") && data.availableIntegrations.length > 0}
-        <ImportKnowledgeDialog></ImportKnowledgeDialog>
+      {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
+        {#if data.availableIntegrations.length > 0}
+          <ImportKnowledgeDialog></ImportKnowledgeDialog>
+        {:else}
+          {#if isOrgSpace}
+            {#if isAdmin}
+              <Button variant="primary" onclick={() => window.location.href = '/admin/integrations?tab=providers'}>
+                {m.configure_integrations()}
+              </Button>
+            {:else}
+              <div class="text-secondary text-sm italic">
+                Organization-wide integrations require admin permissions
+              </div>
+            {/if}
+          {:else}
+            <Button variant="primary" onclick={() => window.location.href = '/account/integrations?tab=providers'}>
+              {m.configure_integrations()}
+            </Button>
+          {/if}
+        {/if}
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -155,7 +209,11 @@
             </div>
           </div>
         {/if}
-        <IntegrationsTable></IntegrationsTable>
+        <IntegrationsTable onSelectIntegrationForSyncHistory={handleSelectIntegration}></IntegrationsTable>
+        <SyncHistoryDialog
+          knowledge={selectedIntegrationForSyncHistory}
+          bind:open={showSyncHistoryDialog}
+        ></SyncHistoryDialog>
       </Page.Tab>
     {/if}
   </Page.Main>

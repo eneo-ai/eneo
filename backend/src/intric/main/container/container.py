@@ -1,9 +1,22 @@
 import redis.asyncio as aioredis
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from typing import AsyncIterator
+
 from dependency_injector import containers, providers
 from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
 from intric.admin.quota_service import QuotaService
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.audit.application.audit_config_service import AuditConfigService
+from intric.audit.application.audit_export_service import AuditExportService
+from intric.audit.application.audit_service import AuditService
+from intric.audit.application.retention_service import RetentionService
+from intric.audit.infrastructure.audit_config_repository import (
+    AuditConfigRepositoryImpl,
+)
+from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
@@ -76,6 +89,8 @@ from intric.group_chat.presentation.assemblers.group_chat_assembler import (
 )
 from intric.groups_legacy.group_repo import GroupRepository
 from intric.groups_legacy.group_service import GroupService
+from intric.icons.icon_repo import IconRepository
+from intric.icons.icon_service import IconService
 from intric.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
 from intric.info_blobs.info_blob_service import InfoBlobService
@@ -87,6 +102,9 @@ from intric.integration.application.integration_preview_service import (
     IntegrationPreviewService,
 )
 from intric.integration.application.integration_service import IntegrationService
+from intric.integration.application.sharepoint_tree_service import (
+    SharePointTreeService as AppSharePointTreeService,
+)
 from intric.integration.application.oauth2_service import Oauth2Service
 from intric.integration.application.tenant_integration_service import (
     TenantIntegrationService,
@@ -99,6 +117,34 @@ from intric.integration.infrastructure.auth_service.confluence_auth_service impo
 )
 from intric.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
+)
+from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+    TenantAppAuthService,
+)
+from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountAuthService,
+)
+from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
+from intric.integration.application.tenant_sharepoint_app_service import (
+    TenantSharePointAppService,
+)
+from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import (
+    TenantSharePointAppRepositoryImpl,
+)
+from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
+    TenantSharePointAppMapper,
+)
+from intric.integration.infrastructure.sharepoint_webhook_service import (
+    SharepointWebhookService,
+)
+from intric.integration.infrastructure.office_change_key_service import (
+    OfficeChangeKeyService,
+)
+from intric.integration.infrastructure.sharepoint_subscription_service import (
+    SharePointSubscriptionService,
+)
+from intric.integration.infrastructure.sharepoint_subscription_repo_impl import (
+    SharePointSubscriptionRepositoryImpl,
 )
 from intric.integration.infrastructure.content_service.confluence_content_service import (
     ConfluenceContentService,
@@ -114,6 +160,12 @@ from intric.integration.infrastructure.mappers.integration_mapper import (
 )
 from intric.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
+)
+from intric.integration.infrastructure.mappers.sharepoint_subscription_mapper import (
+    SharePointSubscriptionMapper,
+)
+from intric.integration.infrastructure.mappers.sync_log_mapper import (
+    SyncLogMapper,
 )
 from intric.integration.infrastructure.mappers.tenant_integration_mapper import (
     TenantIntegrationMapper,
@@ -136,6 +188,9 @@ from intric.integration.infrastructure.repo_impl.integration_repo_impl import (
 )
 from intric.integration.infrastructure.repo_impl.oauth_token_repo_impl import (
     OauthTokenRepoImpl,
+)
+from intric.integration.infrastructure.repo_impl.sync_log_repo_impl import (
+    SyncLogRepoImpl,
 )
 from intric.integration.infrastructure.repo_impl.tenant_integration_repo_impl import (
     TenantIntegrationRepoImpl,
@@ -278,6 +333,7 @@ from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 from intric.workflows.step_repo import StepRepository
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.redis.connection import build_redis_pool_kwargs
 
 _logger = get_logger(__name__)
 
@@ -285,14 +341,7 @@ _logger = get_logger(__name__)
 def _create_redis_client() -> aioredis.Redis:
     settings = get_settings()
     url = f"redis://{settings.redis_host}:{settings.redis_port}"
-    kwargs: dict[str, object] = {
-        "decode_responses": False,
-    }
-
-    # Support optional redis_db attribute on settings (used in tests)
-    redis_db = getattr(settings, "redis_db", None)
-    if redis_db is not None:
-        kwargs["db"] = redis_db
+    kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
 
     return aioredis.Redis.from_url(url, **kwargs)
 
@@ -306,6 +355,62 @@ def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimi
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SESSION PROXY PATTERN FOR SESSIONLESS CONTAINERS
+# ═══════════════════════════════════════════════════════════════════════════════
+# Problem: Long-running tasks (crawlers, 5-30 min) exhaust DB pool when holding
+#          sessions for entire duration. Solution: "sessionless" containers that
+#          only acquire sessions during explicit session_scope() blocks.
+#
+# Why ContextVar: Provides async-safe thread-local storage. Each coroutine gets
+#                 its own session context, avoiding race conditions.
+#
+# Why SessionProxy: Allows dependency-injector to instantiate session-dependent
+#                   services (like JobRepo) without failing type validation.
+#                   The proxy delegates to the ContextVar at runtime.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Context variable to hold the active session in a sessionless container environment
+# This allows "Lazy" resolution of sessions only when a scope is active.
+_active_session_ctx: ContextVar[AsyncSession | None] = ContextVar(
+    "active_session_ctx", default=None
+)
+
+
+class SessionProxy:
+    """A proxy that delegates to the active ContextVar session or raises a clear error.
+
+    When injected into a sessionless container, this proxy allows dependencies
+    to be instantiated without errors. Actual session access only happens when
+    code runs inside a session_scope() block.
+
+    Benefits over injecting None:
+    - Services like JobRepo can be instantiated (no "None is not AsyncSession" error)
+    - Clear runtime error if session accessed outside scope
+    - Works transparently with existing service code
+    """
+
+    def __getattr__(self, name: str):
+        session = _active_session_ctx.get()
+        if session is None:
+            raise RuntimeError(
+                "No active session found! You are running in a sessionless container. "
+                "You must wrap this call in 'async with container.session_scope():' "
+                "or pass the session explicitly via container.some_repo(session=session)."
+            )
+        return getattr(session, name)
+
+    def __call__(self, *args, **kwargs):
+        """Allow the proxy to be called if anyone tries to invoke it."""
+        session = _active_session_ctx.get()
+        if session is None:
+            raise RuntimeError(
+                "Cannot call SessionProxy without active session scope. "
+                "Wrap your code in 'async with container.session_scope():'."
+            )
+        return session(*args, **kwargs)
+
+
 class Container(containers.DeclarativeContainer):
     __self__ = providers.Self()
 
@@ -313,7 +418,13 @@ class Container(containers.DeclarativeContainer):
     config = providers.Configuration()
 
     # Objects
-    session = providers.Dependency(instance_of=AsyncSession)
+    # CRITICAL FIX: Removed `instance_of=AsyncSession` strict type check.
+    # In sessionless containers (for long-running tasks), we inject a SessionProxy
+    # which would fail the 'instance_of' validation. Removing the type check allows
+    # the container to instantiate dependencies (like JobRepo) with the Proxy,
+    # and validation happens at runtime when the session is actually used.
+    # This fixes the "None is not an instance of AsyncSession" error in crawl_task.
+    session = providers.Dependency()
     user = providers.Dependency(instance_of=UserInDB)
     tenant = providers.Dependency(instance_of=TenantInDB)
     aiohttp_client = providers.Object(aiohttp_client)
@@ -423,6 +534,13 @@ class Container(containers.DeclarativeContainer):
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
     confluence_token_mapper = providers.Factory(OauthTokenMapper)
+    sync_log_mapper = providers.Factory(SyncLogMapper)
+    sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
+
+    # SharePoint app mapper uses the same encryption service as tenant credentials
+    tenant_sharepoint_app_mapper = providers.Factory(
+        TenantSharePointAppMapper, encryption_service=encryption_service
+    )
 
     # MCP mappers
     mcp_server_mapper = providers.Factory(MCPServerMapper)
@@ -473,6 +591,16 @@ class Container(containers.DeclarativeContainer):
         mapper=integration_knowledge_mapper,
         embedding_model_repo=embedding_model_repo2,
     )
+    sharepoint_subscription_repo = providers.Factory(
+        SharePointSubscriptionRepositoryImpl,
+        session=session,
+        mapper=sharepoint_subscription_mapper,
+    )
+    tenant_sharepoint_app_repo = providers.Factory(
+        TenantSharePointAppRepositoryImpl,
+        session=session,
+        mapper=tenant_sharepoint_app_mapper,
+    )
     integration_repo = providers.Factory(
         IntegrationRepoImpl, session=session, mapper=integration_mapper
     )
@@ -492,6 +620,10 @@ class Container(containers.DeclarativeContainer):
     )
     mcp_server_tool_repo = providers.Factory(
         MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
+    )
+
+    sync_log_repo = providers.Factory(
+        SyncLogRepoImpl, session=session, mapper=sync_log_mapper
     )
 
     transcription_model_enable_service = providers.Factory(
@@ -551,9 +683,7 @@ class Container(containers.DeclarativeContainer):
     assistant_template_repo = providers.Factory(
         AssistantTemplateRepository, factory=assistant_template_factory, session=session
     )
-    feature_flag_repo = providers.Factory(
-        FeatureFlagRepository, db_session=session
-    )
+    feature_flag_repo = providers.Factory(FeatureFlagRepository, db_session=session)
 
     module_repo = providers.Factory(ModuleRepository, session=session)
 
@@ -561,6 +691,23 @@ class Container(containers.DeclarativeContainer):
         SecurityClassificationRepoImpl,
         session=session,
         user=user,
+    )
+
+    # Audit logging
+    audit_log_repo = providers.Factory(
+        AuditLogRepositoryImpl,
+        session=session,
+    )
+    audit_config_repo = providers.Factory(
+        AuditConfigRepositoryImpl,
+        session=session,
+    )
+    audit_config_service = providers.Factory(
+        AuditConfigService,
+        repository=audit_config_repo,
+    )
+    audit_session_service = providers.Factory(
+        AuditSessionService,
     )
 
     # Completion model adapters
@@ -667,7 +814,30 @@ class Container(containers.DeclarativeContainer):
         SecurityClassificationService,
         user=user,
         repo=security_classification_repo,
-        tenant_repo=tenant_repo,
+        tenant_service=tenant_service,
+    )
+    # Feature flag service for audit logging and other toggles
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
+    audit_service = providers.Factory(
+        AuditService,
+        repository=audit_log_repo,
+        audit_config_service=audit_config_service,
+        feature_flag_service=feature_flag_service,
+    )
+    audit_export_service = providers.Factory(
+        AuditExportService,
+        repository=audit_log_repo,
+    )
+    retention_service = providers.Factory(
+        RetentionService,
+        session=session,
+    )
+    icon_repo = providers.Factory(
+        IconRepository,
+        session=session,
     )
     space_service = providers.Factory(
         SpaceService,
@@ -682,6 +852,7 @@ class Container(containers.DeclarativeContainer):
         transcription_model_service=transcription_model_service,
         actor_manager=actor_manager,
         security_classification_service=security_classification_service,
+        icon_repo=icon_repo,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
     job_service = providers.Factory(
@@ -692,7 +863,14 @@ class Container(containers.DeclarativeContainer):
     file_size_service = providers.Factory(
         FileSizeService,
     )
-    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
+    icon_service = providers.Factory(
+        IconService,
+        icon_repo=icon_repo,
+        file_size_service=file_size_service,
+    )
+    quota_service = providers.Factory(
+        QuotaService, user=user, info_blob_repo=info_blob_repo
+    )
     task_service = providers.Factory(
         TaskService,
         user=user,
@@ -720,7 +898,9 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         group_service=group_service,
     )
-    quota_service = providers.Factory(QuotaService, user=user, info_blob_repo=info_blob_repo)
+    quota_service = providers.Factory(
+        QuotaService, user=user, info_blob_repo=info_blob_repo
+    )
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
         user=user,
@@ -730,10 +910,6 @@ class Container(containers.DeclarativeContainer):
         PredefinedRolesService, repo=predefined_roles_repo
     )
     role_service = providers.Factory(RolesService, user=user, repo=role_repo)
-    feature_flag_service = providers.Factory(
-        FeatureFlagService,
-        feature_flag_repo=feature_flag_repo,
-    )
     settings_service = providers.Factory(
         SettingService,
         user=user,
@@ -813,6 +989,7 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
+        group_service=group_service,
     )
     assistant_service = providers.Factory(
         AssistantService,
@@ -833,6 +1010,7 @@ class Container(containers.DeclarativeContainer):
         integration_knowledge_repo=integration_knowledge_repo,
         completion_service=completion_service,
         references_service=references_service,
+        icon_repo=icon_repo,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -873,7 +1051,7 @@ class Container(containers.DeclarativeContainer):
         AdminService,
         user=user,
         user_repo=user_repo,
-        tenant_repo=tenant_repo,
+        tenant_service=tenant_service,
         user_service=user_service,
     )
     service_service = providers.Factory(
@@ -926,9 +1104,28 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         tenant_integration_repo=tenant_integration_repo,
         user=user,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
     )
     confluence_auth_service = providers.Factory(ConfluenceAuthService)
-    sharepoint_auth_service = providers.Factory(SharepointAuthService)
+
+    # Tenant app authentication services (partial setup)
+    tenant_app_auth_service = providers.Singleton(TenantAppAuthService)
+    tenant_sharepoint_app_service = providers.Factory(
+        TenantSharePointAppService,
+        tenant_app_repo=tenant_sharepoint_app_repo,
+    )
+
+    # SharePoint auth service with tenant app support
+    sharepoint_auth_service = providers.Factory(
+        SharepointAuthService,
+        tenant_sharepoint_app_service=tenant_sharepoint_app_service,
+    )
+
+    # Service account auth service for delegated permissions via service account
+    service_account_auth_service = providers.Factory(
+        ServiceAccountAuthService,
+    )
+
     oauth2_service = providers.Factory(
         Oauth2Service,
         confluence_auth_service=confluence_auth_service,
@@ -944,6 +1141,39 @@ class Container(containers.DeclarativeContainer):
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
     )
+
+    # SharePoint auth router (after oauth_token_service)
+    sharepoint_auth_router = providers.Factory(
+        SharePointAuthRouter,
+        user_oauth_service=sharepoint_auth_service,
+        tenant_app_service=tenant_sharepoint_app_service,
+        tenant_app_auth_service=tenant_app_auth_service,
+        oauth_token_service=oauth_token_service,
+        service_account_auth_service=service_account_auth_service,
+    )
+
+    sharepoint_subscription_service = providers.Factory(
+        SharePointSubscriptionService,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
+        oauth_token_service=oauth_token_service,
+    )
+
+    integration_knowledge_service = providers.Factory(
+        IntegrationKnowledgeService,
+        job_service=job_service,
+        user=user,
+        oauth_token_repo=oauth_token_repo,
+        space_repo=space_repo,
+        integration_knowledge_repo=integration_knowledge_repo,
+        embedding_model_repo=embedding_model_repo2,
+        user_integration_repo=user_integration_repo,
+        actor_manager=actor_manager,
+        sharepoint_subscription_service=sharepoint_subscription_service,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
+    )
+
     confluence_content_service = providers.Factory(
         ConfluenceContentService,
         oauth_token_repo=oauth_token_repo,
@@ -954,6 +1184,10 @@ class Container(containers.DeclarativeContainer):
         datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
+    )
+    office_change_key_service = providers.Factory(
+        OfficeChangeKeyService,
+        redis_client=redis_client,
     )
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
@@ -966,6 +1200,19 @@ class Container(containers.DeclarativeContainer):
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
+        sync_log_repo=sync_log_repo,
+        change_key_service=office_change_key_service,
+    )
+    sharepoint_webhook_service = providers.Factory(
+        SharepointWebhookService,
+        session=session,
+        oauth_token_repo=oauth_token_repo,
+        job_repo=job_repo,
+        user_repo=user_repo,
+        change_key_service=office_change_key_service,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,
@@ -974,6 +1221,8 @@ class Container(containers.DeclarativeContainer):
     sharepoint_preview_service = providers.Factory(
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,
@@ -981,6 +1230,13 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         confluence_preview_service=confluence_preview_service,
         sharepoint_preview_service=sharepoint_preview_service,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+    )
+    sharepoint_tree_service = providers.Factory(
+        AppSharePointTreeService,
+        user_integration_repo=user_integration_repo,
+        sharepoint_auth_router=sharepoint_auth_router,
+        space_repo=space_repo,
     )
     # Completion
     service_runner = providers.Factory(
@@ -1033,7 +1289,6 @@ class Container(containers.DeclarativeContainer):
     task_manager = providers.Factory(
         TaskManager,
         user=user,
-        session=session,
         job_service=job_service,
     )
     text_processor = providers.Factory(
@@ -1067,6 +1322,7 @@ class Container(containers.DeclarativeContainer):
         transcriber=transcriber,
         app_template_service=app_template_service,
         actor_manager=actor_manager,
+        icon_repo=icon_repo,
     )
     app_run_service = providers.Factory(
         AppRunService,
@@ -1082,3 +1338,58 @@ class Container(containers.DeclarativeContainer):
         DataRetentionService,
         session=session,
     )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SESSION SCOPE: Unit-of-Work pattern for long-running tasks
+    # ═══════════════════════════════════════════════════════════════════════════
+    # This provides short-lived sessions for DB operations in worker tasks.
+    # Instead of holding a session for the entire task duration (minutes),
+    # tasks should use this to acquire sessions only when needed (~50-300ms).
+    #
+    # Usage in tasks:
+    #     async with container.session_scope() as session:
+    #         repo = container.some_repo(session=session)  # Override default
+    #         await repo.update(...)
+    #     # Session returned to pool immediately
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[AsyncSession]:
+        """Provide a short-lived session for explicit DB operations.
+
+        Use this for Unit-of-Work pattern in long-running tasks (crawlers,
+        background jobs) that shouldn't hold a session for their entire duration.
+
+        The session is automatically committed on successful exit and rolled
+        back on exception.
+
+        IMPORTANT: This also sets the _active_session_ctx ContextVar, which
+        allows SessionProxy to delegate to the real session. This means that
+        inside session_scope(), you can call container.job_repo() without
+        passing session= explicitly - the proxy will find the session.
+
+        Example:
+            async with container.session_scope() as session:
+                # Option 1: Explicit session override (always works)
+                repo = container.crawl_run_repo(session=session)
+                await repo.mark_started(job_id)
+
+                # Option 2: SessionProxy delegation (works in sessionless containers)
+                repo = container.job_repo()  # Proxy finds session via ContextVar
+                await repo.get(job_id)
+            # Session returned to pool immediately (~50-300ms)
+
+        Yields:
+            AsyncSession: A fresh database session with an active transaction.
+        """
+        from intric.database.database import sessionmanager
+
+        async with sessionmanager.session() as session, session.begin():
+            # Set the ContextVar so SessionProxy can find this session
+            token = _active_session_ctx.set(session)
+            try:
+                yield session
+            finally:
+                # Reset ContextVar to avoid leaking session reference
+                _active_session_ctx.reset(token)

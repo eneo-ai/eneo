@@ -28,6 +28,8 @@ import { initSecurityClassifications } from "./endpoints/security-classification
 import { initMCPServers } from "./endpoints/mcp-servers";
 import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
+import { initAudit } from "./endpoints/audit";
+import { initIcons } from "./endpoints/icons";
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -70,6 +72,8 @@ export function createIntric(args) {
     mcpServers: initMCPServers(client),
     settings: initSettings(client),
     credentials: initCredentials(client),
+    audit: initAudit(client),
+    icons: initIcons(client),
     client
   };
 }

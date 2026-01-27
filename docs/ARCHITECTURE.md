@@ -469,8 +469,10 @@ Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant 
 
 **Authentication Modes:**
 
-- **Single-Tenant (Default)** - Shared IdP via `OIDC_DISCOVERY_ENDPOINT`
-- **Multi-Tenant Federation** - Per-tenant IdPs (Entra ID, MobilityGuard, Auth0, Okta), encrypted with Fernet, enabled via `FEDERATION_PER_TENANT_ENABLED=true`
+- **Single-Tenant (Default)** - Shared IdP via `OIDC_DISCOVERY_ENDPOINT` environment variables
+- **Federation Mode** - IdP config via sysadmin API (`FEDERATION_PER_TENANT_ENABLED=true`), supports:
+  - Multi-tenant: Each tenant has their own IdP (Entra ID, MobilityGuard, Auth0, Okta)
+  - Single-tenant with API management: Dynamic OIDC config without restarts
 
 **Federation Configuration:**
 ```bash

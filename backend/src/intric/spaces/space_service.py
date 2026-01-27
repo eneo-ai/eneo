@@ -11,6 +11,7 @@ from intric.completion_models.domain.completion_model_service import (
 from intric.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
+from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -65,6 +66,7 @@ class SpaceService:
         transcription_model_service: TranscriptionModelService,
         actor_manager: "ActorManager",
         security_classification_service: "SecurityClassificationService",
+        icon_repo: IconRepository,
     ):
         self.user = user
         self.factory = factory
@@ -77,6 +79,7 @@ class SpaceService:
         self.transcription_model_service = transcription_model_service
         self.actor_manager = actor_manager
         self.security_classification_service = security_classification_service
+        self.icon_repo = icon_repo
 
     @staticmethod
     def is_org_space(space: Space) -> bool:
@@ -182,6 +185,8 @@ class SpaceService:
         mcp_server_ids: list[UUID] = None,
         mcp_tools: list = None,  # List of MCPToolSetting objects from API
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
+        data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
         space = await self.get_space(id)
         actor = self._get_actor(space)
@@ -283,6 +288,8 @@ class SpaceService:
                 if security_classification is not NOT_PROVIDED
                 else NOT_PROVIDED
             ),
+            data_retention_days=data_retention_days,
+            icon_id=icon_id,
         )
 
         # Convert MCPToolSetting objects to tuples for repository
@@ -396,7 +403,12 @@ class SpaceService:
         if not actor.can_delete_space():
             raise UnauthorizedException("User does not have permission to delete space")
 
+        icon_id = space.icon_id
+
         await self.repo.delete(space.id)
+
+        if icon_id:
+            await self.icon_repo.delete(icon_id)
 
     async def get_spaces(
         self, *, include_personal: bool = False, include_applications: bool = False
@@ -451,6 +463,25 @@ class SpaceService:
 
         await self.repo.update(space)
 
+    async def get_space_member(self, space_id: UUID, user_id: UUID) -> SpaceMember:
+        """Get a space member by user ID.
+
+        Args:
+            space_id: ID of the space
+            user_id: ID of the user/member
+
+        Returns:
+            SpaceMember object
+
+        Raises:
+            NotFoundException: If the user is not a member of the space
+        """
+        space = await self.get_space(space_id)
+        try:
+            return space.get_member(user_id)
+        except KeyError:
+            raise NotFoundException(f"User {user_id} is not a member of space {space_id}")
+
     async def change_role_of_member(self, id: UUID, user_id: UUID, new_role: SpaceRoleValue):
         if user_id == self.user.id:
             raise BadRequestException("Can not change role of yourself")
@@ -470,8 +501,8 @@ class SpaceService:
         hub = await self.get_or_create_tenant_space()
         space_name = f"{self.user.username}'s personal space"
         space = self.factory.create_space(
-            name=space_name, 
-            user_id=self.user.id, 
+            name=space_name,
+            user_id=self.user.id,
             tenant_id=self.user.tenant_id,
             tenant_space_id=getattr(hub, "id", None),
         )
