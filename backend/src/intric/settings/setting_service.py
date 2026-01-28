@@ -6,6 +6,8 @@ from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
 from intric.settings.settings import SettingsPublic, SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
+from intric.tenants.tenant import TenantUpdate
+from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -21,11 +23,13 @@ class SettingService:
         user: UserInDB,
         ai_models_service: AIModelsService,
         feature_flag_service: "FeatureFlagService",
+        tenant_repo: TenantRepository,
     ):
         self.repo = repo
         self.user = user
         self.ai_models_service = ai_models_service
         self.feature_flag_service = feature_flag_service
+        self.tenant_repo = tenant_repo
 
     async def get_settings(self):
         settings = await self.repo.get(self.user.id)
@@ -46,20 +50,26 @@ class SettingService:
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
 
+        # Get provisioning from tenant
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+        provisioning = tenant.provisioning if tenant else False
+
         # Handle case when user has no settings record yet
         if settings is None:
             return SettingsPublic(
                 chatbot_widget={},
                 using_templates=using_templates,
                 audit_logging_enabled=audit_logging_enabled,
-                tenant_credentials_enabled=tenant_credentials_enabled
+                tenant_credentials_enabled=tenant_credentials_enabled,
+                provisioning=provisioning,
             )
 
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget or {},
             using_templates=using_templates,
             audit_logging_enabled=audit_logging_enabled,
-            tenant_credentials_enabled=tenant_credentials_enabled
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            provisioning=provisioning,
         )
 
     async def update_settings(self, settings: SettingsPublic):
@@ -175,4 +185,35 @@ class SettingService:
             ),
             audit_logging_enabled=enabled,  # Use the value we just set, not a re-query
             tenant_credentials_enabled=tenant_credentials_enabled
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_provisioning_setting(self, enabled: bool) -> SettingsPublic:
+        """Toggle JIT provisioning for tenant."""
+        logger.info(
+            f"Admin {self.user.username} toggling provisioning to {enabled} for tenant {self.user.tenant_id}"
+        )
+
+        tenant_update = TenantUpdate(
+            id=self.user.tenant_id,
+            provisioning=enabled,
+        )
+        await self.tenant_repo.update_tenant(tenant_update)
+
+        settings = await self.repo.get(self.user.id)
+        app_settings = get_app_settings()
+        tenant_credentials_enabled = app_settings.tenant_credentials_enabled
+
+        return SettingsPublic(
+            chatbot_widget=settings.chatbot_widget if settings else {},
+            using_templates=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="using_templates",
+                tenant_id=self.user.tenant_id
+            ),
+            audit_logging_enabled=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="audit_logging_enabled",
+                tenant_id=self.user.tenant_id
+            ),
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            provisioning=enabled,  # Use the value we just set
         )

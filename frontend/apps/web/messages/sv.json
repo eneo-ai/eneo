@@ -1543,6 +1543,8 @@
   "enable_templates_description": "Tillåt användare att skapa assistenter och appar från förkonfigurerade mallar",
   "enable_audit_logging": "Aktivera granskningsloggning",
   "enable_audit_logging_description": "Spåra användaråtgärder och systemhändelser för efterlevnad och säkerhetsövervakning",
+  "enable_provisioning": "Automatisk kontoskapning (SSO)",
+  "enable_provisioning_description": "Skapa automatiskt konton för nya användare vid första SSO-inloggningen",
   "delete_template_confirmation": "Är du säker på att du vill ta bort denna mall?",
   "permanent_action": "Detta kan inte ångras",
   "template_in_use": "Mallen används för närvarande",
