@@ -239,8 +239,8 @@
                 </span>
 
                 {#each result.input.files as file (file.id)}
-                  {#await intric.files.url({ id: file.id, download: true }) then fileUrl}
-                    <Button href={fileUrl} class="outlined no-underline"
+                  {#await intric.files.generateSignedUrl({ fileId: file.id, contentDisposition: "attachment" }) then { url }}
+                    <Button href={url} class="outlined no-underline"
                       ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
                     >
                   {/await}

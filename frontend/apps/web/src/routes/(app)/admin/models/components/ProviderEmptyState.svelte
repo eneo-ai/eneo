@@ -23,8 +23,8 @@
   in:fade={{ duration: 200 }}
 >
   <!-- Icon -->
-  <div class="flex-shrink-0 p-3 rounded-lg bg-surface border border-dimmer/50">
-    <Layers class="w-5 h-5 text-muted/50" strokeWidth={1.5} />
+  <div class="flex-shrink-0 p-3 rounded-lg bg-surface dark:bg-accent-dimmer border border-dimmer/50 dark:border-accent-default/20">
+    <Layers class="w-5 h-5 text-muted/50 dark:text-accent-stronger" strokeWidth={1.5} />
   </div>
 
   <!-- Text -->

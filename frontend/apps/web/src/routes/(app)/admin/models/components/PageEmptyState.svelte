@@ -28,10 +28,11 @@
     <!-- Main icon container -->
     <div class="relative flex items-center justify-center w-24 h-24 rounded-2xl
       bg-gradient-to-br from-surface to-surface-dimmer
-      border border-dimmer/60
+      dark:from-accent-dimmer dark:to-accent-dimmer
+      border border-dimmer/60 dark:border-accent-default/20
       shadow-sm shadow-black/5
       dark:shadow-black/20">
-      <Cpu class="w-10 h-10 text-muted/60" strokeWidth={1.5} />
+      <Cpu class="w-10 h-10 text-muted/60 dark:text-accent-stronger" strokeWidth={1.5} />
 
       <!-- Floating sparkle accent -->
       <div class="absolute -top-2 -right-2 p-1.5 rounded-lg bg-accent-dimmer border border-accent-default/20">
