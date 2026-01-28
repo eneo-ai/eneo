@@ -58,6 +58,8 @@ dependencies = [
     "cryptography>=43.0.0,<44", # For Fernet encryption of HTTP auth passwords
     "httpx~=0.27.0",  # Pin to 0.27.x for compatibility with anthropic 0.28.1
     "pandas>=2.2.3,<3",
+    "orjson>=3.9,<4",
+    "aiofiles>=23.0,<24",
     "python-calamine>=0.3.1,<1",  # Fast Excel reader engine for pandas
 ]
 

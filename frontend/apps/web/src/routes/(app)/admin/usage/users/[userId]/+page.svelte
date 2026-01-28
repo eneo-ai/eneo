@@ -13,7 +13,7 @@
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import { dynamicColour } from "$lib/core/colours";
-  import { modelOrgs } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
+  import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
@@ -96,25 +96,25 @@
     }
   });
 
-  // Group models by organization for better visualization
-  const modelsByOrg = $derived.by(() => {
+  // Group models by provider for better visualization
+  const modelsByProvider = $derived.by(() => {
     if (!modelBreakdown?.models) return [];
 
     return Object.values(
       modelBreakdown.models.reduce(
         (acc, model) => {
-          const org = model.model_org ?? "Unknown";
-          if (!acc[org]) {
-            acc[org] = {
-              label: org || "Unknown Organization",
+          const provider = model.model_provider ?? model.model_org ?? "Unknown";
+          if (!acc[provider]) {
+            acc[provider] = {
+              label: provider || "Unknown Provider",
               tokenCount: 0,
-              colour: modelOrgs[org]?.chartColour || "chart-blue",
+              colour: getChartColour(provider),
               models: [],
-              org: org
+              provider: provider
             };
           }
-          acc[org].tokenCount += model.total_token_usage;
-          acc[org].models.push(model);
+          acc[provider].tokenCount += model.total_token_usage;
+          acc[provider].models.push(model);
           return acc;
         },
         {} as Record<
@@ -124,7 +124,7 @@
             tokenCount: number;
             colour: string;
             models: ModelUsage[];
-            org: string;
+            provider: string;
           }
         >
       )
@@ -307,14 +307,14 @@
             </div>
           </Settings.Row>
 
-          {#if modelBreakdown && modelBreakdown.models && modelBreakdown.models.length > 0 && modelsByOrg.length > 0}
+          {#if modelBreakdown && modelBreakdown.models && modelBreakdown.models.length > 0 && modelsByProvider.length > 0}
             <Settings.Row
               title="Usage by Organization"
               description="See how token usage is distributed across different AI model providers."
             >
               <div class="flex flex-col gap-4">
                 <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full">
-                  {#each modelsByOrg.filter((org) => org.tokenCount > 0) as org (org.org)}
+                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.org)}
                     <div
                       class="last-of-type:!border-none"
                       style="width: {formatPercent(
@@ -324,7 +324,7 @@
                   {/each}
                 </div>
                 <div class="flex flex-wrap gap-x-6">
-                  {#each modelsByOrg as org (org.org)}
+                  {#each modelsByProvider as org (org.org)}
                     <div class="flex items-center gap-2">
                       <div
                         style="background: var(--{org.colour})"
@@ -394,8 +394,7 @@
                           topModels.length > 0
                             ? (model.total_token_usage / topModels[0].total_token_usage) * 100
                             : 0
-                        )}%; background: var(--{modelOrgs[model.model_org || 'Unknown']
-                          ?.chartColour || 'chart-blue'})"
+                        )}%; background: var(--{getChartColour(model.model_provider ?? model.model_org)})"
                       ></div>
                     </div>
                   </div>

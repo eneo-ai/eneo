@@ -116,7 +116,7 @@
       {#if userCanSeeCollections}
         <Page.TabTrigger tab="collections">{m.collections()}</Page.TabTrigger>
       {/if}
-      {#if userCanSeeWebsites && !isPersonalSpace}
+      {#if userCanSeeWebsites}
         <Page.TabTrigger tab="websites">{m.websites()}</Page.TabTrigger>
       {/if}
       {#if userCanSeeIntegrations}
@@ -135,7 +135,9 @@
             disabled={isBulkRecrawling}
           >
             <IconRefresh size="sm" />
-            {isBulkRecrawling ? 'Syncing...' : `Sync selected (${$selectedWebsiteIds.size})`}
+            {isBulkRecrawling
+              ? m.syncing()
+              : m.sync_selected({ count: $selectedWebsiteIds.size })}
           </Button>
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>

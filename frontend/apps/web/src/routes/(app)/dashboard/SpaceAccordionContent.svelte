@@ -10,7 +10,12 @@
 
   export let space: SpaceDashboard;
 
-  const hasAssistants = space.applications.assistants.count > 0;
+  // Combine regular assistants with default_assistant (only for personal spaces)
+  const allAssistants = [
+    ...(space.personal && space.default_assistant ? [space.default_assistant] : []),
+    ...space.applications.assistants.items
+  ];
+  const hasAssistants = allAssistants.length > 0;
   const hasApps = space.applications.apps.count > 0;
 
   const defaultSections: string[] = [];
@@ -35,7 +40,7 @@
         {...$trigger(`${space.id}-assistants`)}
         use:trigger
       >
-        <span>Assistants ({space.applications.assistants.count})</span>
+        <span>Assistants ({allAssistants.length})</span>
         <IconChevronRight
           class={$isSelected(`${space.id}-assistants`)
             ? "rotate-90 transition-all h-4 w-4"
@@ -50,7 +55,7 @@
           transition:slide
           class="grid grid-cols-2 gap-4 px-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
         >
-          {#each space.applications.assistants.items as assistant (assistant.id)}
+          {#each allAssistants as assistant (assistant.id)}
             <DashboardTile {assistant} />
           {/each}
         </div>

@@ -3,7 +3,10 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 
+from intric.database.tables.job_table import Jobs
+from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
+from intric.main.models import Status
 from intric.websites.domain.website import UpdateInterval, WebsiteSparse
 
 if TYPE_CHECKING:
@@ -105,11 +108,26 @@ class WebsiteSparseRepository:
             WebsitesTable.next_retry_at <= now_utc,
         )
 
+        # Active job condition: Skip websites that already have queued/in-progress crawls
+        # Why: Prevent duplicate scheduled crawls while a crawl is running or queued
+        active_job_statuses = [Status.QUEUED.value, Status.IN_PROGRESS.value]
+        active_job_exists = (
+            sa.select(sa.literal(1))
+            .select_from(CrawlRunsTable)
+            .join(Jobs, Jobs.id == CrawlRunsTable.job_id)
+            .where(
+                CrawlRunsTable.website_id == WebsitesTable.id,
+                Jobs.status.in_(active_job_statuses),
+            )
+        )
+        cond_no_active_jobs = ~sa.exists(active_job_exists)
+
         # Combine all conditions with circuit breaker
         stmt = sa.select(WebsitesTable).where(
             sa.and_(
                 sa.or_(cond_daily, cond_every_other_day, cond_weekly),
                 cond_circuit_breaker,
+                cond_no_active_jobs,
             )
         )
 

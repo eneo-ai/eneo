@@ -25,6 +25,7 @@ class ModelUsage(BaseModel):
     model_name: str
     model_nickname: str = Field(..., description="User-friendly name of the model")
     model_org: str | None = Field(default=None, description="Organization providing the model")
+    model_provider: str | None = Field(default=None, description="Provider name for the model")
     input_token_usage: int = Field(..., description="Number of tokens used for input prompts")
     output_token_usage: int = Field(..., description="Number of tokens used for model outputs")
     total_token_usage: int = Field(..., description="Total tokens (input + output)")
@@ -37,6 +38,7 @@ class ModelUsage(BaseModel):
             model_name=domain_model.model_name,
             model_nickname=domain_model.model_nickname,
             model_org=domain_model.model_org,
+            model_provider=domain_model.model_provider,
             input_token_usage=domain_model.input_token_usage,
             output_token_usage=domain_model.output_token_usage,
             total_token_usage=domain_model.total_token_usage,

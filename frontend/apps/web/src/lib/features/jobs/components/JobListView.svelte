@@ -18,7 +18,7 @@
         <div
           class="border-dimmer flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0"
         >
-          <div class="flex-shrink truncate pr-4">
+          <div class="flex-shrink truncate pr-4" title={job.name ?? job.id}>
             {prefix ? prefix + " " : ""}{job.name ?? job.id}
           </div>
           {#if job.status === "in progress" || job.status === "queued"}

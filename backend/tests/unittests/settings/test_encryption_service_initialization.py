@@ -76,53 +76,19 @@ class TestEncryptionServiceInitialization:
 
         assert service.decrypt("sk-legacy-plaintext") == "sk-legacy-plaintext"
 
-    def test_encryption_service_inactive_when_key_not_set(self):
-        """Test EncryptionService is inactive when ENCRYPTION_KEY is not set."""
-        # Arrange: Unset encryption key
-        with patch.dict(
-            os.environ,
-            {
-                "ENCRYPTION_KEY": "",
-                "TENANT_CREDENTIALS_ENABLED": "false",
-                "FEDERATION_PER_TENANT_ENABLED": "false",
-            },
-            clear=False,
-        ):
-            # Reload settings to pick up empty key
-            from intric.main import config
-            from importlib import reload
-            reload(config)
+    def test_encryption_service_inactive_when_initialized_without_key(self):
+        """Test EncryptionService is inactive when initialized without a key."""
+        # Create service directly without key
+        service = EncryptionService(None)
 
-            # Act: Create container
-            container = Container()
-            encryption_service = container.encryption_service()
+        # Assert: Service should be inactive
+        assert not service.is_active()
 
-            # Assert: Service should be inactive
-            assert not encryption_service.is_active(), (
-                "EncryptionService.is_active() returned True when no encryption key was set"
-            )
-
-    def test_encryption_service_fails_on_invalid_key(self):
-        """Test EncryptionService initialization fails with invalid Fernet key."""
-        # Arrange: Set invalid key
-        with patch.dict(
-            os.environ,
-            {
-                "ENCRYPTION_KEY": "invalid-not-base64-fernet-key",
-                "TENANT_CREDENTIALS_ENABLED": "false",  # Avoid validation failure
-                "FEDERATION_PER_TENANT_ENABLED": "false",  # Avoid validation failure
-            },
-            clear=False,
-        ):
-            # Reload settings
-            from intric.main import config
-            from importlib import reload
-            reload(config)
-
-            # Act & Assert: Container creation should fail
-            with pytest.raises(ValueError, match="ENCRYPTION_KEY must be valid Fernet key"):
-                container = Container()
-                container.encryption_service()  # Singleton creation happens here
+    def test_encryption_service_fails_on_invalid_fernet_key(self):
+        """Test EncryptionService raises error with invalid Fernet key."""
+        # Act & Assert: Invalid key should raise ValueError
+        with pytest.raises(ValueError, match="ENCRYPTION_KEY must be valid Fernet key"):
+            EncryptionService("invalid-not-base64-fernet-key")
 
 
 # Regression test metadata

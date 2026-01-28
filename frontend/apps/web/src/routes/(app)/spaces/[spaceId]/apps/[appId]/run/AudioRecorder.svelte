@@ -7,14 +7,25 @@
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
 
-  export let onRecordingDone: (params: { blob: Blob; mimeType: string }) => void;
+  type RecordingStopReason = "manual" | "limit" | "stall" | "error";
+
+  export let onRecordingDone: (params: {
+    blob: Blob;
+    mimeType: string;
+    reason: RecordingStopReason;
+  }) => void;
+  export let onRecordingStateChange: (isRecording: boolean) => void = () => {};
+  export let maxBytes: number | null = null;
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
   let elapsedTime = "";
-  let volumeMeter: HTMLMeterElement | undefined;
   let recordingError: string | null = null;
+  let recordingErrorHint: string | null = null;
   let recordingState: "idle" | "recording" | "processing" | "error" | "complete" = "idle";
+
+  // Volume level for smooth visualizer (0-1)
+  let volumeLevel: number = 0;
 
   let mediaStream: MediaStream | null;
   let mediaStreamNode: MediaStreamAudioSourceNode | null;
@@ -26,9 +37,26 @@
   let recordingBuffer: Blob[] = [];
   let recordedBlob: Blob | null = null;
   let audioURL: string | null = null;
+  let stopReason: RecordingStopReason = "manual";
+  let handleStreamEnded: ((event: Event) => void) | null = null;
 
   // Constants
   const TIMESLICE_MS = 10000; // Save chunks every 10 seconds
+  const STALL_TIMEOUT_MS = TIMESLICE_MS * 2;
+
+  const formatMegabytes = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
+  let maxSizeLabel: string | null = null;
+  $: maxSizeLabel =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? formatMegabytes(maxBytes)
+      : null;
+
+  // Size progress percentage for limit indicator
+  let sizePercent: number = 0;
+  $: sizePercent =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? Math.min(100, (recordingStats.totalBytes / maxBytes) * 100)
+      : 0;
 
   // Stats for diagnostics
   let recordingStats = {
@@ -38,12 +66,140 @@
     errors: [] as string[]
   };
 
+  const audioConstraints: MediaTrackConstraints = {
+    noiseSuppression: true,
+    echoCancellation: true,
+    autoGainControl: true
+  };
+
+  const isFallbackCandidate = (error: unknown) =>
+    error instanceof DOMException &&
+    (error.name === "NotFoundError" || error.name === "OverconstrainedError");
+
+  const formatMediaError = (error: unknown) => {
+    if (error instanceof DOMException) {
+      return `${error.name}: ${error.message}`;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  };
+
+  const getFriendlyErrorMessage = (errorName: string | null) => {
+    switch (errorName) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+        return m.recording_error_permission();
+      case "NotFoundError":
+        return m.recording_error_not_found();
+      case "NotReadableError":
+        return m.recording_error_not_readable();
+      case "OverconstrainedError":
+        return m.recording_error_overconstrained();
+      case "SecurityError":
+        return m.recording_error_security();
+      case "NotSupportedError":
+        return m.recording_error_not_supported();
+      default:
+        return m.recording_error_generic();
+    }
+  };
+
+  const setRecordingErrorState = (message: string, error?: unknown) => {
+    // Store only the raw technical error for diagnostics (developer-facing)
+    recordingError = error ? formatMediaError(error) : message;
+
+    // Set user-friendly localized hint
+    if (error instanceof DOMException) {
+      recordingErrorHint = getFriendlyErrorMessage(error.name);
+    } else if (message.includes("MediaDevices API is not available")) {
+      recordingErrorHint = m.recording_error_not_supported();
+    } else {
+      recordingErrorHint = m.recording_error_generic();
+    }
+  };
+
+  const collectMediaDiagnostics = async (context: string, error?: unknown) => {
+    try {
+      const hasMediaDevices = !!navigator.mediaDevices;
+      const supportsGetUserMedia = !!navigator.mediaDevices?.getUserMedia;
+      const supportsEnumerateDevices = !!navigator.mediaDevices?.enumerateDevices;
+      const secureContext = window.isSecureContext;
+      const protocol = window.location?.protocol ?? "unknown";
+
+      recordingStats.errors.push(
+        `${context} | secureContext=${secureContext} protocol=${protocol} mediaDevices=${supportsGetUserMedia}`
+      );
+
+      if (hasMediaDevices && supportsEnumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter((device) => device.kind === "audioinput");
+        const labeledInputs = audioInputs.filter((device) => device.label?.trim().length);
+        recordingStats.errors.push(
+          `Audio inputs detected: ${audioInputs.length} (${labeledInputs.length} labeled)`
+        );
+        console.warn("AudioRecorder diagnostics", {
+          context,
+          error,
+          secureContext,
+          protocol,
+          devices
+        });
+      }
+    } catch (diagnosticsError) {
+      console.warn("AudioRecorder diagnostics failed", diagnosticsError);
+    }
+  };
+
+  const requestAudioStream = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const errorMsg = "MediaDevices API is not available";
+      recordingStats.errors.push(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints
+      });
+    } catch (error) {
+      await collectMediaDiagnostics("Primary getUserMedia failed", error);
+      if (!isFallbackCandidate(error)) {
+        throw error;
+      }
+
+      recordingStats.errors.push("Retrying getUserMedia with relaxed audio constraints");
+
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const track = fallbackStream.getAudioTracks()[0];
+        if (track?.applyConstraints) {
+          try {
+            await track.applyConstraints(audioConstraints);
+          } catch (applyError) {
+            const applyErrorMsg = `Failed to apply audio constraints: ${formatMediaError(applyError)}`;
+            recordingStats.errors.push(applyErrorMsg);
+            console.warn(applyErrorMsg, applyError);
+          }
+        }
+        return fallbackStream;
+      } catch (fallbackError) {
+        await collectMediaDiagnostics("Fallback getUserMedia failed", fallbackError);
+        throw fallbackError;
+      }
+    }
+  };
+
   function startRecording() {
     try {
       recordingBuffer = [];
       recordingError = null;
+      recordingErrorHint = null;
       recordingState = "recording";
       isRecording = true;
+      stopReason = "manual";
+      onRecordingStateChange(true);
       startedRecordingAt = dayjs();
 
       // Reset stats
@@ -65,12 +221,35 @@
 
         mediaRecorder.addEventListener("dataavailable", (event) => {
           if (event.data.size > 0) {
+            const maxBytesValue =
+              typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+                ? maxBytes
+                : null;
+            const nextTotalBytes = recordingStats.totalBytes + event.data.size;
+
+            if (maxBytesValue && nextTotalBytes > maxBytesValue) {
+              recordingStats.errors.push(
+                "Recording stopped after reaching size limit at " + new Date().toISOString()
+              );
+              stopReason = "limit";
+              stopRecording();
+              return;
+            }
+
             recordingBuffer.push(event.data);
 
             // Update stats
             recordingStats.chunks++;
-            recordingStats.totalBytes += event.data.size;
+            recordingStats.totalBytes = nextTotalBytes;
             recordingStats.lastChunkTime = Date.now();
+
+            if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
+              recordingStats.errors.push(
+                "Recording stopped after reaching size limit at " + new Date().toISOString()
+              );
+              stopReason = "limit";
+              stopRecording();
+            }
           } else {
             console.warn("Received empty data chunk");
             recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
@@ -81,9 +260,10 @@
         mediaRecorder.addEventListener("error", (event) => {
           const errorMsg = "MediaRecorder error: " + (event.error?.message || "Unknown error");
           console.error(errorMsg, event);
-          recordingError = errorMsg;
+          setRecordingErrorState(errorMsg, event.error);
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
+          stopReason = "error";
           stopRecording();
         });
 
@@ -93,24 +273,28 @@
 
             if (recordingBuffer.length === 0) {
               const errorMsg = m.no_audio_data_captured();
-              recordingError = errorMsg;
+              setRecordingErrorState(errorMsg);
               recordingStats.errors.push(errorMsg);
               recordingState = "error";
+              stopReason = "error";
               return;
             }
 
             recordedBlob = new Blob(recordingBuffer, { type: mimeType });
             audioURL = URL.createObjectURL(recordedBlob);
-            onRecordingDone({ blob: recordedBlob, mimeType });
+            const reason = stopReason;
+            stopReason = "manual";
+            onRecordingDone({ blob: recordedBlob, mimeType, reason });
             recordingState = "complete";
           } catch (error) {
             const errorMsg =
               "Failed to process recording: " +
               (error instanceof Error ? error.message : String(error));
             console.error(errorMsg, error);
-            recordingError = errorMsg;
+            setRecordingErrorState(errorMsg, error);
             recordingStats.errors.push(errorMsg);
             recordingState = "error";
+            stopReason = "error";
           }
         });
 
@@ -127,24 +311,29 @@
         });
       } else {
         const errorMsg = "No media stream available";
-        recordingError = errorMsg;
+        setRecordingErrorState(errorMsg);
         recordingStats.errors.push(errorMsg);
         isRecording = false;
+        onRecordingStateChange(false);
         recordingState = "error";
       }
     } catch (error) {
       const errorMsg =
         "Failed to start recording: " + (error instanceof Error ? error.message : String(error));
       console.error(errorMsg, error);
-      recordingError = errorMsg;
+      setRecordingErrorState(errorMsg, error);
       recordingStats.errors.push(errorMsg);
       isRecording = false;
+      onRecordingStateChange(false);
       recordingState = "error";
     }
   }
 
   function stopRecording() {
-    isRecording = false;
+    if (isRecording) {
+      isRecording = false;
+      onRecordingStateChange(false);
+    }
 
     try {
       // Only call stop if the mediaRecorder is actually recording
@@ -155,7 +344,7 @@
       const errorMsg =
         "Failed to stop recording: " + (error instanceof Error ? error.message : String(error));
       console.error(errorMsg, error);
-      recordingError = errorMsg;
+      setRecordingErrorState(errorMsg, error);
       recordingStats.errors.push(errorMsg);
       recordingState = "error";
     }
@@ -171,13 +360,29 @@
   }
 
   const onAnimationFrame = () => {
-    if (volumeMeter) {
-      analyserNode?.getFloatTimeDomainData(levelBuffer);
+    // Update volume level for visualizer
+    if (analyserNode && levelBuffer.length > 0) {
+      analyserNode.getFloatTimeDomainData(levelBuffer);
       let sumSquares = 0.0;
       for (const amplitude of levelBuffer) {
         sumSquares += amplitude * amplitude;
       }
-      volumeMeter.value = Math.sqrt(sumSquares / levelBuffer.length);
+      // Normalize RMS to 0-1 range - speech RMS is typically 0.01-0.1
+      // Using 0.15 as max gives good sensitivity for speech
+      const rms = Math.sqrt(sumSquares / levelBuffer.length);
+      volumeLevel = Math.min(1, rms / 0.15);
+    }
+
+    if (
+      isRecording &&
+      recordingStats.lastChunkTime > 0 &&
+      Date.now() - recordingStats.lastChunkTime > STALL_TIMEOUT_MS
+    ) {
+      recordingStats.errors.push(
+        "Recording stopped due to stalled data at " + new Date().toISOString()
+      );
+      stopReason = "stall";
+      stopRecording();
     }
     elapsedTime = formatElapsed(dayjs().diff(startedRecordingAt, "seconds"));
     window.requestAnimationFrame(onAnimationFrame);
@@ -196,12 +401,21 @@
 
   onMount(async () => {
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          noiseSuppression: true,
-          echoCancellation: true,
-          autoGainControl: true
-        }
+      mediaStream = await requestAudioStream();
+
+      const streamEndedHandler = (_event: Event) => {
+        if (!isRecording) return;
+        const errorMsg = m.recording_device_disconnected();
+        setRecordingErrorState(errorMsg);
+        recordingStats.errors.push(errorMsg + " at " + new Date().toISOString());
+        stopReason = "error";
+        stopRecording();
+      };
+
+      handleStreamEnded = streamEndedHandler;
+      mediaStream.addEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.addEventListener("ended", streamEndedHandler);
       });
 
       audioContext = new AudioContext();
@@ -211,11 +425,12 @@
       mediaStreamNode.connect(analyserNode);
       window.requestAnimationFrame(onAnimationFrame);
     } catch (error) {
+      await collectMediaDiagnostics("Failed to access microphone", error);
       const errorMsg = m.failed_to_access_microphone({
-        error: error instanceof Error ? error.message : String(error)
+        error: formatMediaError(error)
       });
       console.error(errorMsg, error);
-      recordingError = errorMsg;
+      setRecordingErrorState(errorMsg, error);
       recordingState = "error";
     }
   });
@@ -233,6 +448,14 @@
       } catch (e) {
         console.error("Error stopping mediaRecorder during cleanup:", e);
       }
+    }
+
+    if (mediaStream && handleStreamEnded) {
+      const streamEndedHandler = handleStreamEnded;
+      mediaStream.removeEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.removeEventListener("ended", streamEndedHandler);
+      });
     }
 
     mediaStream?.getAudioTracks().forEach((track) => {
@@ -261,35 +484,70 @@
     </Tooltip>
 
     {#if isRecording}
-      <div class="px-6 py-2 font-mono">
-        <div>{m.time_label()}{elapsedTime}</div>
-        <div class="text-xs">
-          {(recordingStats.totalBytes / (1024 * 1024)).toFixed(2)}
-          MB
+      <div class="recording-stats">
+        <div class="stats-row">
+          <div class="time-display">{elapsedTime}</div>
+          <div class="volume-indicator">
+            <div class="volume-bar" style="transform: scaleX({volumeLevel})"></div>
+          </div>
         </div>
+        {#if maxSizeLabel}
+          <div class="size-row">
+            <span class="size-display">{formatMegabytes(recordingStats.totalBytes)} / {maxSizeLabel} MB</span>
+            <div class="size-progress-track">
+              <div class="size-progress-bar" style="width: {sizePercent}%"></div>
+            </div>
+          </div>
+        {/if}
       </div>
     {:else if recordingState === "processing"}
       <div class="px-6 py-2 font-mono">{m.processing_recording()}</div>
     {:else if recordingState === "error"}
-      <div class="error-message px-6 py-2">
-        <div>{m.recording_error()}</div>
-        <div class="text-xs">{recordingError}</div>
-        <button
-          class="cursor-pointer text-xs underline"
-          on:click={() => {
-            console.warn("Recording diagnostics:", recordingStats);
-            alert(m.diagnostics_logged_console());
-          }}
-        >
-          {m.view_diagnostics()}
-        </button>
+      <div class="flex flex-col gap-2 px-4 py-3">
+        <div class="flex flex-col gap-0.5">
+          <div class="text-sm font-semibold text-negative-stronger">
+            {m.recording_error()}
+          </div>
+          {#if recordingErrorHint}
+            <div class="text-sm leading-snug text-negative-stronger/90">
+              {recordingErrorHint}
+            </div>
+          {/if}
+        </div>
+        {#if recordingError}
+          <details class="error-details-collapse">
+            <summary class="cursor-pointer select-none list-none text-xs font-medium text-negative-default hover:text-negative-stronger transition-colors underline underline-offset-2">
+              {m.view_diagnostics()}
+            </summary>
+            <div class="mt-2 rounded-md px-3 py-2 font-mono text-xs leading-relaxed break-words bg-negative-default/15 text-negative-stronger/80 border border-negative-default/25">
+              {recordingError}
+            </div>
+          </details>
+        {:else}
+          <button
+            class="cursor-pointer text-xs font-medium underline underline-offset-2 transition-colors text-negative-default hover:text-negative-stronger text-left"
+            on:click={() => {
+              console.warn("Recording diagnostics:", recordingStats);
+              alert(m.diagnostics_logged_console());
+            }}
+          >
+            {m.view_diagnostics()}
+          </button>
+        {/if}
       </div>
     {:else if audioURL}
-      <audio controls src={audioURL} class="border-stronger ml-2 h-12 rounded-full border shadow-sm"
+      <audio
+        controls
+        preload="metadata"
+        src={audioURL}
+        class="audio-player"
+        dir="ltr"
       ></audio>
     {:else}
-      <div class="flex flex-col items-center justify-center px-6">
-        <meter bind:this={volumeMeter} min="0" high="0.7" optimum="0.5" max="0.8" value="0"></meter>
+      <div class="volume-container">
+        <div class="volume-track">
+          <div class="volume-level" style="transform: scaleX({volumeLevel})"></div>
+        </div>
       </div>
     {/if}
   </div>
@@ -297,12 +555,62 @@
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
+
+  /* Breathing pulse animation for active recording */
+  @keyframes breathe-ring {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.4;
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 0;
+    }
+  }
+
+  /* Subtle glow for recording state */
+  @keyframes subtle-glow {
+    0%,
+    100% {
+      box-shadow:
+        0 10px 15px -3px rgb(0 0 0 / 0.1),
+        0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+    50% {
+      box-shadow:
+        0 10px 15px -3px rgb(0 0 0 / 0.1),
+        0 4px 6px -4px rgb(0 0 0 / 0.1),
+        0 0 20px 2px rgb(239 68 68 / 0.15);
+    }
+  }
+
   .record-button {
-    @apply bg-negative-default text-on-fill hover:bg-negative-stronger flex h-12 w-12 items-center justify-center rounded-full;
+    @apply bg-negative-default text-on-fill hover:bg-negative-stronger relative flex h-12 w-12 items-center justify-center rounded-full transition-all duration-200;
   }
 
   .record-button[data-is-recording="true"] {
     @apply bg-primary text-negative-stronger hover:bg-negative-dimmer hover:text-negative-stronger;
+  }
+
+  /* Breathing pulse ring during recording */
+  .record-button[data-is-recording="true"]::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    border: 2px solid currentColor;
+    animation: breathe-ring 2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .record-button[data-is-recording="true"]::before {
+      animation: none;
+      opacity: 0;
+    }
+    .recording-widget[data-is-recording="true"] {
+      animation: none;
+    }
   }
 
   .record-button:disabled {
@@ -310,30 +618,122 @@
   }
 
   .recording-widget {
-    @apply border-stronger bg-primary flex items-center rounded-full border p-2 shadow-lg;
+    @apply border-stronger bg-primary flex items-center rounded-full border p-2 shadow-lg transition-all duration-300 ease-out;
   }
 
   .recording-widget[data-is-recording="true"] {
     @apply bg-negative-default text-on-fill;
+    animation: subtle-glow 2s ease-in-out infinite;
   }
 
   .recording-widget[data-state="error"] {
-    @apply bg-negative-stronger text-on-fill rounded-lg;
+    @apply bg-negative-dimmer border-negative-default/40 rounded-2xl max-w-sm border;
   }
 
   .recording-widget[data-state="processing"] {
     @apply bg-accent-dimmer text-on-fill;
   }
 
-  .error-message {
-    @apply text-on-fill text-sm;
+  /* Custom disclosure marker for details element */
+  .error-details-collapse summary::before {
+    content: "▶ ";
+    display: inline;
+    font-size: 0.6em;
+    vertical-align: middle;
+    margin-right: 0.25em;
   }
 
-  meter::-webkit-meter-inner-element {
-    @apply !h-4 overflow-clip rounded-full;
+  .error-details-collapse[open] summary::before {
+    content: "▼ ";
   }
 
-  meter::-webkit-meter-bar {
-    @apply !h-4 overflow-clip rounded-full;
+  .error-details-collapse summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* Recording stats display - compact layout */
+  .recording-stats {
+    @apply flex flex-col gap-1 px-4 py-1 font-mono;
+  }
+
+  .stats-row {
+    @apply flex items-center gap-3;
+  }
+
+  .time-display {
+    @apply text-base font-medium tabular-nums;
+  }
+
+  /* Live volume indicator during recording */
+  .volume-indicator {
+    @apply h-2 w-16 overflow-hidden rounded-full bg-white/20;
+  }
+
+  .volume-bar {
+    @apply h-full origin-left rounded-full;
+    background: linear-gradient(90deg, #4ade80 0%, #facc15 70%, #f87171 100%);
+    transition: transform 50ms linear;
+  }
+
+  .size-row {
+    @apply flex items-center gap-2;
+  }
+
+  .size-display {
+    @apply text-xs opacity-80 whitespace-nowrap;
+  }
+
+  /* Size limit progress bar */
+  .size-progress-track {
+    @apply h-1 flex-1 overflow-hidden rounded-full bg-white/20;
+  }
+
+  .size-progress-bar {
+    @apply h-full rounded-full bg-white/60 transition-[width] duration-300 ease-out;
+  }
+
+  /* Volume visualizer in idle state */
+  .volume-container {
+    @apply flex items-center justify-center px-4;
+  }
+
+  .volume-track {
+    @apply h-3 w-20 overflow-hidden rounded-full;
+    background: linear-gradient(90deg, #e5e7eb 0%, #d1d5db 100%);
+  }
+
+  :global(.dark) .volume-track {
+    background: linear-gradient(90deg, #374151 0%, #4b5563 100%);
+  }
+
+  .volume-level {
+    @apply h-full origin-left rounded-full;
+    background: linear-gradient(90deg, #22c55e 0%, #84cc16 50%, #eab308 100%);
+    transition: transform 50ms linear;
+  }
+
+  /* Audio player - ensure LTR rendering and consistent styling */
+  .audio-player {
+    @apply border-stronger ml-2 h-12 rounded-full border shadow-sm;
+    direction: ltr !important;
+    unicode-bidi: bidi-override;
+  }
+
+  /* Force LTR on all audio player internal elements */
+  .audio-player::-webkit-media-controls {
+    direction: ltr !important;
+  }
+
+  .audio-player::-webkit-media-controls-panel {
+    direction: ltr !important;
+  }
+
+  .audio-player::-webkit-media-controls-timeline {
+    direction: ltr !important;
+  }
+
+  .audio-player::-webkit-media-controls-current-time-display,
+  .audio-player::-webkit-media-controls-time-remaining-display {
+    direction: ltr !important;
   }
 </style>

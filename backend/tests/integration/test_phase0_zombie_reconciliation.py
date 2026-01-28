@@ -27,6 +27,7 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
+from intric.jobs.job_models import Task
 from intric.main.config import Settings
 from intric.main.models import Status
 from intric.worker.feeder.watchdog import OrphanWatchdog
@@ -76,7 +77,9 @@ async def clean_redis(redis_client: aioredis.Redis):
     for pattern in patterns:
         cursor = 0
         while True:
-            cursor, keys = await redis_client.scan(cursor=cursor, match=pattern, count=100)
+            cursor, keys = await redis_client.scan(
+                cursor=cursor, match=pattern, count=100
+            )
             if keys:
                 await redis_client.delete(*keys)
             if cursor == 0:
@@ -88,7 +91,9 @@ async def clean_redis(redis_client: aioredis.Redis):
     for pattern in patterns:
         cursor = 0
         while True:
-            cursor, keys = await redis_client.scan(cursor=cursor, match=pattern, count=100)
+            cursor, keys = await redis_client.scan(
+                cursor=cursor, match=pattern, count=100
+            )
             if keys:
                 await redis_client.delete(*keys)
             if cursor == 0:
@@ -104,7 +109,9 @@ async def test_embedding_model_id(db_container):
     async with db_container() as container:
         session = container.session()
         result = await session.execute(
-            select(EmbeddingModels.id).where(EmbeddingModels.name == "fixture-text-embedding")
+            select(EmbeddingModels.id).where(
+                EmbeddingModels.name == "fixture-text-embedding"
+            )
         )
         return result.scalar_one()
 
@@ -155,7 +162,9 @@ class TestPhase0ZombieCounterReconciliation:
         assert slot_value is None, (
             f"Zombie counter should be DELETED when DB has 0 active jobs, got {slot_value}"
         )
-        assert metrics.zombies_reconciled >= 1, "Should have reconciled at least one zombie"
+        assert metrics.zombies_reconciled >= 1, (
+            "Should have reconciled at least one zombie"
+        )
 
     async def test_zombie_counter_with_some_active_jobs_is_reset(
         self,
@@ -192,8 +201,8 @@ class TestPhase0ZombieCounterReconciliation:
                 job = Jobs(
                     id=uuid4(),
                     user_id=admin_user.id,
-                    task="CRAWL",
-                    status=Status.QUEUED,
+                    task=Task.CRAWL.value,
+                    status=Status.QUEUED.value,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
                 )
@@ -262,7 +271,7 @@ class TestPhase0ZombieCounterReconciliation:
                 job = Jobs(
                     id=uuid4(),
                     user_id=admin_user.id,
-                    task="CRAWL",
+                    task=Task.CRAWL.value,
                     status=Status.QUEUED,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -335,7 +344,7 @@ class TestPhase0ZombieCounterReconciliation:
                 job = Jobs(
                     id=uuid4(),
                     user_id=admin_user.id,
-                    task="CRAWL",
+                    task=Task.CRAWL.value,
                     status=Status.QUEUED,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -443,7 +452,7 @@ class TestPhase0ZombieCounterReconciliation:
             job_queued = Jobs(
                 id=uuid4(),
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -470,7 +479,7 @@ class TestPhase0ZombieCounterReconciliation:
                 job_ip = Jobs(
                     id=uuid4(),
                     user_id=admin_user.id,
-                    task="CRAWL",
+                    task=Task.CRAWL.value,
                     status=Status.IN_PROGRESS,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -537,7 +546,7 @@ class TestPhase0ZombieCounterReconciliation:
             job_queued = Jobs(
                 id=uuid4(),
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -564,7 +573,7 @@ class TestPhase0ZombieCounterReconciliation:
                 job_complete = Jobs(
                     id=uuid4(),
                     user_id=admin_user.id,
-                    task="CRAWL",
+                    task=Task.CRAWL.value,
                     status=Status.COMPLETE,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -590,7 +599,7 @@ class TestPhase0ZombieCounterReconciliation:
             job_failed = Jobs(
                 id=uuid4(),
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.FAILED,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -670,7 +679,7 @@ class TestPhase0ZombieCounterReconciliation:
             job = Jobs(
                 id=job_id,
                 user_id=admin_user.id,
-                task="CRAWL",
+                task=Task.CRAWL.value,
                 status=Status.QUEUED,
                 created_at=old_time,
                 updated_at=old_time,
@@ -708,7 +717,9 @@ class TestPhase0ZombieCounterReconciliation:
             session = container.session()
             result = await session.execute(select(Jobs).where(Jobs.id == job_id))
             updated_job = result.scalar_one()
-            assert updated_job.status == Status.FAILED, "Expired job should be marked FAILED"
+            assert updated_job.status == Status.FAILED, (
+                "Expired job should be marked FAILED"
+            )
 
         # Verify counter is 0 or deleted after Phase 0 reconciliation + Phase 1 slot release
         slot_value = await clean_redis.get(slot_key)
@@ -717,4 +728,6 @@ class TestPhase0ZombieCounterReconciliation:
         )
 
         # Verify metrics show both phases ran
-        assert metrics.expired_killed >= 1, "Should have killed at least one expired job"
+        assert metrics.expired_killed >= 1, (
+            "Should have killed at least one expired job"
+        )

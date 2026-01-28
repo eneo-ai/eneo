@@ -22,6 +22,7 @@ import redis.asyncio as aioredis
 
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.redis.connection import build_redis_pool_kwargs
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.election import LeaderElection
@@ -29,6 +30,10 @@ from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
 from intric.worker.feeder.watchdog import OrphanWatchdog
 
 logger = get_logger(__name__)
+
+# DLQ (Dead Letter Queue) configuration for poison entries
+DLQ_MAX_ENTRIES = 1000  # Maximum poison entries to retain per tenant
+DLQ_TTL_SECONDS = 86400 * 7  # 7 days retention
 
 
 class CrawlFeeder:
@@ -150,6 +155,7 @@ class CrawlFeeder:
         enqueued_count = 0
         failed_count = 0
         skipped_capacity = 0
+        duplicate_count = 0
 
         # pending_jobs is list of (raw_bytes, job_data) tuples
         # raw_bytes preserved for exact LREM matching
@@ -158,11 +164,30 @@ class CrawlFeeder:
             # Why: Need job_id before enqueue to mark flag first
             try:
                 job_id = UUID(job_data["job_id"])
-            except (KeyError, ValueError, TypeError):
+            except (KeyError, ValueError, TypeError) as parse_exc:
                 logger.warning(
-                    "Invalid job_id in pending job, skipping",
-                    extra={"tenant_id": str(tenant_id), "job_data": job_data},
+                    "Invalid job_id in pending job, removing poison entry",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "job_data": job_data,
+                        "error": str(parse_exc),
+                        "metric_name": "feeder.poison_entry_removed",
+                        "metric_value": 1,
+                    },
                 )
+                # Push to DLQ for forensics before removing
+                try:
+                    dlq_key = f"tenant:{tenant_id}:crawl_pending:dlq"
+                    await redis_client.lpush(dlq_key, raw_bytes)
+                    await redis_client.ltrim(dlq_key, 0, DLQ_MAX_ENTRIES - 1)
+                    await redis_client.expire(dlq_key, DLQ_TTL_SECONDS)
+                except Exception:
+                    pass  # Best effort DLQ push
+                # Remove poison entry to prevent infinite retry loop
+                try:
+                    await self._pending_queue.remove(tenant_id, raw_bytes)
+                except Exception:
+                    pass  # Best effort removal
                 failed_count += 1
                 continue
 
@@ -194,32 +219,69 @@ class CrawlFeeder:
                 # Mark failed - MUST release slot and skip enqueue to prevent double-acquire
                 logger.error(
                     "Failed to mark slot pre-acquired, rolling back slot",
-                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id), "error": str(mark_exc)},
+                    extra={
+                        "job_id": str(job_id),
+                        "tenant_id": str(tenant_id),
+                        "error": str(mark_exc),
+                    },
                 )
                 await self._capacity_manager.release_slot(tenant_id)
                 failed_count += 1
                 continue
 
             # Enqueue to ARQ
-            success, returned_job_id = await self._job_enqueuer.enqueue(job_data, tenant_id)
+            success, is_duplicate, returned_job_id = await self._job_enqueuer.enqueue(
+                job_data, tenant_id
+            )
 
             if success:
                 # Remove from pending queue using exact raw bytes
                 await self._pending_queue.remove(tenant_id, raw_bytes)
-                enqueued_count += 1
+
+                if is_duplicate:
+                    # Duplicate: job already in ARQ, release the slot we acquired
+                    # The original enqueue already holds a slot, so we must release
+                    # ours to avoid slot counter inflation.
+                    #
+                    # IMPORTANT: Do NOT delete the slot_preacquired flag!
+                    # The flag belongs to the original enqueue. If we delete it,
+                    # the worker will acquire a new slot (thinking none was pre-acquired)
+                    # and the original slot will leak. The flag must remain so the
+                    # worker knows to skip slot acquisition and release the original.
+                    await self._capacity_manager.release_slot(tenant_id)
+                    duplicate_count += 1
+                    # Don't increment enqueued_count - job wasn't newly enqueued
+                else:
+                    enqueued_count += 1
             else:
                 # Enqueue failed - rollback: delete flag and release slot
                 try:
                     await redis_client.delete(f"job:{job_id}:slot_preacquired")
-                except Exception:
-                    pass  # Best effort cleanup
+                except Exception as flag_exc:
+                    logger.debug(
+                        "Failed to delete slot_preacquired flag during rollback",
+                        extra={"job_id": str(job_id), "error": str(flag_exc)},
+                    )
                 await self._capacity_manager.release_slot(tenant_id)
                 failed_count += 1
 
-        if enqueued_count > 0 or failed_count > 0 or skipped_capacity > 0:
+        if (
+            enqueued_count > 0
+            or failed_count > 0
+            or skipped_capacity > 0
+            or duplicate_count > 0
+        ):
             logger.info(
-                f"Feeder cycle complete: {enqueued_count} enqueued, {failed_count} failed, {skipped_capacity} skipped (capacity)",
-                extra={"tenant_id": str(tenant_id)},
+                "Feeder cycle complete",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "enqueued": enqueued_count,
+                    "failed": failed_count,
+                    "skipped_capacity": skipped_capacity,
+                    "duplicates": duplicate_count,
+                    "metric_name": "feeder.cycle_summary",
+                    "metric_value": enqueued_count,
+                },
             )
 
     async def run_forever(self) -> None:
@@ -253,10 +315,10 @@ class CrawlFeeder:
         # Create own Redis client (long-running service manages its own lifecycle)
         try:
             redis_url = f"redis://{self.settings.redis_host}:{self.settings.redis_port}"
-            redis_kwargs = {"decode_responses": False}  # Raw bytes for LREM matching
-            redis_db = getattr(self.settings, "redis_db", None)
-            if redis_db is not None:
-                redis_kwargs["db"] = redis_db
+            redis_kwargs = build_redis_pool_kwargs(
+                self.settings,
+                decode_responses=False,
+            )
 
             self._redis_client = aioredis.Redis.from_url(redis_url, **redis_kwargs)
             redis_client = self._redis_client
@@ -321,7 +383,8 @@ class CrawlFeeder:
                     if not processed_any:
                         if (
                             self._last_heartbeat is None
-                            or (now - self._last_heartbeat).total_seconds() >= self._heartbeat_interval
+                            or (now - self._last_heartbeat).total_seconds()
+                            >= self._heartbeat_interval
                         ):
                             logger.info("Feeder heartbeat: idle, no pending crawls")
                             self._last_heartbeat = now
@@ -333,13 +396,17 @@ class CrawlFeeder:
                     await self._leader_election.refresh()
 
                     # Sleep until next cycle (use shortest interval among active tenants)
-                    sleep_interval = await self._capacity_manager.get_minimum_feeder_interval()
+                    sleep_interval = (
+                        await self._capacity_manager.get_minimum_feeder_interval()
+                    )
                     await asyncio.sleep(sleep_interval)
 
                 except Exception as exc:
                     logger.error(f"Error in feeder loop: {exc}")
                     # Continue running - feeder should be resilient
-                    sleep_interval = await self._capacity_manager.get_minimum_feeder_interval()
+                    sleep_interval = (
+                        await self._capacity_manager.get_minimum_feeder_interval()
+                    )
                     await asyncio.sleep(sleep_interval)
         finally:
             await self._close_redis()

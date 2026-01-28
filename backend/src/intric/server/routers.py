@@ -12,11 +12,17 @@ from intric.assistants.api.assistant_router import router as assistants_router
 from intric.completion_models.presentation.completion_models_router import (
     router as completion_models_router,
 )
+from intric.completion_models.presentation.tenant_completion_models_router import (
+    router as tenant_completion_models_router,
+)
 from intric.conversations.conversations_router import router as conversations_router
 from intric.crawler.crawl_run_router import router as crawl_run_router
 from intric.dashboard.api.dashboard_router import router as dashboard_router
 from intric.embedding_models.presentation.embedding_model_router import (
     router as embedding_models_router,
+)
+from intric.embedding_models.presentation.tenant_embedding_models_router import (
+    router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
@@ -67,6 +73,9 @@ from intric.token_usage.presentation.token_usage_router import (
 from intric.transcription_models.presentation.transcription_models_router import (
     router as transcription_models_router,
 )
+from intric.transcription_models.presentation.tenant_transcription_models_router import (
+    router as tenant_transcription_models_router,
+)
 from intric.user_groups.user_groups_router import router as user_groups_router
 from intric.users.user_router import router as users_router
 from intric.websites.presentation.website_router import router as website_router
@@ -86,6 +95,11 @@ from intric.tenants.presentation.tenant_federation_router import (
 )
 from intric.authentication.federation_router import router as federation_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
+
+from intric.model_providers.presentation.model_provider_router import (
+    router as model_providers_router,
+)
+from intric.api.audit.routes import router as audit_router
 
 router = APIRouter()
 
@@ -120,6 +134,26 @@ router.include_router(
     prefix="/transcription-models",
     tags=["transcription-models"],
 )
+router.include_router(
+    model_providers_router,
+    prefix="/admin/model-providers",
+    tags=["admin", "model-providers"],
+)
+router.include_router(
+    tenant_completion_models_router,
+    prefix="/admin/tenant-models/completion",
+    tags=["admin", "tenant-models"],
+)
+router.include_router(
+    tenant_embedding_models_router,
+    prefix="/admin/tenant-models/embedding",
+    tags=["admin", "tenant-models"],
+)
+router.include_router(
+    tenant_transcription_models_router,
+    prefix="/admin/tenant-models/transcription",
+    tags=["admin", "tenant-models"],
+)
 router.include_router(files_router, prefix="/files", tags=["files"])
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
@@ -146,6 +180,7 @@ router.include_router(
     prefix="/security-classifications",
     tags=["security-classifications"],
 )
+router.include_router(audit_router, prefix="", tags=["audit"])
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
 router.include_router(sharepoint_webhook_router, prefix="/integrations", tags=["integrations"])
 router.include_router(admin_sharepoint_router, prefix="/admin", tags=["admin"])

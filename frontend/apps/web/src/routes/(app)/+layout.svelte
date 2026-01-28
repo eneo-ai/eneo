@@ -16,6 +16,8 @@
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
+  import { Toaster } from "$lib/components/toast";
 
   export let data;
 
@@ -79,7 +81,7 @@
     <div
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
     >
-      <a href="/">
+      <a href={localizeHref("/")}>
         <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
         <IconEneo class="text-brand-intric -ml-0.5 block md:hidden" viewBox="0 0 330 330"
         ></IconEneo>
@@ -95,17 +97,17 @@
       </Button>
     </div>
     <nav class="flex h-[3.25rem] w-full overflow-x-auto">
-      <a href="/spaces/personal/chat" data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
-      <a href="/spaces/list" data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
+      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
+      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
       {#if user.hasPermission("admin")}
-        <a href="/spaces/organization/knowledge" data-current={isOrganization ? "page" : undefined}>{m.organization()}</a>
+        <a href={localizeHref("/spaces/organization/knowledge")} data-current={isOrganization ? "page" : undefined}>{m.organization()}</a>
       {/if}
 
       <div aria-hidden="true" class="flex-grow"></div>
 
       <!-- Toggle -->
       {#if user.hasPermission("admin")}
-        <a href="/admin" data-current={currentRoute.startsWith("/admin") ? "page" : undefined}
+        <a href={localizeHref("/admin")} data-current={currentRoute.startsWith("/admin") ? "page" : undefined}
           >{m.admin()}</a
         >
       {/if}
@@ -120,6 +122,8 @@
     <slot />
   </main>
 </div>
+
+<Toaster />
 
 <style lang="postcss">
   @reference "@intric/ui/styles";

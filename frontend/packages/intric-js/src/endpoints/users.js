@@ -43,7 +43,7 @@ export function initUser(client) {
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
      * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: string}} options
-     * @return {Promise<User[]>}
+     * @return {Promise<import('../types/resources').Paginated<User>>}
      *
      * @overload
      * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string}} [options]

@@ -65,6 +65,7 @@ class Space:
         updated_at: datetime = None,
         group_chats: Optional[list["GroupChat"]] = [],
         security_classification: Optional[SecurityClassification] = None,
+        data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
     ):
         self.id = id
@@ -88,6 +89,7 @@ class Space:
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
+        self.data_retention_days = data_retention_days
         self.icon_id = icon_id
 
     def _get_member_ids(self):
@@ -184,9 +186,9 @@ class Space:
 
         return sorted_completion_models[0]  # type: ignore
 
-    def get_latest_transcription_model(self) -> TranscriptionModel:
+    def get_latest_transcription_model(self) -> Optional[TranscriptionModel]:
         if not self.transcription_models:
-            return
+            return None
 
         sorted_transcription_models = sorted(
             [
@@ -199,10 +201,7 @@ class Space:
         )
 
         if not sorted_transcription_models:
-            raise BadRequestException(
-                f"Cannot perform operation: Space '{self.name}' has no transcription models configured. "
-                "Please configure at least one transcription model (e.g., Whisper) in the space settings."
-            )
+            return None
 
         return sorted_transcription_models[0]  # type: ignore
 
@@ -214,15 +213,7 @@ class Space:
         default_model = next(model, None)
 
         if default_model is None:
-            model = filter(
-                lambda m: m.name == "gpt-4o" and m.can_access,
-                self.completion_models,
-            )
-
-            default_model = next(model, None)
-
-            if default_model is None:
-                default_model = self.get_latest_completion_model()
+            default_model = self.get_latest_completion_model()
 
         return default_model
 
@@ -291,6 +282,7 @@ class Space:
         completion_models: list["CompletionModel"] = None,
         transcription_models: list[TranscriptionModel] = None,
         security_classification: Union[SecurityClassification, NotProvided, None] = NOT_PROVIDED,
+        data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
@@ -352,6 +344,9 @@ class Space:
 
             self.transcription_models = transcription_models
 
+        if data_retention_days is not NOT_PROVIDED:
+            self.data_retention_days = data_retention_days
+
         if icon_id is not NOT_PROVIDED:
             self.icon_id = icon_id
 
@@ -402,11 +397,10 @@ class Space:
             raise BadRequestException("Assistant is already in the space")
 
         cm = getattr(assistant, "completion_model", None)
-        if cm is None or getattr(cm, "id", None) is None:
-            raise BadRequestException("Assistant has no completion model assigned")
-
-        if not self.is_completion_model_in_space(cm.id):
-            self.add_completion_model(cm)
+        # Only add completion model to space if the assistant has one
+        if cm is not None and getattr(cm, "id", None) is not None:
+            if not self.is_completion_model_in_space(cm.id):
+                self.add_completion_model(cm)
 
         self.assistants.append(assistant)
 

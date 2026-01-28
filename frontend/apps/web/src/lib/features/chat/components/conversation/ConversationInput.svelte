@@ -116,7 +116,10 @@
 	});
 
 	const isAskingDisabled = $derived(
-		chat.askQuestion.isLoading || $isUploading || ($question === '' && $attachments.length === 0)
+		chat.askQuestion.isLoading ||
+			$isUploading ||
+			($question === '' && $attachments.length === 0) ||
+			!chat.hasCompletionModel
 	);
 
 	let useWebSearch = $state(false);
@@ -170,7 +173,7 @@
 </script>
 
 <form
-	class="border-default bg-primary ring-dimmer focus-within:border-stronger hover:border-stronger relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 focus-within:shadow-lg hover:ring-4 md:w-full md:rounded-xl md:border"
+	class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4' : 'pointer-events-none opacity-50'}"
 >
 	<!-- Icon always absolutely positioned to prevent jumping -->
 	{#if modelInfo && tokenLimit > 0}

@@ -223,6 +223,38 @@ export interface paths {
      */
     patch: operations["update_template_setting_api_v1_settings_templates_patch"];
   };
+  "/api/v1/settings/audit-logging": {
+    /**
+     * Toggle global audit logging
+     * @description Enable or disable global audit logging for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `audit_logging_enabled` feature flag for your tenant
+     * - When disabled: No audit logs are created for any action (global kill switch)
+     * - When enabled: Audit logging resumes with category and action-level filtering
+     * - This is independent from category/action configuration
+     * - Change takes effect immediately for all workers
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "enabled": false
+     * }
+     * ```
+     *
+     * **Example Response:**
+     * ```json
+     * {
+     *   "chatbot_widget": {},
+     *   "audit_logging_enabled": false,
+     *   "using_templates": true
+     * }
+     * ```
+     */
+    patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
@@ -1062,6 +1094,94 @@ export interface paths {
     /** Update Transcription Model */
     post: operations["update_transcription_model_api_v1_transcription_models__id___post"];
   };
+  "/api/v1/admin/model-providers/": {
+    /**
+     * List Providers
+     * @description List all model providers for the tenant.
+     */
+    get: operations["list_providers_api_v1_admin_model_providers__get"];
+    /**
+     * Create Provider
+     * @description Create a new model provider.
+     */
+    post: operations["create_provider_api_v1_admin_model_providers__post"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/": {
+    /**
+     * Get Provider
+     * @description Get a specific model provider.
+     */
+    get: operations["get_provider_api_v1_admin_model_providers__provider_id___get"];
+    /**
+     * Update Provider
+     * @description Update an existing model provider.
+     */
+    put: operations["update_provider_api_v1_admin_model_providers__provider_id___put"];
+    /**
+     * Delete Provider
+     * @description Delete a model provider.
+     *
+     * Will fail if the provider has models attached to it.
+     */
+    delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/completion/": {
+    /**
+     * Create Tenant Completion Model
+     * @description Create a new tenant-specific completion model.
+     */
+    post: operations["create_tenant_completion_model_api_v1_admin_tenant_models_completion__post"];
+  };
+  "/api/v1/admin/tenant-models/completion/{model_id}/": {
+    /**
+     * Update Tenant Completion Model
+     * @description Update a tenant-specific completion model.
+     */
+    put: operations["update_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___put"];
+    /**
+     * Delete Tenant Completion Model
+     * @description Delete a tenant-specific completion model.
+     */
+    delete: operations["delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/embedding/": {
+    /**
+     * Create Tenant Embedding Model
+     * @description Create a new tenant-specific embedding model.
+     */
+    post: operations["create_tenant_embedding_model_api_v1_admin_tenant_models_embedding__post"];
+  };
+  "/api/v1/admin/tenant-models/embedding/{model_id}/": {
+    /**
+     * Update Tenant Embedding Model
+     * @description Update a tenant-specific embedding model.
+     */
+    put: operations["update_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___put"];
+    /**
+     * Delete Tenant Embedding Model
+     * @description Delete a tenant-specific embedding model.
+     */
+    delete: operations["delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete"];
+  };
+  "/api/v1/admin/tenant-models/transcription/": {
+    /**
+     * Create Tenant Transcription Model
+     * @description Create a new tenant-specific transcription model.
+     */
+    post: operations["create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post"];
+  };
+  "/api/v1/admin/tenant-models/transcription/{model_id}/": {
+    /**
+     * Update Tenant Transcription Model
+     * @description Update a tenant-specific transcription model.
+     */
+    put: operations["update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put"];
+    /**
+     * Delete Tenant Transcription Model
+     * @description Delete a tenant-specific transcription model.
+     */
+    delete: operations["delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete"];
+  };
   "/api/v1/files/": {
     /** Get Files */
     get: operations["get_files_api_v1_files__get"];
@@ -1193,13 +1313,17 @@ export interface paths {
      */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
   };
-  "/api/v1/spaces/{id}/knowledge/integrations/{user_integration_id}/": {
+  "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/": {
     /** Create Space Integration Knowledge */
-    post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations__user_integration_id___post"];
+    post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post"];
   };
-  "/api/v1/spaces/{id}/knowledge/{integration_knowledge_id}/": {
+  "/api/v1/spaces/{id}/knowledge/integrations/remove/{integration_knowledge_id}/": {
     /** Delete Space Integration Knowledge */
-    delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge__integration_knowledge_id___delete"];
+    delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
+    /** Update Integration Knowledge */
+    patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
   };
   "/api/v1/spaces/{id}/members/": {
     /** Add Space Member */
@@ -1507,6 +1631,217 @@ export interface paths {
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
   };
+  "/api/v1/audit/config": {
+    /**
+     * Get audit category configuration
+     * @description Retrieve all audit category configurations for the current tenant.
+     */
+    get: operations["get_audit_config_api_v1_audit_config_get"];
+    /**
+     * Update audit category configuration
+     * @description Update one or more audit category configurations for the current tenant.
+     */
+    patch: operations["update_audit_config_api_v1_audit_config_patch"];
+  };
+  "/api/v1/audit/config/actions": {
+    /**
+     * Get per-action audit configuration
+     * @description Retrieve all 65 actions with their enabled status for the modal UI.
+     */
+    get: operations["get_action_config_api_v1_audit_config_actions_get"];
+    /**
+     * Update per-action audit configuration
+     * @description Update one or more action-level audit configurations.
+     */
+    patch: operations["update_action_config_api_v1_audit_config_actions_patch"];
+  };
+  "/api/v1/audit/access-session/rate-limit": {
+    /**
+     * Reset Rate Limit
+     * @description Admin utility: Reset audit session rate limit for current user.
+     *
+     * This endpoint is only available in development/testing environments.
+     * Use when you get rate limited during testing.
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Development/testing environment
+     *
+     * Note: Permission check intentionally removed to allow clearing rate limit
+     * even when locked out. User is still authenticated via JWT.
+     */
+    delete: operations["reset_rate_limit_api_v1_audit_access_session_rate_limit_delete"];
+  };
+  "/api/v1/audit/access-session": {
+    /**
+     * Create Access Session
+     * @description Create an audit access session with justification.
+     *
+     * Stores the access justification securely in Redis (server-side) instead of
+     * exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+     *
+     * Security Features:
+     * - Justification never appears in URLs or browser history
+     * - Session ID stored in HTTP-only cookie (prevents XSS)
+     * - Automatic expiration after 1 hour
+     * - Tenant isolation validation
+     * - Instant revocation capability
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Admin permissions
+     *
+     * Returns: Session creation confirmation with HTTP-only cookie set
+     */
+    post: operations["create_access_session_api_v1_audit_access_session_post"];
+  };
+  "/api/v1/audit/logs": {
+    /**
+     * List Audit Logs
+     * @description List audit logs for the authenticated user's tenant.
+     *
+     * Security:
+     * - Requires active audit access session (via HTTP-only cookie)
+     * - Session must contain valid justification
+     * - Justification stored server-side (Redis) - never in URLs
+     *
+     * Access Control:
+     * - Admins only: View all actions in their tenant
+     *
+     * Requires: Authentication (JWT token or API key)
+     * Requires: Admin permissions
+     * Requires: Active audit access session with justification
+     */
+    get: operations["list_audit_logs_api_v1_audit_logs_get"];
+  };
+  "/api/v1/audit/logs/user/{user_id}": {
+    /**
+     * Get User Logs
+     * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+     *
+     * Returns audit logs involving the user in any capacity.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     * Security: Only returns logs for the authenticated user's tenant
+     */
+    get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
+  };
+  "/api/v1/audit/logs/export": {
+    /**
+     * Export Audit Logs
+     * @description Export audit logs to CSV or JSON Lines format.
+     *
+     * Supported formats:
+     * - csv: Comma-separated values (default, Excel-compatible)
+     * - json: JSON Lines format (one JSON object per line, for large exports)
+     *
+     * Use user_id for GDPR Article 15 data subject access requests.
+     *
+     * Memory Protection:
+     * - Default limit: 50,000 records (configurable via max_records parameter)
+     * - Response includes X-Records-Truncated header if limit was hit
+     * - Response includes X-Total-Records header with total matching count
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     * Security: Only exports logs for the authenticated user's tenant
+     */
+    get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
+  };
+  "/api/v1/audit/logs/export/async": {
+    /**
+     * Request Async Export
+     * @description Request async export of audit logs.
+     *
+     * Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+     * Download via /logs/export/{job_id}/download when complete.
+     *
+     * Advantages over sync export:
+     * - Handles 1M-10M+ records without timeout
+     * - Progress tracking for long exports
+     * - Cancellation support
+     * - Constant memory usage (~50MB)
+     *
+     * Limitations:
+     * - Max 2 concurrent exports per tenant
+     * - Files auto-deleted after 24 hours
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    post: operations["request_async_export_api_v1_audit_logs_export_async_post"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/status": {
+    /**
+     * Get Export Status
+     * @description Get export job status with progress.
+     *
+     * Poll this endpoint to track export progress.
+     * When status is 'completed', use the download_url to get the file.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["get_export_status_api_v1_audit_logs_export__job_id__status_get"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/download": {
+    /**
+     * Download Export
+     * @description Download completed export file.
+     *
+     * Only available when job status is 'completed'.
+     * Files are auto-deleted after 24 hours.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["download_export_api_v1_audit_logs_export__job_id__download_get"];
+  };
+  "/api/v1/audit/logs/export/{job_id}/cancel": {
+    /**
+     * Cancel Export
+     * @description Cancel an in-progress export.
+     *
+     * Only works for jobs in 'pending' or 'processing' state.
+     * The worker will stop processing and clean up the partial file.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    post: operations["cancel_export_api_v1_audit_logs_export__job_id__cancel_post"];
+  };
+  "/api/v1/audit/retention-policy": {
+    /**
+     * Get Retention Policy
+     * @description Get the current retention policy for your tenant.
+     *
+     * Returns audit log retention policy configuration.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    get: operations["get_retention_policy_api_v1_audit_retention_policy_get"];
+    /**
+     * Update Retention Policy
+     * @description Update the audit log retention policy for your tenant.
+     *
+     * Configure audit log retention for compliance and security tracking.
+     *
+     * Audit Log Retention:
+     * - Minimum: 1 day (Recommended: 90+ days for compliance)
+     * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+     * - Default: 365 days (Swedish Arkivlagen)
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level.
+     * Tenant-level conversation retention has been removed to prevent accidental data loss.
+     *
+     * The system automatically runs a daily job to delete audit logs older than
+     * the retention period.
+     *
+     * Requires: Authentication (JWT token or API key via X-API-Key header)
+     * Requires: Admin permissions
+     */
+    put: operations["update_retention_policy_api_v1_audit_retention_policy_put"];
+  };
   "/api/v1/integrations/": {
     /** Get Integrations */
     get: operations["get_integrations_api_v1_integrations__get"];
@@ -1515,29 +1850,140 @@ export interface paths {
     /** Get Tenant Integrations */
     get: operations["get_tenant_integrations_api_v1_integrations_tenant__get"];
   };
-  "/api/v1/integrations/tenant/{integration_id}/": {
+  "/api/v1/integrations/tenant/add/{integration_id}/": {
     /** Add Tenant Integration */
-    post: operations["add_tenant_integration_api_v1_integrations_tenant__integration_id___post"];
+    post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
   };
-  "/api/v1/integrations/tenant/{tenant_integration_id}/": {
+  "/api/v1/integrations/tenant/remove/{tenant_integration_id}/": {
     /** Remove Tenant Integration */
-    delete: operations["remove_tenant_integration_api_v1_integrations_tenant__tenant_integration_id___delete"];
+    delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
   };
   "/api/v1/integrations/me/": {
-    /** Get User Integrations */
+    /**
+     * Get User Integrations
+     * @description Get user's personal integrations.
+     *
+     * Only returns user_oauth integrations (personal account connections).
+     * Tenant app integrations are managed in admin panel and not shown here.
+     */
     get: operations["get_user_integrations_api_v1_integrations_me__get"];
+  };
+  "/api/v1/integrations/spaces/{space_id}/available/": {
+    /**
+     * Get Available Integrations For Space
+     * @description Get integrations available for a specific space, filtered by space type and auth type.
+     *
+     * - Personal spaces: Only user OAuth integrations
+     * - Shared/Organization spaces: Both tenant app and user OAuth integrations
+     */
+    get: operations["get_available_integrations_for_space_api_v1_integrations_spaces__space_id__available__get"];
   };
   "/api/v1/integrations/users/{user_integration_id}/": {
     /** Disconnect User Integration */
     delete: operations["disconnect_user_integration_api_v1_integrations_users__user_integration_id___delete"];
   };
+  "/api/v1/integrations/sync-logs/{integration_knowledge_id}/": {
+    /**
+     * Get Sync Logs
+     * @description Get paginated sync history for an integration knowledge.
+     */
+    get: operations["get_sync_logs_api_v1_integrations_sync_logs__integration_knowledge_id___get"];
+  };
   "/api/v1/integrations/{user_integration_id}/preview/": {
     /** Get Integration Preview */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
   };
+  "/api/v1/integrations/{user_integration_id}/sharepoint/tree/": {
+    /**
+     * Get Sharepoint Folder Tree
+     * @description Get SharePoint/OneDrive folder tree with hybrid authentication support.
+     *
+     * Authentication is determined by space type:
+     * - Personal space: Uses user OAuth
+     * - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
+     * - Shared/Org space without tenant app: Falls back to user OAuth
+     *
+     * Provide site_id for SharePoint sites, or drive_id for OneDrive.
+     */
+    get: operations["get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get"];
+  };
   "/api/v1/integrations/{integration_id}/": {
     /** Get Integration By Id */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
+  };
+  "/api/v1/integrations/sharepoint/webhook/": {
+    /** Sharepoint Webhook Validation */
+    get: operations["sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get"];
+    /** Sharepoint Webhook */
+    post: operations["sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post"];
+  };
+  "/api/v1/admin/sharepoint/app": {
+    /**
+     * Get tenant SharePoint app configuration
+     * @description Retrieve the current SharePoint app configuration for the tenant. Client secret is masked in the response. Requires admin role.
+     */
+    get: operations["get_sharepoint_app_api_v1_admin_sharepoint_app_get"];
+    /**
+     * Configure tenant SharePoint app
+     * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+     */
+    post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
+    /**
+     * Permanently delete SharePoint app
+     * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
+     * - All user_integrations using this tenant app (both org and personal)
+     * - All integration_knowledge (imported SharePoint content)
+     * - All info_blobs and embeddings (document data and vectors)
+     * - All sharepoint_subscriptions (webhooks)
+     * - All oauth_tokens for personal SharePoint integrations
+     * - All sync_logs
+     *
+     * Assistants linked to this knowledge will lose their connections.
+     * Requires admin role.
+     */
+    delete: operations["delete_sharepoint_app_api_v1_admin_sharepoint_app_delete"];
+  };
+  "/api/v1/admin/sharepoint/app/test": {
+    /**
+     * Test SharePoint app credentials
+     * @description Test if the provided SharePoint app credentials are valid by attempting to acquire an access token. This does not save the credentials. Requires admin role.
+     */
+    post: operations["test_sharepoint_app_credentials_api_v1_admin_sharepoint_app_test_post"];
+  };
+  "/api/v1/admin/sharepoint/subscriptions": {
+    /**
+     * List all SharePoint webhook subscriptions
+     * @description Get all SharePoint webhook subscriptions for the tenant. Shows status, expiration time, and related integration information. Requires admin role.
+     */
+    get: operations["list_sharepoint_subscriptions_api_v1_admin_sharepoint_subscriptions_get"];
+  };
+  "/api/v1/admin/sharepoint/subscriptions/renew-expired": {
+    /**
+     * Renew all expired SharePoint subscriptions
+     * @description Recreate all expired SharePoint webhook subscriptions for the tenant. This is useful after server downtime > 24h when subscriptions have expired. Preserves all integration relationships - assistants continue to work. Requires admin role.
+     */
+    post: operations["renew_expired_subscriptions_api_v1_admin_sharepoint_subscriptions_renew_expired_post"];
+  };
+  "/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate": {
+    /**
+     * Recreate a specific SharePoint subscription
+     * @description Recreate a specific SharePoint webhook subscription. Useful for targeted fixes of expired or problematic subscriptions. Preserves all integration relationships. Requires admin role.
+     */
+    post: operations["recreate_subscription_api_v1_admin_sharepoint_subscriptions__subscription_id__recreate_post"];
+  };
+  "/api/v1/admin/sharepoint/service-account/auth/start": {
+    /**
+     * Start service account OAuth flow
+     * @description Start the OAuth flow for configuring a service account. Returns an authorization URL that the admin should be redirected to. The admin will log in with the service account credentials at Microsoft. Requires admin role.
+     */
+    post: operations["start_service_account_auth_api_v1_admin_sharepoint_service_account_auth_start_post"];
+  };
+  "/api/v1/admin/sharepoint/service-account/auth/callback": {
+    /**
+     * Complete service account OAuth flow
+     * @description Complete the OAuth flow by exchanging the authorization code for tokens. This will configure the service account for the tenant's SharePoint access. Requires admin role.
+     */
+    post: operations["service_account_auth_callback_api_v1_admin_sharepoint_service_account_auth_callback_post"];
   };
   "/api/v1/ai-models/": {
     /**
@@ -1896,6 +2342,18 @@ export interface paths {
     /** Get Healthz */
     get: operations["get_healthz_api_healthz_get"];
   };
+  "/api/healthz/crawler": {
+    /**
+     * Crawler Health
+     * @description Detailed crawler diagnostics. NOT for K8s probes.
+     *
+     * Public endpoint - no auth required. Shows only job counts and tenant IDs.
+     *
+     * Args:
+     *     include_all: If True, return all tenant queue lengths instead of top-10.
+     */
+    get: operations["crawler_health_api_healthz_crawler_get"];
+  };
   "/version": {
     /** Get Version */
     get: operations["get_version_version_get"];
@@ -1906,12 +2364,80 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /**
+     * ARQHealth
+     * @description Parsed ARQ health metrics (clean view).
+     */
+    ARQHealth: {
+      /** Heartbeat Ttl Seconds */
+      heartbeat_ttl_seconds?: number | null;
+      /** Age Seconds */
+      age_seconds?: number | null;
+      /**
+       * J Complete
+       * @default 0
+       */
+      j_complete?: number;
+      /**
+       * J Failed
+       * @default 0
+       */
+      j_failed?: number;
+      /**
+       * J Retried
+       * @default 0
+       */
+      j_retried?: number;
+      /**
+       * J Ongoing
+       * @default 0
+       */
+      j_ongoing?: number;
+      /**
+       * Queued
+       * @default 0
+       */
+      queued?: number;
+    };
     /** AcceptedFileType */
     AcceptedFileType: {
       /** Mimetype */
       mimetype: string;
       /** Size Limit */
       size_limit: number;
+    };
+    /**
+     * AccessJustificationRequest
+     * @description Schema for creating audit access session with justification.
+     */
+    AccessJustificationRequest: {
+      /**
+       * Category
+       * @description Justification category
+       */
+      category: string;
+      /**
+       * Description
+       * @description Detailed access reason
+       */
+      description: string;
+    };
+    /**
+     * AccessJustificationResponse
+     * @description Schema for access session creation response.
+     */
+    AccessJustificationResponse: {
+      /**
+       * Status
+       * @description Status of session creation
+       * @default session_created
+       */
+      status?: string;
+      /**
+       * Message
+       * @description Additional message if needed
+       */
+      message?: string | null;
     };
     /** AccessToken */
     AccessToken: {
@@ -1920,6 +2446,196 @@ export interface components {
       /** Token Type */
       token_type: string;
     };
+    /**
+     * ActionConfig
+     * @description Configuration for a single action type with metadata for UI display.
+     * @example {
+     *   "action": "user_created",
+     *   "category": "admin_actions",
+     *   "description_sv": "Loggar när en ny användare skapas",
+     *   "enabled": true,
+     *   "name_sv": "Användare skapad"
+     * }
+     */
+    ActionConfig: {
+      /**
+       * Action
+       * @description Action type value (e.g., 'user_created')
+       */
+      action: string;
+      /**
+       * Enabled
+       * @description Whether this action is currently enabled
+       */
+      enabled: boolean;
+      /**
+       * Category
+       * @description Category this action belongs to
+       */
+      category: string;
+      /**
+       * Name Sv
+       * @description Swedish display name
+       */
+      name_sv: string;
+      /**
+       * Description Sv
+       * @description Swedish description
+       */
+      description_sv: string;
+    };
+    /**
+     * ActionConfigResponse
+     * @description Response model for GET /api/v1/audit/config/actions.
+     * Contains all 65 actions with their configuration and metadata.
+     * @example {
+     *   "actions": [
+     *     {
+     *       "action": "user_created",
+     *       "category": "admin_actions",
+     *       "description_sv": "Loggar när en ny användare skapas",
+     *       "enabled": true,
+     *       "name_sv": "Användare skapad"
+     *     },
+     *     {
+     *       "action": "user_deleted",
+     *       "category": "admin_actions",
+     *       "description_sv": "Loggar när en användare tas bort",
+     *       "enabled": false,
+     *       "name_sv": "Användare raderad"
+     *     }
+     *   ]
+     * }
+     */
+    ActionConfigResponse: {
+      /**
+       * Actions
+       * @description List of all actions with configuration and Swedish metadata
+       */
+      actions: components["schemas"]["ActionConfig"][];
+    };
+    /**
+     * ActionConfigUpdateRequest
+     * @description Request model for PATCH /api/v1/audit/config/actions.
+     * Allows bulk updates of multiple action overrides.
+     * @example {
+     *   "updates": [
+     *     {
+     *       "action": "user_created",
+     *       "enabled": false
+     *     },
+     *     {
+     *       "action": "user_deleted",
+     *       "enabled": false
+     *     }
+     *   ]
+     * }
+     */
+    ActionConfigUpdateRequest: {
+      /**
+       * Updates
+       * @description List of action configuration updates
+       */
+      updates: components["schemas"]["ActionUpdate"][];
+    };
+    /**
+     * ActionType
+     * @description Standardized vocabulary of auditable actions
+     * @enum {string}
+     */
+    ActionType:
+      | "user_created"
+      | "user_deleted"
+      | "user_updated"
+      | "role_created"
+      | "role_modified"
+      | "role_deleted"
+      | "permission_changed"
+      | "tenant_settings_updated"
+      | "credentials_updated"
+      | "federation_updated"
+      | "api_key_generated"
+      | "module_added"
+      | "module_added_to_tenant"
+      | "assistant_created"
+      | "assistant_deleted"
+      | "assistant_updated"
+      | "assistant_transferred"
+      | "assistant_published"
+      | "space_created"
+      | "space_updated"
+      | "space_deleted"
+      | "space_member_added"
+      | "space_member_removed"
+      | "app_created"
+      | "app_deleted"
+      | "app_updated"
+      | "app_executed"
+      | "app_published"
+      | "app_run_deleted"
+      | "session_started"
+      | "session_ended"
+      | "file_uploaded"
+      | "file_deleted"
+      | "website_created"
+      | "website_updated"
+      | "website_deleted"
+      | "website_crawled"
+      | "website_transferred"
+      | "group_chat_created"
+      | "collection_created"
+      | "collection_updated"
+      | "collection_deleted"
+      | "integration_added"
+      | "integration_removed"
+      | "integration_connected"
+      | "integration_disconnected"
+      | "integration_knowledge_created"
+      | "integration_knowledge_deleted"
+      | "completion_model_updated"
+      | "embedding_model_updated"
+      | "transcription_model_updated"
+      | "template_created"
+      | "template_updated"
+      | "template_deleted"
+      | "security_classification_created"
+      | "security_classification_updated"
+      | "security_classification_deleted"
+      | "security_classification_levels_updated"
+      | "security_classification_enabled"
+      | "security_classification_disabled"
+      | "retention_policy_applied"
+      | "encryption_key_rotated"
+      | "system_maintenance"
+      | "audit_session_created"
+      | "audit_log_viewed"
+      | "audit_log_exported";
+    /**
+     * ActionUpdate
+     * @description Represents an action-level configuration change request.
+     * @example {
+     *   "action": "user_created",
+     *   "enabled": false
+     * }
+     */
+    ActionUpdate: {
+      /**
+       * Action
+       * @description Action name to update
+       */
+      action: string;
+      /**
+       * Enabled
+       * @description New enabled state
+       */
+      enabled: boolean;
+    };
+    /**
+     * ActorType
+     * @description Categorize who performed the action
+     * @enum {string}
+     */
+    ActorType: "user" | "system" | "api_key";
     /** AddSpaceMemberRequest */
     AddSpaceMemberRequest: {
       /**
@@ -2038,12 +2754,12 @@ export interface components {
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       prompt: components["schemas"]["PromptPublic"] | null;
-      completion_model: components["schemas"]["CompletionModelSparse"];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Published */
       published: boolean;
-      transcription_model: components["schemas"]["TranscriptionModelPublic"];
+      transcription_model?: components["schemas"]["TranscriptionModelPublic"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -2344,15 +3060,11 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       transcription_model?: components["schemas"]["ModelId"] | null;
-      /**
-       * Data Retention Days
-       * @default NOT_PROVIDED
-       */
+      /** Data Retention Days */
       data_retention_days?: number | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
-       * @default NOT_PROVIDED
        */
       icon_id?: string | null;
     };
@@ -2550,7 +3262,7 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
-      completion_model: components["schemas"]["CompletionModelSparse"];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
        * @default false
@@ -2638,6 +3350,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
+      /**
+       * Completion Model Id
+       * @description ID of the completion model, or None if not configured
+       */
+      completion_model_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -2841,6 +3558,142 @@ export interface components {
       /** Max In Question */
       max_in_question: number;
     };
+    /**
+     * AuditConfigResponse
+     * @description Response model for GET /api/v1/audit/config.
+     * Contains all 7 categories with metadata.
+     * @example {
+     *   "categories": [
+     *     {
+     *       "action_count": 13,
+     *       "category": "admin_actions",
+     *       "description": "User management, role changes, API keys, tenant settings",
+     *       "enabled": true,
+     *       "example_actions": [
+     *         "USER_CREATED",
+     *         "ROLE_DELETED",
+     *         "API_KEY_GENERATED"
+     *       ]
+     *     },
+     *     {
+     *       "action_count": 28,
+     *       "category": "user_actions",
+     *       "description": "Assistant, space, app operations, templates, model configs",
+     *       "enabled": true,
+     *       "example_actions": [
+     *         "ASSISTANT_CREATED",
+     *         "SPACE_DELETED",
+     *         "APP_EXECUTED"
+     *       ]
+     *     }
+     *   ]
+     * }
+     */
+    AuditConfigResponse: {
+      /**
+       * Categories
+       * @description List of all audit categories with configuration and metadata
+       */
+      categories: components["schemas"]["CategoryConfig"][];
+    };
+    /**
+     * AuditConfigUpdateRequest
+     * @description Request model for PATCH /api/v1/audit/config.
+     * Allows bulk updates of multiple categories.
+     * @example {
+     *   "updates": [
+     *     {
+     *       "category": "admin_actions",
+     *       "enabled": false
+     *     },
+     *     {
+     *       "category": "file_operations",
+     *       "enabled": false
+     *     }
+     *   ]
+     * }
+     */
+    AuditConfigUpdateRequest: {
+      /**
+       * Updates
+       * @description List of category configuration updates
+       */
+      updates: components["schemas"]["CategoryUpdate"][];
+    };
+    /**
+     * AuditLogListResponse
+     * @description Schema for audit log list response.
+     */
+    AuditLogListResponse: {
+      /** Logs */
+      logs: components["schemas"]["AuditLogResponse"][];
+      /** Total Count */
+      total_count: number;
+      /** Page */
+      page: number;
+      /** Page Size */
+      page_size: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * AuditLogResponse
+     * @description Schema for audit log response.
+     */
+    AuditLogResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Actor Id */
+      actor_id?: string | null;
+      actor_type: components["schemas"]["ActorType"];
+      action: components["schemas"]["ActionType"];
+      entity_type: components["schemas"]["EntityType"];
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /**
+       * Timestamp
+       * Format: date-time
+       */
+      timestamp: string;
+      /** Description */
+      description: string;
+      /** Metadata */
+      metadata: {
+        [key: string]: unknown;
+      };
+      outcome: components["schemas"]["Outcome"];
+      /** Ip Address */
+      ip_address?: string | null;
+      /** User Agent */
+      user_agent?: string | null;
+      /** Request Id */
+      request_id?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Deleted At */
+      deleted_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
     /** AuthCallbackParams */
     AuthCallbackParams: {
       /** Auth Code */
@@ -2940,6 +3793,68 @@ export interface components {
       /** Code Verifier */
       code_verifier?: string | null;
     };
+    /**
+     * CategoryConfig
+     * @description Enriched category configuration with metadata for API responses.
+     * @example {
+     *   "action_count": 13,
+     *   "category": "admin_actions",
+     *   "description": "User management, role changes, API keys, tenant settings",
+     *   "enabled": true,
+     *   "example_actions": [
+     *     "USER_CREATED",
+     *     "ROLE_DELETED",
+     *     "API_KEY_GENERATED"
+     *   ]
+     * }
+     */
+    CategoryConfig: {
+      /**
+       * Category
+       * @description Category name (e.g., 'admin_actions')
+       */
+      category: string;
+      /**
+       * Enabled
+       * @description Whether category is currently enabled
+       */
+      enabled: boolean;
+      /**
+       * Description
+       * @description Human-readable description of category
+       */
+      description: string;
+      /**
+       * Action Count
+       * @description Number of action types in this category
+       */
+      action_count: number;
+      /**
+       * Example Actions
+       * @description Sample action types (max 3) for UI display
+       */
+      example_actions: string[];
+    };
+    /**
+     * CategoryUpdate
+     * @description Represents a category configuration change request.
+     * @example {
+     *   "category": "admin_actions",
+     *   "enabled": false
+     * }
+     */
+    CategoryUpdate: {
+      /**
+       * Category
+       * @description Category name to update
+       */
+      category: string;
+      /**
+       * Enabled
+       * @description New enabled state
+       */
+      enabled: boolean;
+    };
     /** CollectionMetadata */
     CollectionMetadata: {
       /** Num Info Blobs */
@@ -2993,7 +3908,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3002,15 +3918,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3029,6 +3948,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -3036,7 +3959,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3045,15 +3969,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3078,7 +4005,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3087,15 +4015,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3114,6 +4045,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -3161,7 +4096,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3170,15 +4106,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3197,6 +4136,10 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -3230,7 +4173,8 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family: components["schemas"]["ModelFamily"] | string;
       /** Token Limit */
       token_limit: number;
       /** Is Deprecated */
@@ -3239,15 +4183,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability: components["schemas"]["ModelStability"] | string;
+      /** Hosting */
+      hosting: components["schemas"]["ModelHostingLocation"] | string;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -3263,10 +4210,7 @@ export interface components {
       is_org_enabled?: boolean | null;
       /** Is Org Default */
       is_org_default?: boolean | null;
-      /**
-       * Security Classification
-       * @default NOT_PROVIDED
-       */
+      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /**
@@ -3333,6 +4277,96 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlerActivity
+     * @description Real-time crawler activity from multiple sources.
+     */
+    CrawlerActivity: {
+      /** Db In Progress */
+      db_in_progress?: number | null;
+      /**
+       * Db Query Ok
+       * @default true
+       */
+      db_query_ok?: boolean;
+      /**
+       * Arq Ongoing
+       * @default 0
+       */
+      arq_ongoing?: number;
+      /** Delta */
+      delta?: number | null;
+    };
+    /**
+     * CrawlerHealthResponse
+     * @description Crawler health status with operator-friendly signals.
+     */
+    CrawlerHealthResponse: {
+      /** Status */
+      status: string;
+      /**
+       * Status Flags
+       * @default []
+       */
+      status_flags?: string[];
+      /**
+       * Status Reason
+       * @default
+       */
+      status_reason?: string;
+      /** Response Timestamp Utc */
+      response_timestamp_utc: string;
+      /**
+       * @default {
+       *   "db_query_ok": true,
+       *   "arq_ongoing": 0
+       * }
+       */
+      crawler_activity?: components["schemas"]["CrawlerActivity"];
+      /**
+       * @default {
+       *   "j_complete": 0,
+       *   "j_failed": 0,
+       *   "j_retried": 0,
+       *   "j_ongoing": 0,
+       *   "queued": 0
+       * }
+       */
+      arq?: components["schemas"]["ARQHealth"];
+      /**
+       * @default {
+       *   "zombies_reconciled": 0,
+       *   "expired_killed": 0,
+       *   "rescued": 0,
+       *   "early_zombies_failed": 0,
+       *   "long_running_failed": 0,
+       *   "slots_released": 0
+       * }
+       */
+      watchdog?: components["schemas"]["WatchdogMetrics"];
+      /**
+       * @default {
+       *   "status": "UNKNOWN"
+       * }
+       */
+      feeder?: components["schemas"]["FeederLeader"];
+      /**
+       * @default {
+       *   "total": 0,
+       *   "tenant_count": 0,
+       *   "top_tenants": {}
+       * }
+       */
+      pending?: components["schemas"]["PendingQueueSummary"];
+      thresholds: components["schemas"]["HealthThresholds"];
+      /**
+       * @default {
+       *   "arq_raw": "",
+       *   "queue_name": "arq:queue"
+       * }
+       */
+      debug?: components["schemas"]["DebugInfo"];
+    };
     /**
      * CrawlerSettingsResponse
      * @description Response model for crawler settings operations.
@@ -3533,6 +4567,17 @@ export interface components {
       url: string;
       /** Key */
       key?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: string | null;
+      /**
+       * Resource Type
+       * @default site
+       */
+      resource_type?: string | null;
     };
     /** CreateSpaceRequest */
     CreateSpaceRequest: {
@@ -3626,6 +4671,28 @@ export interface components {
     /** Dashboard */
     Dashboard: {
       spaces: components["schemas"]["PaginatedResponse_SpaceDashboard_"];
+    };
+    /**
+     * DebugInfo
+     * @description Raw data for debugging - noisy, not for quick reads.
+     */
+    DebugInfo: {
+      /**
+       * Arq Raw
+       * @default
+       */
+      arq_raw?: string;
+      /** Arq Timestamp */
+      arq_timestamp?: string | null;
+      /** Watchdog Timestamp */
+      watchdog_timestamp?: string | null;
+      /** Redis Db */
+      redis_db?: number | null;
+      /**
+       * Queue Name
+       * @default arq:queue
+       */
+      queue_name?: string;
     };
     /** DefaultAssistant */
     DefaultAssistant: {
@@ -3891,6 +4958,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -3994,6 +5065,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -4033,15 +5108,9 @@ export interface components {
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
-      /**
-       * Is Org Enabled
-       * @default NOT_PROVIDED
-       */
+      /** Is Org Enabled */
       is_org_enabled?: boolean;
-      /**
-       * Security Classification
-       * @default NOT_PROVIDED
-       */
+      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** EmbeddingModelUpdateFlags */
@@ -4052,6 +5121,35 @@ export interface components {
        */
       is_org_enabled?: boolean | null;
     };
+    /**
+     * EntityType
+     * @description Categorize what type of entity was affected
+     * @enum {string}
+     */
+    EntityType:
+      | "user"
+      | "assistant"
+      | "space"
+      | "app"
+      | "file"
+      | "website"
+      | "tenant_settings"
+      | "credential"
+      | "federation_config"
+      | "api_key"
+      | "role"
+      | "module"
+      | "template"
+      | "group_chat"
+      | "collection"
+      | "app_run"
+      | "security_classification"
+      | "integration"
+      | "integration_knowledge"
+      | "completion_model"
+      | "embedding_model"
+      | "transcription_model"
+      | "audit_log";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -4088,6 +5186,131 @@ export interface components {
       | 9028
       | 9029
       | 9030;
+    /**
+     * ExportJobRequest
+     * @description Schema for requesting async audit log export.
+     */
+    ExportJobRequest: {
+      /**
+       * User Id
+       * @description User ID for GDPR export
+       */
+      user_id?: string | null;
+      /**
+       * Actor Id
+       * @description Filter by actor
+       */
+      actor_id?: string | null;
+      /** @description Filter by action type */
+      action?: components["schemas"]["ActionType"] | null;
+      /**
+       * From Date
+       * @description Filter from date
+       */
+      from_date?: string | null;
+      /**
+       * To Date
+       * @description Filter to date
+       */
+      to_date?: string | null;
+      /**
+       * Format
+       * @description Export format: csv or jsonl
+       * @default csv
+       */
+      format?: string;
+      /**
+       * Max Records
+       * @description Maximum records to export
+       */
+      max_records?: number | null;
+    };
+    /**
+     * ExportJobResponse
+     * @description Schema for export job creation response.
+     */
+    ExportJobResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /**
+       * Status
+       * @description Job status: pending, processing, completed, failed, cancelled
+       */
+      status: string;
+      /**
+       * Message
+       * @description Status message
+       */
+      message?: string | null;
+    };
+    /**
+     * ExportJobStatusResponse
+     * @description Schema for export job status response.
+     */
+    ExportJobStatusResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /**
+       * Status
+       * @description Job status: pending, processing, completed, failed, cancelled
+       */
+      status: string;
+      /**
+       * Progress
+       * @description Progress percentage
+       */
+      progress: number;
+      /**
+       * Total Records
+       * @description Total records to export
+       */
+      total_records: number;
+      /**
+       * Processed Records
+       * @description Records processed so far
+       */
+      processed_records: number;
+      /**
+       * Format
+       * @description Export format: csv or jsonl
+       */
+      format: string;
+      /**
+       * File Size Bytes
+       * @description File size in bytes (when completed)
+       */
+      file_size_bytes?: number | null;
+      /**
+       * Error Message
+       * @description Error message (when failed)
+       */
+      error_message?: string | null;
+      /**
+       * Download Url
+       * @description Download URL (when completed)
+       */
+      download_url?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+    };
     /**
      * FederationInfo
      * @description Information about configured federation.
@@ -4133,6 +5356,21 @@ export interface components {
       has_global_oidc_config: boolean;
       /** Tenant Count */
       tenant_count: number;
+    };
+    /**
+     * FeederLeader
+     * @description Feeder leader election status.
+     */
+    FeederLeader: {
+      /** Leader Id */
+      leader_id?: string | null;
+      /** Leader Ttl Seconds */
+      leader_ttl_seconds?: number | null;
+      /**
+       * Status
+       * @default UNKNOWN
+       */
+      status?: string;
     };
     /** FilePublic */
     FilePublic: {
@@ -4366,7 +5604,6 @@ export interface components {
       /**
        * Metadata Json
        * @description Metadata for the group chat.
-       * @default NOT_PROVIDED
        */
       metadata_json?: {
         [key: string]: unknown;
@@ -4428,6 +5665,18 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
+    };
+    /**
+     * HealthThresholds
+     * @description Thresholds used for status decisions - helps explain status.
+     */
+    HealthThresholds: {
+      /** Feeder Interval Seconds */
+      feeder_interval_seconds: number;
+      /** Watchdog Stale Threshold Seconds */
+      watchdog_stale_threshold_seconds: number;
+      /** Heartbeat Ttl Expected Seconds */
+      heartbeat_ttl_expected_seconds: number;
     };
     /** IconPublic */
     IconPublic: {
@@ -4595,14 +5844,14 @@ export interface components {
       size: number;
       /** Last Sync Summary */
       last_sync_summary?: {
-        files_processed?: number | null;
-        pages_processed?: number | null;
-        folders_processed?: number | null;
-        skipped_items?: number | null;
+        [key: string]: number;
       } | null;
       /** Last Synced At */
       last_synced_at?: string | null;
-      /** SharePoint Subscription Expires At */
+      /**
+       * Sharepoint Subscription Expires At
+       * @description When the SharePoint webhook subscription expires (only for SharePoint integrations)
+       */
       sharepoint_subscription_expires_at?: string | null;
     };
     /** IntegrationKnowledgePublic */
@@ -4614,6 +5863,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** Original Name */
+      original_name?: string | null;
       /** Url */
       url: string;
       /**
@@ -4632,9 +5883,20 @@ export interface components {
        */
       user_integration_id: string;
       embedding_model: components["schemas"]["EmbeddingModelPublicLegacy"];
+      /** Site Id */
       site_id?: string | null;
+      /** Drive Id */
+      drive_id?: string | null;
+      /** Resource Type */
+      resource_type?: string | null;
+      /** Sharepoint Subscription Id */
       sharepoint_subscription_id?: string | null;
-      sharepoint_subscription_expires_at?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: string | null;
       /**
        * Permissions
        * @default []
@@ -4989,6 +6251,115 @@ export interface components {
       | "Berget"
       | "GDM";
     /**
+     * ModelProviderCreate
+     * @description Request model for creating a model provider.
+     */
+    ModelProviderCreate: {
+      /**
+       * Name
+       * @description User-defined name for this provider instance
+       */
+      name: string;
+      /**
+       * Provider Type
+       * @description Provider type: openai, azure, or anthropic
+       */
+      provider_type: string;
+      /**
+       * Credentials
+       * @description Provider credentials (will be encrypted)
+       */
+      credentials: {
+        [key: string]: unknown;
+      };
+      /**
+       * Config
+       * @description Additional configuration
+       */
+      config?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Is Active
+       * @description Whether the provider is active
+       * @default true
+       */
+      is_active?: boolean;
+    };
+    /**
+     * ModelProviderPublic
+     * @description Public response model for a model provider (without credentials).
+     */
+    ModelProviderPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Name */
+      name: string;
+      /** Provider Type */
+      provider_type: string;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /** Is Active */
+      is_active: boolean;
+      /** Masked Api Key */
+      masked_api_key?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ModelProviderUpdate
+     * @description Request model for updating a model provider.
+     */
+    ModelProviderUpdate: {
+      /**
+       * Name
+       * @description User-defined name for this provider instance
+       */
+      name?: string | null;
+      /**
+       * Provider Type
+       * @description Provider type: openai, azure, or anthropic
+       */
+      provider_type?: string | null;
+      /**
+       * Credentials
+       * @description Provider credentials (will be encrypted)
+       */
+      credentials?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Config
+       * @description Additional configuration
+       */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Active
+       * @description Whether the provider is active
+       */
+      is_active?: boolean | null;
+    };
+    /**
      * ModelStability
      * @enum {string}
      */
@@ -5012,6 +6383,11 @@ export interface components {
        * @description Organization providing the model
        */
       model_org?: string | null;
+      /**
+       * Model Provider
+       * @description Provider name for the model
+       */
+      model_provider?: string | null;
       /**
        * Input Token Usage
        * @description Number of tokens used for input prompts
@@ -5157,7 +6533,7 @@ export interface components {
      * @description Any change to these enums will result in database changes
      * @enum {string}
      */
-    Modules: "eu_hosting" | "intric-applications" | "SWE Models";
+    Modules: "intric-applications";
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -5215,6 +6591,12 @@ export interface components {
       /** Nonce */
       nonce?: string | null;
     };
+    /**
+     * Outcome
+     * @description Indicate success or failure of audited action
+     * @enum {string}
+     */
+    Outcome: "success" | "failure";
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -5752,6 +7134,42 @@ export interface components {
        */
       count: number;
     };
+    /**
+     * PaginatedSyncLogList
+     * @description Paginated sync logs response with metadata.
+     */
+    PaginatedSyncLogList: {
+      /** Items */
+      items: components["schemas"]["SyncLog"][];
+      /** Total Count */
+      total_count: number;
+      /** Page Size */
+      page_size: number;
+      /** Offset */
+      offset: number;
+      /** Count */
+      count: number;
+      /**
+       * Current Page
+       * @description Calculate the current page number (1-indexed).
+       */
+      current_page: number;
+      /**
+       * Total Pages
+       * @description Calculate the total number of pages.
+       */
+      total_pages: number;
+      /**
+       * Has Next
+       * @description Check if there is a next page.
+       */
+      has_next: boolean;
+      /**
+       * Has Previous
+       * @description Check if there is a previous page.
+       */
+      has_previous: boolean;
+    };
     /** PaginatedUsersResponse[UserAdminView] */
     PaginatedUsersResponse_UserAdminView_: {
       /**
@@ -5888,7 +7306,8 @@ export interface components {
       name?: string | null;
       /** Nickname */
       nickname?: string | null;
-      family?: components["schemas"]["ModelFamily"] | null;
+      /** Family */
+      family?: components["schemas"]["ModelFamily"] | string | null;
       /** Token Limit */
       token_limit?: number | null;
       /** Is Deprecated */
@@ -5897,15 +7316,18 @@ export interface components {
       nr_billion_parameters?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability?: components["schemas"]["ModelStability"] | null;
-      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Stability */
+      stability?: components["schemas"]["ModelStability"] | string | null;
+      /** Hosting */
+      hosting?: components["schemas"]["ModelHostingLocation"] | string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Deployment Name */
       deployment_name?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: components["schemas"]["ModelOrg"] | string | null;
       /** Vision */
       vision?: boolean | null;
       /** Reasoning */
@@ -5988,6 +7410,34 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /**
+       * Data Retention Days
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       */
+      data_retention_days?: number | null;
+    };
+    /**
+     * PendingQueueSummary
+     * @description Pending crawl queue summary.
+     */
+    PendingQueueSummary: {
+      /**
+       * Total
+       * @default 0
+       */
+      total?: number;
+      /**
+       * Tenant Count
+       * @default 0
+       */
+      tenant_count?: number;
+      /**
+       * Top Tenants
+       * @default {}
+       */
+      top_tenants?: {
+        [key: string]: number;
+      };
     };
     /**
      * Permission
@@ -6160,6 +7610,53 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
+    /**
+     * RetentionPolicyResponse
+     * @description Schema for audit log retention policy response.
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level,
+     * not at the tenant level, to prevent accidental data loss.
+     */
+    RetentionPolicyResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Retention Days
+       * @description Days to retain audit logs (1-2555). Recommended: 90+
+       */
+      retention_days: number;
+      /** Last Purge At */
+      last_purge_at?: string | null;
+      /** Purge Count */
+      purge_count: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * RetentionPolicyUpdateRequest
+     * @description Schema for updating audit log retention policy.
+     *
+     * Note: Conversation retention is configured at the Assistant, App, or Space level,
+     * not at the tenant level, to prevent accidental data loss.
+     */
+    RetentionPolicyUpdateRequest: {
+      /**
+       * Retention Days
+       * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
+       */
+      retention_days: number;
+    };
     /** RoleCreateRequest */
     RoleCreateRequest: {
       /** Name */
@@ -6302,13 +7799,11 @@ export interface components {
       /**
        * Name
        * @description Name of the security classification
-       * @default NOT_PROVIDED
        */
       name?: string;
       /**
        * Description
        * @description Description of the security classification
-       * @default NOT_PROVIDED
        */
       description?: string | null;
     };
@@ -6383,6 +7878,77 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * ServiceAccountAuthCallback
+     * @description Request model for service account OAuth callback.
+     */
+    ServiceAccountAuthCallback: {
+      /**
+       * Auth Code
+       * @description OAuth authorization code from Microsoft callback
+       */
+      auth_code: string;
+      /**
+       * State
+       * @description OAuth state parameter for verification
+       */
+      state: string;
+      /**
+       * Client Id
+       * @description Azure AD Application (Client) ID (must match auth/start)
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description Azure AD Application Client Secret (must match auth/start)
+       */
+      client_secret: string;
+      /**
+       * Tenant Domain
+       * @description Azure AD Tenant Domain (must match auth/start)
+       */
+      tenant_domain: string;
+    };
+    /**
+     * ServiceAccountAuthStart
+     * @description Request model to start service account OAuth flow.
+     */
+    ServiceAccountAuthStart: {
+      /**
+       * Client Id
+       * @description Azure AD Application (Client) ID
+       * @example 12345678-1234-1234-1234-123456789012
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description Azure AD Application Client Secret
+       * @example abc123~xyz789
+       */
+      client_secret: string;
+      /**
+       * Tenant Domain
+       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @example contoso.onmicrosoft.com
+       */
+      tenant_domain: string;
+    };
+    /**
+     * ServiceAccountAuthStartResponse
+     * @description Response with OAuth URL for service account login.
+     */
+    ServiceAccountAuthStartResponse: {
+      /**
+       * Auth Url
+       * @description Microsoft OAuth authorization URL. Redirect the admin to this URL.
+       */
+      auth_url: string;
+      /**
+       * State
+       * @description OAuth state parameter for CSRF protection
+       */
+      state: string;
     };
     /** ServiceCreatePublic */
     ServiceCreatePublic: {
@@ -6642,6 +8208,95 @@ export interface components {
        * @default false
        */
       tenant_credentials_enabled?: boolean;
+      /**
+       * Audit Logging Enabled
+       * @default true
+       */
+      audit_logging_enabled?: boolean;
+    };
+    /**
+     * SharePointSubscriptionPublic
+     * @description Public representation of a SharePoint subscription.
+     */
+    SharePointSubscriptionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * User Integration Id
+       * Format: uuid
+       */
+      user_integration_id: string;
+      /** Site Id */
+      site_id: string;
+      /** Subscription Id */
+      subscription_id: string;
+      /** Drive Id */
+      drive_id: string;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Is Expired
+       * @description True if subscription has already expired
+       */
+      is_expired: boolean;
+      /**
+       * Expires In Hours
+       * @description Hours until expiration (0 if already expired)
+       */
+      expires_in_hours: number;
+      /**
+       * Owner Email
+       * @description Email of subscription owner (None for organization integrations)
+       */
+      owner_email?: string | null;
+      /**
+       * Owner Type
+       * @description Type of owner: 'user' or 'organization'
+       */
+      owner_type: string;
+    };
+    /** SharePointTreeItem */
+    SharePointTreeItem: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Type */
+      type: string;
+      /** Path */
+      path: string;
+      /** Has Children */
+      has_children: boolean;
+      /** Size */
+      size?: number | null;
+      /** Modified */
+      modified?: string | null;
+      /** Web Url */
+      web_url?: string | null;
+    };
+    /** SharePointTreeResponse */
+    SharePointTreeResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /** Current Path */
+      current_path: string;
+      /** Parent Id */
+      parent_id?: string | null;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -6703,6 +8358,8 @@ export interface components {
       icon_id?: string | null;
       applications: components["schemas"]["Applications"];
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
     };
     /** SpaceMember */
     SpaceMember: {
@@ -6755,6 +8412,8 @@ export interface components {
       icon_id?: string | null;
       applications: components["schemas"]["Applications"];
       default_assistant: components["schemas"]["DefaultAssistant"];
+      /** Data Retention Days */
+      data_retention_days?: number | null;
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Completion Models */
@@ -6809,6 +8468,8 @@ export interface components {
       icon_id?: string | null;
       applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
     };
     /**
      * StateFilter
@@ -6886,6 +8547,112 @@ export interface components {
       role: string;
     };
     /**
+     * SubscriptionRenewalResult
+     * @description Result of subscription renewal operation.
+     */
+    SubscriptionRenewalResult: {
+      /**
+       * Total Subscriptions
+       * @description Total number of subscriptions found
+       */
+      total_subscriptions: number;
+      /**
+       * Expired Count
+       * @description Number of expired subscriptions
+       */
+      expired_count: number;
+      /**
+       * Recreated
+       * @description Number of subscriptions successfully recreated
+       * @default 0
+       */
+      recreated?: number;
+      /**
+       * Failed
+       * @description Number of subscriptions that failed to recreate
+       * @default 0
+       */
+      failed?: number;
+      /**
+       * Errors
+       * @description Error messages for failed renewals
+       */
+      errors?: string[];
+    };
+    /**
+     * SyncLog
+     * @description Detailed sync operation log.
+     */
+    SyncLog: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /** Sync Type */
+      sync_type: string;
+      /** Status */
+      status: string;
+      /** Metadata */
+      metadata?: {
+        [key: string]: unknown;
+      } | null;
+      /** Error Message */
+      error_message?: string | null;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      /** Completed At */
+      completed_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Files Processed
+       * @description Get files_processed from metadata.
+       */
+      files_processed: number;
+      /**
+       * Files Deleted
+       * @description Get files_deleted from metadata.
+       */
+      files_deleted: number;
+      /**
+       * Pages Processed
+       * @description Get pages_processed from metadata.
+       */
+      pages_processed: number;
+      /**
+       * Folders Processed
+       * @description Get folders_processed from metadata.
+       */
+      folders_processed: number;
+      /**
+       * Skipped Items
+       * @description Get skipped_items from metadata.
+       */
+      skipped_items: number;
+      /**
+       * Duration Seconds
+       * @description Calculate sync duration in seconds.
+       */
+      duration_seconds: number | null;
+      /**
+       * Total Items Processed
+       * @description Total items processed in this sync.
+       */
+      total_items_processed: number;
+    };
+    /**
      * Task
      * @enum {string}
      */
@@ -6898,6 +8665,7 @@ export interface components {
       | "run_app"
       | "pull_confluence_content"
       | "pull_sharepoint_content"
+      | "sync_sharepoint_delta"
       | "update_model_usage_stats";
     /** TemplateCreate */
     TemplateCreate: {
@@ -6936,6 +8704,21 @@ export interface components {
       /** Description */
       description?: string | null;
     };
+    /**
+     * TenantAppTestResult
+     * @description Result of testing tenant app credentials.
+     */
+    TenantAppTestResult: {
+      /** Success */
+      success: boolean;
+      /** Error Message */
+      error_message?: string | null;
+      /**
+       * Details
+       * @description Additional details about the test (e.g., token acquired successfully)
+       */
+      details?: string | null;
+    };
     /** TenantBase */
     TenantBase: {
       /** Name */
@@ -6964,6 +8747,193 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+    };
+    /** TenantCompletionModelCreate */
+    TenantCompletionModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Token Limit
+       * @description Maximum context tokens
+       * @default 128000
+       */
+      token_limit?: number;
+      /**
+       * Vision
+       * @description Supports vision/image inputs
+       * @default false
+       */
+      vision?: boolean;
+      /**
+       * Reasoning
+       * @description Supports extended reasoning
+       * @default false
+       */
+      reasoning?: boolean;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantCompletionModelUpdate */
+    TenantCompletionModelUpdate: {
+      /**
+       * Name
+       * @description Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')
+       */
+      name?: string | null;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Token Limit
+       * @description Maximum context tokens
+       */
+      token_limit?: number | null;
+      /**
+       * Vision
+       * @description Supports vision/image inputs
+       */
+      vision?: boolean | null;
+      /**
+       * Reasoning
+       * @description Supports extended reasoning
+       */
+      reasoning?: boolean | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
+    /** TenantEmbeddingModelCreate */
+    TenantEmbeddingModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'text-embedding-3-large', 'intfloat/multilingual-e5-large')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'huggingface_e5', 'cohere', 'voyage')
+       * @default openai
+       */
+      family?: string;
+      /**
+       * Dimensions
+       * @description Embedding dimensions
+       */
+      dimensions?: number | null;
+      /**
+       * Max Input
+       * @description Maximum input tokens
+       */
+      max_input?: number | null;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantEmbeddingModelUpdate */
+    TenantEmbeddingModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Family
+       * @description Model family
+       */
+      family?: string | null;
+      /**
+       * Dimensions
+       * @description Embedding dimensions
+       */
+      dimensions?: number | null;
+      /**
+       * Max Input
+       * @description Maximum input tokens
+       */
+      max_input?: number | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
     };
     /** TenantInDB */
     TenantInDB: {
@@ -7120,10 +9090,151 @@ export interface components {
       privacy_policy?: string | null;
     };
     /**
+     * TenantSharePointAppCreate
+     * @description Request model for creating/updating tenant SharePoint app credentials.
+     */
+    TenantSharePointAppCreate: {
+      /**
+       * Client Id
+       * @description Azure AD Application (Client) ID
+       * @example 12345678-1234-1234-1234-123456789012
+       */
+      client_id: string;
+      /**
+       * Client Secret
+       * @description Azure AD Application Client Secret
+       * @example abc123~xyz789
+       */
+      client_secret: string;
+      /**
+       * Tenant Domain
+       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @example contoso.onmicrosoft.com
+       */
+      tenant_domain: string;
+      /**
+       * Certificate Path
+       * @description Optional path to certificate for certificate-based authentication
+       */
+      certificate_path?: string | null;
+    };
+    /**
+     * TenantSharePointAppPublic
+     * @description Response model for tenant SharePoint app (secret masked).
+     */
+    TenantSharePointAppPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Client Id */
+      client_id: string;
+      /**
+       * Client Secret Masked
+       * @description Masked client secret (last 4 chars visible)
+       * @example ********xyz789
+       */
+      client_secret_masked: string;
+      /** Tenant Domain */
+      tenant_domain: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Auth Method
+       * @description Authentication method: 'tenant_app' or 'service_account'
+       * @example service_account
+       */
+      auth_method: string;
+      /**
+       * Service Account Email
+       * @description Email of the service account (only for service_account auth method)
+       */
+      service_account_email?: string | null;
+      /** Certificate Path */
+      certificate_path: string | null;
+      /** Created By */
+      created_by: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
      * TenantState
      * @enum {string}
      */
     TenantState: "active" | "suspended";
+    /** TenantTranscriptionModelCreate */
+    TenantTranscriptionModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier (e.g., 'whisper-1', 'distil-whisper-large-v3-en')
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** TenantTranscriptionModelUpdate */
+    TenantTranscriptionModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
       /** Display Name */
@@ -7362,6 +9473,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -7411,6 +9526,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -7420,10 +9539,7 @@ export interface components {
       is_org_enabled?: boolean | null;
       /** Is Org Default */
       is_org_default?: boolean | null;
-      /**
-       * Security Classification
-       * @default NOT_PROVIDED
-       */
+      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TransferApplicationRequest */
@@ -7446,6 +9562,11 @@ export interface components {
        * Format: uuid
        */
       target_space_id: string;
+    };
+    /** UpdateIntegrationKnowledgeRequest */
+    UpdateIntegrationKnowledgeRequest: {
+      /** Name */
+      name: string;
     };
     /**
      * UpdateInterval
@@ -7917,6 +10038,18 @@ export interface components {
       tenant_integration_id: string;
       /** Connected */
       connected: boolean;
+      /**
+       * Auth Type
+       * @default user_oauth
+       */
+      auth_type?: string;
+      /** Tenant App Id */
+      tenant_app_id?: string | null;
+      /**
+       * Tenant App Configured
+       * @default true
+       */
+      tenant_app_configured?: boolean;
     };
     /** UserIntegrationList */
     UserIntegrationList: {
@@ -8184,6 +10317,44 @@ export interface components {
       /** Error Type */
       type: string;
     };
+    /**
+     * WatchdogMetrics
+     * @description Watchdog activity metrics.
+     */
+    WatchdogMetrics: {
+      /** Age Seconds */
+      age_seconds?: number | null;
+      /**
+       * Zombies Reconciled
+       * @default 0
+       */
+      zombies_reconciled?: number;
+      /**
+       * Expired Killed
+       * @default 0
+       */
+      expired_killed?: number;
+      /**
+       * Rescued
+       * @default 0
+       */
+      rescued?: number;
+      /**
+       * Early Zombies Failed
+       * @default 0
+       */
+      early_zombies_failed?: number;
+      /**
+       * Long Running Failed
+       * @default 0
+       */
+      long_running_failed?: number;
+      /**
+       * Slots Released
+       * @default 0
+       */
+      slots_released?: number;
+    };
     /** WebSearchResultPublic */
     WebSearchResultPublic: {
       /**
@@ -8308,41 +10479,24 @@ export interface components {
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
-      /**
-       * Url
-       * @default NOT_PROVIDED
-       */
+      /** Url */
       url?: string;
-      /**
-       * Name
-       * @default NOT_PROVIDED
-       */
+      /** Name */
       name?: string | null;
-      /**
-       * Download Files
-       * @default NOT_PROVIDED
-       */
+      /** Download Files */
       download_files?: boolean;
-      /**
-       * Crawl Type
-       * @default NOT_PROVIDED
-       */
+      /** Crawl Type */
       crawl_type?: components["schemas"]["CrawlType"];
-      /**
-       * Update Interval
-       * @default NOT_PROVIDED
-       */
+      /** Update Interval */
       update_interval?: components["schemas"]["UpdateInterval"];
       /**
        * Http Auth Username
        * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.
-       * @default NOT_PROVIDED
        */
       http_auth_username?: string | null;
       /**
        * Http Auth Password
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
-       * @default NOT_PROVIDED
        */
       http_auth_password?: string | null;
     };
@@ -9789,6 +11943,56 @@ export interface operations {
     };
   };
   /**
+   * Toggle global audit logging
+   * @description Enable or disable global audit logging for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `audit_logging_enabled` feature flag for your tenant
+   * - When disabled: No audit logs are created for any action (global kill switch)
+   * - When enabled: Audit logging resumes with category and action-level filtering
+   * - This is independent from category/action configuration
+   * - Change takes effect immediately for all workers
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": false
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "audit_logging_enabled": false,
+   *   "using_templates": true
+   * }
+   * ```
+   */
+  update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Assistants
    * @description Requires Admin permission if `for_tenant` is `true`.
    */
@@ -10051,7 +12255,8 @@ export interface operations {
                 name: string;
                 /** Nickname */
                 nickname: string;
-                family: components["schemas"]["ModelFamily"];
+                /** Family */
+                family: components["schemas"]["ModelFamily"] | string;
                 /** Token Limit */
                 token_limit: number;
                 /** Is Deprecated */
@@ -10060,15 +12265,18 @@ export interface operations {
                 nr_billion_parameters?: number | null;
                 /** Hf Link */
                 hf_link?: string | null;
-                stability: components["schemas"]["ModelStability"];
-                hosting: components["schemas"]["ModelHostingLocation"];
+                /** Stability */
+                stability: components["schemas"]["ModelStability"] | string;
+                /** Hosting */
+                hosting: components["schemas"]["ModelHostingLocation"] | string;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
                 description?: string | null;
                 /** Deployment Name */
                 deployment_name?: string | null;
-                org?: components["schemas"]["ModelOrg"] | null;
+                /** Org */
+                org?: components["schemas"]["ModelOrg"] | string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -10087,6 +12295,10 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -10356,7 +12568,8 @@ export interface operations {
                 name: string;
                 /** Nickname */
                 nickname: string;
-                family: components["schemas"]["ModelFamily"];
+                /** Family */
+                family: components["schemas"]["ModelFamily"] | string;
                 /** Token Limit */
                 token_limit: number;
                 /** Is Deprecated */
@@ -10365,15 +12578,18 @@ export interface operations {
                 nr_billion_parameters?: number | null;
                 /** Hf Link */
                 hf_link?: string | null;
-                stability: components["schemas"]["ModelStability"];
-                hosting: components["schemas"]["ModelHostingLocation"];
+                /** Stability */
+                stability: components["schemas"]["ModelStability"] | string;
+                /** Hosting */
+                hosting: components["schemas"]["ModelHostingLocation"] | string;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
                 description?: string | null;
                 /** Deployment Name */
                 deployment_name?: string | null;
-                org?: components["schemas"]["ModelOrg"] | null;
+                /** Org */
+                org?: components["schemas"]["ModelOrg"] | string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -10392,6 +12608,10 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -12489,7 +14709,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     requestBody: {
@@ -14086,6 +16307,529 @@ export interface operations {
       };
     };
   };
+  /**
+   * List Providers
+   * @description List all model providers for the tenant.
+   */
+  list_providers_api_v1_admin_model_providers__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"][];
+        };
+      };
+    };
+  };
+  /**
+   * Create Provider
+   * @description Create a new model provider.
+   */
+  create_provider_api_v1_admin_model_providers__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelProviderCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Provider
+   * @description Get a specific model provider.
+   */
+  get_provider_api_v1_admin_model_providers__provider_id___get: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Provider
+   * @description Update an existing model provider.
+   */
+  update_provider_api_v1_admin_model_providers__provider_id___put: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelProviderUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Provider
+   * @description Delete a model provider.
+   *
+   * Will fail if the provider has models attached to it.
+   */
+  delete_provider_api_v1_admin_model_providers__provider_id___delete: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Completion Model
+   * @description Create a new tenant-specific completion model.
+   */
+  create_tenant_completion_model_api_v1_admin_tenant_models_completion__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantCompletionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Completion Model
+   * @description Update a tenant-specific completion model.
+   */
+  update_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantCompletionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Completion Model
+   * @description Delete a tenant-specific completion model.
+   */
+  delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Embedding Model
+   * @description Create a new tenant-specific embedding model.
+   */
+  create_tenant_embedding_model_api_v1_admin_tenant_models_embedding__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantEmbeddingModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Embedding Model
+   * @description Update a tenant-specific embedding model.
+   */
+  update_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantEmbeddingModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Embedding Model
+   * @description Delete a tenant-specific embedding model.
+   */
+  delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Tenant Transcription Model
+   * @description Create a new tenant-specific transcription model.
+   */
+  create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantTranscriptionModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Transcription Model
+   * @description Update a tenant-specific transcription model.
+   */
+  update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantTranscriptionModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Tenant Transcription Model
+   * @description Delete a tenant-specific transcription model.
+   */
+  delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete: {
+    parameters: {
+      path: {
+        model_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Files */
   get_files_api_v1_files__get: {
     responses: {
@@ -14897,7 +17641,7 @@ export interface operations {
     };
   };
   /** Create Space Integration Knowledge */
-  create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations__user_integration_id___post: {
+  create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post: {
     parameters: {
       path: {
         id: string;
@@ -14911,9 +17655,9 @@ export interface operations {
     };
     responses: {
       /** @description Successful Response */
-      200: {
+      202: {
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["JobPublic"];
         };
       };
       /** @description Validation Error */
@@ -14925,7 +17669,7 @@ export interface operations {
     };
   };
   /** Delete Space Integration Knowledge */
-  delete_space_integration_knowledge_api_v1_spaces__id__knowledge__integration_knowledge_id___delete: {
+  delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete: {
     parameters: {
       path: {
         id: string;
@@ -14936,6 +17680,34 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Integration Knowledge */
+  update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
+    parameters: {
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateIntegrationKnowledgeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IntegrationKnowledgePublic"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -16117,6 +18889,489 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get audit category configuration
+   * @description Retrieve all audit category configurations for the current tenant.
+   */
+  get_audit_config_api_v1_audit_config_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update audit category configuration
+   * @description Update one or more audit category configurations for the current tenant.
+   */
+  update_audit_config_api_v1_audit_config_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AuditConfigUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get per-action audit configuration
+   * @description Retrieve all 65 actions with their enabled status for the modal UI.
+   */
+  get_action_config_api_v1_audit_config_actions_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update per-action audit configuration
+   * @description Update one or more action-level audit configurations.
+   */
+  update_action_config_api_v1_audit_config_actions_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActionConfigUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reset Rate Limit
+   * @description Admin utility: Reset audit session rate limit for current user.
+   *
+   * This endpoint is only available in development/testing environments.
+   * Use when you get rate limited during testing.
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Development/testing environment
+   *
+   * Note: Permission check intentionally removed to allow clearing rate limit
+   * even when locked out. User is still authenticated via JWT.
+   */
+  reset_rate_limit_api_v1_audit_access_session_rate_limit_delete: {
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Create Access Session
+   * @description Create an audit access session with justification.
+   *
+   * Stores the access justification securely in Redis (server-side) instead of
+   * exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
+   *
+   * Security Features:
+   * - Justification never appears in URLs or browser history
+   * - Session ID stored in HTTP-only cookie (prevents XSS)
+   * - Automatic expiration after 1 hour
+   * - Tenant isolation validation
+   * - Instant revocation capability
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Admin permissions
+   *
+   * Returns: Session creation confirmation with HTTP-only cookie set
+   */
+  create_access_session_api_v1_audit_access_session_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccessJustificationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessJustificationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Audit Logs
+   * @description List audit logs for the authenticated user's tenant.
+   *
+   * Security:
+   * - Requires active audit access session (via HTTP-only cookie)
+   * - Session must contain valid justification
+   * - Justification stored server-side (Redis) - never in URLs
+   *
+   * Access Control:
+   * - Admins only: View all actions in their tenant
+   *
+   * Requires: Authentication (JWT token or API key)
+   * Requires: Admin permissions
+   * Requires: Active audit access session with justification
+   */
+  list_audit_logs_api_v1_audit_logs_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by single action type (deprecated, use actions) */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Search entity names in log descriptions (min 3 chars) */
+        search?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+        /** @description Filter by multiple action types (comma-separated or repeated) */
+        actions?: string[] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get User Logs
+   * @description Get all logs where user is actor OR target (GDPR Article 15 export).
+   *
+   * Returns audit logs involving the user in any capacity.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   * Security: Only returns logs for the authenticated user's tenant
+   */
+  get_user_logs_api_v1_audit_logs_user__user_id__get: {
+    parameters: {
+      query?: {
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Page number */
+        page?: number;
+        /** @description Page size */
+        page_size?: number;
+      };
+      path: {
+        /** @description User ID for GDPR export */
+        user_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Export Audit Logs
+   * @description Export audit logs to CSV or JSON Lines format.
+   *
+   * Supported formats:
+   * - csv: Comma-separated values (default, Excel-compatible)
+   * - json: JSON Lines format (one JSON object per line, for large exports)
+   *
+   * Use user_id for GDPR Article 15 data subject access requests.
+   *
+   * Memory Protection:
+   * - Default limit: 50,000 records (configurable via max_records parameter)
+   * - Response includes X-Records-Truncated header if limit was hit
+   * - Response includes X-Total-Records header with total matching count
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   * Security: Only exports logs for the authenticated user's tenant
+   */
+  export_audit_logs_api_v1_audit_logs_export_get: {
+    parameters: {
+      query?: {
+        /** @description User ID for GDPR export */
+        user_id?: string | null;
+        /** @description Filter by actor */
+        actor_id?: string | null;
+        /** @description Filter by action type */
+        action?: components["schemas"]["ActionType"] | null;
+        /** @description Filter from date */
+        from_date?: string | null;
+        /** @description Filter to date */
+        to_date?: string | null;
+        /** @description Export format: csv or json */
+        format?: string;
+        /** @description Maximum records to export (default: 50000, max: 100000) */
+        max_records?: number | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Request Async Export
+   * @description Request async export of audit logs.
+   *
+   * Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
+   * Download via /logs/export/{job_id}/download when complete.
+   *
+   * Advantages over sync export:
+   * - Handles 1M-10M+ records without timeout
+   * - Progress tracking for long exports
+   * - Cancellation support
+   * - Constant memory usage (~50MB)
+   *
+   * Limitations:
+   * - Max 2 concurrent exports per tenant
+   * - Files auto-deleted after 24 hours
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  request_async_export_api_v1_audit_logs_export_async_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExportJobRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExportJobResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Export Status
+   * @description Get export job status with progress.
+   *
+   * Poll this endpoint to track export progress.
+   * When status is 'completed', use the download_url to get the file.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  get_export_status_api_v1_audit_logs_export__job_id__status_get: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExportJobStatusResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Download Export
+   * @description Download completed export file.
+   *
+   * Only available when job status is 'completed'.
+   * Files are auto-deleted after 24 hours.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  download_export_api_v1_audit_logs_export__job_id__download_get: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel Export
+   * @description Cancel an in-progress export.
+   *
+   * Only works for jobs in 'pending' or 'processing' state.
+   * The worker will stop processing and clean up the partial file.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  cancel_export_api_v1_audit_logs_export__job_id__cancel_post: {
+    parameters: {
+      path: {
+        /** @description Export job ID */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Retention Policy
+   * @description Get the current retention policy for your tenant.
+   *
+   * Returns audit log retention policy configuration.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  get_retention_policy_api_v1_audit_retention_policy_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RetentionPolicyResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Retention Policy
+   * @description Update the audit log retention policy for your tenant.
+   *
+   * Configure audit log retention for compliance and security tracking.
+   *
+   * Audit Log Retention:
+   * - Minimum: 1 day (Recommended: 90+ days for compliance)
+   * - Maximum: 2555 days (~7 years, Swedish statute of limitations)
+   * - Default: 365 days (Swedish Arkivlagen)
+   *
+   * Note: Conversation retention is configured at the Assistant, App, or Space level.
+   * Tenant-level conversation retention has been removed to prevent accidental data loss.
+   *
+   * The system automatically runs a daily job to delete audit logs older than
+   * the retention period.
+   *
+   * Requires: Authentication (JWT token or API key via X-API-Key header)
+   * Requires: Admin permissions
+   */
+  update_retention_policy_api_v1_audit_retention_policy_put: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RetentionPolicyUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RetentionPolicyResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Integrations */
   get_integrations_api_v1_integrations__get: {
     responses: {
@@ -16151,7 +19406,7 @@ export interface operations {
     };
   };
   /** Add Tenant Integration */
-  add_tenant_integration_api_v1_integrations_tenant__integration_id___post: {
+  add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post: {
     parameters: {
       path: {
         integration_id: string;
@@ -16173,7 +19428,7 @@ export interface operations {
     };
   };
   /** Remove Tenant Integration */
-  remove_tenant_integration_api_v1_integrations_tenant__tenant_integration_id___delete: {
+  remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete: {
     parameters: {
       path: {
         tenant_integration_id: string;
@@ -16192,13 +19447,47 @@ export interface operations {
       };
     };
   };
-  /** Get User Integrations */
+  /**
+   * Get User Integrations
+   * @description Get user's personal integrations.
+   *
+   * Only returns user_oauth integrations (personal account connections).
+   * Tenant app integrations are managed in admin panel and not shown here.
+   */
   get_user_integrations_api_v1_integrations_me__get: {
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["UserIntegrationList"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Available Integrations For Space
+   * @description Get integrations available for a specific space, filtered by space type and auth type.
+   *
+   * - Personal spaces: Only user OAuth integrations
+   * - Shared/Organization spaces: Both tenant app and user OAuth integrations
+   */
+  get_available_integrations_for_space_api_v1_integrations_spaces__space_id__available__get: {
+    parameters: {
+      path: {
+        space_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserIntegrationList"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -16214,6 +19503,37 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Sync Logs
+   * @description Get paginated sync history for an integration knowledge.
+   */
+  get_sync_logs_api_v1_integrations_sync_logs__integration_knowledge_id___get: {
+    parameters: {
+      query?: {
+        /** @description Number of items to skip */
+        skip?: number;
+        /** @description Number of items per page */
+        limit?: number;
+      };
+      path: {
+        integration_knowledge_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedSyncLogList"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -16245,6 +19565,50 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Sharepoint Folder Tree
+   * @description Get SharePoint/OneDrive folder tree with hybrid authentication support.
+   *
+   * Authentication is determined by space type:
+   * - Personal space: Uses user OAuth
+   * - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
+   * - Shared/Org space without tenant app: Falls back to user OAuth
+   *
+   * Provide site_id for SharePoint sites, or drive_id for OneDrive.
+   */
+  get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get: {
+    parameters: {
+      query: {
+        /** @description Space ID (for auth routing) */
+        space_id: string;
+        /** @description SharePoint site ID (required for SharePoint) */
+        site_id?: string | null;
+        /** @description Drive ID (required for OneDrive) */
+        drive_id?: string | null;
+        /** @description Folder ID (null for root) */
+        folder_id?: string | null;
+        /** @description Current folder path */
+        folder_path?: string;
+      };
+      path: {
+        user_integration_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SharePointTreeResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Integration By Id */
   get_integration_by_id_api_v1_integrations__integration_id___get: {
     parameters: {
@@ -16258,6 +19622,330 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["Integration"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Sharepoint Webhook Validation */
+  sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
+    parameters: {
+      query?: {
+        validationToken?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Sharepoint Webhook */
+  sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post: {
+    parameters: {
+      query?: {
+        validationToken?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant SharePoint app configuration
+   * @description Retrieve the current SharePoint app configuration for the tenant. Client secret is masked in the response. Requires admin role.
+   */
+  get_sharepoint_app_api_v1_admin_sharepoint_app_get: {
+    responses: {
+      /** @description SharePoint app configuration retrieved (may be null if not configured) */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantSharePointAppPublic"] | null;
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Configure tenant SharePoint app
+   * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+   */
+  configure_sharepoint_app_api_v1_admin_sharepoint_app_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantSharePointAppCreate"];
+      };
+    };
+    responses: {
+      /** @description SharePoint app successfully configured */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TenantSharePointAppPublic"];
+        };
+      };
+      /** @description Invalid credentials or configuration */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Permanently delete SharePoint app
+   * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
+   * - All user_integrations using this tenant app (both org and personal)
+   * - All integration_knowledge (imported SharePoint content)
+   * - All info_blobs and embeddings (document data and vectors)
+   * - All sharepoint_subscriptions (webhooks)
+   * - All oauth_tokens for personal SharePoint integrations
+   * - All sync_logs
+   *
+   * Assistants linked to this knowledge will lose their connections.
+   * Requires admin role.
+   */
+  delete_sharepoint_app_api_v1_admin_sharepoint_app_delete: {
+    responses: {
+      /** @description SharePoint app permanently deleted */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: string;
+          };
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description No SharePoint app configured */
+      404: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Test SharePoint app credentials
+   * @description Test if the provided SharePoint app credentials are valid by attempting to acquire an access token. This does not save the credentials. Requires admin role.
+   */
+  test_sharepoint_app_credentials_api_v1_admin_sharepoint_app_test_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantSharePointAppCreate"];
+      };
+    };
+    responses: {
+      /** @description Test completed (check success field in response) */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantAppTestResult"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List all SharePoint webhook subscriptions
+   * @description Get all SharePoint webhook subscriptions for the tenant. Shows status, expiration time, and related integration information. Requires admin role.
+   */
+  list_sharepoint_subscriptions_api_v1_admin_sharepoint_subscriptions_get: {
+    responses: {
+      /** @description List of subscriptions retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SharePointSubscriptionPublic"][];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Renew all expired SharePoint subscriptions
+   * @description Recreate all expired SharePoint webhook subscriptions for the tenant. This is useful after server downtime > 24h when subscriptions have expired. Preserves all integration relationships - assistants continue to work. Requires admin role.
+   */
+  renew_expired_subscriptions_api_v1_admin_sharepoint_subscriptions_renew_expired_post: {
+    responses: {
+      /** @description Renewal operation completed (check result for details) */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SubscriptionRenewalResult"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Recreate a specific SharePoint subscription
+   * @description Recreate a specific SharePoint webhook subscription. Useful for targeted fixes of expired or problematic subscriptions. Preserves all integration relationships. Requires admin role.
+   */
+  recreate_subscription_api_v1_admin_sharepoint_subscriptions__subscription_id__recreate_post: {
+    parameters: {
+      path: {
+        subscription_id: string;
+      };
+    };
+    responses: {
+      /** @description Subscription successfully recreated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SharePointSubscriptionPublic"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Subscription not found */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Start service account OAuth flow
+   * @description Start the OAuth flow for configuring a service account. Returns an authorization URL that the admin should be redirected to. The admin will log in with the service account credentials at Microsoft. Requires admin role.
+   */
+  start_service_account_auth_api_v1_admin_sharepoint_service_account_auth_start_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ServiceAccountAuthStart"];
+      };
+    };
+    responses: {
+      /** @description OAuth authorization URL generated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ServiceAccountAuthStartResponse"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Complete service account OAuth flow
+   * @description Complete the OAuth flow by exchanging the authorization code for tokens. This will configure the service account for the tenant's SharePoint access. Requires admin role.
+   */
+  service_account_auth_callback_api_v1_admin_sharepoint_service_account_auth_callback_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ServiceAccountAuthCallback"];
+      };
+    };
+    responses: {
+      /** @description Service account successfully configured */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TenantSharePointAppPublic"];
+        };
+      };
+      /** @description Invalid state or auth code */
+      400: {
+        content: never;
+      };
+      /** @description Authentication required */
+      401: {
+        content: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -17314,7 +21002,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     requestBody: {
@@ -17353,7 +21042,8 @@ export interface operations {
           | "gdm"
           | "mistral"
           | "ovhcloud"
-          | "vllm";
+          | "gemini"
+          | "cohere";
       };
     };
     responses: {
@@ -17909,6 +21599,36 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Crawler Health
+   * @description Detailed crawler diagnostics. NOT for K8s probes.
+   *
+   * Public endpoint - no auth required. Shows only job counts and tenant IDs.
+   *
+   * Args:
+   *     include_all: If True, return all tenant queue lengths instead of top-10.
+   */
+  crawler_health_api_healthz_crawler_get: {
+    parameters: {
+      query?: {
+        include_all?: boolean;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CrawlerHealthResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

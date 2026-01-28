@@ -12,7 +12,7 @@ from intric.database.tables.users_table import Users
 from intric.main.exceptions import BadRequestException, NotFoundException, UniqueUserException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
-from intric.tenants.tenant_repo import TenantRepository
+from intric.tenants.tenant_service import TenantService
 from intric.users.user import (
     PaginationParams,
     SearchFilters,
@@ -35,12 +35,12 @@ class AdminService:
         self,
         user: UserInDB,
         user_repo: UsersRepository,
-        tenant_repo: TenantRepository,
+        tenant_service: TenantService,
         user_service: UserService,
     ):
         self.user = user
         self.user_repo = user_repo
-        self.tenant_repo = tenant_repo
+        self.tenant_service = tenant_service
         self.user_service = user_service
 
     @validate_permissions(Permission.ADMIN)
@@ -203,8 +203,9 @@ class AdminService:
 
     @validate_permissions(Permission.ADMIN)
     async def update_privacy_policy(self, privacy_policy: PrivacyPolicy):
-        return await self.tenant_repo.set_privacy_policy(
-            privacy_policy.url, tenant_id=self.user.tenant_id
+        return await self.tenant_service.set_privacy_policy(
+            tenant_id=self.user.tenant_id,
+            privacy_policy_url=privacy_policy.url,
         )
 
     @validate_permissions(Permission.ADMIN)

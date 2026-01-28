@@ -8,6 +8,7 @@
   import type { SpaceSparse } from "@intric/intric-js";
   import { dynamicColour } from "$lib/core/colours";
   import { getAppContext } from "$lib/core/AppContext";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   export let space: SpaceSparse;
 
@@ -21,7 +22,7 @@
 
 <a
   aria-label={space.name}
-  href="/spaces/{space.id}"
+  href={localizeHref(`/spaces/${space.id}`)}
   {...dynamicColour({ basedOn: space.id })}
   class="group border-dynamic-default bg-dynamic-dimmer text-dynamic-stronger hover:bg-dynamic-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-4 border-t p-4 pt-2"
 >

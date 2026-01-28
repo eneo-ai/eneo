@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
@@ -9,7 +10,6 @@ from uuid import UUID
 
 import crochet
 import sqlalchemy as sa
-from arq.connections import RedisSettings
 from arq.cron import cron
 from dependency_injector import providers
 
@@ -20,10 +20,71 @@ from intric.main.container.container import Container, SessionProxy
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType, Status
+from intric.redis.connection import build_arq_redis_settings
 from intric.server.dependencies import lifespan
 from intric.worker.task_manager import TaskManager, WorkerConfig
 
 logger = get_logger(__name__)
+
+
+def _log_startup_diagnostics(settings) -> None:
+    """Log effective worker settings and detect common env var typos.
+
+    Why: Prevents config drift and helps diagnose issues caused by
+    typos in environment variable names (e.g., TRESHOLD vs THRESHOLD).
+    """
+    # Common env var typos and naming mismatches to detect
+    typo_checks = [
+        ("CRAWL_STALE_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
+        ("CRAWL_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
+        ("TENANT_WORKER_CONCURENCY_LIMIT", "TENANT_WORKER_CONCURRENCY_LIMIT"),
+        ("CRAWL_HEARBEAT_INTERVAL_SECONDS", "CRAWL_HEARTBEAT_INTERVAL_SECONDS"),
+        ("WORKER_MAX_CONCURRENT_JOBS", "WORKER_MAX_JOBS"),  # naming mismatch
+    ]
+
+    # Check for typos in environment
+    typos_found = []
+    for typo, correct in typo_checks:
+        if typo in os.environ:
+            typos_found.append(f"{typo} (should be {correct})")
+
+    if typos_found:
+        logger.warning(
+            "Detected possible env var typos (these are ignored)",
+            extra={"typos": typos_found},
+        )
+
+    # Log effective worker/crawler settings
+    logger.info(
+        "Worker startup diagnostics - effective settings",
+        extra={
+            # Feeder settings
+            "crawl_feeder_enabled": settings.crawl_feeder_enabled,
+            "crawl_feeder_interval_seconds": settings.crawl_feeder_interval_seconds,
+            "crawl_feeder_batch_size": settings.crawl_feeder_batch_size,
+            # Redis settings (connection resilience)
+            "redis_host": settings.redis_host,
+            "redis_port": settings.redis_port,
+            "redis_conn_timeout": settings.redis_conn_timeout,
+            "redis_conn_retries": settings.redis_conn_retries,
+            "redis_conn_retry_delay": settings.redis_conn_retry_delay,
+            "redis_retry_on_timeout": settings.redis_retry_on_timeout,
+            "redis_socket_keepalive": settings.redis_socket_keepalive,
+            "redis_health_check_interval": settings.redis_health_check_interval,
+            "redis_max_connections": settings.redis_max_connections,
+            # Concurrency settings
+            "tenant_worker_concurrency_limit": settings.tenant_worker_concurrency_limit,
+            "tenant_worker_semaphore_ttl_seconds": settings.tenant_worker_semaphore_ttl_seconds,
+            # Crawl settings
+            "crawl_max_length": settings.crawl_max_length,
+            "crawl_stale_threshold_minutes": settings.crawl_stale_threshold_minutes,
+            "crawl_heartbeat_interval_seconds": settings.crawl_heartbeat_interval_seconds,
+            "crawl_heartbeat_max_failures": settings.crawl_heartbeat_max_failures,
+            "crawl_job_max_age_seconds": settings.crawl_job_max_age_seconds,
+            # Cleanup settings
+            "orphan_crawl_run_timeout_hours": settings.orphan_crawl_run_timeout_hours,
+        },
+    )
 
 
 class Worker:
@@ -71,16 +132,16 @@ class Worker:
         settings = get_settings()
         self.functions = []
         self.cron_jobs = []
-        self.redis_settings = RedisSettings(
-            host=settings.redis_host, port=settings.redis_port
-        )
+        self.redis_settings = build_arq_redis_settings(settings)
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
         # Job timeout is a safety net - uses global env default as upper bound.
         # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
         # which respects tenant-specific crawl_max_length settings.
-        self.job_timeout = settings.crawl_max_length + 60 * 60  # crawl window + 1h buffer
+        self.job_timeout = (
+            settings.crawl_max_length + 60 * 60
+        )  # crawl window + 1h buffer
         self.max_jobs = settings.worker_max_jobs
         self.expires_extra_ms = 604800000  # 1 week
 
@@ -96,9 +157,9 @@ class Worker:
         # Allows Scrapy/Twisted reactor cleanup via crochet
         self.job_completion_wait = 60  # seconds
 
-        # ARQ lifecycle hooks for centralized job status management
-        # These run for ALL job types, providing consistent state tracking
-        self.on_job_start = self._on_job_start
+        # ARQ lifecycle hooks for job observability
+        # NOTE: on_job_start removed - conflicts with mark_job_started() CAS check
+        # after_job_end is safe - runs AFTER job completes, no CAS conflict
         self.after_job_end = self._after_job_end
 
     async def _on_job_start(self, ctx: dict) -> None:
@@ -163,7 +224,7 @@ class Worker:
             extra={
                 "job_id": job_id,
                 "job_try": ctx.get("job_try", 1),
-                "success": result is not None and not isinstance(result, Exception),
+                "success": not isinstance(result, Exception),
             },
         )
 
@@ -196,10 +257,13 @@ class Worker:
         await lifespan.startup()
         crochet.setup()
 
+        # Log effective settings at startup for observability
+        settings = get_settings()
+        _log_startup_diagnostics(settings)
+
         # Start crawl feeder as background task if enabled
         # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
         # Uses leader election to ensure only ONE feeder runs across all workers
-        settings = get_settings()
         if settings.crawl_feeder_enabled:
             from intric.worker.crawl_feeder import CrawlFeeder
 
@@ -288,6 +352,7 @@ class Worker:
                     await repo.update(...)
                 # Session returned to pool immediately
         """
+
         def decorator(func):
             @wraps(func)
             async def wrapper(*args):
@@ -320,7 +385,9 @@ class Worker:
                                 .options(
                                     selectinload(Users.roles),
                                     selectinload(Users.predefined_roles),
-                                    selectinload(Users.tenant).selectinload(Tenants.modules),
+                                    selectinload(Users.tenant).selectinload(
+                                        Tenants.modules
+                                    ),
                                     selectinload(Users.api_key),
                                     selectinload(Users.user_groups),
                                 )
@@ -345,6 +412,7 @@ class Worker:
                 # Override user if found during bootstrap
                 if user is not None:
                     from intric.main.container.container_overrides import override_user
+
                     override_user(container=container, user=user)
 
                 # PHASE 3: Execute task - NO session held

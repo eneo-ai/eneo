@@ -3,6 +3,10 @@
 import intric.database.tables.ai_models_table
 import intric.database.tables.allowed_origins_table
 import intric.database.tables.api_keys_table
+import intric.database.tables.audit_action_config_table
+import intric.database.tables.audit_category_config_table
+import intric.database.tables.audit_log_table
+import intric.database.tables.audit_retention_policy_table
 import intric.database.tables.app_table
 import intric.database.tables.app_template_table
 import intric.database.tables.assistant_table

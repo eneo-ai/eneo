@@ -16,7 +16,7 @@ from intric.completion_models.presentation.completion_model_models import (
     ModelUsageSummary,
     PaginatedResponse,
 )
-from intric.database.tables.ai_models_table import CompletionModelUsageStats, CompletionModels, CompletionModelSettings
+from intric.database.tables.ai_models_table import CompletionModelUsageStats, CompletionModels
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.app_table import Apps
@@ -167,28 +167,21 @@ class CompletionModelUsageService:
         """Get usage summary for all models in a tenant."""
         import logging
         logger = logging.getLogger(__name__)
-        
+
         try:
             logger.info(f"Starting get_all_models_usage_summary for tenant {tenant_id}")
-            
-            # Join with CompletionModelSettings to get the is_org_enabled field
+
+            # Settings are now directly on the model table
             stmt = (
                 select(
                     CompletionModels.id,
                     CompletionModels.name,
                     CompletionModels.nickname,
-                    CompletionModelSettings.is_org_enabled,
+                    CompletionModels.is_enabled,
                     CompletionModelUsageStats.total_usage,
                     CompletionModelUsageStats.last_updated,
                 )
                 .select_from(CompletionModels)
-                .join(
-                    CompletionModelSettings,
-                    and_(
-                        CompletionModelSettings.completion_model_id == CompletionModels.id,
-                        CompletionModelSettings.tenant_id == tenant_id
-                    )
-                )
                 .outerjoin(
                     CompletionModelUsageStats,
                     and_(
@@ -196,35 +189,36 @@ class CompletionModelUsageService:
                         CompletionModelUsageStats.tenant_id == tenant_id
                     )
                 )
+                .where(CompletionModels.tenant_id == tenant_id)
                 .order_by(
                     CompletionModelUsageStats.total_usage.desc().nullslast()
                 )
             )
-            
+
             logger.info(f"Executing query: {stmt}")
-            
+
             results = await self.session.execute(stmt)
             rows = results.all()
-            
+
             logger.info(f"Query returned {len(rows)} rows")
-            
+
             summaries = []
             for row in rows:
                 logger.debug(f"Processing row: {row}")
-                
+
                 summary = ModelUsageSummary(
                     model_id=row.id,
                     model_name=row.name,
                     model_nickname=row.nickname,
-                    is_enabled=row.is_org_enabled,  # Map is_org_enabled to is_enabled
+                    is_enabled=row.is_enabled,
                     total_usage=row.total_usage or 0,
                     last_updated=row.last_updated or datetime.utcnow(),
                 )
                 summaries.append(summary)
-            
+
             logger.info(f"Successfully created {len(summaries)} usage summaries")
             return summaries
-            
+
         except Exception as e:
             logger.error(f"Error in get_all_models_usage_summary: {str(e)}", exc_info=True)
             raise
@@ -510,17 +504,14 @@ class CompletionModelUsageService:
         as a background job for production use with 10k+ users.
         """
         self.logger.info(f"Starting recalculate_all_usage_stats for tenant {tenant_id}")
-        
-        # Get all models enabled for tenant through CompletionModelSettings
+
+        # Get all models enabled for tenant (settings are now directly on model table)
         # This is done in a separate read-only transaction
         model_ids = []
         async with self.session.begin():
-            stmt = select(CompletionModels.id, CompletionModels.name).join(
-                CompletionModelSettings,
-                CompletionModels.id == CompletionModelSettings.completion_model_id
-            ).where(
-                CompletionModelSettings.tenant_id == tenant_id,
-                CompletionModelSettings.is_org_enabled == True
+            stmt = select(CompletionModels.id, CompletionModels.name).where(
+                CompletionModels.tenant_id == tenant_id,
+                CompletionModels.is_enabled == True
             )
             self.logger.debug(f"Query for completion models: {stmt}")
             
@@ -598,14 +589,11 @@ class CompletionModelUsageService:
         have an active transaction, so it doesn't start its own transactions.
         """
         self.logger.info(f"Starting recalculate_all_usage_stats_in_transaction for tenant {tenant_id}")
-        
-        # Get all models enabled for tenant (no transaction needed, we're already in one)
-        stmt = select(CompletionModels.id, CompletionModels.name).join(
-            CompletionModelSettings,
-            CompletionModels.id == CompletionModelSettings.completion_model_id
-        ).where(
-            CompletionModelSettings.tenant_id == tenant_id,
-            CompletionModelSettings.is_org_enabled == True
+
+        # Get all models enabled for tenant (settings are now directly on model table)
+        stmt = select(CompletionModels.id, CompletionModels.name).where(
+            CompletionModels.tenant_id == tenant_id,
+            CompletionModels.is_enabled == True
         )
         self.logger.debug(f"Query for completion models: {stmt}")
         

@@ -193,15 +193,22 @@ class CrawlService:
         except Exception as exc:
             logger.warning(
                 "Failed to release slot for preempted job",
-                extra={"tenant_id": str(tenant_id), "job_id": str(job_id), "error": str(exc)},
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "job_id": str(job_id),
+                    "error": str(exc),
+                },
             )
 
         # Delete pre-acquired flag (harmless if doesn't exist)
         flag_key = f"job:{job_id}:slot_preacquired"
         try:
             await self.redis_client.delete(flag_key)
-        except Exception:
-            pass  # Best effort - flag may not exist
+        except Exception as flag_exc:
+            logger.debug(
+                "Failed to delete slot_preacquired flag during preemption",
+                extra={"job_id": str(job_id), "error": str(flag_exc)},
+            )
 
     async def _add_to_pending_queue(
         self,
@@ -313,7 +320,7 @@ class CrawlService:
             # Optimistic Acquire Pattern
             # Step 1: Create job record WITHOUT enqueueing to ARQ
             crawl_job = await self.task_service.queue_crawl(
-                name=website.name,
+                name=website.name or website.url,
                 run_id=crawl_run.id,
                 website_id=website.id,
                 url=website.url,
@@ -348,8 +355,11 @@ class CrawlService:
                         await self.redis_client.delete(
                             f"job:{crawl_job.id}:slot_preacquired"
                         )
-                    except Exception:
-                        pass
+                    except Exception as flag_exc:
+                        logger.debug(
+                            "Failed to delete slot_preacquired flag during rollback",
+                            extra={"job_id": str(crawl_job.id), "error": str(flag_exc)},
+                        )
                     await self._release_slot(website.tenant_id)
 
                     # Fail the job to prevent orphaned DB records
@@ -388,7 +398,7 @@ class CrawlService:
         else:
             # Feeder disabled: Original direct enqueue behavior
             crawl_job = await self.task_service.queue_crawl(
-                name=website.name,
+                name=website.name or website.url,
                 run_id=crawl_run.id,
                 website_id=website.id,
                 url=website.url,

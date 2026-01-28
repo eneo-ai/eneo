@@ -23,7 +23,8 @@ function initAppEditor(data: { app: App; intric: Intric; onUpdateDone?: (app: Ap
       transcription_model: { id: true },
       attachments: ["id"],
       prompt: { description: true, text: true },
-      input_fields: ["type", "description"]
+      input_fields: ["type", "description"],
+      data_retention_days: true
     },
     manageAttachements: "attachments",
     updateResource: async (resource, changes) => {

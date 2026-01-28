@@ -13,6 +13,11 @@ from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
 
+# Audit logging - module level imports for consistency
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+
 logger = get_logger(__name__)
 
 
@@ -161,15 +166,11 @@ async def set_tenant_federation(
         HTTPException 400: Invalid configuration
     """
     tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
     encryption_service = container.encryption_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
-        )
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
 
     # Fetch OIDC discovery to validate config
     import aiohttp
@@ -282,9 +283,7 @@ async def set_tenant_federation(
             return "client_secret_basic"
         return normalized[0] if normalized else "client_secret_post"
 
-    token_endpoint_auth_method = _select_token_auth_method(
-        token_auth_methods_supported
-    )
+    token_endpoint_auth_method = _select_token_auth_method(token_auth_methods_supported)
 
     # Encrypt client_secret
     encrypted_secret = encryption_service.encrypt(request.client_secret)
@@ -347,6 +346,29 @@ async def set_tenant_federation(
         f"...{request.client_secret[-4:]}" if len(request.client_secret) > 4 else "***"
     )
 
+    # Audit logging (sysadmin operation - system actor)
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,  # System actor (no user)
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin configured {request.provider} federation for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "provider": request.provider,
+                "issuer": issuer,
+                "client_id": request.client_id,
+                "allowed_domains": request.allowed_domains,
+            },
+        },
+    )
+
     return SetFederationResponse(
         tenant_id=tenant_id,
         provider=request.provider,
@@ -368,17 +390,33 @@ async def delete_tenant_federation(
 ) -> DeleteFederationResponse:
     """Delete federation config for tenant (revert to global IdP)."""
     tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
-        )
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
 
     # Delete federation config
     await tenant_repo.delete_federation_config(tenant_id=tenant_id)
+
+    # Audit logging (sysadmin operation - system actor)
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin deleted federation config for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "action": "deleted",
+            },
+        },
+    )
 
     logger.info(f"Federation config deleted for tenant {tenant.name}")
 
@@ -401,14 +439,10 @@ async def get_tenant_federation(
 ) -> FederationInfo:
     """Get federation config for tenant (masked secrets)."""
     tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant {tenant_id} not found",
-        )
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
 
     # Get config with metadata
     metadata = await tenant_repo.get_federation_config_with_metadata(tenant_id)
@@ -451,11 +485,11 @@ async def test_tenant_federation(
         HTTPException 404: Tenant not found or no config
         HTTPException 500: Discovery endpoint unreachable or invalid
     """
-    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
 
-    # Validate tenant exists
-    tenant = await tenant_repo.get(tenant_id)
-    if not tenant or not tenant.federation_config:
+    # Validate tenant exists (raises NotFoundException if not found)
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    if not tenant.federation_config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No federation config found for tenant",

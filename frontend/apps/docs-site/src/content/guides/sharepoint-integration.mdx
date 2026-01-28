@@ -6,6 +6,12 @@ This guide describes how to configure the SharePoint integration in Eneo. Once s
 
 The SharePoint integration enables connecting SharePoint sites and OneDrive folders to Eneo. When the integration is configured, users can select which folders or sites they want to import, and Eneo automatically fetches the content and keeps it up to date via webhooks.
 
+<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
+
+![SharePoint Integration Architecture showing User connecting to Eneo Platform (Backend API, SharePoint Service, Worker, PostgreSQL, Webhook Endpoint) which communicates with Microsoft Cloud (Azure AD, Microsoft Graph API, SharePoint & OneDrive). Includes authentication methods (Service Account, Tenant App, User OAuth) and webhook subscription lifecycle.](/diagrams/sharepoint-integration.svg)
+
+</div>
+
 There are two different use cases to consider:
 
 **Personal spaces** use OAuth login where each user authenticates with their own Microsoft account. This is suitable when users want to import from their personal OneDrive or SharePoint sites they have access to.
@@ -65,18 +71,26 @@ Click **Register**.
 
 After registration, the application needs the right permissions to read files from SharePoint. Navigate to **API permissions** → **Add a permission** → **Microsoft Graph**.
 
-Which permissions are needed depends on which authentication method you choose (see next section), but generally you need:
+**Delegated permissions (always required):**
 
-**For delegated permissions:**
+These permissions are used for personal spaces and the Service Account method. They only grant access to files that the authenticating user/account has access to.
+
 - `Files.Read.All` – read files the user has access to
 - `Sites.Read.All` – read SharePoint sites
 - `offline_access` – keep the session active without the user needing to log in again
 
-**For application permissions:**
+**Application permissions (only for Tenant App method):**
+
+These permissions are **only required if you choose the Tenant App authentication method** for shared spaces. If you use Service Account (recommended), you do not need application permissions.
+
+> **Warning:** Application permissions grant access to **all SharePoint sites in the entire organization**. Microsoft does not provide a way to limit application permissions to specific sites. If you want to restrict access to specific sites, use the Service Account method instead.
+
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
 
-After adding the permissions, click **Grant admin consent** to approve them at the organization level.
+After adding the permissions, click **Grant admin consent for [your tenant]** to approve them at the organization level.
+
+> **Important:** The delegated permissions `Files.Read.All` and `Sites.Read.All` require admin consent before regular users can authenticate. Without granting admin consent, only Azure AD administrators will be able to use the integration – other users will receive a consent error (AADSTS65001) when trying to sign in.
 
 ### Create a Client Secret
 
@@ -109,6 +123,8 @@ With the service account method, an administrator logs in with a dedicated Micro
 - A dedicated service account in Azure AD (for example `eneo-service@contoso.com`)
 - The account must have read permission to the SharePoint sites to be imported
 - Delegated permissions in the Azure AD application
+
+> **Note:** The Azure AD app permissions define what the app *can* do on behalf of the service account, but the service account must also have actual access to the SharePoint sites. Add the service account as a **Member** or **Visitor** on each SharePoint site via **Site settings** → **Site permissions** → **Add members**. Without this, the integration will receive 403 Forbidden errors when trying to read files.
 
 ### Tenant App
 
@@ -226,6 +242,19 @@ Under **Admin** → **Integrations** → **Manage webhooks** you can see all act
 
 If webhooks have stopped working, for example after an extended outage where the background job couldn't run, you can click **Renew expired** to manually recreate all expired subscriptions.
 
+### Network Configuration for Webhooks
+
+> **Note:** This section only applies if Eneo is deployed behind an API gateway or reverse proxy that requires authentication.
+
+If your Eneo installation is behind an API gateway (such as WSO2, Kong, or nginx with auth), the webhook endpoints must be configured to allow unauthenticated access:
+
+- `GET /integrations/sharepoint/webhook/` - Subscription validation
+- `POST /integrations/sharepoint/webhook/` - Change notifications
+
+Microsoft cannot provide API keys or bearer tokens with webhook requests. Security is instead maintained via the `clientState` parameter, which is configured through the `SHAREPOINT_WEBHOOK_CLIENT_STATE` environment variable. Eneo validates that all incoming notifications contain this secret before processing them.
+
+If Eneo is directly accessible on a public URL without an authenticating proxy, no additional configuration is needed.
+
 ### Troubleshooting Webhooks
 
 If changes in SharePoint aren't synchronizing:
@@ -233,6 +262,7 @@ If changes in SharePoint aren't synchronizing:
 1. Check webhook status in the admin panel
 2. Verify that Eneo's domain is reachable via HTTPS from the internet
 3. Check that the firewall allows incoming traffic from Microsoft's IP addresses
+4. If using an API gateway, verify that the webhook endpoints are accessible without authentication
 
 ---
 
@@ -246,6 +276,24 @@ If connection testing fails, check:
 - That the client secret hasn't expired (they have limited validity periods)
 - That admin consent has been granted for all permissions
 - That the correct permission type is used (delegated for service account, application for tenant app)
+
+### Non-Admin Users Cannot Authenticate
+
+If administrators can authenticate but regular users receive errors like "AADSTS65001" (consent required) or "AADSTS50105" (user not assigned):
+
+**Check admin consent is granted:**
+1. Go to **Azure Portal** → **App registrations** → your app
+2. Navigate to **API permissions**
+3. Verify the Status column shows **"Granted for [tenant name]"** (green checkmark)
+4. If not, click **Grant admin consent for [tenant]**
+
+**Check user assignment settings:**
+1. Go to **Azure Portal** → **Enterprise applications** (not App registrations)
+2. Search for and select your application
+3. Navigate to **Properties**
+4. Ensure **"User assignment required?"** is set to **No**
+
+If "User assignment required" is set to Yes, only users explicitly added under **Users and groups** can authenticate with the application.
 
 ### Files Don't Synchronize
 

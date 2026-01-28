@@ -19,11 +19,16 @@ from intric.completion_models.presentation.completion_model_models import (
     PaginatedResponse as ModelUsagePaginatedResponse,
 )
 from intric.main.container.container import Container
-from intric.main.models import PaginatedResponse
+from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.server.dependencies.container import get_container
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -55,13 +60,68 @@ async def update_completion_model(
 ):
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
+    user = container.user()
 
+    # Validate admin permissions first
+    validate_permission(user, Permission.ADMIN)
+
+    # Get old state for change tracking (bypass access check since admin is already validated)
+    completion_model_repo = container.completion_model_repo2()
+    old_model = await completion_model_repo.one(model_id=id)
+
+    # Update model
     completion_model = await service.update_completion_model(
         model_id=id,
         is_org_enabled=update_flags.is_org_enabled,
         is_org_default=update_flags.is_org_default,
         security_classification=update_flags.security_classification,
     )
+
+    # Build consolidated changes dict (one API call = one audit log)
+    changes = {}
+
+    # Track is_org_enabled changes
+    if update_flags.is_org_enabled is not NOT_PROVIDED:
+        if old_model.is_org_enabled != completion_model.is_org_enabled:
+            changes["is_org_enabled"] = {
+                "old": old_model.is_org_enabled,
+                "new": completion_model.is_org_enabled,
+            }
+
+    # Track is_org_default changes
+    if update_flags.is_org_default is not NOT_PROVIDED:
+        if old_model.is_org_default != completion_model.is_org_default:
+            changes["is_org_default"] = {
+                "old": old_model.is_org_default,
+                "new": completion_model.is_org_default,
+            }
+
+    # Track security classification changes
+    if update_flags.security_classification is not NOT_PROVIDED:
+        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
+        new_sc_name = completion_model.security_classification.name if completion_model.security_classification else None
+        if old_sc_name != new_sc_name:
+            changes["security_classification"] = {
+                "old": old_sc_name,
+                "new": new_sc_name,
+            }
+
+    # Only log if there were actual changes (ONE entry with all changes)
+    if changes:
+        audit_service = container.audit_service()
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.COMPLETION_MODEL_UPDATED,
+            entity_type=EntityType.COMPLETION_MODEL,
+            entity_id=id,
+            description=f"Updated settings for {completion_model.name}",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=completion_model,
+                changes=changes,
+            ),
+        )
 
     return assembler.from_completion_model_to_model(completion_model=completion_model)
 

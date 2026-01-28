@@ -17,7 +17,7 @@ export const metadata = {
   openGraph: {
     title: 'Eneo - Democratic AI Platform',
     description: 'Open-source AI platform for public sector organizations',
-    url: 'https://eneo.ai',
+    url: 'https://docs.eneo.ai',
     siteName: 'Eneo Documentation',
     type: 'website',
   },
@@ -63,7 +63,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           pageMap={await getPageMap()}
           docsRepositoryBase="https://github.com/eneo-ai/eneo/tree/main/frontend/apps/docs-site"
           footer={footer}
-          // ... Your additional layout options
         >
           {children}
         </Layout>

@@ -7,6 +7,8 @@ from intric.main.models import ModelId
 from intric.tenants.crawler_settings_helper import get_all_crawler_settings
 from intric.tenants.masking import mask_api_key
 from intric.tenants.provider_field_config import validate_provider_credentials
+from pydantic import HttpUrl
+
 from intric.tenants.tenant import (
     TenantBase,
     TenantInDB,
@@ -409,3 +411,55 @@ class TenantService:
             "tenant_id": tenant_id,
             "deleted_keys": deleted_keys,
         }
+
+    async def set_privacy_policy(
+        self,
+        tenant_id: UUID,
+        privacy_policy_url: HttpUrl | None,
+    ) -> TenantInDB:
+        """
+        Set privacy policy URL for a tenant.
+
+        Args:
+            tenant_id: UUID of the tenant
+            privacy_policy_url: URL to the privacy policy, or None to clear
+
+        Returns:
+            Updated TenantInDB
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        return await self.repo.set_privacy_policy(
+            privacy_policy=privacy_policy_url,
+            tenant_id=tenant_id,
+        )
+
+    async def toggle_security(
+        self,
+        tenant_id: UUID,
+        enabled: bool,
+    ) -> TenantInDB:
+        """
+        Enable or disable security classifications for a tenant.
+
+        Args:
+            tenant_id: UUID of the tenant
+            enabled: Whether security classifications should be enabled
+
+        Returns:
+            Updated TenantInDB
+
+        Raises:
+            NotFoundException: If tenant not found
+        """
+        # Validate tenant exists
+        tenant = await self.repo.get(tenant_id)
+        self._validate(tenant, tenant_id)
+
+        tenant_update = TenantUpdate(id=tenant_id, security_enabled=enabled)
+        return await self.repo.update_tenant(tenant_update)

@@ -10,6 +10,11 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses, to_paginated_response
 from intric.spaces.api.space_models import TransferRequest
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.websites.presentation.website_models import (
     BulkCrawlRequest,
     BulkCrawlResponse,
@@ -131,7 +136,9 @@ async def update_website(
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.website_crud_service()
+    user = container.user()
 
+    # Update website
     website = await service.update_website(
         id=id,
         url=website_update.url,
@@ -143,6 +150,22 @@ async def update_website(
         http_auth_password=website_update.http_auth_password,
     )
 
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_UPDATED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=id,
+        description=f"Updated website '{website.url}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=website,
+            extra={"url": website.url},
+        ),
+    )
+
     return WebsitePublic.from_domain(website)
 
 
@@ -152,7 +175,30 @@ async def delete_website(
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.website_crud_service()
+    user = container.user()
+
+    # Get website info before deletion (snapshot pattern)
+    website = await service.get_website(id)
+
+    # Delete website
     await service.delete_website(id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_DELETED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=id,
+        description=f"Deleted website '{website.url}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=website,
+            extra={"url": website.url},
+        ),
+    )
+
     return {"id": id, "deletion_info": {"success": True}}
 
 @router.post(
@@ -208,8 +254,33 @@ async def transfer_website_to_space(
     transfer_req: TransferRequest = ...,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    # Transfer website (do this FIRST to avoid DI issues)
     service = container.resource_mover_service()
     await service.link_website_to_space(website_id=id, space_id=transfer_req.target_space_id)
+
+    # Get user and website info AFTER transfer for audit logging
+    user = container.user()
+    website_service = container.website_crud_service()
+    website = await website_service.get_website(id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.WEBSITE_TRANSFERRED,
+        entity_type=EntityType.WEBSITE,
+        entity_id=id,
+        description=f"Transferred website '{website.url}' to new space",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=website,
+            extra={
+                "url": website.url,
+                "target_space_id": str(transfer_req.target_space_id),
+            },
+        ),
+    )
 
 
 @router.get(

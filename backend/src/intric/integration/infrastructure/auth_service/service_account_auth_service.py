@@ -30,8 +30,8 @@ class ServiceAccountCredentials:
     client_id: str
     client_secret: str
     tenant_domain: str
-    redirect_uri: str
     authority: str
+    redirect_uri: Optional[str] = None  # Only needed for OAuth flow, not for refresh
 
 
 @dataclass
@@ -75,25 +75,41 @@ class ServiceAccountAuthService:
         client_id: str,
         client_secret: str,
         tenant_domain: str,
+        include_redirect_uri: bool = True,
     ) -> ServiceAccountCredentials:
-        """Build credentials object from provided values."""
+        """Build credentials object from provided values.
+
+        Args:
+            client_id: Azure AD application client ID
+            client_secret: Azure AD application client secret
+            tenant_domain: Azure AD tenant domain
+            include_redirect_uri: Whether to include redirect_uri (only needed for OAuth flow)
+        """
+        redirect_uri = self._get_redirect_uri() if include_redirect_uri else None
         return ServiceAccountCredentials(
             client_id=client_id,
             client_secret=client_secret,
             tenant_domain=tenant_domain,
-            redirect_uri=self._get_redirect_uri(),
             authority=f"https://login.microsoftonline.com/{tenant_domain}",
+            redirect_uri=redirect_uri,
         )
 
     def _build_credentials_from_app(
         self,
         tenant_app: "TenantSharePointApp",
+        include_redirect_uri: bool = True,
     ) -> ServiceAccountCredentials:
-        """Build credentials from TenantSharePointApp entity."""
+        """Build credentials from TenantSharePointApp entity.
+
+        Args:
+            tenant_app: TenantSharePointApp with service account configuration
+            include_redirect_uri: Whether to include redirect_uri (only needed for OAuth flow)
+        """
         return self._build_credentials(
             client_id=tenant_app.client_id,
             client_secret=tenant_app.client_secret,
             tenant_domain=tenant_app.tenant_domain,
+            include_redirect_uri=include_redirect_uri,
         )
 
     def gen_auth_url(
@@ -232,7 +248,8 @@ class ServiceAccountAuthService:
                 f"TenantSharePointApp {tenant_app.id} has no service account refresh token"
             )
 
-        creds = self._build_credentials_from_app(tenant_app)
+        # Refresh token flow doesn't require redirect_uri
+        creds = self._build_credentials_from_app(tenant_app, include_redirect_uri=False)
         token_endpoint = f"{creds.authority}/oauth2/v2.0/token"
 
         data = {
