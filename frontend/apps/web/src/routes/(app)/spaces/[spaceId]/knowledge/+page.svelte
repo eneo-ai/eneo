@@ -135,7 +135,9 @@
             disabled={isBulkRecrawling}
           >
             <IconRefresh size="sm" />
-            {isBulkRecrawling ? 'Syncing...' : `Sync selected (${$selectedWebsiteIds.size})`}
+            {isBulkRecrawling
+              ? m.syncing()
+              : m.sync_selected({ count: $selectedWebsiteIds.size })}
           </Button>
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>

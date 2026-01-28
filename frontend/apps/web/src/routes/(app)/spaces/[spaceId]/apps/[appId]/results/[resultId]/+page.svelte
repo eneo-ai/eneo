@@ -252,8 +252,14 @@
               </div>
             {/if}
           {:else}
-            <div class="flex h-[50vh] flex-col items-center justify-center gap-2">
-              <IconLoadingSpinner class="animate-spin" />
+            <div class="flex h-[50vh] flex-col items-center justify-center gap-4">
+              <div class="audio-wave">
+                <div class="wave-bar" style="animation-delay: 0s"></div>
+                <div class="wave-bar" style="animation-delay: 0.1s"></div>
+                <div class="wave-bar" style="animation-delay: 0.2s"></div>
+                <div class="wave-bar" style="animation-delay: 0.3s"></div>
+                <div class="wave-bar" style="animation-delay: 0.4s"></div>
+              </div>
               <span class="text-secondary">{m.result_being_generated()}</span>
             </div>
           {/if}
@@ -292,3 +298,34 @@
     </div>
   </Page.Main>
 </Page.Root>
+
+<style lang="postcss">
+  @reference "@intric/ui/styles";
+
+  /* Audio wave loading animation */
+  .audio-wave {
+    @apply flex h-8 items-center gap-1;
+  }
+
+  .wave-bar {
+    @apply w-1 rounded-full bg-blue-500;
+    animation: wave 1s ease-in-out infinite;
+  }
+
+  @keyframes wave {
+    0%,
+    100% {
+      height: 8px;
+    }
+    50% {
+      height: 24px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wave-bar {
+      animation: none;
+      height: 16px;
+    }
+  }
+</style>

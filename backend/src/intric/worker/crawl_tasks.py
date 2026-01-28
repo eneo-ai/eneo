@@ -1,5 +1,6 @@
 import hashlib
 import random
+import socket
 import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -26,12 +27,42 @@ from intric.worker.crawl import (
 )
 from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 from intric.worker.feeder.capacity import CapacityManager
+from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import PendingQueue
 from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.task_manager import TaskManager
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 
 logger = get_logger(__name__)
+
+SCHEDULER_LOCK_KEY = "crawl_scheduler:leader"
+SCHEDULER_LOCK_TTL_SECONDS = 1800
+
+
+async def _get_primary_active_job_id(
+    session: AsyncSession,
+    *,
+    website_id: UUID,
+) -> UUID | None:
+    """Return the oldest active crawl job ID for a website.
+
+    Used to ensure newer duplicate crawl jobs yield to the earliest queued or
+    running job, preventing duplicate executions when schedules overlap.
+    """
+    from intric.database.tables.job_table import Jobs
+    from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+    from intric.main.models import Status
+
+    active_statuses = [Status.QUEUED.value, Status.IN_PROGRESS.value]
+    stmt = (
+        sa.select(Jobs.id)
+        .join(CrawlRunsTable, CrawlRunsTable.job_id == Jobs.id)
+        .where(CrawlRunsTable.website_id == website_id)
+        .where(Jobs.status.in_(active_statuses))
+        .order_by(Jobs.created_at.asc())
+        .limit(1)
+    )
+    return await session.scalar(stmt)
 
 
 async def queue_website_crawls(container: Container):
@@ -55,182 +86,241 @@ async def queue_website_crawls(container: Container):
 
     settings = get_settings()
 
-    # Get Redis client for feeder mode (if enabled)
-    redis_client = None
-    if settings.crawl_feeder_enabled:
-        try:
-            redis_client = container.redis_client()
-        except Exception as exc:
-            logger.error(
-                f"Feeder enabled but Redis unavailable: {exc}. "
-                "Falling back to direct enqueue mode."
-            )
+    scheduler_lock = None
+    scheduler_lock_acquired = False
+    scheduler_worker_id = socket.gethostname()
 
-    # PHASE 1: Query due websites with SHORT-LIVED session (~50-200ms)
-    # Release connection immediately after query completes to prevent
-    # "Connection held for 60s" warnings when processing many websites.
-    async with sessionmanager.session() as query_session, query_session.begin():
-        crawl_scheduler_service = container.crawl_scheduler_service()
-        # Inject the short-lived session for this query only
-        crawl_scheduler_service.website_sparse_repo.session = query_session
-        websites = await crawl_scheduler_service.get_websites_due_for_crawl()
-    # Session is now CLOSED - connection returned to pool
+    try:
+        redis_client = container.redis_client()
+    except Exception as exc:
+        redis_client = None
+        logger.warning(
+            "Failed to initialize Redis client for crawl scheduling",
+            extra={"error": str(exc)},
+        )
 
-    logger.info(
-        f"Processing {len(websites)} websites due for crawling",
-        extra={
-            "feeder_enabled": settings.crawl_feeder_enabled,
-            "mode": "pending_queue" if settings.crawl_feeder_enabled else "direct_enqueue",
-            "website_count": len(websites),
-        },
-    )
-
-    successful_crawls = 0
-    failed_crawls = 0
-
-    # PHASE 2: Process each website with its OWN short-lived session
-    # Each website operation takes ~100-500ms. Without per-website sessions,
-    # 100 websites would hold ONE connection for 10-50 seconds.
-    # With per-website sessions, each connection is held for <500ms.
-    for website in websites:
-        try:
-            # Each website gets its own session scope
-            async with sessionmanager.session() as website_session, website_session.begin():
-                # Create repos with this session
-                user_repo = container.user_repo()
-                user_repo.session = website_session
-
-                # Get user for this website
-                user = await user_repo.get_user_by_id(website.user_id)
-                container.user.override(providers.Object(user))
-                container.tenant.override(providers.Object(user.tenant))
-
-                # Feeder mode: Create crawl run AND job record, then add to pending queue
-                # Why: Pre-create DB records so feeder only handles ARQ enqueueing
-                # Deterministic job_id based on run_id prevents duplicate enqueues
-                if settings.crawl_feeder_enabled and redis_client:
-                    from intric.websites.domain.crawl_run import CrawlRun
-                    from intric.jobs.job_models import Job, Task
-                    from intric.main.models import Status
-
-                    # Step 1: Create crawl run record
-                    crawl_run_repo = container.crawl_run_repo()
-                    crawl_run_repo.session = website_session
-                    crawl_run = CrawlRun.create(website=website)
-                    crawl_run = await crawl_run_repo.add(crawl_run=crawl_run)
-
-                    # Step 2: Create job record in database
-                    # Why: Pre-create so job_id is deterministic and available for feeder
-                    # CRITICAL: Use website_session, not container's outer cron_job session!
-                    # Bug fix: Job and CrawlRun must commit together for watchdog JOIN to work.
-                    # See: watchdog.py zombie reconciliation query joins Jobs with CrawlRuns
-                    job_repo = container.job_repo()
-                    job_repo.delegate.session = website_session  # Align with crawl_run_repo
-                    job = Job(
-                        task=Task.CRAWL,
-                        name=f"Crawl: {website.name}",
-                        status=Status.QUEUED,
-                        user_id=website.user_id,
-                    )
-                    job_in_db = await job_repo.add_job(job=job)
-
-                    # Step 3: Link job_id to crawl_run
-                    crawl_run.update(job_id=job_in_db.id)
-                    await crawl_run_repo.update(crawl_run=crawl_run)
-
-                    # Step 4: Prepare job data for pending queue
-                    # Store database job_id for deterministic enqueueing
-                    job_data = {
-                        "job_id": str(job_in_db.id),  # Critical: Deterministic ID from DB
-                        "user_id": str(website.user_id),
-                        "website_id": str(website.id),
-                        "run_id": str(crawl_run.id),
-                        "url": website.url,
-                        "download_files": website.download_files,
-                        "crawl_type": website.crawl_type.value,
-                    }
-
-                    # Step 5: Add to pending queue with orphaning protection
-                    # If Redis push fails, mark DB records as FAILED
-                    # Why: Prevents orphaned crawl_run/job records that never execute
-                    try:
-                        pending_queue = PendingQueue(redis_client)
-                        if not await pending_queue.add(
-                            tenant_id=user.tenant.id,
-                            job_data=job_data,
-                        ):
-                            raise Exception("Failed to add to pending queue")
-
-                        successful_crawls += 1
-                        logger.debug(
-                            f"Added crawl to pending queue: {website.url}",
-                            extra={
-                                "feeder_mode": True,
-                                "job_id": str(job_in_db.id),
-                                "run_id": str(crawl_run.id),
-                            },
-                        )
-                    except Exception as redis_exc:
-                        # Redis push failed, rollback by marking DB records as FAILED
-                        # Why: Prevents silent data loss and orphaned records
-                        try:
-                            from intric.main.models import Status
-
-                            job_in_db.status = Status.FAILED
-                            await job_repo.update_job(job_in_db)
-
-                            crawl_run.status = Status.FAILED
-                            await crawl_run_repo.update(crawl_run)
-                        except Exception as update_exc:
-                            logger.warning(
-                                "Failed to rollback DB records after Redis error",
-                                extra={
-                                    "job_id": str(job_in_db.id),
-                                    "error": str(update_exc),
-                                },
-                            )
-
-                        failed_crawls += 1
-                        logger.error(
-                            f"Failed to add to pending queue: {redis_exc}",
-                            extra={
-                                "website_id": str(website.id),
-                                "url": website.url,
-                                "job_id": str(job_in_db.id),
-                            },
-                        )
-                else:
-                    # Direct enqueue mode (original behavior when feeder disabled)
-                    crawl_service = container.crawl_service()
-                    await crawl_service.crawl(website)
-                    successful_crawls += 1
-
-                    logger.debug(f"Successfully queued crawl for {website.url}")
-
-            # Session is now CLOSED for this website - connection returned to pool
-
-        except Exception as e:
-            # Why: Individual website failures shouldn't stop the entire batch
-            failed_crawls += 1
-            logger.error(
-                f"Failed to queue crawl for {website.url}: {str(e)}",
+    # Scheduler lock: prevent multiple workers from enqueueing the same schedule
+    if redis_client:
+        scheduler_lock = LeaderElection(
+            redis_client,
+            scheduler_worker_id,
+            lock_key=SCHEDULER_LOCK_KEY,
+            ttl_seconds=SCHEDULER_LOCK_TTL_SECONDS,
+        )
+        scheduler_lock_acquired = await scheduler_lock.try_acquire()
+        if not scheduler_lock_acquired:
+            logger.info(
+                "Skipping crawl scheduling; another worker holds the scheduler lock",
                 extra={
-                    "website_id": str(website.id),
-                    "tenant_id": str(website.tenant_id),
-                    "space_id": str(website.space_id),
-                    "user_id": str(website.user_id),
+                    "lock_key": SCHEDULER_LOCK_KEY,
+                    "lock_ttl_seconds": SCHEDULER_LOCK_TTL_SECONDS,
+                    "worker_id": scheduler_worker_id,
                 },
             )
-            continue
+            return False
+        logger.debug(
+            "Acquired crawl scheduler lock",
+            extra={
+                "lock_key": SCHEDULER_LOCK_KEY,
+                "lock_ttl_seconds": SCHEDULER_LOCK_TTL_SECONDS,
+                "worker_id": scheduler_worker_id,
+            },
+        )
 
-    logger.info(
-        f"Crawl queueing completed: {successful_crawls} successful, {failed_crawls} failed"
-    )
+    # Get Redis client for feeder mode (if enabled)
+    if settings.crawl_feeder_enabled and redis_client is None:
+        logger.error(
+            "Feeder enabled but Redis unavailable; falling back to direct enqueue mode."
+        )
 
-    return True
+    try:
+        # PHASE 1: Query due websites with SHORT-LIVED session (~50-200ms)
+        # Release connection immediately after query completes to prevent
+        # "Connection held for 60s" warnings when processing many websites.
+        async with sessionmanager.session() as query_session, query_session.begin():
+            crawl_scheduler_service = container.crawl_scheduler_service()
+            # Inject the short-lived session for this query only
+            crawl_scheduler_service.website_sparse_repo.session = query_session
+            websites = await crawl_scheduler_service.get_websites_due_for_crawl()
+        # Session is now CLOSED - connection returned to pool
+
+        logger.info(
+            f"Processing {len(websites)} websites due for crawling",
+            extra={
+                "feeder_enabled": settings.crawl_feeder_enabled,
+                "mode": "pending_queue"
+                if settings.crawl_feeder_enabled
+                else "direct_enqueue",
+                "website_count": len(websites),
+            },
+        )
+
+        successful_crawls = 0
+        failed_crawls = 0
+
+        # PHASE 2: Process each website with its OWN short-lived session
+        # Each website operation takes ~100-500ms. Without per-website sessions,
+        # 100 websites would hold ONE connection for 10-50 seconds.
+        # With per-website sessions, each connection is held for <500ms.
+        for website in websites:
+            try:
+                # Each website gets its own session scope
+                async with (
+                    sessionmanager.session() as website_session,
+                    website_session.begin(),
+                ):
+                    # Create repos with this session
+                    user_repo = container.user_repo()
+                    user_repo.session = website_session
+
+                    # Get user for this website
+                    user = await user_repo.get_user_by_id(website.user_id)
+                    container.user.override(providers.Object(user))
+                    container.tenant.override(providers.Object(user.tenant))
+
+                    # Feeder mode: Create crawl run AND job record, then add to pending queue
+                    # Why: Pre-create DB records so feeder only handles ARQ enqueueing
+                    # Deterministic job_id based on run_id prevents duplicate enqueues
+                    if settings.crawl_feeder_enabled and redis_client:
+                        from intric.websites.domain.crawl_run import CrawlRun
+                        from intric.jobs.job_models import Job, Task
+                        from intric.main.models import Status
+
+                        # Step 1: Create crawl run record
+                        crawl_run_repo = container.crawl_run_repo()
+                        crawl_run_repo.session = website_session
+                        crawl_run = CrawlRun.create(website=website)
+                        crawl_run = await crawl_run_repo.add(crawl_run=crawl_run)
+
+                        # Step 2: Create job record in database
+                        # Why: Pre-create so job_id is deterministic and available for feeder
+                        # CRITICAL: Use website_session, not container's outer cron_job session!
+                        # Bug fix: Job and CrawlRun must commit together for watchdog JOIN to work.
+                        # See: watchdog.py zombie reconciliation query joins Jobs with CrawlRuns
+                        job_repo = container.job_repo()
+                        job_repo.delegate.session = (
+                            website_session  # Align with crawl_run_repo
+                        )
+                        job = Job(
+                            task=Task.CRAWL,
+                            name=f"Crawl: {website.name or website.url}",
+                            status=Status.QUEUED,
+                            user_id=website.user_id,
+                        )
+                        job_in_db = await job_repo.add_job(job=job)
+
+                        # Step 3: Link job_id to crawl_run
+                        crawl_run.update(job_id=job_in_db.id)
+                        await crawl_run_repo.update(crawl_run=crawl_run)
+
+                        # Step 4: Prepare job data for pending queue
+                        # Store database job_id for deterministic enqueueing
+                        job_data = {
+                            "job_id": str(
+                                job_in_db.id
+                            ),  # Critical: Deterministic ID from DB
+                            "user_id": str(website.user_id),
+                            "website_id": str(website.id),
+                            "run_id": str(crawl_run.id),
+                            "url": website.url,
+                            "download_files": website.download_files,
+                            "crawl_type": website.crawl_type.value,
+                        }
+
+                        # Step 5: Add to pending queue with orphaning protection
+                        # If Redis push fails, mark DB records as FAILED
+                        # Why: Prevents orphaned crawl_run/job records that never execute
+                        try:
+                            pending_queue = PendingQueue(redis_client)
+                            if not await pending_queue.add(
+                                tenant_id=user.tenant.id,
+                                job_data=job_data,
+                            ):
+                                raise Exception("Failed to add to pending queue")
+
+                            successful_crawls += 1
+                            logger.debug(
+                                f"Added crawl to pending queue: {website.url}",
+                                extra={
+                                    "feeder_mode": True,
+                                    "job_id": str(job_in_db.id),
+                                    "run_id": str(crawl_run.id),
+                                },
+                            )
+                        except Exception as redis_exc:
+                            # Redis push failed, rollback by marking DB records as FAILED
+                            # Why: Prevents silent data loss and orphaned records
+                            try:
+                                from intric.main.models import Status
+
+                                job_in_db.status = Status.FAILED
+                                await job_repo.update_job(job_in_db)
+
+                                crawl_run.status = Status.FAILED
+                                await crawl_run_repo.update(crawl_run)
+                            except Exception as update_exc:
+                                logger.warning(
+                                    "Failed to rollback DB records after Redis error",
+                                    extra={
+                                        "job_id": str(job_in_db.id),
+                                        "error": str(update_exc),
+                                    },
+                                )
+
+                            failed_crawls += 1
+                            logger.error(
+                                f"Failed to add to pending queue: {redis_exc}",
+                                extra={
+                                    "website_id": str(website.id),
+                                    "url": website.url,
+                                    "job_id": str(job_in_db.id),
+                                },
+                            )
+                    else:
+                        # Direct enqueue mode (original behavior when feeder disabled)
+                        crawl_service = container.crawl_service()
+                        await crawl_service.crawl(website)
+                        successful_crawls += 1
+
+                        logger.debug(f"Successfully queued crawl for {website.url}")
+
+                # Session is now CLOSED for this website - connection returned to pool
+
+            except Exception as e:
+                # Why: Individual website failures shouldn't stop the entire batch
+                failed_crawls += 1
+                logger.error(
+                    f"Failed to queue crawl for {website.url}: {str(e)}",
+                    extra={
+                        "website_id": str(website.id),
+                        "tenant_id": str(website.tenant_id),
+                        "space_id": str(website.space_id),
+                        "user_id": str(website.user_id),
+                    },
+                )
+                continue
+
+        logger.info(
+            f"Crawl queueing completed: {successful_crawls} successful, {failed_crawls} failed"
+        )
+
+        return True
+    finally:
+        if scheduler_lock and scheduler_lock_acquired:
+            released = await scheduler_lock.release()
+            if not released:
+                logger.debug(
+                    "Failed to release crawl scheduler lock",
+                    extra={
+                        "lock_key": SCHEDULER_LOCK_KEY,
+                        "worker_id": scheduler_worker_id,
+                    },
+                )
 
 
 async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
+    # Normalize job_id - ARQ passes job_id as string in ctx
+    job_id = job_id if isinstance(job_id, UUID) else UUID(str(job_id))
     # Create TaskManager directly without using container.task_manager()
     # Why: container.task_manager() tries to resolve job_service which has
     # transitive dependency: job_service → job_repo → session
@@ -310,7 +400,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     # Flag will be deleted in finally block after slot release
                     logger.debug(
                         "Pre-acquired slot detected on retry (early check failed)",
-                        extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
+                        extra={
+                            "job_id": str(job_id),
+                            "tenant_id": str(preacquired_tenant_id),
+                        },
                     )
             except Exception:
                 pass  # Best effort - will acquire normally if this fails too
@@ -332,7 +425,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     try:
                         semaphore_ttl = get_crawler_setting(
                             "tenant_worker_semaphore_ttl_seconds",
-                            tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                            tenant.crawler_settings
+                            if hasattr(tenant, "crawler_settings")
+                            else None,
                             default=settings.tenant_worker_semaphore_ttl_seconds,
                         )
                         concurrency_key = f"tenant:{tenant.id}:active_jobs"
@@ -357,7 +452,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         # Use per-tenant TTL if available
                         semaphore_ttl = get_crawler_setting(
                             "tenant_worker_semaphore_ttl_seconds",
-                            tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                            tenant.crawler_settings
+                            if hasattr(tenant, "crawler_settings")
+                            else None,
                             default=settings.tenant_worker_semaphore_ttl_seconds,
                         )
                         release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
@@ -475,6 +572,74 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 },
             )
             raise Retry(defer=retry_delay)
+
+    primary_job_id: UUID | None = None
+    if tenant is not None:
+        try:
+            async with Container.session_scope() as session:
+                primary_job_id = await _get_primary_active_job_id(
+                    session,
+                    website_id=params.website_id,
+                )
+
+                if primary_job_id and primary_job_id != job_id:
+                    from intric.database.tables.job_table import Jobs
+                    from intric.main.models import Status
+
+                    skip_message = (
+                        f"Skipped duplicate crawl; active job {primary_job_id}"
+                    )
+                    stmt = (
+                        sa.update(Jobs)
+                        .where(Jobs.id == job_id)
+                        .where(
+                            Jobs.status.in_(
+                                [Status.QUEUED.value, Status.IN_PROGRESS.value]
+                            )
+                        )
+                        .values(
+                            status=Status.FAILED.value,
+                            finished_at=datetime.now(timezone.utc),
+                            result_location=skip_message,
+                        )
+                    )
+                    result = await session.execute(stmt)
+                    if result.rowcount == 0:
+                        logger.debug(
+                            "Duplicate crawl skip ignored; job status already changed",
+                            extra={
+                                "job_id": str(job_id),
+                                "website_id": str(params.website_id),
+                            },
+                        )
+
+            if primary_job_id and primary_job_id != job_id:
+                logger.warning(
+                    "Skipping duplicate crawl job; another active job exists",
+                    extra={
+                        "job_id": str(job_id),
+                        "primary_job_id": str(primary_job_id),
+                        "website_id": str(params.website_id),
+                        "url": params.url,
+                        "metric_name": "crawl.job.duplicate_skipped",
+                        "metric_value": 1,
+                    },
+                )
+                task_manager._job_already_handled = True
+                return {
+                    "status": "duplicate_skipped",
+                    "job_id": str(job_id),
+                    "primary_job_id": str(primary_job_id),
+                }
+        except Exception as exc:
+            logger.warning(
+                "Failed to evaluate duplicate crawl guard; proceeding with crawl",
+                extra={
+                    "job_id": str(job_id),
+                    "website_id": str(params.website_id),
+                    "error": str(exc),
+                },
+            )
 
     try:
         # CRITICAL: Atomic status check to prevent worker resurrection
@@ -595,7 +760,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # because we're working with the raw Websites table, not the domain model
                 http_user = None
                 http_pass = None
-                has_auth_in_db = bool(website.http_auth_username and website.encrypted_auth_password)
+                has_auth_in_db = bool(
+                    website.http_auth_username and website.encrypted_auth_password
+                )
 
                 if has_auth_in_db:
                     # Decrypt the password using HttpAuthEncryptionService (NOT encryption_service)
@@ -604,7 +771,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     try:
                         http_auth_encryption = container.http_auth_encryption_service()
                         http_user = website.http_auth_username
-                        http_pass = http_auth_encryption.decrypt_password(website.encrypted_auth_password)
+                        http_pass = http_auth_encryption.decrypt_password(
+                            website.encrypted_auth_password
+                        )
                         logger.info(
                             "HTTP auth configured for website",
                             extra={
@@ -667,14 +836,24 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     tenant_slug=tenant.slug if tenant else None,
                     user_id=container.user().id,
                     # Embedding model - use EmbeddingModelSpec DTO (already extracted)
-                    embedding_model_id=embedding_model_spec.id if embedding_model_spec else None,
-                    embedding_model_name=embedding_model_spec.name if embedding_model_spec else None,
-                    embedding_model_open_source=embedding_model_spec.open_source if embedding_model_spec else False,
+                    embedding_model_id=embedding_model_spec.id
+                    if embedding_model_spec
+                    else None,
+                    embedding_model_name=embedding_model_spec.name
+                    if embedding_model_spec
+                    else None,
+                    embedding_model_open_source=embedding_model_spec.open_source
+                    if embedding_model_spec
+                    else False,
                     embedding_model_family=(
-                        embedding_model_spec.family if embedding_model_spec and embedding_model_spec.family else None
+                        embedding_model_spec.family
+                        if embedding_model_spec and embedding_model_spec.family
+                        else None
                     ),
                     embedding_model_dimensions=(
-                        embedding_model_spec.dimensions if embedding_model_spec else None
+                        embedding_model_spec.dimensions
+                        if embedding_model_spec
+                        else None
                     ),
                     # HTTP Auth - primitives only
                     http_auth_user=http_user,
@@ -715,7 +894,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "batch_size": crawl_context.batch_size,
                     "embedding_model": crawl_context.embedding_model_name,
                     "existing_titles_count": len(existing_titles),
-                    "bootstrap_duration_ms": int(timings["fetch_existing_titles"] * 1000),
+                    "bootstrap_duration_ms": int(
+                        timings["fetch_existing_titles"] * 1000
+                    ),
                 },
             )
 
@@ -743,7 +924,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
             semaphore_ttl_seconds = get_crawler_setting(
                 "tenant_worker_semaphore_ttl_seconds",
-                tenant.crawler_settings if hasattr(tenant, 'crawler_settings') else None,
+                tenant.crawler_settings
+                if hasattr(tenant, "crawler_settings")
+                else None,
                 default=settings.tenant_worker_semaphore_ttl_seconds,
             )
 
@@ -825,17 +1008,27 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 "pages_processed": num_pages,
                             },
                         )
-                        return {"status": "preempted_during_crawl", "pages_crawled": num_pages}
+                        return {
+                            "status": "preempted_during_crawl",
+                            "pages_crawled": num_pages,
+                        }
 
                     # Buffer page as dict (primitives only!)
-                    page_buffer.append({
-                        "url": page.url,
-                        "content": page.content,
-                    })
+                    page_buffer.append(
+                        {
+                            "url": page.url,
+                            "content": page.content,
+                        }
+                    )
 
                     # Flush when buffer is full
                     if len(page_buffer) >= crawl_context.batch_size:
-                        success_count, failed_count, successful_urls, batch_failed_urls = await persist_batch(
+                        (
+                            success_count,
+                            failed_count,
+                            successful_urls,
+                            batch_failed_urls,
+                        ) = await persist_batch(
                             page_buffer=page_buffer,
                             ctx=crawl_context,
                             embedding_model=embedding_model_spec,
@@ -858,7 +1051,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 # Final flush for remaining pages
                 if page_buffer:
-                    success_count, failed_count, successful_urls, batch_failed_urls = await persist_batch(
+                    (
+                        success_count,
+                        failed_count,
+                        successful_urls,
+                        batch_failed_urls,
+                    ) = await persist_batch(
                         page_buffer=page_buffer,
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
@@ -952,12 +1150,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             cleanup_start = time.time()
             # Exclude failed_titles - their original data was preserved by transaction rollback
             stale_titles = [
-                title for title in existing_titles
+                title
+                for title in existing_titles
                 if title not in crawled_titles and title not in failed_titles
             ]
 
             # Batch delete using session-per-operation pattern
             if stale_titles:
+
                 async def _do_stale_blob_cleanup(sess):
                     # Get fresh repo with this session
                     container.session.override(providers.Object(sess))
@@ -992,7 +1192,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             async def _do_update_size(sess):
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                from intric.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
+                from intric.database.tables.info_blobs_table import (
+                    InfoBlobs as InfoBlobsTable,
+                )
 
                 update_size_stmt = (
                     sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
@@ -1023,7 +1225,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             last_crawled_stmt = (
                 sa.update(WebsitesTable)
                 .where(WebsitesTable.id == params.website_id)
-                .where(WebsitesTable.tenant_id == crawl_context.tenant_id)  # Tenant isolation
+                .where(
+                    WebsitesTable.tenant_id == crawl_context.tenant_id
+                )  # Tenant isolation
                 .values(last_crawled_at=sa.func.now())
             )
 
@@ -1041,7 +1245,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
 
             # Calculate file skip rate for performance analysis
-            file_skip_rate = (num_skipped_files / num_files * 100) if num_files > 0 else 0
+            file_skip_rate = (
+                (num_skipped_files / num_files * 100) if num_files > 0 else 0
+            )
 
             # Structured crawl summary for easy log scanning
             status_label = (
@@ -1058,7 +1264,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
             ]
             if crawl_is_partial:
-                summary.append(f"⚠️  Partial completion due to: {crawl_termination_reason}")
+                summary.append(
+                    f"⚠️  Partial completion due to: {crawl_termination_reason}"
+                )
             summary.append("=" * 60)
             logger.info("\n".join(summary))
 
@@ -1211,7 +1419,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     else:
                         # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
                         backoff_hours = min(2 ** (new_failures - 1), 24)
-                        next_retry = datetime.now(timezone.utc) + timedelta(hours=backoff_hours)
+                        next_retry = datetime.now(timezone.utc) + timedelta(
+                            hours=backoff_hours
+                        )
 
                         logger.warning(
                             f"Crawl failed for website {params.website_id}. "
@@ -1229,7 +1439,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             sa.update(WebsitesTable)
                             .where(WebsitesTable.id == params.website_id)
                             .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                            .values(consecutive_failures=new_failures, next_retry_at=next_retry)
+                            .values(
+                                consecutive_failures=new_failures,
+                                next_retry_at=next_retry,
+                            )
                         )
                         await sess.execute(backoff_stmt)
 
@@ -1249,7 +1462,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Determine actor (crawl is typically triggered by a user or system)
             # Use website owner or system actor
-            actor_id = website.user_id if hasattr(website, 'user_id') and website.user_id else current_tenant.id
+            actor_id = (
+                website.user_id
+                if hasattr(website, "user_id") and website.user_id
+                else current_tenant.id
+            )
 
             await audit_service.log_async(
                 tenant_id=current_tenant.id,
@@ -1262,7 +1479,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "target": {
                         "website_id": str(params.website_id),
                         "url": website.url,
-                        "name": getattr(website, 'name', website.url),
+                        "name": getattr(website, "name", website.url),
                     },
                     "crawl_stats": {
                         "pages_crawled": num_pages,
@@ -1342,7 +1559,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "job_id": str(job_id),
                     "tenant_id": str(preacquired_tenant_id),
-                    "reason": "tenant_injection_failed" if tenant is None else "acquired_not_set",
+                    "reason": "tenant_injection_failed"
+                    if tenant is None
+                    else "acquired_not_set",
                 },
             )
             try:
@@ -1365,7 +1584,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     # Delete pre-acquired flag after fallback slot release
                     if job_id:
                         try:
-                            await _fallback_redis.delete(f"job:{job_id}:slot_preacquired")
+                            await _fallback_redis.delete(
+                                f"job:{job_id}:slot_preacquired"
+                            )
                         except Exception:
                             pass  # Best effort cleanup
             except Exception as release_exc:
@@ -1382,7 +1603,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         # tenant=None and preacquired_tenant_id=None, which skips both paths above.
         # This prevents slot leak until TTL in dual-failure scenarios.
         # Safety: Watchdog deletes flag when releasing, so if flag exists, slot needs release.
-        elif tenant is None and preacquired_tenant_id is None and not acquired and job_id:
+        elif (
+            tenant is None and preacquired_tenant_id is None and not acquired and job_id
+        ):
             # Get redis client with fallback to container
             _emergency_redis = redis_client
             if _emergency_redis is None:

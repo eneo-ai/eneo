@@ -65,12 +65,12 @@ class OpenAISTTModelAdapter:
         five_minutes = 60 * 5
         chunk_index = 0
         total_duration_seconds = int(audio_file.info.duration)
+        had_chunk_failure = False
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             total_chunks = len(files)
 
             for i, path in enumerate(files):
-                block_text = await self._get_text_from_file(path)
                 start_time = chunk_index * five_minutes
 
                 # For the last chunk, calculate the correct end time based on total duration
@@ -82,6 +82,18 @@ class OpenAISTTModelAdapter:
                 start_time_formatted = f"{start_time // 60}:{start_time % 60:02d}"
                 end_time_formatted = f"{end_time // 60}:{end_time % 60:02d}"
 
+                try:
+                    block_text = await self._get_text_from_file(path)
+                except Exception:
+                    had_chunk_failure = True
+                    logger.exception(
+                        "Failed to transcribe audio chunk %s/%s", i + 1, total_chunks
+                    )
+                    block_text = (
+                        f"[Transcription failed for segment {start_time_formatted} - "
+                        f"{end_time_formatted}]"
+                    )
+
                 # Add markdown formatting with timestamp
                 if chunk_index > 0:
                     text += "\n\n"
@@ -89,6 +101,12 @@ class OpenAISTTModelAdapter:
                     f"### {start_time_formatted} - {end_time_formatted}\n\n{block_text}"
                 )
                 chunk_index += 1
+
+        if had_chunk_failure:
+            text = (
+                "Note: Some segments failed to transcribe. You can still use the "
+                "available text.\n\n" + text
+            )
 
         return text
 

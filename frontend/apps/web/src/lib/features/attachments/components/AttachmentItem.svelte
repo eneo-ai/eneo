@@ -7,14 +7,16 @@
   import { formatFileType } from "$lib/core/formatting/formatFileType";
   import { IconTrash } from "@intric/icons/trash";
   import UploadedFileIcon from "./UploadedFileIcon.svelte";
+  import { fly, fade, scale } from "svelte/transition";
 
   export let attachment: Attachment;
   export let borderOnLastItem = false;
 </script>
 
 <div
-  class="border-default hover:bg-hover-dimmer flex h-16 items-center gap-4 border-b px-4"
+  class="attachment-row"
   class:last-of-type:border-b-0={!borderOnLastItem}
+  in:fly={{ y: 10, duration: 200 }}
 >
   <UploadedFileIcon file={attachment.fileRef} class="min-w-6"></UploadedFileIcon>
 
@@ -25,7 +27,9 @@
           {attachment.file.name}
         </span>
         {#if attachment.progress === 100}
-          <IconCheck class="text-positive-default min-w-6 !stroke-2" />
+          <div in:scale={{ duration: 200, start: 0.5 }}>
+            <IconCheck class="text-positive-default min-w-6 !stroke-2" />
+          </div>
         {/if}
       </div>
       <span class="text-secondary min-w-[8rem] text-right text-sm">
@@ -34,7 +38,9 @@
     </div>
 
     {#if attachment.progress < 100}
-      <ProgressBar progress={attachment.progress}></ProgressBar>
+      <div transition:fade={{ duration: 150 }}>
+        <ProgressBar progress={attachment.progress}></ProgressBar>
+      </div>
     {/if}
   </div>
 
@@ -54,3 +60,17 @@
     </Button>
   </div>
 </div>
+
+<style lang="postcss">
+  @reference "@intric/ui/styles";
+
+  .attachment-row {
+    @apply border-default hover:bg-hover-dimmer flex h-16 items-center gap-4 border-b px-4;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .attachment-row {
+      animation: none;
+    }
+  }
+</style>

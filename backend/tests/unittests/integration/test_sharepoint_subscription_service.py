@@ -78,7 +78,7 @@ def service(mock_subscription_repo, mock_oauth_token_service):
         settings = MagicMock()
         settings.sharepoint_webhook_notification_url = "https://example.com/webhook/"
         settings.sharepoint_webhook_client_state = "test-client-state"
-        settings.server_url = "https://example.com"
+        settings.public_origin = "https://example.com"
         mock_settings.return_value = settings
 
         return SharePointSubscriptionService(
@@ -150,7 +150,7 @@ class TestEnsureSubscriptionForSite:
         with patch("intric.integration.infrastructure.sharepoint_subscription_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = None
-            settings.server_url = None
+            settings.public_origin = None
             mock_settings.return_value = settings
 
             svc = SharePointSubscriptionService(
