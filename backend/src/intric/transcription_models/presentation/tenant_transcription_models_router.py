@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelFamily, ModelHostingLocation, ModelStability
+from intric.ai_models.model_enums import ModelFamily, ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.transcription_models.presentation.transcription_model_models import TranscriptionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -22,6 +22,7 @@ class TenantTranscriptionModelCreate(BaseModel):
         description="Model identifier (e.g., 'whisper-1', 'distil-whisper-large-v3-en')",
     )
     display_name: str = Field(..., description="User-friendly display name")
+    hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -29,7 +30,7 @@ class TenantTranscriptionModelCreate(BaseModel):
 class TenantTranscriptionModelUpdate(BaseModel):
     display_name: str | None = Field(None, description="User-friendly display name")
     description: str | None = Field(None, description="Model description")
-    hosting: str | None = Field(None, description="Hosting location (eu, usa)")
+    hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(None, description="Model stability (stable, experimental)")
 
@@ -81,7 +82,7 @@ async def create_tenant_transcription_model(
         model_name=model_create.name,  # Actual model name from provider
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
         family=ModelFamily.OPEN_AI.value,
-        hosting=ModelHostingLocation.USA.value,
+        hosting=model_create.hosting,
         org=None,
         stability=ModelStability.STABLE.value,
         open_source=False,
