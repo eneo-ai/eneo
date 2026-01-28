@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from arq import create_pool
-from arq.connections import ArqRedis, RedisSettings
+from arq.connections import ArqRedis
 from arq.jobs import Job
 
 from intric.jobs.job_models import Task
@@ -9,6 +9,7 @@ from intric.jobs.task_models import TaskParams
 from intric.main.config import get_settings
 from intric.main.exceptions import NotReadyException
 from intric.main.logging import get_logger
+from intric.redis.connection import build_arq_redis_settings
 
 logger = get_logger(__name__)
 
@@ -18,19 +19,19 @@ class JobManager:
         self._redis: ArqRedis | None = None
 
     async def init(self):
-        self._redis = await create_pool(
-            RedisSettings(
-                host=get_settings().redis_host, port=get_settings().redis_port
-            )
-        )
+        settings = get_settings()
+        self._redis = await create_pool(build_arq_redis_settings(settings))
 
         logger.debug(
-            f"Job manager connected to redis on host {get_settings().redis_host}"
-            f" and port {get_settings().redis_port}"
+            f"Job manager connected to redis on host {settings.redis_host}"
+            f" and port {settings.redis_port}"
         )
 
     async def close(self):
+        if self._redis is None:
+            return
         await self._redis.aclose()
+        self._redis = None
 
     async def enqueue(self, task: Task, job_id: UUID, params: TaskParams):
         if self._redis is None:

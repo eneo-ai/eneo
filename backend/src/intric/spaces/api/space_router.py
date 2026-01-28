@@ -44,20 +44,32 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 from intric.roles.permissions import Permission
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 async def forbid_org_space(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    space = await container.space_service().get_space(id)
-    if space.user_id is None and space.tenant_space_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This operation is not allowed in organization spaces. Please use a personal or shared space."
+    logger.warning(f"forbid_org_space called with space_id={id}")
+    try:
+        space = await container.space_service().get_space(id)
+        logger.warning(
+            f"forbid_org_space check: space_id={id}, user_id={space.user_id}, "
+            f"tenant_space_id={space.tenant_space_id}, is_org={space.user_id is None and space.tenant_space_id is None}"
         )
-    return True
-    
+        if space.user_id is None and space.tenant_space_id is None:
+            logger.warning(f"Blocking org space access: space_id={id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return True
+    except Exception as e:
+        logger.error(f"forbid_org_space error: {type(e).__name__}: {e}")
+        raise
+
+
 @router.post("/", response_model=SpacePublic, status_code=201)
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -529,7 +541,7 @@ async def create_space_groups(
     )
 
     return CollectionPublic.from_domain(created_collection)
-  
+
 
 @router.post(
     "/{id}/knowledge/websites/",

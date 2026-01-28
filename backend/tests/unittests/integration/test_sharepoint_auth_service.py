@@ -65,7 +65,7 @@ class TestGetCredentials:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             creds = await service.get_credentials(tenant_id)
@@ -90,18 +90,33 @@ class TestGetCredentials:
     async def test_uses_default_redirect_uri_if_not_configured(
         self, service, mock_tenant_app_service
     ):
-        """Uses server_url + default path if oauth_callback_url not set."""
+        """Uses public_origin + default path if oauth_callback_url not set."""
         tenant_id = uuid4()
 
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = None
-            settings.server_url = "https://myapp.example.com"
+            settings.public_origin = "https://myapp.example.com"
             mock_settings.return_value = settings
 
             creds = await service.get_credentials(tenant_id)
 
         assert creds["redirect_uri"] == "https://myapp.example.com/integrations/callback/token/"
+
+    async def test_raises_error_if_no_redirect_uri_configured(
+        self, service, mock_tenant_app_service
+    ):
+        """Raises ValueError if neither oauth_callback_url nor public_origin is set."""
+        tenant_id = uuid4()
+
+        with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.oauth_callback_url = None
+            settings.public_origin = None
+            mock_settings.return_value = settings
+
+            with pytest.raises(ValueError, match="OAUTH_CALLBACK_URL or PUBLIC_ORIGIN"):
+                await service.get_credentials(tenant_id)
 
 
 class TestGenAuthUrl:
@@ -115,7 +130,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state=state, tenant_id=tenant_id)
@@ -131,7 +146,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state="state", tenant_id=tenant_id)
@@ -149,7 +164,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state=state, tenant_id=tenant_id)
@@ -163,7 +178,7 @@ class TestGenAuthUrl:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             result = await service.gen_auth_url(state="state", tenant_id=tenant_id)
@@ -185,7 +200,7 @@ class TestExchangeToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -214,7 +229,7 @@ class TestExchangeToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -251,7 +266,7 @@ class TestExchangeToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -282,7 +297,7 @@ class TestRefreshAccessToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -311,7 +326,7 @@ class TestRefreshAccessToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -344,7 +359,7 @@ class TestRefreshAccessToken:
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
-            settings.server_url = "https://example.com"
+            settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
             with patch("httpx.AsyncClient") as mock_client_class:

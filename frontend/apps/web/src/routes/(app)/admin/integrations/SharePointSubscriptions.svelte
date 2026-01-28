@@ -114,11 +114,11 @@
   // Get status badge class
   function getStatusBadgeClass(subscription: SharePointSubscription): string {
     if (subscription.is_expired) {
-      return "bg-red-100 text-red-800";
+      return "bg-negative-dimmer text-negative-stronger";
     } else if (subscription.expires_in_hours <= 48) {
-      return "bg-yellow-100 text-yellow-800";
+      return "bg-warning-dimmer text-warning-stronger";
     } else {
-      return "bg-green-100 text-green-800";
+      return "bg-positive-dimmer text-positive-stronger";
     }
   }
 
@@ -239,7 +239,7 @@
               </td>
               <td class="whitespace-nowrap px-3 py-3">
                 {#if subscription.owner_type === "organization"}
-                  <span class="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                  <span class="inline-flex items-center rounded-full bg-accent-dimmer px-2 py-0.5 text-xs font-medium text-accent-stronger">
                     {m.sharepoint_subscription_owner_organization()}
                   </span>
                 {:else}

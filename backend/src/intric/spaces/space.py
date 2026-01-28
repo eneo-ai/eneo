@@ -207,15 +207,7 @@ class Space:
         default_model = next(model, None)
 
         if default_model is None:
-            model = filter(
-                lambda m: m.name == "gpt-4o" and m.can_access,
-                self.completion_models,
-            )
-
-            default_model = next(model, None)
-
-            if default_model is None:
-                default_model = self.get_latest_completion_model()
+            default_model = self.get_latest_completion_model()
 
         return default_model
 
@@ -399,11 +391,10 @@ class Space:
             raise BadRequestException("Assistant is already in the space")
 
         cm = getattr(assistant, "completion_model", None)
-        if cm is None or getattr(cm, "id", None) is None:
-            raise BadRequestException("Assistant has no completion model assigned")
-
-        if not self.is_completion_model_in_space(cm.id):
-            self.add_completion_model(cm)
+        # Only add completion model to space if the assistant has one
+        if cm is not None and getattr(cm, "id", None) is not None:
+            if not self.is_completion_model_in_space(cm.id):
+                self.add_completion_model(cm)
 
         self.assistants.append(assistant)
 

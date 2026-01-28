@@ -1,6 +1,8 @@
 import asyncio
 import json
 import time
+import traceback
+import uuid
 import uvicorn
 from datetime import datetime, timezone
 from typing import Optional
@@ -219,11 +221,46 @@ def get_application():
 
     @app.exception_handler(500)
     async def custom_http_500_exception_handler(request, exc):
+        # Generate unique error ID for tracing
+        error_id = str(uuid.uuid4())[:8]
+
+        # Log the full exception with traceback
+        logger.error(
+            f"Internal Server Error [error_id={error_id}]",
+            extra={
+                "error_id": error_id,
+                "path": request.url.path,
+                "method": request.method,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+        )
+
+        # Build error response
+        settings = get_settings()
+        is_dev = settings.environment in ("development", "local", "dev")
+
+        error_content = {
+            "error": "Internal server error",
+            "error_id": error_id,
+            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
+        }
+
+        # In development mode, include more details
+        if is_dev:
+            error_content["detail"] = {
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "path": request.url.path,
+                "method": request.method,
+            }
+
         # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
         # Solving this like this response:
         #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
         response = JSONResponse(
-            status_code=500, content={"error": "Something went wrong"}
+            status_code=500, content=error_content
         )
 
         origin = request.headers.get("origin")
@@ -253,6 +290,69 @@ def get_application():
 
             # If we only allow specific origins, then we have to mirror back
             # the Origin header in the response.
+            elif not cors.allow_all_origins and await cors.is_allowed_origin(
+                origin=origin
+            ):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers.add_vary_header("Origin")
+
+        return response
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request, exc):
+        """Catch-all handler for unhandled exceptions"""
+        # Generate unique error ID for tracing
+        error_id = str(uuid.uuid4())[:8]
+
+        # Log the full exception with traceback
+        logger.error(
+            f"Unhandled Exception [error_id={error_id}]",
+            extra={
+                "error_id": error_id,
+                "path": request.url.path,
+                "method": request.method,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+        )
+
+        # Build error response
+        settings = get_settings()
+        is_dev = settings.environment in ("development", "local", "dev")
+
+        error_content = {
+            "error": "Internal server error",
+            "error_id": error_id,
+            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
+        }
+
+        # In development mode, include more details
+        if is_dev:
+            error_content["detail"] = {
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "path": request.url.path,
+                "method": request.method,
+            }
+
+        response = JSONResponse(status_code=500, content=error_content)
+
+        origin = request.headers.get("origin")
+
+        if origin:
+            cors = CORSMiddleware(
+                app=app,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+                callback=get_origin,
+            )
+            response.headers.update(cors.simple_headers)
+            has_cookie = "cookie" in request.headers
+            if cors.allow_all_origins and has_cookie:
+                response.headers["Access-Control-Allow-Origin"] = origin
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
                 origin=origin
             ):

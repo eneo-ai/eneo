@@ -5,10 +5,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from intric.database.database import AsyncSession
-from intric.database.tables.ai_models_table import (
-    TranscriptionModels,
-    TranscriptionModelSettings,
-)
+from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.main.exceptions import UniqueException
 
 if TYPE_CHECKING:
@@ -48,41 +45,24 @@ class TranscriptionModelEnableService:
             tenant_id: The ID of the tenant
 
         Returns:
-            The updated or created TranscriptionModelSettings
+            The updated TranscriptionModel
 
         Raises:
-            UniqueException: If there's a conflict when creating settings
+            UniqueException: If there's a conflict when updating
         """
-        query = sa.select(TranscriptionModelSettings).where(
-            TranscriptionModelSettings.tenant_id == tenant_id,
-            TranscriptionModelSettings.transcription_model_id == transcription_model_id,
-        )
-        settings = await self.session.scalar(query)
-
         try:
-            if settings:
-                query = (
-                    sa.update(TranscriptionModelSettings)
-                    .values(
-                        is_org_enabled=is_org_enabled, is_org_default=is_org_default
-                    )
-                    .where(
-                        TranscriptionModelSettings.tenant_id == tenant_id,
-                        TranscriptionModelSettings.transcription_model_id
-                        == transcription_model_id,
-                    )
-                    .returning(TranscriptionModelSettings)
-                )
-                return await self.session.scalar(query)
+            # Settings are now stored directly on the model table
             query = (
-                sa.insert(TranscriptionModelSettings)
+                sa.update(TranscriptionModels)
                 .values(
-                    is_org_enabled=is_org_enabled,
-                    is_org_default=is_org_default,
-                    transcription_model_id=transcription_model_id,
-                    tenant_id=tenant_id,
+                    is_enabled=is_org_enabled,
+                    is_default=is_org_default,
                 )
-                .returning(TranscriptionModelSettings)
+                .where(
+                    TranscriptionModels.id == transcription_model_id,
+                    TranscriptionModels.tenant_id == tenant_id,
+                )
+                .returning(TranscriptionModels)
             )
             return await self.session.scalar(query)
         except IntegrityError as e:

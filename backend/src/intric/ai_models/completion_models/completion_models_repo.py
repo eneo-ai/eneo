@@ -10,10 +10,7 @@ from intric.ai_models.completion_models.completion_model import (
 )
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
-from intric.database.tables.ai_models_table import (
-    CompletionModels,
-    CompletionModelSettings,
-)
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.main.exceptions import UniqueException
 from intric.main.models import IdAndName
 
@@ -25,26 +22,24 @@ class CompletionModelsRepository:
             session, CompletionModels, CompletionModel
         )
 
-    async def _get_model_settings(self, id: UUID, tenant_id: UUID):
-        query = sa.select(CompletionModelSettings).where(
-            CompletionModelSettings.tenant_id == tenant_id,
-            CompletionModelSettings.completion_model_id == id,
-        )
-        return await self.session.scalar(query)
-
-    async def _get_models_settings_mapper(self, tenant_id: UUID):
-        query = sa.select(CompletionModelSettings).where(
-            CompletionModelSettings.tenant_id == tenant_id
-        )
-        settings = await self.session.scalars(query)
-        return {s.completion_model_id: s.is_org_enabled for s in settings}
-
     async def get_model(self, id: UUID, tenant_id: UUID) -> CompletionModel:
-        model = await self.delegate.get(id)
+        # Query the model with tenant filtering
+        stmt = sa.select(CompletionModels).where(
+            CompletionModels.id == id,
+            sa.or_(
+                CompletionModels.tenant_id.is_(None),
+                CompletionModels.tenant_id == tenant_id
+            )
+        )
+        result = await self.session.execute(stmt)
+        db_model = result.scalar_one_or_none()
 
-        settings = await self._get_model_settings(id, tenant_id)
-        if settings:
-            model.is_org_enabled = settings.is_org_enabled
+        if db_model is None:
+            from intric.main.exceptions import NotFoundException
+            raise NotFoundException()
+
+        model = CompletionModel.model_validate(db_model)
+        model.is_org_enabled = db_model.is_enabled
         return model
 
     async def get_model_by_name(self, name: str) -> CompletionModel:
@@ -59,33 +54,16 @@ class CompletionModelsRepository:
         completion_model_id: UUID,
         tenant_id: UUID,
     ):
-        query = sa.select(CompletionModelSettings).where(
-            CompletionModelSettings.tenant_id == tenant_id,
-            CompletionModelSettings.completion_model_id == completion_model_id,
-        )
-        settings = await self.session.scalar(query)
-
         try:
-            if settings:
-                query = (
-                    sa.update(CompletionModelSettings)
-                    .values(is_org_enabled=is_org_enabled)
-                    .where(
-                        CompletionModelSettings.tenant_id == tenant_id,
-                        CompletionModelSettings.completion_model_id
-                        == completion_model_id,
-                    )
-                    .returning(CompletionModelSettings)
-                )
-                return await self.session.scalar(query)
+            # Settings are now stored directly on the model table
             query = (
-                sa.insert(CompletionModelSettings)
-                .values(
-                    is_org_enabled=is_org_enabled,
-                    completion_model_id=completion_model_id,
-                    tenant_id=tenant_id,
+                sa.update(CompletionModels)
+                .values(is_enabled=is_org_enabled)
+                .where(
+                    CompletionModels.id == completion_model_id,
+                    CompletionModels.tenant_id == tenant_id,
                 )
-                .returning(CompletionModelSettings)
+                .returning(CompletionModels)
             )
             return await self.session.scalar(query)
         except IntegrityError as e:
@@ -118,13 +96,23 @@ class CompletionModelsRepository:
         if id_list is not None:
             query = query.where(CompletionModels.id.in_(id_list))
 
-        models = await self.delegate.get_models_from_query(query)
-
+        # Filter to tenant's models
         if tenant_id is not None:
-            settings_mapper = await self._get_models_settings_mapper(tenant_id)
+            query = query.where(
+                sa.or_(
+                    CompletionModels.tenant_id.is_(None),
+                    CompletionModels.tenant_id == tenant_id
+                )
+            )
 
-            for model in models:
-                model.is_org_enabled = settings_mapper.get(model.id, False)
+        result = await self.session.execute(query)
+        db_models = result.scalars().all()
+
+        models = []
+        for db_model in db_models:
+            model = CompletionModel.model_validate(db_model)
+            model.is_org_enabled = db_model.is_enabled
+            models.append(model)
 
         return models
 

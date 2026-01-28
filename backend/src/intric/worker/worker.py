@@ -10,7 +10,6 @@ from uuid import UUID
 
 import crochet
 import sqlalchemy as sa
-from arq.connections import RedisSettings
 from arq.cron import cron
 from dependency_injector import providers
 
@@ -21,6 +20,7 @@ from intric.main.container.container import Container, SessionProxy
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType, Status
+from intric.redis.connection import build_arq_redis_settings
 from intric.server.dependencies import lifespan
 from intric.worker.task_manager import TaskManager, WorkerConfig
 
@@ -62,6 +62,16 @@ def _log_startup_diagnostics(settings) -> None:
             "crawl_feeder_enabled": settings.crawl_feeder_enabled,
             "crawl_feeder_interval_seconds": settings.crawl_feeder_interval_seconds,
             "crawl_feeder_batch_size": settings.crawl_feeder_batch_size,
+            # Redis settings (connection resilience)
+            "redis_host": settings.redis_host,
+            "redis_port": settings.redis_port,
+            "redis_conn_timeout": settings.redis_conn_timeout,
+            "redis_conn_retries": settings.redis_conn_retries,
+            "redis_conn_retry_delay": settings.redis_conn_retry_delay,
+            "redis_retry_on_timeout": settings.redis_retry_on_timeout,
+            "redis_socket_keepalive": settings.redis_socket_keepalive,
+            "redis_health_check_interval": settings.redis_health_check_interval,
+            "redis_max_connections": settings.redis_max_connections,
             # Concurrency settings
             "tenant_worker_concurrency_limit": settings.tenant_worker_concurrency_limit,
             "tenant_worker_semaphore_ttl_seconds": settings.tenant_worker_semaphore_ttl_seconds,
@@ -122,9 +132,7 @@ class Worker:
         settings = get_settings()
         self.functions = []
         self.cron_jobs = []
-        self.redis_settings = RedisSettings(
-            host=settings.redis_host, port=settings.redis_port
-        )
+        self.redis_settings = build_arq_redis_settings(settings)
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
@@ -216,7 +224,7 @@ class Worker:
             extra={
                 "job_id": job_id,
                 "job_try": ctx.get("job_try", 1),
-                "success": result is not None and not isinstance(result, Exception),
+                "success": not isinstance(result, Exception),
             },
         )
 

@@ -18,6 +18,8 @@ if [ -e /var/run/docker.sock ]; then
 fi
 
 # Install system dependencies
+# Remove expired Yarn repository (not needed - we use Bun)
+sudo rm -f /etc/apt/sources.list.d/yarn.list
 sudo apt-get update
 sudo apt-get install -y libmagic1 ffmpeg
 
