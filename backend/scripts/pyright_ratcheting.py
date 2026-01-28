@@ -137,9 +137,12 @@ def main() -> int:
 
     if args.write_baseline:
         baseline_data = dict(current_data)
-        baseline_data["generalDiagnostics"] = [
+        baseline_diags = [
             normalize_diag(diag) for diag in current_data.get("generalDiagnostics", [])
         ]
+        if not args.include_warnings:
+            baseline_diags = [diag for diag in baseline_diags if is_error(diag)]
+        baseline_data["generalDiagnostics"] = baseline_diags
         try:
             write_json(args.baseline, baseline_data)
         except Exception as exc:

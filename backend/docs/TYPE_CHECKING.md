@@ -6,7 +6,7 @@ This repository uses Pyright to catch runtime issues like incorrect method names
 
 We use baselines to avoid legacy noise while blocking regressions:
 
-- `backend/.pyright-baseline.json` captures existing Pyright diagnostics at a point in time and is committed to the repo.
+- `backend/.pyright-baseline.json` captures existing Pyright errors at a point in time and is committed to the repo.
 - `backend/.type-check-future-baseline` defines which tracked files count as new or modified in CI.
 - New files are checked in strict mode.
 - Existing modified files are checked in basic mode, but only new diagnostics fail (ratcheting).
@@ -60,7 +60,7 @@ Install the VS Code Pylance extension. It uses the same engine as Pyright and re
 
 We keep `reportAttributeAccessIssue` and `reportCallIssue` as errors to catch wrong method names. Base config keeps `reportGeneralTypeIssues` as a warning to reduce legacy noise, while strict config raises it to an error for new files.
 
-If you want to gate warnings as well, run ratcheting with `--include-warnings` or add it to `backend/scripts/typecheck_changed.sh`.
+If you want to gate warnings as well, run ratcheting with `--include-warnings` or add it to `backend/scripts/typecheck_changed.sh`. If you enable warning gating, regenerate the baseline with `--include-warnings` too.
 
 ## Ratcheting Options
 
@@ -77,6 +77,8 @@ cd backend
 uv run pyright --outputjson | python scripts/pyright_ratcheting.py \
   --write-baseline --current - --baseline .pyright-baseline.json
 ```
+
+To include warnings in the baseline, add `--include-warnings` to the command above.
 
 Move the future baseline forward so only new work is enforced:
 
