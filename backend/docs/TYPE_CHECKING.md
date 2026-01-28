@@ -62,6 +62,12 @@ We keep `reportAttributeAccessIssue` and `reportCallIssue` as errors to catch wr
 
 If you want to gate warnings as well, run ratcheting with `--include-warnings` or add it to `backend/scripts/typecheck_changed.sh`.
 
+## Ratcheting Options
+
+By default, ratcheting compares file + rule + message + line/column ranges. This is stricter and can flag errors as "new" when large refactors move code around.
+
+If you are doing a big refactor and want to ignore line/column movement, set `RATCHET_IGNORE_RANGE=1` (or pass `--ignore-range` to `scripts/pyright_ratcheting.py`). This compares only file + rule + message + severity.
+
 ## Updating the Baselines
 
 Refresh the Pyright diagnostic baseline when type coverage improves or you intentionally accept existing errors:

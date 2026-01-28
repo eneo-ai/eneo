@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import sys
 
 
@@ -39,8 +40,15 @@ def normalize_diag(diag: dict) -> dict:
     }
 
 
-def diag_key(diag: dict) -> tuple:
+def diag_key(diag: dict, ignore_range: bool) -> tuple:
     normalized = normalize_diag(diag)
+    if ignore_range:
+        return (
+            normalized["file"],
+            normalized["rule"],
+            normalized["message"],
+            normalized["severity"],
+        )
     start = normalized["range"]["start"]
     end = normalized["range"]["end"]
     return (
@@ -107,7 +115,19 @@ def main() -> int:
         action="store_true",
         help="Include warning-level diagnostics in comparisons",
     )
+    parser.add_argument(
+        "--ignore-range",
+        action="store_true",
+        help="Ignore line/column ranges when comparing diagnostics",
+    )
     args = parser.parse_args()
+
+    ignore_range = args.ignore_range or os.environ.get(
+        "RATCHET_IGNORE_RANGE", ""
+    ).lower() in (
+        "1",
+        "true",
+    )
 
     try:
         current_data = load_json(args.current)
@@ -138,9 +158,13 @@ def main() -> int:
     if not args.include_warnings:
         baseline_diags = [diag for diag in baseline_diags if is_error(diag)]
         current_diags = [diag for diag in current_diags if is_error(diag)]
-    baseline_keys = {diag_key(diag) for diag in baseline_diags}
+    baseline_keys = {diag_key(diag, ignore_range) for diag in baseline_diags}
 
-    new_diags = [diag for diag in current_diags if diag_key(diag) not in baseline_keys]
+    new_diags = [
+        diag
+        for diag in current_diags
+        if diag_key(diag, ignore_range) not in baseline_keys
+    ]
 
     if not new_diags:
         return 0
