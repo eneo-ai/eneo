@@ -12,11 +12,8 @@ from intric.ai_models.embedding_models.embedding_model import EmbeddingModelSpar
 from intric.database.database import AsyncSession
 from intric.database.tables.ai_models_table import (
     CompletionModels,
-    CompletionModelSettings,
     EmbeddingModels,
-    EmbeddingModelSettings,
     TranscriptionModels,
-    TranscriptionModelSettings,
 )
 from intric.database.tables.app_table import Apps, AppsFiles, AppsPrompts
 from intric.database.tables.app_template_table import AppTemplates
@@ -167,76 +164,52 @@ class SpaceRepository:
 
     async def _get_completion_models(self, space_in_db: Spaces):
         space_id = space_in_db.id
-        tenant_id = space_in_db.tenant_id
 
         cm = aliased(CompletionModels)
-        cms = aliased(CompletionModelSettings)
         scm = aliased(SpacesCompletionModels)
 
+        # Settings are now directly on the model table
         stmt = (
-            sa.select(cm, cms)
+            sa.select(cm)
             .join(scm, scm.completion_model_id == cm.id)
-            .outerjoin(
-                cms,
-                sa.and_(
-                    cms.completion_model_id == cm.id,
-                    cms.tenant_id == tenant_id,
-                ),
-            )
             .filter(scm.space_id == space_id)
             .order_by(cm.org, cm.created_at, cm.nickname)
         )
 
         res = await self.session.execute(stmt)
-        return res.all()
+        return res.scalars().all()
 
     async def _get_embedding_models(self, space_in_db: Spaces):
         space_id = space_in_db.id
-        tenant_id = space_in_db.tenant_id
 
         em = aliased(EmbeddingModels)
-        ems = aliased(EmbeddingModelSettings)
         sem = aliased(SpacesEmbeddingModels)
 
+        # Settings are now directly on the model table
         stmt = (
-            sa.select(em, ems.is_org_enabled)
+            sa.select(em)
             .join(sem, sem.embedding_model_id == em.id)
-            .outerjoin(
-                ems,
-                sa.and_(
-                    ems.embedding_model_id == em.id,
-                    ems.tenant_id == tenant_id,
-                ),
-            )
             .filter(sem.space_id == space_id)
         )
 
         res = await self.session.execute(stmt)
-        return res.all()
+        return res.scalars().all()
 
     async def _get_transcription_models(self, space_in_db: Spaces):
         space_id = space_in_db.id
-        tenant_id = space_in_db.tenant_id
 
         tm = aliased(TranscriptionModels)
-        tms = aliased(TranscriptionModelSettings)
         stm = aliased(SpacesTranscriptionModels)
 
+        # Settings are now directly on the model table
         stmt = (
-            sa.select(tm, tms)
+            sa.select(tm)
             .join(stm, stm.transcription_model_id == tm.id)
-            .outerjoin(
-                tms,
-                sa.and_(
-                    tms.transcription_model_id == tm.id,
-                    tms.tenant_id == tenant_id,
-                ),
-            )
             .filter(stm.space_id == space_id)
         )
 
         res = await self.session.execute(stmt)
-        return res.all()
+        return res.scalars().all()
 
     async def _set_embedding_models(
         self, space_in_db: Spaces, embedding_models: list[EmbeddingModelSparse]

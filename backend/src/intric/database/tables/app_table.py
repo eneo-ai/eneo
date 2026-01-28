@@ -31,7 +31,7 @@ class Apps(BasePublic):
     template_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(AppTemplates.id, ondelete="SET NULL")
     )
-    completion_model_id: Mapped[UUID] = mapped_column(
+    completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id, ondelete="SET NULL")
     )
     transcription_model_id: Mapped[Optional[UUID]] = mapped_column(
@@ -42,7 +42,7 @@ class Apps(BasePublic):
     )
 
     # Relationships
-    completion_model: Mapped[CompletionModels] = relationship()
+    completion_model: Mapped[Optional[CompletionModels]] = relationship()
     transcription_model: Mapped[Optional[TranscriptionModels]] = relationship()
     input_fields: Mapped[list["InputFields"]] = relationship(
         order_by="InputFields.created_at", viewonly=True

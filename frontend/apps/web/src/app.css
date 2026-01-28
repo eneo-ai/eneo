@@ -52,6 +52,12 @@
 html {
   font-size: 15px;
   color: var(--text-color-primary);
+  /* Prevent browser dark mode from interfering with app theme */
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 *::placeholder {
