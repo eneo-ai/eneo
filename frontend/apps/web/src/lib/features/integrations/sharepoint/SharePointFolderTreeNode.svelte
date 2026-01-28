@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconFolder } from "@intric/icons/folder";
-  import { IconFile } from "@intric/icons/file";
+  import { ChevronRight, Folder, File } from "lucide-svelte";
 
   type TreeNode = {
     id: string;
@@ -58,24 +56,33 @@
     onclick={handleSelect}
   >
     {#if node.has_children}
-      <button
+      <span
+        role="button"
+        tabindex="0"
         onclick={(e) => {
           e.stopPropagation();
           handleToggle();
         }}
-        class="flex-shrink-0 w-5 h-5 flex items-center justify-center transition-transform"
+        onkeydown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.stopPropagation();
+            e.preventDefault();
+            handleToggle();
+          }
+        }}
+        class="flex-shrink-0 w-5 h-5 flex items-center justify-center transition-transform cursor-pointer"
         class:rotate-90={isExpanded}
       >
-        <IconChevronRight class="w-4 h-4" />
-      </button>
+        <ChevronRight class="w-4 h-4" />
+      </span>
     {:else}
       <div class="w-5 h-5"></div>
     {/if}
 
     {#if node.type === "folder"}
-      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+      <Folder class="w-4 h-4 flex-shrink-0 text-secondary" />
     {:else}
-      <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+      <File class="w-4 h-4 flex-shrink-0 text-secondary" />
     {/if}
 
     <span class="truncate text-sm group-hover:font-medium">{node.name}</span>

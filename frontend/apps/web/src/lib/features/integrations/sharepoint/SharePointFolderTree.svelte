@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getIntric } from "$lib/core/Intric";
-  import { IconChevronUp } from "@intric/icons/chevron-up";
+  import { ChevronUp } from "lucide-svelte";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -140,7 +140,7 @@
           onclick={navigateBack}
           class="flex items-center gap-1 px-2 py-1 hover:bg-hover-default rounded-md text-sm"
         >
-          <IconChevronUp class="w-4 h-4" />
+          <ChevronUp class="w-4 h-4" />
           {m.back()}
         </button>
       {/if}
