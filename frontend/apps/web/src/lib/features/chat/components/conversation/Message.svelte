@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ConversationMessage } from "@intric/intric-js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import TypingIndicator from "./TypingIndicator.svelte";
+  import ThinkingIndicator from "./ThinkingIndicator.svelte";
   import MessageQuestion from "./MessageQuestion.svelte";
   import MessageAnswer from "./MessageAnswer.svelte";
   import MessageFiles from "./MessageFiles.svelte";
@@ -8,7 +9,6 @@
   import { browser } from "$app/environment";
   import { getChatService } from "../../ChatService.svelte";
   import { setMessageContext } from "../../MessageContext.svelte";
-  import { m } from "$lib/paraglide/messages";
 
   interface Props {
     message: ConversationMessage;
@@ -59,7 +59,9 @@
 
   const showSpinner = $derived.by(() => {
     const isGeneratingImage = message.generated_files.length > 0;
-    return isLast && isLoading && !isGeneratingImage;
+    const hasStartedStreaming = message.answer.trim().length > 0;
+    // Show typing indicator only while waiting for text to start, not during streaming
+    return isLast && isLoading && !isGeneratingImage && !hasStartedStreaming;
   });
 
   const isReasoning = $derived.by(() => {
@@ -81,16 +83,13 @@
   <MessageQuestion></MessageQuestion>
   <MessageAnswer></MessageAnswer>
   {#if showSpinner}
-    <div class="flex items-center gap-2">
-      <IconLoadingSpinner class="animate-spin" />
-      {#if isReasoning}
-        <span
-          class="bg-accent-dimmer text-accent-stronger w-fit animate-pulse rounded-full px-4 py-2"
-          >{m.thinking()}</span
-        >
-      {/if}
-    </div>
+    {#if isReasoning}
+      <ThinkingIndicator />
+    {:else}
+      <TypingIndicator />
+    {/if}
   {:else}
     <MessageTools></MessageTools>
   {/if}
 </div>
+

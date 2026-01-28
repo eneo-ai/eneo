@@ -65,6 +65,15 @@ export class ChatService {
   // Debounce timer for new prompt token calculations
   #newPromptTokenTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Streaming buffer for smoother text rendering (rAF-based for frame alignment)
+  #streamBuffer = "";
+  #streamAnimationFrame: number | null = null;
+  #lastFlushTime = 0;
+  #streamRef: ConversationMessage | null = null;
+  #streamFlushInterval = 33; // ~30fps target, imperceptible delay but smoother rendering
+  #streamGen = 0;
+  #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
+
   constructor(data: Parameters<typeof this.init>[0]) {
     this.#intric = data.intric;
     this.init(data);
@@ -121,6 +130,57 @@ export class ChatService {
     this.historyTokens = 0;
     this.newPromptTokens = 0;
     this.promptTokens = 0;
+  }
+
+  // RAF-based flush loop for smooth frame-aligned rendering
+  #flushLoop = (timestamp: number) => {
+    if (!this.#streamRef) return;
+
+    const elapsed = timestamp - this.#lastFlushTime;
+
+    // Flush if enough time has passed
+    if (elapsed >= this.#streamFlushInterval && this.#streamBuffer) {
+      this.#streamRef.answer += this.#streamBuffer;
+      this.#streamBuffer = "";
+      this.#lastFlushTime = timestamp;
+    }
+
+    // Continue the loop if we still have an active stream
+    if (this.#streamRef) {
+      this.#streamAnimationFrame = requestAnimationFrame(this.#flushLoop);
+    }
+  };
+
+  // Start the buffering loop for a message
+  #startStreamBuffering(ref: ConversationMessage) {
+    // If already streaming to this ref, just return
+    if (this.#streamRef === ref) return;
+
+    this.#streamRef = ref;
+    this.#lastFlushTime = performance.now();
+
+    // Cancel any existing loop
+    if (this.#streamAnimationFrame) {
+      cancelAnimationFrame(this.#streamAnimationFrame);
+    }
+
+    this.#streamAnimationFrame = requestAnimationFrame(this.#flushLoop);
+  }
+
+  // Force flush any remaining buffer (call when stream ends)
+  #finalizeStream() {
+    if (this.#streamAnimationFrame) {
+      cancelAnimationFrame(this.#streamAnimationFrame);
+      this.#streamAnimationFrame = null;
+    }
+
+    // Flush any remaining content
+    if (this.#streamBuffer && this.#streamRef) {
+      this.#streamRef.answer += this.#streamBuffer;
+      this.#streamBuffer = "";
+    }
+
+    this.#streamRef = null;
   }
 
   async loadConversations(args?: { limit?: number; reset?: boolean }) {
@@ -216,18 +276,24 @@ export class ChatService {
     ) => {
       this.currentConversation.messages?.push(emptyMessage({ question }));
 
+      // End any previous stream loop/buffer
+      this.#finalizeStream();
+      const streamGen = ++this.#streamGen;
+      let inrefBuffer = "";
+      const ref =
+        this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+      const isStale = () => this.#streamGen !== streamGen;
+
       const ensureCurrentSession = (event: { session_id: string }) => {
         if (event.session_id !== this.currentConversation.id) {
           abortController?.abort();
           console.error(`cancelled streaming answer as session ${event.session_id} was changed.`);
+          return false;
         }
+        return true;
       };
 
       try {
-        let buffer = "";
-        const ref =
-          this.currentConversation.messages[this.currentConversation.messages?.length - 1];
-
         await this.#intric.conversations.ask({
           question,
           chatPartner: this.#chatPartner,
@@ -238,29 +304,59 @@ export class ChatService {
           useWebSearch,
           callbacks: {
             onFirstChunk: (chunk) => {
+              if (isStale()) return;
               Object.assign(ref, chunk);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
             },
             onText: (text) => {
-              ensureCurrentSession(text);
-              if (text.answer.includes("<") || buffer) {
-                buffer += text.answer;
-                if (isNotInref(buffer) || isCompleteInref(buffer)) {
-                  ref.answer += buffer;
-                  buffer = "";
-                }
-              } else {
-                ref.answer += text.answer;
+              if (isStale()) {
+                abortController?.abort();
+                return;
               }
+
+              if (!ensureCurrentSession(text)) return;
+
+              // Handle inref buffering (existing logic)
+              let textToAdd = text.answer;
+              if (text.answer.includes("<") || inrefBuffer) {
+                inrefBuffer += text.answer;
+                if (isNotInref(inrefBuffer) || isCompleteInref(inrefBuffer)) {
+                  textToAdd = inrefBuffer;
+                  inrefBuffer = "";
+                } else {
+                  textToAdd = ""; // Wait for complete inref
+                }
+              }
+
+              // Buffer text for frame-aligned rendering (reduces jitter)
+              if (textToAdd) {
+                if (!browser || typeof requestAnimationFrame !== "function") {
+                  ref.answer += textToAdd;
+                } else {
+                  this.#streamBuffer += textToAdd;
+
+                  if (this.#streamBuffer.length >= this.#producerFlushThreshold) {
+                    ref.answer += this.#streamBuffer;
+                    this.#streamBuffer = "";
+                    this.#lastFlushTime = performance.now();
+                  }
+
+                  // Start or continue the rAF flush loop
+                  this.#startStreamBuffering(ref);
+                }
+              }
+
               ref.references = text.references;
             },
             onImage: (image) => {
-              ensureCurrentSession(image);
+              if (isStale()) return;
+              if (!ensureCurrentSession(image)) return;
               Object.assign(ref, image);
             },
             onIntricEvent: (event) => {
-              ensureCurrentSession(event);
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
 
               // Debug logging for token-related events only
               if ((event as any).usage || event.intric_event_type === "token_usage") {
@@ -295,6 +391,8 @@ export class ChatService {
           }
         });
       } catch (error) {
+        if (isStale()) return;
+
         const streamAborted = error instanceof Error && error.message.includes("aborted");
         if (streamAborted) {
           // In that case nothing more to do, just return
@@ -311,9 +409,21 @@ export class ChatService {
         this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
           message;
         console.error(error);
+      } finally {
+        if (this.#streamGen === streamGen) {
+          if (inrefBuffer) {
+            ref.answer += inrefBuffer;
+            inrefBuffer = "";
+          }
+
+          // Flush any remaining buffered content after stream completes
+          this.#finalizeStream();
+        }
       }
 
-      this.reloadHistory();
+      if (this.#streamGen === streamGen) {
+        this.reloadHistory();
+      }
 
       // The $effect in constructor now handles automatic token calculation
     }
@@ -592,7 +702,16 @@ function emptyConversation(): Conversation {
 
 const couldBeInref = (buffer: string): boolean => {
   // We assume that "<" can be anywhere in the buffer, but that there can only be one
-  return "<inref".startsWith(buffer.slice(buffer.indexOf("<"), 5));
+  const start = buffer.indexOf("<");
+  if (start === -1) return false;
+
+  const tag = "<inref";
+  const max = Math.min(tag.length, buffer.length - start);
+  return buffer.slice(start, start + max) === tag.slice(0, max);
 };
 const isNotInref = (buffer: string): boolean => !couldBeInref(buffer);
-const isCompleteInref = (buffer: string): boolean => couldBeInref(buffer) && buffer.includes(">");
+const isCompleteInref = (buffer: string): boolean => {
+  if (!couldBeInref(buffer)) return false;
+  const start = buffer.indexOf("<");
+  return buffer.indexOf(">", start) !== -1;
+};
