@@ -30,6 +30,7 @@ from intric.main.config import get_settings
 from intric.main.models import (
     NOT_PROVIDED,
     InDB,
+    MCPToolSetting,
     ModelId,
     NotProvided,
     ResourcePermissionsMixin,
@@ -117,6 +118,9 @@ class AssistantCreatePublic(AssistantBase):
     integration_knowledge_list: list[ModelId] = Field(
         default=[], deprecated=True, description="This field is deprecated and will be ignored"
     )
+    mcp_servers: list[ModelId] = Field(
+        default=[], deprecated=True, description="This field is deprecated and will be ignored"
+    )
     guardrail: Optional[AssistantGuard] = Field(
         default=None, deprecated=True, description="This field is deprecated and will be ignored"
     )
@@ -137,6 +141,7 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
+    mcp_tools: Optional[list[MCPToolSetting]] = None
     description: Optional[str] = Field(
         default=NOT_PROVIDED,
         description=(
@@ -239,6 +244,8 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]
     integration_knowledge_list: list[IntegrationKnowledgePublic]
+    mcp_servers: list[dict]  # Will be populated by assembler
+    mcp_tools: list[MCPToolSetting] = Field(default_factory=list)  # Tool-level overrides
     completion_model: CompletionModelSparse
     published: bool = False
     user: UserSparse

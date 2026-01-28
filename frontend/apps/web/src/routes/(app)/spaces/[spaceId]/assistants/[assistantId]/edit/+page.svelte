@@ -13,6 +13,7 @@
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
@@ -402,6 +403,20 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+      </Settings.Group>
+
+      <Settings.Group title={m.mcp_servers()}>
+        <Settings.Row
+          title={m.mcp_servers()}
+          description={m.select_mcp_servers_description()}
+          hasChanges={$currentChanges.diff.mcp_servers !== undefined || $currentChanges.diff.mcp_tools !== undefined}
+          revertFn={() => {
+            discardChanges("mcp_servers");
+            discardChanges("mcp_tools");
+          }}
+        >
+          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} />
+       </Settings.Row>
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>

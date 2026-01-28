@@ -20,6 +20,7 @@ def space():
         embedding_models=[],
         completion_models=[],
         transcription_models=[],
+        mcp_servers=[],
         default_assistant=MagicMock(),
         assistants=[],
         apps=[],

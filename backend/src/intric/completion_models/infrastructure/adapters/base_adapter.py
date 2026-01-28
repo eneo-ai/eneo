@@ -16,7 +16,7 @@ class CompletionModelAdapter(ABC):
     def get_token_limit_of_model(self):
         raise NotImplementedError()
 
-    async def get_response(self, context: "Context", model_kwargs: "ModelKwargs"):
+    async def get_response(self, context: "Context", model_kwargs: "ModelKwargs", mcp_servers: list = []):
         raise NotImplementedError()
 
     def get_response_streaming(self, context: "Context", model_kwargs: "ModelKwargs"):
@@ -33,7 +33,7 @@ class CompletionModelAdapter(ABC):
 
     @abstractmethod
     async def prepare_streaming(
-        self, context: "Context", model_kwargs: "ModelKwargs | None" = None
+        self, context: "Context", model_kwargs: "ModelKwargs | None" = None, mcp_servers: list = []
     ) -> Any:
         """
         Phase 1 (Pre-flight): Create streaming connection BEFORE EventSourceResponse.

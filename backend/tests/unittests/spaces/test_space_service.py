@@ -20,8 +20,14 @@ def service(actor: MagicMock):
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space.return_value = actor
 
+    # Mock the repo with proper session.execute chain for MCP servers query
+    repo = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    repo.session.execute.return_value = mock_result
+
     service = SpaceService(
-        repo=AsyncMock(),
+        repo=repo,
         completion_model_crud_service=AsyncMock(),
         transcription_model_crud_service=AsyncMock(),
         embedding_model_crud_service=AsyncMock(),

@@ -7,6 +7,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_validator,
     model_validator,
 )
 
@@ -58,6 +59,16 @@ class QuestionBase(BaseModel):
     answer: str
 
 
+class ToolCallInfo(BaseModel):
+    """Info about a single tool being called."""
+
+    server_name: str
+    tool_name: str
+    arguments: Optional[dict] = None
+    tool_call_id: Optional[str] = None  # For tool approval flow
+    approved: Optional[bool] = None  # True=approved, False=denied, None=auto-approved or pending
+
+
 class QuestionAdd(QuestionBase):
     num_tokens_question: int
     num_tokens_answer: int
@@ -67,6 +78,7 @@ class QuestionAdd(QuestionBase):
     service_id: Optional[UUID] = None
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
+    tool_calls: Optional[list[ToolCallInfo]] = None
 
     @model_validator(mode="after")
     def require_one_of_session_id_and_service_id(self) -> "QuestionAdd":
@@ -88,6 +100,7 @@ class Question(QuestionAdd, InDB):
     )
     questions_files: list[QuestionsFiles] = []
     web_search_results: list[WebSearchResult] = []
+    tool_calls: Optional[list[ToolCallInfo]] = None
 
     @model_validator(mode="after")
     def process_files_from_db(self) -> "Question":
@@ -112,6 +125,12 @@ class Message(QuestionBase, InDB):
     tools: UseTools
     generated_files: list[FilePublic]
     web_search_references: list[WebSearchResultPublic]
+    tool_calls: list[ToolCallInfo] = []
+
+    @field_validator("tool_calls", mode="before")
+    @classmethod
+    def convert_none_to_empty_list(cls, v):
+        return v if v is not None else []
 
 
 class MessageLogging(Message):
