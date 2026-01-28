@@ -54,7 +54,7 @@
     use:menu
     in:fly={{ y: -15, duration: 100 }}
     out:fly={{ y: -5, duration: 200 }}
-    class="items border-strongest bg-primary absolute z-[50] flex min-w-[22rem] -translate-y-[0.75rem] flex-col rounded-sm border-b p-3 shadow-md"
+    class="items border-strongest bg-primary absolute z-[50] flex max-h-[70vh] min-w-[22rem] -translate-y-[0.75rem] flex-col overflow-y-auto rounded-sm border-b p-3 shadow-md"
   >
     <p
       class="border-default text-secondary mb-2 border-b px-6 pt-1 pb-2.5 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"

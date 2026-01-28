@@ -65,6 +65,32 @@ export function initModels(client) {
         /** @ts-expect-error Jsdoc can't properly infer return type */
         return res;
       }
+    },
+
+    /**
+     * Migrate completion model usage to another model.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @param {string[]} [params.entityTypes] Optional list of entity types to migrate
+     * @param {boolean} [params.confirmMigration] Proceed even if compatibility warnings exist
+     * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
+     * @throws {IntricError}
+     * */
+    migrateCompletion: async ({ fromId, toId, entityTypes, confirmMigration }) => {
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/migrate", {
+        method: "post",
+        params: { path: { model_id: fromId } },
+        requestBody: {
+          "application/json": {
+            to_model_id: toId,
+            entity_types: entityTypes,
+            confirm_migration: confirmMigration
+          }
+        }
+      });
+
+      return res;
     }
   };
 }

@@ -45,6 +45,12 @@
   export let emptyIcon:
     | ComponentType<SvelteComponent<{ size?: "small" | "base" | "large"; class?: string }>>
     | undefined = undefined;
+  /**
+   * When true, always render slot content (groups) even when there are no rows.
+   * Useful for tables where groups should be visible to allow adding items.
+   * When false (default), shows EmptyState when there are no rows.
+   */
+  export let showEmptyGroups: boolean = false;
 
   setTableContext({
     displayType,
@@ -126,7 +132,7 @@
     </div>
   </div>
   <div class="w-full">
-    {#if $rows.length > 0}
+    {#if $rows.length > 0 || showEmptyGroups}
       {#if $displayType === "list"}
         <table {...$tableAttrs} class="w-full border-separate border-spacing-0">
           <thead class="bg-frosted-glass-primary sticky top-0 z-30">

@@ -13,16 +13,6 @@ Run Pyright for audit focus and new changes:
 ./scripts/typecheck_changed.sh
 ```
 
-## CLI Scripts
-
-### Seed AI Models
-Seed completion and embedding models from the `ai_models.yml` configuration file:
-```bash
-uv run python -m intric.cli.seed_ai_models
-```
-
-See [AI Models Management](docs/AI_MODELS_MANAGEMENT.md) for full documentation.
-
 ## Environment variables
 
 | Variable                         | Required | Explanation                                              |

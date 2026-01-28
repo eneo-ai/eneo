@@ -27,7 +27,19 @@
     </Tooltip>
   {/if}
   {#if variant === "full"}
-    <span class="p-2 capitalize">{run.status}</span>
+    <span class="p-2">
+      {#if run.status === "complete"}
+        {m.complete()}
+      {:else if run.status === "in progress"}
+        {m.in_progress()}
+      {:else if run.status === "failed"}
+        {m.failed()}
+      {:else if run.status === "queued"}
+        {m.queued()}
+      {:else}
+        {run.status}
+      {/if}
+    </span>
   {/if}
 </div>
 

@@ -203,7 +203,7 @@ async def queue_website_crawls(container: Container):
                         )
                         job = Job(
                             task=Task.CRAWL,
-                            name=f"Crawl: {website.name}",
+                            name=f"Crawl: {website.name or website.url}",
                             status=Status.QUEUED,
                             user_id=website.user_id,
                         )

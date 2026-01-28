@@ -49,15 +49,6 @@
     <Dialog.Title>{m.create_a_new_service()}</Dialog.Title>
 
     <Dialog.Section>
-      {#if $currentSpace.completion_models.length < 1}
-        <p
-          class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
-        >
-          <span class="font-bold">{m.warning()}:</span>
-          {m.completion_models_warning_service()}
-        </p>
-        <div class="border-default border-b"></div>
-      {/if}
       <Input.Text
         bind:value={newServiceName}
         label={m.name()}
@@ -75,7 +66,7 @@
       <Button
         variant="primary"
         on:click={createService}
-        disabled={isProcessing || $currentSpace.completion_models.length === 0}
+        disabled={isProcessing}
         >{isProcessing ? m.creating() : m.create_service()}</Button
       >
     </Dialog.Controls>
