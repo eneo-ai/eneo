@@ -60,7 +60,7 @@
       alert(m.recording_not_found());
       return;
     }
-    const suggestedName = audioFile.name + (audioFile.type.includes("webm") ? ".webm" : ".mp4");
+    const suggestedName = audioFile.name;
     if (window.showSaveFilePicker) {
       try {
         const handle = await window.showSaveFilePicker({ suggestedName });
@@ -99,7 +99,7 @@
   {#if showSuccess}
     <div class="success-flash" transition:fade={{ duration: 200 }}>
       <IconCheck class="text-positive-default" />
-      <span>{m.recording_queued ? m.recording_queued() : "Recording queued"}</span>
+      <span>{m.recording_queued()}</span>
     </div>
   {/if}
 

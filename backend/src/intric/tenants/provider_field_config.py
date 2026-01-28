@@ -19,7 +19,8 @@ PROVIDER_REQUIRED_FIELDS: dict[str, Set[str]] = {
     "gdm": {"api_key"},
     "mistral": {"api_key"},
     "ovhcloud": {"api_key"},
-    "vllm": {"api_key", "endpoint"},
+    "gemini": {"api_key"},
+    "cohere": {"api_key"},
 }
 
 

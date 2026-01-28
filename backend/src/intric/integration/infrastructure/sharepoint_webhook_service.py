@@ -69,7 +69,10 @@ class SharepointWebhookService:
                 continue
 
             if self.expected_client_state and notification.get("clientState") != self.expected_client_state:
-                logger.debug("Ignoring notification with unexpected clientState")
+                logger.warning(
+                    "Ignoring webhook notification with unexpected clientState. "
+                    "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
+                )
                 continue
 
             if site_id not in notifications_by_site:

@@ -62,17 +62,18 @@ class Completion:
 class CompletionModelBase(BaseModel):
     name: str
     nickname: str
-    family: CompletionModelFamily
+    # Allow both enum and string for tenant models with dynamic values
+    family: Union[CompletionModelFamily, str]
     token_limit: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: ModelStability
-    hosting: ModelHostingLocation
+    stability: Union[ModelStability, str]
+    hosting: Union[ModelHostingLocation, str]
     open_source: Optional[bool] = None
     description: Optional[str] = None
     deployment_name: Optional[str] = None
-    org: Optional[Orgs] = None
+    org: Optional[Union[Orgs, str]] = None
     vision: bool
     reasoning: bool
     base_url: Optional[str] = None
@@ -97,6 +98,9 @@ class CompletionModelUpdateFlags(BaseModel):
 class CompletionModel(CompletionModelBase, InDB):
     is_org_enabled: bool = False
     is_org_default: bool = False
+    # Tenant model fields (required for provider-based architecture)
+    tenant_id: Optional[UUID] = None
+    provider_id: Optional[UUID] = None
 
 
 class CompletionModelPublic(CompletionModel):
@@ -105,6 +109,7 @@ class CompletionModelPublic(CompletionModel):
     lock_reason: Optional[str] = None
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
+    # tenant_id and provider_id inherited from CompletionModel
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -139,6 +144,8 @@ class CompletionModelPublic(CompletionModel):
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,
             ),
+            tenant_id=completion_model.tenant_id,
+            provider_id=completion_model.provider_id,
         )
 
 

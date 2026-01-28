@@ -58,11 +58,22 @@ async def forbid_org_space(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    space = await container.space_service().get_space(id)
-    if space.user_id is None and space.tenant_space_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return True
-    
+    logger.warning(f"forbid_org_space called with space_id={id}")
+    try:
+        space = await container.space_service().get_space(id)
+        logger.warning(
+            f"forbid_org_space check: space_id={id}, user_id={space.user_id}, "
+            f"tenant_space_id={space.tenant_space_id}, is_org={space.user_id is None and space.tenant_space_id is None}"
+        )
+        if space.user_id is None and space.tenant_space_id is None:
+            logger.warning(f"Blocking org space access: space_id={id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return True
+    except Exception as e:
+        logger.error(f"forbid_org_space error: {type(e).__name__}: {e}")
+        raise
+
+
 @router.post("/", response_model=SpacePublic, status_code=201)
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -419,7 +430,6 @@ async def create_app(
     assembler = container.app_assembler()
     current_user = container.user()
 
-    # Create app (space is fetched first for the creation process)
     space = await space_service.get_space(id)
     app, permissions = await app_service.create_app(
         name=create_service_req.name,
@@ -535,7 +545,7 @@ async def create_space_groups(
     )
 
     return CollectionPublic.from_domain(created_collection)
-  
+
 
 @router.post(
     "/{id}/knowledge/websites/",

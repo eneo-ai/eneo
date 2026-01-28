@@ -320,7 +320,7 @@ class CrawlService:
             # Optimistic Acquire Pattern
             # Step 1: Create job record WITHOUT enqueueing to ARQ
             crawl_job = await self.task_service.queue_crawl(
-                name=website.name,
+                name=website.name or website.url,
                 run_id=crawl_run.id,
                 website_id=website.id,
                 url=website.url,
@@ -398,7 +398,7 @@ class CrawlService:
         else:
             # Feeder disabled: Original direct enqueue behavior
             crawl_job = await self.task_service.queue_crawl(
-                name=website.name,
+                name=website.name or website.url,
                 run_id=crawl_run.id,
                 website_id=website.id,
                 url=website.url,

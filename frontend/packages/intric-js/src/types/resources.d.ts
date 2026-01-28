@@ -36,6 +36,7 @@ export type SecurityClassification = components["schemas"]["SecurityClassificati
 export type Job = components["schemas"]["JobPublic"];
 export type JobStatus = components["schemas"]["Status"];
 export type Tenant = components["schemas"]["TenantPublic"];
+export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
 export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
@@ -108,6 +109,12 @@ export type UserTokenUsage = components["schemas"]["UserTokenUsage"];
 export type UserSortBy = components["schemas"]["UserSortBy"];
 export type ModelUsage = components["schemas"]["ModelUsage"];
 export type ModelKwargs = components["schemas"]["ModelKwargs"];
+
+// Tenant model update types
+export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];
+export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
+export type TenantTranscriptionModelUpdate =
+  components["schemas"]["TenantTranscriptionModelUpdate"];
 
 // Federation types
 export type TenantInfo = {

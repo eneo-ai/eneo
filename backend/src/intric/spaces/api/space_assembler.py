@@ -251,6 +251,7 @@ class SpaceAssembler:
             type="assistant",
             metadata_json=assistant.metadata_json,
             icon_id=assistant.icon_id,
+            completion_model_id=assistant.completion_model.id if assistant.completion_model else None,
         )
 
     def _get_group_chat_model(self, group_chat: "GroupChat"):
@@ -445,6 +446,13 @@ class SpaceAssembler:
         self._set_permissions_on_resources(space)
         applications = self._get_applications_model(space=space, only_published=only_published)
 
+        default_assistant = None
+        if getattr(space, "default_assistant", None) is not None:
+            default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
+                space.default_assistant,
+                permissions=self._get_default_assistant_permissions(space),
+            )
+
         return SpaceDashboard(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -455,6 +463,7 @@ class SpaceAssembler:
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             applications=applications,
+            default_assistant=default_assistant,
             data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
         )
