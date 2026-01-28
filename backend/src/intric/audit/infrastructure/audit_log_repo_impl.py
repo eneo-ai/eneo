@@ -4,7 +4,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -52,6 +52,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
     def _to_domain(self, table: AuditLogTable) -> AuditLog:
         """Convert SQLAlchemy table to domain model."""
+        ip_address = cast(Optional[str], table.ip_address)
         return AuditLog(
             id=table.id,
             tenant_id=table.tenant_id,
@@ -64,7 +65,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             description=table.description,
             metadata=table.log_metadata,
             outcome=Outcome(table.outcome),
-            ip_address=str(table.ip_address) if table.ip_address else None,
+            ip_address=str(ip_address) if ip_address else None,
             user_agent=table.user_agent,
             request_id=table.request_id,
             error_message=table.error_message,
@@ -223,7 +224,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         combined = sa.union(actor_query, target_query).alias("user_logs")
 
         # Build query from the aliased subquery (prevents cartesian product)
-        query = sa.select(combined.c)
+        query = sa.select(*combined.c)
 
         # Apply date filters using subquery columns
         if from_date:
@@ -251,7 +252,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         for row in results:
             # Reconstruct AuditLogTable from row columns
             # Note: Column is named "metadata" in DB, but "log_metadata" in ORM
-            table_obj = AuditLogTable(
+            table_obj = cast(Any, AuditLogTable)(
                 id=row.id,
                 tenant_id=row.tenant_id,
                 actor_id=row.actor_id,
@@ -261,7 +262,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=row.entity_id,
                 timestamp=row.timestamp,
                 description=row.description,
-                log_metadata=row.metadata,  # DB column is "metadata", ORM is "log_metadata"
+                log_metadata=row._mapping["metadata"],
                 outcome=row.outcome,
                 ip_address=row.ip_address,
                 user_agent=row.user_agent,
@@ -557,7 +558,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Combine with UNION
         combined = sa.union(actor_query, target_query).alias("user_logs")
-        query = sa.select(combined.c)
+        query = sa.select(*combined.c)
 
         if from_date:
             query = query.where(combined.c.timestamp >= from_date)
@@ -574,7 +575,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         # Pattern: `async for row in await session.stream(query):` - WITH await, NO context manager
         async for row in await self.session.stream(query):
             # Reconstruct domain model from row
-            table_obj = AuditLogTable(
+            table_obj = cast(Any, AuditLogTable)(
                 id=row.id,
                 tenant_id=row.tenant_id,
                 actor_id=row.actor_id,
@@ -584,7 +585,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=row.entity_id,
                 timestamp=row.timestamp,
                 description=row.description,
-                log_metadata=row.metadata,
+                log_metadata=row._mapping["metadata"],
                 outcome=row.outcome,
                 ip_address=row.ip_address,
                 user_agent=row.user_agent,
@@ -673,7 +674,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Combine with UNION
         combined = sa.union(actor_query, target_query).alias("user_logs")
-        query = sa.select(combined.c)
+        query = sa.select(*combined.c)
 
         if from_date:
             query = query.where(combined.c.timestamp >= from_date)

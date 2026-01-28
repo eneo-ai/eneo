@@ -1,3 +1,4 @@
+from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -17,7 +18,7 @@ class FileRepository:
         self.session = session
 
     async def add(self, file: FileCreate) -> File:
-        return await self._delegate.add(file)
+        return cast(File, await self._delegate.add(file))
 
     async def get_list_by_id_and_user(
         self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
@@ -59,17 +60,23 @@ class FileRepository:
         file = await self._delegate.get(id=file_id)
         return File.model_validate(file)
 
-    async def get_list_by_user(self, user_id: UUID) -> File:
-        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
+    async def get_list_by_user(self, user_id: UUID) -> list[File]:
+        return cast(
+            list[File],
+            await self._delegate.filter_by(conditions={Files.user_id: user_id}),
+        )
 
     async def get_by_checksum(self, checksum: str) -> File:
-        return await self._delegate.get_by(conditions={Files.checksum: checksum})
+        return cast(
+            File,
+            await self._delegate.get_by(conditions={Files.checksum: checksum}),
+        )
 
     async def delete(self, id: UUID) -> File:
-        return await self._delegate.delete(id)
+        return cast(File, await self._delegate.delete(id))
 
     async def update(self, file: File) -> File:
-        return await self._delegate.update(file)
+        return cast(File, await self._delegate.update(file))
 
     async def get_file_infos(self, ids: list[UUID]) -> list[FileInfo]:
         stmt = (

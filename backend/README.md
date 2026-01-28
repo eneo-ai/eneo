@@ -3,6 +3,15 @@
 ## Documentation
 
 - [AI Models Management](docs/AI_MODELS_MANAGEMENT.md) - Managing completion, embedding, and transcription models via API and CLI
+- [Type Checking](docs/TYPE_CHECKING.md) - Pyright baseline setup and local commands
+
+## Type Checking
+
+Run Pyright for audit focus and new changes:
+
+```bash
+./scripts/typecheck_changed.sh
+```
 
 ## Environment variables
 
