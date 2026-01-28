@@ -4,16 +4,33 @@ This repository uses Pyright to catch runtime issues like incorrect method names
 
 ## Baseline Strategy
 
-We use two baselines to balance audit slop detection and future changes:
+We use baselines to avoid legacy noise while blocking regressions:
 
-- `backend/.type-check-baseline` tracks the audit slop baseline (Jan 15 commit).
-- `backend/.type-check-future-baseline` tracks when we start enforcing new changes.
-- Audit focus files are always checked.
-- New or modified files after the future baseline are checked.
+- `backend/.pyright-baseline.json` captures existing Pyright diagnostics at a point in time and is committed to the repo.
+- `backend/.type-check-future-baseline` defines which tracked files count as new or modified in CI.
+- New files are checked in strict mode.
+- Existing modified files are checked in basic mode, but only new diagnostics fail (ratcheting).
+- Ratcheting compares error-level diagnostics by default (warnings are not gated).
+- Local runs include staged, unstaged, and untracked files.
+
+## What It Checks
+
+- Scope: `backend/src/intric/**/*.py` only.
+- New files: strict Pyright via `backend/pyrightconfig.strict.json`.
+- Modified existing files: base Pyright via `backend/pyrightconfig.json`, but only new diagnostics fail.
+- CI: uses `.type-check-future-baseline` to decide which tracked files are new/modified on the branch.
+
+## What It Does Not Check
+
+- Unchanged legacy files (no noise from pre-existing issues).
+- Tests and migrations (excluded by config).
+- Warning-level diagnostics (ratchet only gates errors).
+- Frontend or non-`src/intric` Python code.
+- Line-level diffs (ratcheting is file-level, not per-line).
 
 ## Local Commands
 
-### Audit slop sweep (Jan 15 audit commit)
+### Audit sweep (optional, Jan 15 audit commit)
 
 ```bash
 cd backend
@@ -21,7 +38,7 @@ AUDIT_FILES=$(git -C .. diff --name-only a7f09f78^..a7f09f78 -- "backend/src/int
 uv run pyright $AUDIT_FILES
 ```
 
-### Audit focus + future changes
+### Changed files (strict new + ratchet)
 
 ```bash
 cd backend
@@ -41,24 +58,21 @@ Install the VS Code Pylance extension. It uses the same engine as Pyright and re
 
 ## Configuration Notes
 
-We keep `reportAttributeAccessIssue` and `reportCallIssue` as errors to catch wrong method names. `reportGeneralTypeIssues` is a warning to reduce legacy noise while audit slop is being addressed.
+We keep `reportAttributeAccessIssue` and `reportCallIssue` as errors to catch wrong method names. Base config keeps `reportGeneralTypeIssues` as a warning to reduce legacy noise, while strict config raises it to an error for new files.
 
-## Updating the Baseline
+If you want to gate warnings as well, run ratcheting with `--include-warnings` or add it to `backend/scripts/typecheck_changed.sh`.
 
-When type coverage improves, move the audit baseline forward:
+## Updating the Baselines
+
+Refresh the Pyright diagnostic baseline when type coverage improves or you intentionally accept existing errors:
 
 ```bash
 cd backend
-NEW_BASELINE=$(git rev-parse HEAD)
-cat > .type-check-baseline <<EOF
-# Type checking baseline for audit slop
-BASELINE_COMMIT=$NEW_BASELINE
-BASELINE_DATE=$(date +%Y-%m-%d)
-EOF
+uv run pyright --outputjson | python scripts/pyright_ratcheting.py \
+  --write-baseline --current - --baseline .pyright-baseline.json
+```
 
-## Updating the Future Baseline
-
-After merging this branch, set the future baseline to the merge commit so only new work is enforced:
+Move the future baseline forward so only new work is enforced:
 
 ```bash
 cd backend
@@ -68,5 +82,4 @@ cat > .type-check-future-baseline <<EOF
 FUTURE_BASELINE_COMMIT=$NEW_BASELINE
 FUTURE_BASELINE_DATE=$(date +%Y-%m-%d)
 EOF
-```
 ```
