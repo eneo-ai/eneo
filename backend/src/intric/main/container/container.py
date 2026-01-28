@@ -677,6 +677,7 @@ class Container(containers.DeclarativeContainer):
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,
+        session=session,
     )
 
     # Datastore
@@ -685,6 +686,7 @@ class Container(containers.DeclarativeContainer):
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,
+        session=session,
     )
     datastore = providers.Factory(
         Datastore,
@@ -1242,6 +1244,7 @@ class Container(containers.DeclarativeContainer):
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,
+        session=session,
     )
     crawler = providers.Factory(Crawler)
 

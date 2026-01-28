@@ -1,8 +1,4 @@
-<!--
-    Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
--->
+<!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script context="module" lang="ts">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";

@@ -9,6 +9,7 @@ class ModelTokenUsage:
     model_name: str
     model_nickname: str
     model_org: str | None
+    model_provider: str | None
     input_token_usage: int
     output_token_usage: int
     request_count: int

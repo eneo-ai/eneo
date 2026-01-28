@@ -21,6 +21,12 @@ export type ChatPartner = GroupChat | Assistant;
 export class ChatService {
   #chatPartner = $state<ChatPartner>() as ChatPartner; // Needs typecast to get rid of undefined
   partner = $derived(this.#chatPartner);
+  hasCompletionModel = $derived(
+    this.#chatPartner &&
+    'completion_model' in this.#chatPartner &&
+    this.#chatPartner.completion_model !== null &&
+    this.#chatPartner.completion_model !== undefined
+  );
   #intric: Intric;
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);

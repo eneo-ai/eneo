@@ -8,7 +8,7 @@ from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import BadRequestException, FileTooLargeException, NotFoundException
 
 ICON_MAX_SIZE = 262144  # 256 KB
-ICON_ALLOWED_MIMETYPES = {"image/png", "image/jpeg", "image/webp"}
+ICON_ALLOWED_MIMETYPES = ("image/jpeg", "image/png", "image/webp")  # Tuple for deterministic order in tests
 
 
 class IconService:
