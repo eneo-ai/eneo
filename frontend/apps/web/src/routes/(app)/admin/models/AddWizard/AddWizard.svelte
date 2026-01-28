@@ -55,6 +55,7 @@
       family?: string;
       dimensions?: number;
       maxInput?: number;
+      hosting?: string;
     }>;
   }
 
@@ -193,6 +194,7 @@
             token_limit: model.tokenLimit ?? 128000,
             vision: model.vision ?? false,
             reasoning: model.reasoning ?? false,
+            hosting: model.hosting ?? "swe",
             is_active: true
           });
         } else if (modelType === "embedding") {
@@ -203,6 +205,7 @@
             family: model.family ?? "openai",
             dimensions: model.dimensions ?? undefined,
             max_input: model.maxInput ?? undefined,
+            hosting: model.hosting ?? "swe",
             is_active: true
           });
         } else if (modelType === "transcription") {
@@ -210,6 +213,7 @@
             provider_id: providerId,
             name: model.name,
             display_name: model.displayName,
+            hosting: model.hosting ?? "swe",
             is_active: true
           });
         }

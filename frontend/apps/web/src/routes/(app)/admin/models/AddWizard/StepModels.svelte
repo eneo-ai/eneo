@@ -7,6 +7,13 @@
   import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
 
+  // Hosting location options
+  const hostingOptions = [
+    { value: "swe", label: m.hosting_swe() },
+    { value: "eu", label: m.hosting_eu() },
+    { value: "usa", label: m.hosting_usa() }
+  ] as const;
+
   // Auto-focus first input on mount
   onMount(() => {
     setTimeout(() => {
@@ -27,6 +34,7 @@
     family?: string;
     dimensions?: number;
     maxInput?: number;
+    hosting?: string;
   }> = [];
 
   const dispatch = createEventDispatcher<{
@@ -116,7 +124,8 @@
       reasoning: false,
       family: "openai",
       dimensions: undefined as number | undefined,
-      maxInput: undefined as number | undefined
+      maxInput: undefined as number | undefined,
+      hosting: "swe"
     };
   }
 
@@ -140,7 +149,8 @@
       reasoning: suggestion.reasoning ?? false,
       family: "openai",
       dimensions: undefined,
-      maxInput: undefined
+      maxInput: undefined,
+      hosting: "swe"
     };
   }
 
@@ -317,6 +327,21 @@
         </div>
       </div>
     {/if}
+
+    <!-- Hosting Location (common to all model types) -->
+    <div class="flex flex-col gap-2">
+      <label for="hosting" class="text-sm font-medium">{m.hosting_region()}</label>
+      <select
+        id="hosting"
+        bind:value={currentModel.hosting}
+        class="h-10 rounded-md border border-dimmer bg-surface px-3 text-sm text-primary
+          focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
+      >
+        {#each hostingOptions as option}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+    </div>
 
     <!-- Action Buttons -->
     <div class="border-t border-dimmer/40 pt-4 mt-2">

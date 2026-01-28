@@ -1,7 +1,6 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { melt } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut, backOut } from "svelte/easing";
   import { X, CheckCircle2, XCircle, Info, AlertTriangle } from "lucide-svelte";
@@ -42,7 +41,7 @@
       {@const iconStyle = iconStyles[data.type]}
 
       <div
-        use:melt={$content(id)}
+        {...$content(id)}
         class="pointer-events-auto flex w-full items-start gap-2.5 rounded-lg border px-4 py-3.5 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.15),0_2px_6px_-2px_rgba(0,0,0,0.1)] backdrop-blur-sm {style}"
         in:fly={{ y: -20, duration: 250, easing: backOut }}
         out:fade={{ duration: 150, easing: cubicOut }}
@@ -54,7 +53,7 @@
         </p>
 
         <button
-          use:melt={$close(id)}
+          {...$close(id)}
           class="flex-shrink-0 rounded-md p-1 -mr-1 opacity-50 transition-all duration-150 hover:opacity-100 hover:bg-black/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-current/40"
           aria-label="Dismiss"
         >

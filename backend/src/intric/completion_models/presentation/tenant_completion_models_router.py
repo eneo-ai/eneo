@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelFamily, ModelHostingLocation, ModelStability
+from intric.ai_models.model_enums import ModelFamily, ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -27,6 +27,7 @@ class TenantCompletionModelCreate(BaseModel):
     token_limit: int = Field(default=128000, description="Maximum context tokens")
     vision: bool = Field(default=False, description="Supports vision/image inputs")
     reasoning: bool = Field(default=False, description="Supports extended reasoning")
+    hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -38,7 +39,7 @@ class TenantCompletionModelUpdate(BaseModel):
     token_limit: int | None = Field(None, description="Maximum context tokens")
     vision: bool | None = Field(None, description="Supports vision/image inputs")
     reasoning: bool | None = Field(None, description="Supports extended reasoning")
-    hosting: str | None = Field(None, description="Hosting location (eu, usa)")
+    hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(None, description="Model stability (stable, experimental)")
 
@@ -99,7 +100,7 @@ async def create_tenant_completion_model(
         reasoning=model_create.reasoning,
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
         family=ModelFamily.OPEN_AI.value,
-        hosting=ModelHostingLocation.USA.value,
+        hosting=model_create.hosting,
         org=None,
         stability=ModelStability.STABLE.value,
         open_source=False,

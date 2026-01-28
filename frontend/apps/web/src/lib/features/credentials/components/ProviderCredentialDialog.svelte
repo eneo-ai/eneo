@@ -38,7 +38,7 @@
 			{ name: "api_version", type: "text", required: true },
 			{ name: "deployment_name", type: "text", required: true }
 		],
-		vllm: [
+		hosted_vllm: [
 			{ name: "api_key", type: "password", required: true },
 			{ name: "endpoint", type: "text", required: true }
 		]
