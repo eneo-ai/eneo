@@ -141,4 +141,6 @@ jobs:
 
       - name: Run pyright on changed files
         working-directory: ./backend
+        env:
+          RATCHET_IGNORE_RANGE: "1"
         run: ./scripts/typecheck_changed.sh
