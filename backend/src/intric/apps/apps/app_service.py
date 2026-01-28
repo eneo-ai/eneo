@@ -163,6 +163,11 @@ class AppService:
                 await self.transcription_model_crud_service.get_default_transcription_model()
             )
 
+        if transcription_model is None:
+            raise BadRequestException(
+                "No transcription model available. Please enable a transcription model in the space before creating an app."
+            )
+
         return transcription_model
 
     async def get_app(self, app_id: UUID) -> tuple[App, list[str]]:

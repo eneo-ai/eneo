@@ -290,6 +290,7 @@
   "create_app": "Create app",
   "open_app_editor_after_creation": "Open app editor after creation",
   "completion_models_warning_app": "This space does currently not have any completion models enabled. Enable at least one completion model to be able to create an app.",
+  "transcription_models_warning_app": "This space does currently not have any transcription models enabled. Enable at least one transcription model to be able to create an app.",
   "move": "Move",
   "delete_assistant": "Delete assistant",
   "move_assistant": "Move assistant",
