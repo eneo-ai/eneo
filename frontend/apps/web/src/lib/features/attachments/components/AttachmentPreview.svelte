@@ -4,6 +4,7 @@
   import { IconDocument } from "@intric/icons/document";
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
+  import { m } from "$lib/paraglide/messages";
 
   import type { Snippet } from "svelte";
 
@@ -57,7 +58,7 @@
     } catch (e) {
       loadError = true;
       console.error("Error loading file:", e);
-      alert("Error loading file, see console for details.");
+      alert(m.error_loading_file());
     } finally {
       loadingFile = false;
     }
@@ -79,18 +80,18 @@
       window.open(response.url, "_blank");
     } catch (e) {
       console.error("Error generating download URL:", e);
-      alert("Error downloading file, see console for details.");
+      alert(m.error_downloading_file());
     }
   }
 
-  let copyButtonText = "Copy to clipboard";
+  let copyButtonText = m.copy_to_clipboard();
   async function copyText() {
     await loadFile();
     if (loadedContent && browser) {
       navigator.clipboard.writeText(loadedContent);
-      copyButtonText = "Copied!";
+      copyButtonText = m.copied();
       setTimeout(() => {
-        copyButtonText = "Copy to clipboard";
+        copyButtonText = m.copy_to_clipboard();
       }, 2000);
     }
   }
@@ -148,9 +149,9 @@
           </audio>
         {:else}
           <div class="text-center">
-            <p class="mb-4">Preview not available for this file type</p>
+            <p class="mb-4">{m.preview_not_available()}</p>
             <Button on:click={downloadFile} variant="outlined">
-              Download file
+              {m.download_file()}
             </Button>
           </div>
         {/if}
@@ -159,7 +160,7 @@
 
     <Dialog.Controls let:close>
       <Button variant="simple" on:click={downloadFile} padding="icon-leading">
-        Download file
+        {m.download_file()}
       </Button>
 
       {#if isTextFile && loadedContent}
@@ -169,7 +170,7 @@
       {/if}
 
       <div class="flex-grow"></div>
-      <Button variant="primary" is={close}>Done</Button>
+      <Button variant="primary" is={close}>{m.done()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
