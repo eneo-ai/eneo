@@ -12,13 +12,24 @@ export const load = async (event) => {
       : null;
   };
 
-  const [assistant, session] = await Promise.all([
-    intric.assistants.get({ id: selectedAssistantId }),
-    loadSession()
-  ]);
+  const listSessions = async () => {
+    return intric.conversations
+      .list({
+        chatPartner: { id: selectedAssistantId, type: "assistant" },
+        pagination: { limit: 20 }
+      })
+      .catch((error) => error);
+  };
+
+  const assistantPromise = intric.assistants.get({ id: selectedAssistantId });
+  const sessionPromise = loadSession();
+  const historyPromise = listSessions();
+
+  const assistant = await assistantPromise;
 
   return {
     chatPartner: assistant,
-    initialConversation: session
+    initialConversation: sessionPromise,
+    initialHistory: historyPromise
   };
 };

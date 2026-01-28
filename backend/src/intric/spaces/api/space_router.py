@@ -69,6 +69,7 @@ async def forbid_org_space(
         logger.error(f"forbid_org_space error: {type(e).__name__}: {e}")
         raise
 
+
 @router.post("/", response_model=SpacePublic, status_code=201)
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -425,7 +426,6 @@ async def create_app(
     assembler = container.app_assembler()
     current_user = container.user()
 
-    # Create app (space is fetched first for the creation process)
     space = await space_service.get_space(id)
     app, permissions = await app_service.create_app(
         name=create_service_req.name,
