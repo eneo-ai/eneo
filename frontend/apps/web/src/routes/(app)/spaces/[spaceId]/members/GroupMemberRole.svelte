@@ -17,14 +17,14 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
 
-  type Member = Space["members"]["items"][number];
+  type GroupMember = Space["group_members"]["items"][number];
   type RoleOption = { label: string; value: SpaceRole["value"] };
 
   type Props = {
-    member: Member;
+    groupMember: GroupMember;
   };
 
-  let { member }: Props = $props();
+  let { groupMember }: Props = $props();
   const intric = getIntric();
 
   const {
@@ -32,7 +32,7 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const options: RoleOption[] = [...$currentSpace.available_roles];
+  const options: RoleOption[] = $currentSpace.available_roles.filter(role => role.value !== "owner");
 
   const {
     elements: { trigger, menu, option, label },
@@ -44,31 +44,31 @@
       fitViewport: true,
       sameWidth: false
     },
-    defaultSelected: { value: member.role }
+    defaultSelected: { value: groupMember.role }
   });
 
   // After changing the role we update with the passed prop as source of truth
   $effect(() => {
-    $selected = { value: member.role };
+    $selected = { value: groupMember.role };
   });
 
-  const removeMember = createAsyncState(async () => {
+  const removeGroupMember = createAsyncState(async () => {
     try {
-      await intric.spaces.members.remove({ spaceId: $currentSpace.id, user: member });
+      await intric.spaces.groupMembers.remove({ spaceId: $currentSpace.id, group: groupMember });
       $showRemoveDialog = false;
-      // Will cause an update in the parent page and remove this component instance form the tree
+      // Will cause an update in the parent page and remove this component instance from the tree
       refreshCurrentSpace();
     } catch (e) {
-      alert(m.couldnt_remove_user());
+      alert(m.couldnt_remove_group());
       console.error(e);
     }
   });
 
   const changeRole = createAsyncState(async (newRole: SpaceRole["value"]) => {
     try {
-      await intric.spaces.members.update({
+      await intric.spaces.groupMembers.update({
         spaceId: $currentSpace.id,
-        user: { id: member.id, role: newRole }
+        group: { id: groupMember.id, role: newRole }
       });
       // Await refreshing as that will update the actual label
       await refreshCurrentSpace();
@@ -76,7 +76,7 @@
       alert(m.couldnt_change_role());
       console.error(e);
       // Reset selected
-      $selected = { value: member.role };
+      $selected = { value: groupMember.role };
     }
   });
 
@@ -90,7 +90,7 @@
 <div class="flex items-center gap-2">
   <div class="relative flex flex-col gap-1">
     <label class="sr-only pl-3 font-medium" {...$label} use:label>
-      {m.select_role_for_member()}
+      {m.select_role_for_group()}
     </label>
 
     <Button is={[$trigger]}>
@@ -98,7 +98,7 @@
         {#if changeRole.isLoading}
           <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
         {:else}
-          {member.role}
+          {groupMember.role}
         {/if}
       </div>
       <IconChevronDown />
@@ -137,7 +137,7 @@
   <Button
     variant="destructive"
     padding="icon"
-    label={m.remove_member()}
+    label={m.remove_group()}
     on:click={() => ($showRemoveDialog = true)}
   >
     <IconTrash class="h-4 w-4" />
@@ -146,13 +146,12 @@
 
 <Dialog.Root alert bind:isOpen={showRemoveDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>{m.remove_member()}</Dialog.Title>
-    <Dialog.Description>{m.confirm_remove_member({ memberEmail: member.email })}</Dialog.Description
-    >
+    <Dialog.Title>{m.remove_group()}</Dialog.Title>
+    <Dialog.Description>{m.confirm_remove_group({ groupName: groupMember.name })}</Dialog.Description>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={removeMember}
-        >{removeMember.isLoading ? m.removing() : m.remove()}</Button
+      <Button variant="destructive" on:click={removeGroupMember}
+        >{removeGroupMember.isLoading ? m.removing() : m.remove()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

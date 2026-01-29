@@ -34,6 +34,7 @@ class SpaceResourceType(str, Enum):
     INFO_BLOB = "info blob"
     SPACE = "space"
     MEMBER = "member"
+    GROUP_MEMBER = "group_member"
     DEFAULT_ASSISTANT = "default assistant"
 
 
@@ -195,6 +196,12 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
+        SpaceResourceType.GROUP_MEMBER: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+        },
         SpaceResourceType.DEFAULT_ASSISTANT: {
             SpaceAction.READ,
             SpaceAction.EDIT,
@@ -308,6 +315,9 @@ ORG_SPACE_PERMISSIONS = {
         SpaceResourceType.MEMBER: {
             SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
         },
+        SpaceResourceType.GROUP_MEMBER: {
+            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+        },
         # Chat / default-assistenten synlig & redigerbar endast för admin:
         SpaceResourceType.DEFAULT_ASSISTANT: {
             SpaceAction.READ, SpaceAction.EDIT,
@@ -367,13 +377,60 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
-        space_member = self.space.members.get(self.user.id)
-
+        # 1. Personal space → OWNER
         if self.space.is_personal():
             if self.user.id == self.space.user_id:
                 return SpaceRole.OWNER
+            return None
 
-        return space_member.role if space_member else None
+        # 2. Check direct membership
+        direct_role = self._get_direct_role()
+
+        # 3. Check group membership
+        group_role = self._get_highest_group_role()
+
+        # 4. Return the highest role
+        return self._get_highest_role(direct_role, group_role)
+
+    def _get_direct_role(self) -> SpaceRole | None:
+        """Get the user's role from direct membership."""
+        space_member = self.space.members.get(self.user.id)
+        return SpaceRole(space_member.role) if space_member else None
+
+    def _get_highest_group_role(self) -> SpaceRole | None:
+        """Find the highest role the user has through group membership."""
+        user_group_ids = self.user.user_groups_ids
+        if not user_group_ids:
+            return None
+
+        highest = None
+        for group_member in self.space.group_members.values():
+            if group_member.id in user_group_ids:
+                group_role = SpaceRole(group_member.role)
+                highest = self._get_highest_role(highest, group_role)
+
+        return highest
+
+    def _get_highest_role(
+        self, role1: SpaceRole | None, role2: SpaceRole | None
+    ) -> SpaceRole | None:
+        """Return the highest privilege role between two roles.
+
+        Role hierarchy (highest to lowest): OWNER > ADMIN > EDITOR > VIEWER
+        """
+        if role1 is None:
+            return role2
+        if role2 is None:
+            return role1
+
+        role_priority = {
+            SpaceRole.OWNER: 4,
+            SpaceRole.ADMIN: 3,
+            SpaceRole.EDITOR: 2,
+            SpaceRole.VIEWER: 1,
+        }
+
+        return role1 if role_priority.get(role1, 0) >= role_priority.get(role2, 0) else role2
 
     def _get_permissions(self, role: SpaceRole):
         if self.space.is_personal():
@@ -441,6 +498,30 @@ class SpaceActor:
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.MEMBER,
+        )
+
+    def can_read_group_members(self):
+        return self.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.GROUP_MEMBER,
+        )
+
+    def can_add_group_members(self):
+        return self.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.GROUP_MEMBER,
+        )
+
+    def can_edit_group_members(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.GROUP_MEMBER,
+        )
+
+    def can_delete_group_members(self):
+        return self.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.GROUP_MEMBER,
         )
 
     def can_read_default_assistant(self):

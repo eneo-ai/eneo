@@ -246,6 +246,8 @@ function derivedCurrentSpace(space: Readable<Space>) {
             );
           case "member":
             return $space.members.permissions?.includes(action) ?? false;
+          case "group_member":
+            return $space.group_members?.permissions?.includes(action) ?? false;
           default:
             return false;
         }
@@ -264,4 +266,5 @@ type Resource =
   | "integrationKnowledge"
   | "collection"
   | "member"
+  | "group_member"
   | "app";

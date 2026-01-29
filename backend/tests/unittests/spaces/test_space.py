@@ -251,3 +251,72 @@ def test_cannot_change_completion_models_of_personal_space(space: Space):
 
     with pytest.raises(BadRequestException):
         space.update(completion_models=[MagicMock()])
+
+
+# Group Member Tests
+
+
+def test_add_group_member(space: Space):
+    group = MagicMock(id=uuid4())
+
+    space.add_group_member(group)
+
+    assert group.id in space.group_members
+    assert space.group_members[group.id] == group
+
+
+def test_add_group_member_already_exists(space: Space):
+    group_id = uuid4()
+    space.group_members = {group_id: MagicMock(id=group_id)}
+
+    with pytest.raises(BadRequestException, match="already a member"):
+        space.add_group_member(MagicMock(id=group_id))
+
+
+def test_cannot_add_group_member_to_personal_space(space: Space):
+    space.user_id = MagicMock()  # Makes it a personal space
+
+    with pytest.raises(BadRequestException, match="personal spaces"):
+        space.add_group_member(MagicMock(id=uuid4()))
+
+
+def test_remove_group_member(space: Space):
+    group_id = uuid4()
+    space.group_members = {group_id: MagicMock(id=group_id)}
+
+    space.remove_group_member(group_id)
+
+    assert group_id not in space.group_members
+
+
+def test_remove_group_member_not_exists(space: Space):
+    space.group_members = {}
+
+    with pytest.raises(BadRequestException, match="not a member"):
+        space.remove_group_member(uuid4())
+
+
+def test_change_group_member_role(space: Space):
+    group_id = uuid4()
+    space.group_members = {group_id: MagicMock(id=group_id, role=SpaceRoleValue.ADMIN)}
+
+    space.change_group_member_role(group_id, SpaceRoleValue.VIEWER)
+
+    assert space.group_members[group_id].role == SpaceRoleValue.VIEWER
+
+
+def test_change_group_member_role_not_exists(space: Space):
+    space.group_members = {}
+
+    with pytest.raises(BadRequestException, match="not a member"):
+        space.change_group_member_role(uuid4(), SpaceRoleValue.ADMIN)
+
+
+def test_get_group_member(space: Space):
+    group_id = uuid4()
+    group = MagicMock(id=group_id)
+    space.group_members = {group_id: group}
+
+    result = space.get_group_member(group_id)
+
+    assert result == group

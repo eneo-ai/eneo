@@ -806,6 +806,7 @@ class Container(containers.DeclarativeContainer):
         repo=space_repo,
         factory=space_factory,
         user_repo=user_repo,
+        user_groups_repo=user_groups_repo,
         embedding_model_crud_service=embedding_model_crud_service,
         completion_model_crud_service=completion_model_crud_service,
         transcription_model_crud_service=transcription_model_crud_service,

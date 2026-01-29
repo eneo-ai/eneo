@@ -20,7 +20,8 @@ from intric.main.exceptions import (
 from sqlalchemy.exc import IntegrityError
 from intric.main.exceptions import UniqueException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
-from intric.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
+from intric.user_groups.user_groups_repo import UserGroupsRepository
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.spaces.space_repo import SpaceRepository
@@ -59,6 +60,7 @@ class SpaceService:
         factory: SpaceFactory,
         repo: SpaceRepository,
         user_repo: UsersRepository,
+        user_groups_repo: UserGroupsRepository,
         embedding_model_crud_service: EmbeddingModelCRUDService,
         completion_model_crud_service: CompletionModelCRUDService,
         completion_model_service: CompletionModelService,
@@ -72,6 +74,7 @@ class SpaceService:
         self.factory = factory
         self.repo = repo
         self.user_repo = user_repo
+        self.user_groups_repo = user_groups_repo
         self.embedding_model_crud_service = embedding_model_crud_service
         self.completion_model_crud_service = completion_model_crud_service
         self.completion_model_service = completion_model_service
@@ -324,7 +327,7 @@ class SpaceService:
         self, *, include_personal: bool = False, include_applications: bool = False
     ) -> list[Space]:
         spaces = await self.repo.get_spaces_for_member(
-            self.user.id, include_applications=include_applications
+            include_applications=include_applications
         )
 
         if include_personal:
@@ -406,6 +409,119 @@ class SpaceService:
         space = await self.repo.update(space)
 
         return space.get_member(user_id)
+
+    # Group Member Management
+
+    async def add_group_member(
+        self, space_id: UUID, group_id: UUID, role: SpaceRoleValue
+    ) -> SpaceGroupMember:
+        """Add a user group to a space with the specified role.
+
+        Args:
+            space_id: ID of the space
+            group_id: ID of the user group to add
+            role: Role to assign to the group (admin, editor, viewer)
+
+        Returns:
+            The created SpaceGroupMember
+
+        Raises:
+            UnauthorizedException: If user doesn't have permission to add group members
+            BadRequestException: If trying to add to a personal space or group already exists
+            NotFoundException: If group not found or not in same tenant
+        """
+        space = await self.get_space(space_id)
+        actor = self._get_actor(space)
+
+        if not actor.can_add_group_members():
+            raise UnauthorizedException("Only Admins can add group members to the space")
+
+        if space.is_personal():
+            raise BadRequestException("Cannot add group members to personal spaces")
+
+        # Fetch the user group and validate it belongs to same tenant
+        user_group = await self.user_groups_repo.get_user_group(group_id)
+        if user_group is None or user_group.tenant_id != self.user.tenant_id:
+            raise NotFoundException(f"User group {group_id} not found")
+
+        group_member = SpaceGroupMember(
+            id=user_group.id,
+            name=user_group.name,
+            role=role,
+            user_count=len(user_group.users) if user_group.users else 0,
+        )
+
+        space.add_group_member(group_member)
+        space = await self.repo.update(space)
+
+        return space.get_group_member(group_id)
+
+    async def remove_group_member(self, space_id: UUID, group_id: UUID):
+        """Remove a user group from a space.
+
+        Args:
+            space_id: ID of the space
+            group_id: ID of the user group to remove
+
+        Raises:
+            UnauthorizedException: If user doesn't have permission to remove group members
+            BadRequestException: If group is not a member of the space
+        """
+        space = await self.get_space(space_id)
+        actor = self._get_actor(space)
+
+        if not actor.can_delete_group_members():
+            raise UnauthorizedException("Only Admins can remove group members from the space")
+
+        space.remove_group_member(group_id)
+        await self.repo.update(space)
+
+    async def change_group_member_role(
+        self, space_id: UUID, group_id: UUID, new_role: SpaceRoleValue
+    ) -> SpaceGroupMember:
+        """Change the role of a user group in a space.
+
+        Args:
+            space_id: ID of the space
+            group_id: ID of the user group
+            new_role: New role to assign
+
+        Returns:
+            The updated SpaceGroupMember
+
+        Raises:
+            UnauthorizedException: If user doesn't have permission to edit group members
+            BadRequestException: If group is not a member of the space
+        """
+        space = await self.get_space(space_id)
+        actor = self._get_actor(space)
+
+        if not actor.can_edit_group_members():
+            raise UnauthorizedException("Only Admins can change group member roles")
+
+        space.change_group_member_role(group_id, new_role)
+        space = await self.repo.update(space)
+
+        return space.get_group_member(group_id)
+
+    async def get_group_member(self, space_id: UUID, group_id: UUID) -> SpaceGroupMember:
+        """Get a group member by ID.
+
+        Args:
+            space_id: ID of the space
+            group_id: ID of the user group
+
+        Returns:
+            SpaceGroupMember object
+
+        Raises:
+            NotFoundException: If the group is not a member of the space
+        """
+        space = await self.get_space(space_id)
+        try:
+            return space.get_group_member(group_id)
+        except KeyError:
+            raise NotFoundException(f"Group {group_id} is not a member of space {space_id}")
 
     async def create_personal_space(self):
         hub = await self.get_or_create_tenant_space()

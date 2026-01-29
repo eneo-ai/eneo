@@ -9,6 +9,7 @@
   import { Button, Dialog } from "@intric/ui";
   import type { UserGroup } from "@intric/intric-js";
   import UserGroupEditor from "./UserGroupEditor.svelte";
+  import UserGroupMembersEditor from "./UserGroupMembersEditor.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
@@ -32,6 +33,10 @@
     isDeleting = false;
   }
 </script>
+
+<UserGroupMembersEditor {userGroup}></UserGroupMembersEditor>
+
+<div class="w-2"></div>
 
 <UserGroupEditor {userGroup} mode="update"></UserGroupEditor>
 

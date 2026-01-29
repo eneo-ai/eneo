@@ -185,6 +185,73 @@ export function initSpaces(client) {
         });
         return true;
       }
+    },
+
+    groupMembers: {
+      /**
+       * List all user groups that are members of a space.
+       * @param {{spaceId: string}} params - Space ID
+       * @returns Group members list
+       * @throws {IntricError}
+       * */
+      list: async ({ spaceId }) => {
+        const res = await client.fetch("/api/v1/spaces/{id}/group-members/", {
+          method: "get",
+          params: { path: { id: spaceId } }
+        });
+        return res.items;
+      },
+
+      /**
+       * Add a user group to a space.
+       * @param {{spaceId: string, group: {id: string, role: string}}} params - Space ID and group with role
+       * @returns Added group member
+       * @throws {IntricError}
+       * */
+      add: async ({ spaceId, group }) => {
+        const res = await client.fetch("/api/v1/spaces/{id}/group-members/", {
+          method: "post",
+          params: { path: { id: spaceId } },
+          requestBody: {
+            "application/json": group
+          }
+        });
+        return res;
+      },
+
+      /**
+       * Update the specified user group's role in a space.
+       * @param {{spaceId: string, group: {id: string, role: string}}} params
+       * @returns Updated group member
+       * @throws {IntricError}
+       * */
+      update: async ({ spaceId, group }) => {
+        const group_id = group.id;
+        const role = group.role;
+        const res = await client.fetch("/api/v1/spaces/{id}/group-members/{group_id}/", {
+          method: "patch",
+          params: { path: { id: spaceId, group_id } },
+          requestBody: {
+            "application/json": { role }
+          }
+        });
+        return res;
+      },
+
+      /**
+       * Remove a user group from a space
+       * @param {{spaceId: string, group: {id: string}}} params
+       * @returns {Promise<true>} True if the group was removed
+       * @throws {IntricError} Throws if group can't be removed
+       * */
+      remove: async ({ spaceId, group }) => {
+        const group_id = group.id;
+        await client.fetch("/api/v1/spaces/{id}/group-members/{group_id}/", {
+          method: "delete",
+          params: { path: { id: spaceId, group_id } }
+        });
+        return true;
+      }
     }
   };
 }

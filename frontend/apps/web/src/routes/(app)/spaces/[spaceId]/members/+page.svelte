@@ -9,9 +9,12 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
   import AddMember from "./AddMember.svelte";
+  import AddGroupMember from "./AddGroupMember.svelte";
   import MemberRole from "./MemberRole.svelte";
+  import GroupMemberRole from "./GroupMemberRole.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
+  import { IconGroup } from "@intric/icons/group";
 
   const { user } = getAppContext();
 
@@ -28,6 +31,9 @@
   );
 
   $: viewers = $currentSpace.members.filter((member) => member.role === "viewer");
+
+  $: groupMembers = $currentSpace.group_members?.items ?? [];
+  $: hasGroupMemberPermission = $currentSpace.hasPermission("add", "group_member");
 </script>
 
 <svelte:head>
@@ -37,9 +43,14 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.members()}></Page.Title>
-    {#if $currentSpace.hasPermission("add", "member")}
-      <AddMember></AddMember>
-    {/if}
+    <Page.Flex>
+      {#if hasGroupMemberPermission}
+        <AddGroupMember></AddGroupMember>
+      {/if}
+      {#if $currentSpace.hasPermission("add", "member")}
+        <AddMember></AddMember>
+      {/if}
+    </Page.Flex>
   </Page.Header>
   <Page.Main>
     <Settings.Page>
@@ -99,6 +110,40 @@
             </div>
           </Settings.Row>
         {/if}
+      </Settings.Group>
+
+      <Settings.Group title={m.group_members()}>
+        <Settings.Row title={m.user_groups()} description={m.user_groups_description()}>
+          <div class="flex flex-grow flex-col">
+            {#if groupMembers.length > 0}
+              {#each groupMembers as groupMember (groupMember.id)}
+                <div
+                  class="border-default hover:bg-hover-dimmer flex items-center justify-between gap-4 border-b py-4 pr-4 pl-4"
+                >
+                  <div class="flex items-center gap-2">
+                    <IconGroup class="h-6 w-6 text-secondary" />
+                    <span class="text-primary font-medium">{groupMember.name}</span>
+                  </div>
+                  <span class="text-secondary text-sm">
+                    {groupMember.user_count} {groupMember.user_count === 1 ? m.user() : m.users()}
+                  </span>
+                  <div class="flex-grow"></div>
+                  {#if $currentSpace.hasPermission("edit", "group_member")}
+                    <GroupMemberRole {groupMember}></GroupMemberRole>
+                  {:else}
+                    <span class="text-secondary px-2 capitalize">{groupMember.role}</span>
+                  {/if}
+                </div>
+              {/each}
+            {:else}
+              <div
+                class="border-default text-muted hover:bg-hover-dimmer flex items-center justify-between gap-4 border-b py-4 pr-4 pl-4"
+              >
+                {m.no_group_members_in_space()}
+              </div>
+            {/if}
+          </div>
+        </Settings.Row>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>
