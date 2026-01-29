@@ -76,7 +76,7 @@
     </Dialog.Trigger>
   {:else}
     <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger}>{m.edit()}</Button>
+      <Button variant="outlined" is={trigger}>{m.rename()}</Button>
     </Dialog.Trigger>
   {/if}
 
@@ -84,7 +84,7 @@
     {#if mode === "create"}
       <Dialog.Title>{m.create_new_user_group()}</Dialog.Title>
     {:else}
-      <Dialog.Title>{m.edit_user_group()}</Dialog.Title>
+      <Dialog.Title>{m.rename_user_group()}</Dialog.Title>
     {/if}
 
     <Dialog.Section>

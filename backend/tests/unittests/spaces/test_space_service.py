@@ -33,6 +33,7 @@ def service(actor: MagicMock):
         transcription_model_service=AsyncMock(),
         security_classification_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        user_groups_repo=AsyncMock(),
     )
 
     return service

@@ -68,6 +68,13 @@ class SpaceMember(UserSparse):
     role: SpaceRoleValue
 
 
+class SpaceGroupMember(InDB):
+    """A user group that is a member of a space with a specific role."""
+    name: str
+    role: SpaceRoleValue
+    user_count: int = 0
+
+
 # Apps
 
 
@@ -182,8 +189,9 @@ class SpacePublic(SpaceDashboard):
     transcription_models: list[TranscriptionModelPublic]
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
+    group_members: PaginatedPermissions[SpaceGroupMember]
 
-    default_assistant: DefaultAssistant 
+    default_assistant: DefaultAssistant
 
     available_roles: list[SpaceRole]
     security_classification: Optional[SecurityClassificationPublic]
@@ -290,6 +298,18 @@ class AddSpaceMemberRequest(BaseModel):
 
 
 class UpdateSpaceMemberRequest(BaseModel):
+    role: SpaceRoleValue
+
+
+# Group Members
+
+
+class AddSpaceGroupMemberRequest(BaseModel):
+    id: UUID
+    role: SpaceRoleValue
+
+
+class UpdateSpaceGroupMemberRequest(BaseModel):
     role: SpaceRoleValue
 
 
