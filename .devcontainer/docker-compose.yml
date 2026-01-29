@@ -1,11 +1,11 @@
-# Copyright (c) 2024 Sundsvalls Kommun
+# Copyright (c) 2026 Sundsvalls Kommun
 #
-# Licensed under the MIT License.
-
 version: "3.8"
 services:
   eneo:
-    image: mcr.microsoft.com/devcontainers/python:3.11-bookworm
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: sleep infinity
     networks:
       - eneo
