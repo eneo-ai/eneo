@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -106,7 +106,7 @@ class RunService(BaseModel):
 
 
 class ServiceOutput(BaseModel):
-    output: dict | list | str | bool
+    output: Any
     files: list[FilePublic] = []
 
 
