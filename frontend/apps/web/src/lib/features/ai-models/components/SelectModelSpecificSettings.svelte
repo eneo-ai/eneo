@@ -10,9 +10,8 @@
   // Show reasoning effort for models that support reasoning
   $: showReasoningEffort = selectedModel?.reasoning === true;
 
-  // Show verbosity for models that use LiteLLM or specific models that support it
-  $: showVerbosity =
-    selectedModel?.litellm_model_name || selectedModel?.name?.toLowerCase().includes("gpt-5");
+  // Show verbosity for GPT-5.x models that support it
+  $: showVerbosity = selectedModel?.name?.toLowerCase().includes("gpt-5");
 
   // Check if model supports "none" reasoning effort (GPT-5.x but not plain GPT-5)
   $: supportsNoneReasoning = /gpt-5\.\d/i.test(selectedModel?.name || "");
@@ -78,9 +77,6 @@
       <option value="">Default</option>
       {#if supportsNoneReasoning}
         <option value="none">None</option>
-      {/if}
-      {#if !supportsNoneReasoning}
-        <option value="minimal">Minimal</option>
       {/if}
       <option value="low">Low</option>
       <option value="medium">Medium</option>

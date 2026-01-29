@@ -242,6 +242,19 @@ Under **Admin** → **Integrations** → **Manage webhooks** you can see all act
 
 If webhooks have stopped working, for example after an extended outage where the background job couldn't run, you can click **Renew expired** to manually recreate all expired subscriptions.
 
+### Network Configuration for Webhooks
+
+> **Note:** This section only applies if Eneo is deployed behind an API gateway or reverse proxy that requires authentication.
+
+If your Eneo installation is behind an API gateway (such as WSO2, Kong, or nginx with auth), the webhook endpoints must be configured to allow unauthenticated access:
+
+- `GET /integrations/sharepoint/webhook/` - Subscription validation
+- `POST /integrations/sharepoint/webhook/` - Change notifications
+
+Microsoft cannot provide API keys or bearer tokens with webhook requests. Security is instead maintained via the `clientState` parameter, which is configured through the `SHAREPOINT_WEBHOOK_CLIENT_STATE` environment variable. Eneo validates that all incoming notifications contain this secret before processing them.
+
+If Eneo is directly accessible on a public URL without an authenticating proxy, no additional configuration is needed.
+
 ### Troubleshooting Webhooks
 
 If changes in SharePoint aren't synchronizing:
@@ -249,6 +262,7 @@ If changes in SharePoint aren't synchronizing:
 1. Check webhook status in the admin panel
 2. Verify that Eneo's domain is reachable via HTTPS from the internet
 3. Check that the firewall allows incoming traffic from Microsoft's IP addresses
+4. If using an API gateway, verify that the webhook endpoints are accessible without authentication
 
 ---
 

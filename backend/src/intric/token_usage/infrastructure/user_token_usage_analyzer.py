@@ -5,6 +5,7 @@ from sqlalchemy import func, select, union_all, desc, asc
 
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import AppRuns
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.users_table import Users
@@ -298,6 +299,7 @@ class UserTokenUsageAnalyzer:
                     model_name=model.model_name,
                     model_nickname=model.model_nickname,
                     model_org=model.model_org,
+                    model_provider=model.model_provider,
                     input_token_usage=model.input_token_usage,
                     output_token_usage=model.output_token_usage,
                     request_count=model.request_count,
@@ -321,6 +323,7 @@ class UserTokenUsageAnalyzer:
                 CompletionModels.name.label("model_name"),
                 CompletionModels.nickname.label("model_nickname"),
                 CompletionModels.org.label("model_org"),
+                ModelProviders.name.label("model_provider"),
                 func.sum(Questions.num_tokens_question).label("input_tokens"),
                 func.sum(Questions.num_tokens_answer).label("output_tokens"),
                 func.count(Questions.id).label("request_count"),
@@ -329,6 +332,10 @@ class UserTokenUsageAnalyzer:
             .join(
                 CompletionModels,
                 Questions.completion_model_id == CompletionModels.id,
+            )
+            .outerjoin(
+                ModelProviders,
+                CompletionModels.provider_id == ModelProviders.id,
             )
             .where(Questions.tenant_id == tenant_id)
             .where(Sessions.user_id == user_id)
@@ -339,6 +346,7 @@ class UserTokenUsageAnalyzer:
                 CompletionModels.name,
                 CompletionModels.nickname,
                 CompletionModels.org,
+                ModelProviders.name,
             )
         )
 
@@ -349,6 +357,7 @@ class UserTokenUsageAnalyzer:
                 CompletionModels.name.label("model_name"),
                 CompletionModels.nickname.label("model_nickname"),
                 CompletionModels.org.label("model_org"),
+                ModelProviders.name.label("model_provider"),
                 func.sum(func.coalesce(AppRuns.num_tokens_input, 0)).label(
                     "input_tokens"
                 ),
@@ -361,6 +370,10 @@ class UserTokenUsageAnalyzer:
                 CompletionModels,
                 AppRuns.completion_model_id == CompletionModels.id,
             )
+            .outerjoin(
+                ModelProviders,
+                CompletionModels.provider_id == ModelProviders.id,
+            )
             .where(AppRuns.tenant_id == tenant_id)
             .where(AppRuns.user_id == user_id)
             .where(AppRuns.created_at >= start_date)
@@ -370,6 +383,7 @@ class UserTokenUsageAnalyzer:
                 CompletionModels.name,
                 CompletionModels.nickname,
                 CompletionModels.org,
+                ModelProviders.name,
             )
         )
 
@@ -384,6 +398,7 @@ class UserTokenUsageAnalyzer:
             combined_usage_query.c.model_name,
             combined_usage_query.c.model_nickname,
             combined_usage_query.c.model_org,
+            combined_usage_query.c.model_provider,
             func.sum(combined_usage_query.c.input_tokens).label("input_tokens"),
             func.sum(combined_usage_query.c.output_tokens).label("output_tokens"),
             func.sum(combined_usage_query.c.request_count).label("request_count"),
@@ -392,6 +407,7 @@ class UserTokenUsageAnalyzer:
             combined_usage_query.c.model_name,
             combined_usage_query.c.model_nickname,
             combined_usage_query.c.model_org,
+            combined_usage_query.c.model_provider,
         )
 
         # Execute the query
@@ -408,6 +424,7 @@ class UserTokenUsageAnalyzer:
                         model_name=row.model_name,
                         model_nickname=row.model_nickname,
                         model_org=row.model_org,
+                        model_provider=row.model_provider,
                         input_token_usage=row.input_tokens or 0,
                         output_token_usage=row.output_tokens or 0,
                         request_count=row.request_count or 0,

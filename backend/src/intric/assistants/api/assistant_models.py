@@ -50,6 +50,7 @@ class AssistantType(str, Enum):
 
 class ModelInfo(BaseModel):
     """Information about the model used by the assistant."""
+
     name: str
     token_limit: int
     prompt_tokens: Optional[int] = None
@@ -70,15 +71,20 @@ class TokenEstimateBreakdown(BaseModel):
     prompt: int = Field(description="Tokens used by assistant prompt")
     text: int = Field(description="Tokens used by user input text")
     files: int = Field(description="Total tokens used by all files")
-    file_details: dict[str, int] = Field(default_factory=dict, description="Per-file token counts")
+    file_details: dict[str, int] = Field(
+        default_factory=dict, description="Per-file token counts"
+    )
 
 
 class TokenEstimateResponse(BaseModel):
     """Response model for token usage estimation."""
+
     tokens: int = Field(description="Total token count")
     percentage: float = Field(description="Percentage of context window used")
     limit: int = Field(description="Model's context window limit")
-    breakdown: TokenEstimateBreakdown = Field(description="Token usage breakdown by source")
+    breakdown: TokenEstimateBreakdown = Field(
+        description="Token usage breakdown by source"
+    )
 
 
 # Relationship models
@@ -107,22 +113,34 @@ class AssistantBase(BaseModel):
 class AssistantCreatePublic(AssistantBase):
     space_id: UUID
     prompt: Optional[PromptCreate] = Field(
-        default=None, deprecated=True, description="This field is deprecated and will be ignored"
+        default=None,
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     groups: list[ModelId] = Field(
-        default=[], deprecated=True, description="This field is deprecated and will be ignored"
+        default=[],
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     websites: list[ModelId] = Field(
-        default=[], deprecated=True, description="This field is deprecated and will be ignored"
+        default=[],
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     integration_knowledge_list: list[ModelId] = Field(
-        default=[], deprecated=True, description="This field is deprecated and will be ignored"
+        default=[],
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     mcp_servers: list[ModelId] = Field(
-        default=[], deprecated=True, description="This field is deprecated and will be ignored"
+        default=[],
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     guardrail: Optional[AssistantGuard] = Field(
-        default=None, deprecated=True, description="This field is deprecated and will be ignored"
+        default=None,
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     completion_model: Optional[ModelId] = Field(
         default=None,
@@ -130,10 +148,14 @@ class AssistantCreatePublic(AssistantBase):
         description="This field is deprecated and will be ignored",
     )
     logging_enabled: Optional[bool] = Field(
-        default=None, deprecated=True, description="This field is deprecated and will be ignored"
+        default=None,
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
     completion_model_kwargs: Optional[ModelKwargs] = Field(
-        default=None, deprecated=True, description="This field is deprecated and will be ignored"
+        default=None,
+        deprecated=True,
+        description="This field is deprecated and will be ignored",
     )
 
 
@@ -176,7 +198,9 @@ class AssistantCreate(AssistantBase):
     websites: list[ModelId] = []
     guardrail_active: Optional[bool] = None
     completion_model_id: UUID = Field(
-        validation_alias=AliasChoices(AliasPath("completion_model", "id"), "completion_model_id")
+        validation_alias=AliasChoices(
+            AliasPath("completion_model", "id"), "completion_model_id"
+        )
     )
 
 
@@ -231,6 +255,10 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
         default=None,
         description="Icon ID referencing an uploaded icon",
     )
+    completion_model_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the completion model, or None if not configured",
+    )
 
 
 class AssistantPublic(InDB, ResourcePermissionsMixin):
@@ -245,8 +273,10 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     websites: list[WebsitePublic]
     integration_knowledge_list: list[IntegrationKnowledgePublic]
     mcp_servers: list[dict]  # Will be populated by assembler
-    mcp_tools: list[MCPToolSetting] = Field(default_factory=list)  # Tool-level overrides
-    completion_model: CompletionModelSparse
+    mcp_tools: list[MCPToolSetting] = Field(
+        default_factory=list
+    )  # Tool-level overrides
+    completion_model: Optional[CompletionModelSparse] = None
     published: bool = False
     user: UserSparse
     tools: UseTools

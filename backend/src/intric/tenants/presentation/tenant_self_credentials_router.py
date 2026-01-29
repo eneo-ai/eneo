@@ -42,7 +42,7 @@ router = APIRouter(
     ],
 )
 
-Provider = Literal["openai", "anthropic", "azure", "berget", "gdm", "mistral", "ovhcloud", "vllm"]
+Provider = Literal["openai", "anthropic", "azure", "berget", "gdm", "mistral", "ovhcloud", "gemini", "cohere"]
 
 
 class SetCredentialRequest(BaseModel):

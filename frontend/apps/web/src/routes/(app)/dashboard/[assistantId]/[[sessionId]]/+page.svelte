@@ -2,20 +2,36 @@
   import { Button } from "@intric/ui";
   import { pushState } from "$app/navigation";
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
-  import { fade, fly } from "svelte/transition";
+  import { fade, fly, slide } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
   import { initChatService } from "$lib/features/chat/ChatService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import dayjs from "dayjs";
+  import relativeTime from "dayjs/plugin/relativeTime";
+  dayjs.extend(relativeTime);
 
   let { data } = $props();
 
   const chat = initChatService(data);
 
+  let showHistory = $state(false);
+
   $effect(() => {
     // Re-init if rout param changes
     chat.init(data);
   });
+
+  async function loadConversation(conversation: { id: string; name: string | null }) {
+    const loaded = await chat.loadConversation(conversation);
+    if (loaded) {
+      showHistory = false;
+      pushState(`/dashboard/${chat.partner.id}/${loaded.id}`, {
+        conversation: loaded,
+        tab: "chat"
+      });
+    }
+  }
 </script>
 
 <svelte:head>
@@ -35,7 +51,7 @@
       <h1
         in:fly|global={{
           x: -5,
-          duration: parent ? 300 : 0,
+          duration: 300,
           easing: quadInOut,
           opacity: 0.3
         }}
@@ -57,6 +73,36 @@
       >{m.new_chat()}
     </Button>
   </div>
+
+  {#if chat.loadedConversations.length > 0}
+    <div class="border-default border-b px-3.5">
+      <button
+        class="text-secondary hover:text-primary flex w-full items-center justify-between py-2 text-sm"
+        onclick={() => (showHistory = !showHistory)}
+      >
+        <span>{m.history()} ({chat.loadedConversations.length})</span>
+        <span class="transition-transform" class:rotate-180={showHistory}>▼</span>
+      </button>
+
+      {#if showHistory}
+        <div class="max-h-[40vh] overflow-y-auto pb-2" transition:slide={{ duration: 200 }}>
+          {#each chat.loadedConversations.slice(0, 10) as conversation}
+            <button
+              class="hover:bg-hover-dimmer w-full rounded-lg px-3 py-2 text-left"
+              onclick={() => loadConversation(conversation)}
+            >
+              <div class="truncate text-sm font-medium">
+                {conversation.name || m.untitled()}
+              </div>
+              <div class="text-secondary text-xs">
+                {dayjs(conversation.created_at).fromNow()}
+              </div>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <ConversationView></ConversationView>
 </div>

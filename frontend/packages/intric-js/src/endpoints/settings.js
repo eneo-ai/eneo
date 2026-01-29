@@ -43,6 +43,20 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Update JIT provisioning setting for the tenant
+     * @param {boolean} enabled Whether to enable JIT provisioning (auto-create users on SSO login)
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateProvisioning: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/provisioning", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
     }
   };
 }

@@ -1,8 +1,4 @@
-<!--
-    Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
--->
+<!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script context="module" lang="ts">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
@@ -28,6 +24,14 @@
         tooltip: m.model_tooltip_vision(),
         label: m.model_label_vision(),
         color: "moss"
+      });
+    }
+
+    if ("supports_tool_calling" in model && model.supports_tool_calling) {
+      labels.push({
+        tooltip: m.model_tooltip_tool_calling(),
+        label: m.model_label_tool_calling(),
+        color: "blue"
       });
     }
 

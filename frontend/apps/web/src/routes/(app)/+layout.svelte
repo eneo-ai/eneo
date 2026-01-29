@@ -17,6 +17,7 @@
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { Toaster } from "$lib/components/toast";
 
   export let data;
 
@@ -113,7 +114,7 @@
 
       <JobManagerDropdown></JobManagerDropdown>
       <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu tenantFederationEnabled={data.featureFlags?.tenantFederationEnabled ?? false}></ProfileMenu>
+      <ProfileMenu tenantFederationEnabled={Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation)}></ProfileMenu>
     </nav>
   </header>
 
@@ -121,6 +122,8 @@
     <slot />
   </main>
 </div>
+
+<Toaster />
 
 <style lang="postcss">
   @reference "@intric/ui/styles";

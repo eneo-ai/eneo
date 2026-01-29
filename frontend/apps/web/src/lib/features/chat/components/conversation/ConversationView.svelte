@@ -84,6 +84,12 @@
         ></Message>
       {/each}
     </div>
+  {:else if !chat.hasCompletionModel}
+    <div class="flex flex-grow items-center justify-center">
+      <p class="text-secondary max-w-[50ch] text-center text-sm">
+        {m.no_completion_model_description()}
+      </p>
+    </div>
   {:else if children}
     <div class="flex flex-grow flex-col items-center justify-center">
       {@render children?.()}

@@ -31,7 +31,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = '20251103_consolidated_mcp'
-down_revision = 'e23b168d0080'
+down_revision = 'nullable_app_completion_model'
 branch_labels = None
 depends_on = None
 

@@ -10,10 +10,7 @@ from intric.ai_models.embedding_models.embedding_model import (
 )
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
-from intric.database.tables.ai_models_table import (
-    EmbeddingModels,
-    EmbeddingModelSettings,
-)
+from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.main.exceptions import UniqueException
 from intric.main.models import IdAndName
 
@@ -23,26 +20,24 @@ class AdminEmbeddingModelsService:
         self.session = session
         self.delegate = BaseRepositoryDelegate(session, EmbeddingModels, EmbeddingModelLegacy)
 
-    async def _get_model_settings(self, id: UUID, tenant_id: UUID):
-        query = sa.select(EmbeddingModelSettings).where(
-            EmbeddingModelSettings.tenant_id == tenant_id,
-            EmbeddingModelSettings.embedding_model_id == id,
-        )
-        return await self.session.scalar(query)
-
-    async def _get_models_settings_mapper(self, tenant_id: UUID):
-        query = sa.select(EmbeddingModelSettings).where(
-            EmbeddingModelSettings.tenant_id == tenant_id
-        )
-        settings = await self.session.scalars(query)
-        return {s.embedding_model_id: s.is_org_enabled for s in settings}
-
     async def get_model(self, id: UUID, tenant_id: UUID) -> EmbeddingModelLegacy:
-        model = await self.delegate.get(id)
+        # Query the model with tenant filtering
+        stmt = sa.select(EmbeddingModels).where(
+            EmbeddingModels.id == id,
+            sa.or_(
+                EmbeddingModels.tenant_id.is_(None),
+                EmbeddingModels.tenant_id == tenant_id
+            )
+        )
+        result = await self.session.execute(stmt)
+        db_model = result.scalar_one_or_none()
 
-        settings = await self._get_model_settings(id, tenant_id)
-        if settings:
-            model.is_org_enabled = settings.is_org_enabled
+        if db_model is None:
+            from intric.main.exceptions import NotFoundException
+            raise NotFoundException()
+
+        model = EmbeddingModelLegacy.model_validate(db_model)
+        model.is_org_enabled = db_model.is_enabled
         return model
 
     async def get_model_by_name(self, name: str) -> EmbeddingModelLegacy:
@@ -71,12 +66,23 @@ class AdminEmbeddingModelsService:
         if id_list is not None:
             stmt = stmt.where(EmbeddingModels.id.in_(id_list))
 
-        models = await self.delegate.get_models_from_query(stmt)
+        # Filter to tenant's models
+        if tenant_id is not None:
+            stmt = stmt.where(
+                sa.or_(
+                    EmbeddingModels.tenant_id.is_(None),
+                    EmbeddingModels.tenant_id == tenant_id
+                )
+            )
 
-        settings_mapper = await self._get_models_settings_mapper(tenant_id)
+        result = await self.session.execute(stmt)
+        db_models = result.scalars().all()
 
-        for model in models:
-            model.is_org_enabled = settings_mapper.get(model.id, False)
+        models = []
+        for db_model in db_models:
+            model = EmbeddingModelLegacy.model_validate(db_model)
+            model.is_org_enabled = db_model.is_enabled
+            models.append(model)
 
         return models
 
@@ -93,32 +99,16 @@ class AdminEmbeddingModelsService:
         embedding_model_id: UUID,
         tenant_id: UUID,
     ):
-        query = sa.select(EmbeddingModelSettings).where(
-            EmbeddingModelSettings.tenant_id == tenant_id,
-            EmbeddingModelSettings.embedding_model_id == embedding_model_id,
-        )
-        settings = await self.session.scalar(query)
-
         try:
-            if settings:
-                query = (
-                    sa.update(EmbeddingModelSettings)
-                    .values(is_org_enabled=is_org_enabled)
-                    .where(
-                        EmbeddingModelSettings.tenant_id == tenant_id,
-                        EmbeddingModelSettings.embedding_model_id == embedding_model_id,
-                    )
-                    .returning(EmbeddingModelSettings)
-                )
-                return await self.session.scalar(query)
+            # Settings are now stored directly on the model table
             query = (
-                sa.insert(EmbeddingModelSettings)
-                .values(
-                    is_org_enabled=is_org_enabled,
-                    embedding_model_id=embedding_model_id,
-                    tenant_id=tenant_id,
+                sa.update(EmbeddingModels)
+                .values(is_enabled=is_org_enabled)
+                .where(
+                    EmbeddingModels.id == embedding_model_id,
+                    EmbeddingModels.tenant_id == tenant_id,
                 )
-                .returning(EmbeddingModelSettings)
+                .returning(EmbeddingModels)
             )
             return await self.session.scalar(query)
         except IntegrityError as e:
