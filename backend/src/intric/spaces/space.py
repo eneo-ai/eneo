@@ -159,7 +159,10 @@ class Space:
         )
 
         if not sorted_embedding_models:
-            raise NotFoundException("No embedding models found in the space")
+            raise BadRequestException(
+                f"Cannot perform operation: Space '{self.name}' has no embedding models configured. "
+                "Please configure at least one embedding model in the space settings."
+            )
 
         return sorted_embedding_models[0]  # type: ignore
 
@@ -178,7 +181,10 @@ class Space:
         )
 
         if not sorted_completion_models:
-            raise NotFoundException("No completion models found in the space")
+            raise BadRequestException(
+                f"Cannot perform operation: Space '{self.name}' has no completion models configured. "
+                "Please configure at least one completion model in the space settings."
+            )
 
         return sorted_completion_models[0]  # type: ignore
 

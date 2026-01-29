@@ -139,7 +139,6 @@
             // Integration knowledge - not yet supported
             blobs = [];
           }
-          console.log(`Fetched ${blobs.length} blobs for ${type} ${id}`);
           blobCache.set(id, blobs);
           blobCache = blobCache;
         } catch (error) {
@@ -363,7 +362,12 @@
           {:else}
             <IconCancel />
           {/if}
-          <span class="truncate px-2">{collection.name}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(collection.id, "collection", collection)}
+          >
+            {collection.name}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
@@ -452,7 +456,12 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{formatWebsiteName(website)}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(website.id, "website", website)}
+          >
+            {formatWebsiteName(website)}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
           {#if pagesCrawled && pagesCrawled > 0}
@@ -560,7 +569,12 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{collection.name}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(collection.id, "collection", collection)}
+          >
+            {collection.name}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
@@ -569,7 +583,7 @@
             </span>
           {:else}
             <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              Empty
+              {m.empty()}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -649,7 +663,12 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{formatWebsiteName(website)}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(website.id, "website", website)}
+          >
+            {formatWebsiteName(website)}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
           {#if pagesCrawled && pagesCrawled > 0}

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.spaces.space import UNAUTHORIZED_EXCEPTION_MESSAGE, Space, SpaceRoleValue
 
 
@@ -117,14 +117,15 @@ def test_get_default_model(space: Space):
     space.completion_models = [default_model]
     assert space.get_default_completion_model() is not None
 
-    # Disable access
+    # Disable access - falls back to get_latest_completion_model which raises BadRequestException
     default_model.can_access = False
-    with pytest.raises(NotFoundException):
+    with pytest.raises(BadRequestException):
         space.get_default_completion_model()
 
     non_default_model = MagicMock()
     non_default_model.is_org_default = False
     non_default_model.can_access = True
+    non_default_model.created_at = datetime.now()
     space.completion_models = [non_default_model]
     assert space.get_default_completion_model() is not None
 
