@@ -1,13 +1,15 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Dialog } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
+  import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import type { ModelProviderPublic } from "@intric/intric-js";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
   import ProviderStatusBadge from "../components/ProviderStatusBadge.svelte";
-  import { Plus, ChevronRight } from "lucide-svelte";
+  import { ChevronRight, Search, LayoutGrid } from "lucide-svelte";
+  import { getIntric } from "$lib/core/Intric";
 
   export let providers: ModelProviderPublic[] = [];
   export let selectedProviderId: string | null = null;
@@ -15,6 +17,8 @@
   const dispatch = createEventDispatcher<{
     select: { providerId: string | null; isNew: boolean; providerType: string };
   }>();
+
+  const intric = getIntric();
 
   // Provider types available for creation
   // Note: type values must be LiteLLM-compatible provider types
@@ -28,12 +32,96 @@
     { type: "hosted_vllm", label: "vLLM", description: "Self-hosted vLLM inference server" }
   ] as const;
 
+  const featuredTypes = new Set(providerTypes.map((p) => p.type));
+
   type ViewMode = "select" | "create";
   let viewMode: ViewMode = providers.length > 0 ? "select" : "create";
 
   // Selection state
   let hoveredProvider: string | null = null;
   let selectedNewProviderType: string | null = null;
+
+  const providerOrigins: Record<string, string> = {
+    openai: "🇺🇸 USA",
+    azure: "🇺🇸 USA",
+    anthropic: "🇺🇸 USA",
+    gemini: "🇺🇸 USA",
+    cohere: "🇨🇦 Canada",
+    mistral: "🇫🇷 France",
+    hosted_vllm: "",
+    deepseek: "🇨🇳 China",
+    ai21: "🇮🇱 Israel",
+    aleph_alpha: "🇩🇪 Germany",
+    amazon: "🇺🇸 USA",
+    bedrock: "🇺🇸 USA",
+    cerebras: "🇺🇸 USA",
+    cloudflare: "🇺🇸 USA",
+    databricks: "🇺🇸 USA",
+    fireworks_ai: "🇺🇸 USA",
+    friendliai: "🇰🇷 South Korea",
+    groq: "🇺🇸 USA",
+    huggingface: "🇺🇸 USA",
+    nscale: "🇬🇧 UK",
+    nvidia_nim: "🇺🇸 USA",
+    ollama: "",
+    perplexity: "🇺🇸 USA",
+    replicate: "🇺🇸 USA",
+    sambanova: "🇺🇸 USA",
+    together_ai: "🇺🇸 USA",
+    vertex_ai: "🇺🇸 USA",
+    voyage: "🇺🇸 USA",
+    xai: "🇺🇸 USA",
+    zhipuai: "🇨🇳 China",
+    moonshot: "🇨🇳 China",
+    baidu: "🇨🇳 China",
+    volcengine: "🇨🇳 China",
+  };
+
+  // Browse all providers dialog
+  const browseDialogOpen = writable(false);
+  let allProviders: { type: string; label: string; origin: string }[] = [];
+  let searchQuery = "";
+  let loadingCapabilities = false;
+  let capabilitiesLoaded = false;
+
+  $: filteredProviders = searchQuery
+    ? allProviders.filter((p) => p.label.toLowerCase().includes(searchQuery.toLowerCase()))
+    : allProviders;
+
+  async function openBrowseDialog() {
+    browseDialogOpen.set(true);
+    if (!capabilitiesLoaded) {
+      loadingCapabilities = true;
+      try {
+        const capabilities = await intric.modelProviders.getCapabilities();
+        allProviders = Object.entries(capabilities)
+          .filter(([type]) => !featuredTypes.has(type))
+          .map(([type]) => ({
+            type,
+            label: formatProviderName(type),
+            origin: providerOrigins[type] ?? ""
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+        capabilitiesLoaded = true;
+      } catch {
+        // Silently fail
+      } finally {
+        loadingCapabilities = false;
+      }
+    }
+  }
+
+  function selectFromBrowse(type: string) {
+    browseDialogOpen.set(false);
+    searchQuery = "";
+    selectNewProviderType(type);
+  }
+
+  function formatProviderName(type: string): string {
+    return type
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
 
   function selectExistingProvider(provider: ModelProviderPublic) {
     dispatch("select", {
@@ -147,7 +235,12 @@
             </div>
 
             <div class="flex-1 min-w-0">
-              <span class="font-medium text-primary">{label}</span>
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-primary">{label}</span>
+                {#if providerOrigins[type]}
+                  <span class="inline-flex items-center rounded-full bg-surface-dimmer px-2 py-0.5 text-xs text-muted">{providerOrigins[type]}</span>
+                {/if}
+              </div>
               <p class="text-sm text-muted mt-0.5">{description}</p>
             </div>
 
@@ -161,7 +254,82 @@
             </div>
           </button>
         {/each}
+        <!-- Browse all providers card -->
+        <button
+          type="button"
+          class="group flex items-start gap-3 rounded-lg border border-dashed p-4 text-left transition-all duration-150
+            focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80 focus-visible:ring-offset-0
+            border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer"
+          on:click={openBrowseDialog}
+        >
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-dimmer text-muted transition-transform duration-150 group-hover:scale-105">
+            <LayoutGrid class="h-5 w-5" />
+          </div>
+
+          <div class="flex-1 min-w-0">
+            <span class="font-medium text-primary">{m.more_providers()}</span>
+            <p class="text-sm text-muted mt-0.5">{m.browse_all_providers_description()}</p>
+          </div>
+        </button>
       </div>
     </div>
   {/if}
 </div>
+
+<!-- Browse All Providers Dialog -->
+<Dialog.Root openController={browseDialogOpen}>
+  <Dialog.Content width="large" form>
+    <Dialog.Title>
+      {m.more_providers()}
+    </Dialog.Title>
+
+    <Dialog.Section class="flex flex-col gap-4">
+      <div class="relative">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+        <input
+          type="text"
+          bind:value={searchQuery}
+          placeholder={m.search_providers()}
+          class="w-full rounded-lg border border-dimmer bg-surface pl-9 pr-3 py-2 text-sm
+            placeholder:text-muted focus:outline-none focus:border-accent-default focus:ring-1 focus:ring-accent-default/80"
+        />
+      </div>
+
+      {#if loadingCapabilities}
+        <div class="flex items-center justify-center py-12">
+          <div class="h-6 w-6 animate-spin rounded-full border-2 border-accent-default border-t-transparent"></div>
+        </div>
+      {:else if filteredProviders.length === 0}
+        <p class="text-sm text-muted text-center py-8">{m.no_providers_found()}</p>
+      {:else}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+          {#each filteredProviders as { type, label, origin }}
+            <button
+              type="button"
+              class="group flex items-center gap-3 rounded-lg border p-3 text-left transition-all duration-150
+                focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80
+                border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer"
+              on:click={() => selectFromBrowse(type)}
+            >
+              <div class="transition-transform duration-150 group-hover:scale-105">
+                <ProviderGlyph {type} size="md" />
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-primary text-sm">{label}</span>
+                  {#if origin}
+                    <span class="inline-flex items-center rounded-full bg-surface-dimmer px-1.5 py-0.5 text-xs text-muted leading-none">{origin}</span>
+                  {/if}
+                </div>
+                <p class="text-xs text-muted font-mono">{type}</p>
+              </div>
+
+              <ChevronRight class="h-4 w-4 text-muted group-hover:text-primary transition-colors" />
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </Dialog.Section>
+  </Dialog.Content>
+</Dialog.Root>

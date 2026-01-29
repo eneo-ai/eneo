@@ -85,7 +85,8 @@
       await invalidate("admin:model-providers:load");
       $showDeleteConfirm = false;
     } catch (e: any) {
-      deleteError = e.message || m.failed_to_delete_model();
+      const msg = e.message || "";
+      deleteError = msg.includes("MODEL_IN_USE") ? m.model_in_use_error() : (msg || m.failed_to_delete_model());
       deleteErrorStatus = typeof e?.status === "number" ? e.status : null;
     } finally {
       isDeleting = false;

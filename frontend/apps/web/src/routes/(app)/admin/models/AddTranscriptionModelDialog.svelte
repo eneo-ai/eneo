@@ -10,6 +10,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { TriangleAlert } from "lucide-svelte";
 
   export let openController: Writable<boolean>;
   export let providers: any[] = [];
@@ -203,6 +204,38 @@
   }
 
   $: requiresEndpoint = providerType === "azure";
+
+  // Dynamic provider capabilities from LiteLLM
+  let capabilities: Record<string, { modes: string[], models: Record<string, string[]> }> = {};
+  async function loadCapabilities() {
+    try {
+      capabilities = await intric.modelProviders.getCapabilities();
+    } catch {
+      // Silently fail — warning just won't show
+    }
+  }
+  $: if ($openController) loadCapabilities();
+
+  // Available transcription models for the selected provider
+  $: availableModels = (capabilities[selectedProviderType]?.models?.transcription ?? []).map((m: any) => typeof m === "string" ? m : m.name) as string[];
+
+  function selectModel(model: string) {
+    modelName = model;
+    if (!displayName) {
+      displayName = model;
+    }
+  }
+
+  $: selectedProviderType = (() => {
+    if (showProviderForm) return providerType;
+    const p = providers.find(p => p.id === selectedProviderId);
+    return p?.provider_type ?? "";
+  })();
+
+  $: providerHasNoSupport = selectedProviderType !== ""
+    && Object.keys(capabilities).length > 0
+    && selectedProviderType in capabilities
+    && !capabilities[selectedProviderType]?.modes?.includes("transcription");
 </script>
 
 <Dialog.Root {openController}>
@@ -229,6 +262,16 @@
             </Select.Options>
           </Select.Root>
         </div>
+
+        {#if providerHasNoSupport}
+          <div class="flex items-start gap-3 rounded-lg border border-label-default bg-label-dimmer px-4 py-3 text-sm label-warning">
+            <TriangleAlert class="h-5 w-5 flex-shrink-0 text-label-stronger mt-0.5" />
+            <div>
+              <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType: selectedProviderType })}</p>
+              <p class="text-label-default mt-0.5">{m.provider_no_support_description({ modelType: "transcription" })}</p>
+            </div>
+          </div>
+        {/if}
 
         <!-- Provider Creation Form (shown when "+ Create New Provider" is selected) -->
         {#if showProviderForm}
@@ -330,6 +373,26 @@
         <!-- Model Fields (always shown) -->
         {#if !showProviderForm || (showProviderForm && providerName && apiKey)}
           <div class="flex flex-col gap-4">
+            {#if availableModels.length > 0}
+              <div class="flex flex-col gap-2">
+                <span class="text-sm font-medium">{m.suggested_models()}</span>
+                <div class="flex flex-wrap gap-2">
+                  {#each availableModels as model}
+                    <button
+                      type="button"
+                      class="rounded-full border px-3 py-1.5 text-sm transition-all duration-150
+                        {modelName === model
+                          ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
+                          : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}"
+                      on:click={() => selectModel(model)}
+                    >
+                      {model}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
             <div class="flex flex-col gap-2">
               <label for="model-name" class="text-sm font-medium">Model Identifier</label>
               <Input.Text
@@ -339,7 +402,7 @@
                 required
               />
               <p class="text-muted-foreground text-xs">
-                Enter the exact model identifier from your provider
+                Enter the exact model identifier or select one above
               </p>
             </div>
 

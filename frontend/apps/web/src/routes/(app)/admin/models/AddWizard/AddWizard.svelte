@@ -9,7 +9,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { Check, Loader2 } from "lucide-svelte";
+  import { Check, Loader2, AlertTriangle } from "lucide-svelte";
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
   import StepModels from "./StepModels.svelte";
@@ -77,6 +77,11 @@
       // Coming from "Add Model" button on a provider - skip to step 3
       $wizardData.selectedProviderId = preSelectedProviderId;
       $wizardData.isCreatingNewProvider = false;
+      // Resolve provider type from the providers list
+      const matched = providers.find(p => p.id === preSelectedProviderId);
+      if (matched?.provider_type) {
+        $wizardData.selectedProviderType = matched.provider_type;
+      }
       $currentStep = 3;
     }
   }
@@ -153,7 +158,12 @@
 
   // Handle wizard completion
   let isSubmitting = false;
+  let isValidating = false;
   let error: string | null = null;
+
+  // Validation state — when set, show confirmation prompt instead of creating
+  let pendingValidationWarnings: string[] = [];
+  let pendingModelsToCreate: typeof $wizardData.models = [];
 
   async function handleComplete(event: CustomEvent<{ skip: boolean }>) {
     if (event.detail.skip) {
@@ -184,6 +194,69 @@
         throw new Error(m.add_at_least_one_model());
       }
 
+      // Validate models before creating them
+      isValidating = true;
+      const validationWarnings: string[] = [];
+      for (const model of modelsToCreate) {
+        try {
+          const result = await intric.modelProviders.validateModel(
+            { id: providerId },
+            { model_name: model.name, model_type: modelType }
+          );
+          if (!result.success && result.error) {
+            validationWarnings.push(`${model.name}: ${result.error}`);
+          }
+        } catch {
+          // If validation endpoint itself fails, skip silently
+        }
+      }
+      isValidating = false;
+
+      if (validationWarnings.length > 0) {
+        // Pause and ask user — store state for "create anyway"
+        pendingValidationWarnings = validationWarnings;
+        pendingModelsToCreate = modelsToCreate;
+        isSubmitting = false;
+        return;
+      }
+
+      // All models validated — create them
+      await createModels(modelsToCreate, providerId);
+      return;
+    } catch (e: any) {
+      error = e.message || m.failed_to_create_model();
+      toast.error(m.failed_to_create_model());
+    } finally {
+      isSubmitting = false;
+      isValidating = false;
+    }
+  }
+
+  async function handleCreateAnyway() {
+    error = null;
+    isSubmitting = true;
+    const models = pendingModelsToCreate;
+    const providerId = $wizardData.selectedProviderId;
+    pendingValidationWarnings = [];
+    pendingModelsToCreate = [];
+
+    try {
+      if (!providerId) throw new Error(m.no_provider_selected());
+      await createModels(models, providerId);
+    } catch (e: any) {
+      error = e.message || m.failed_to_create_model();
+      toast.error(m.failed_to_create_model());
+    } finally {
+      isSubmitting = false;
+    }
+  }
+
+  function handleGoBackFromValidation() {
+    pendingValidationWarnings = [];
+    pendingModelsToCreate = [];
+  }
+
+  async function createModels(modelsToCreate: typeof $wizardData.models, providerId: string) {
       // Create models based on type
       for (const model of modelsToCreate) {
         if (modelType === "completion") {
@@ -191,6 +264,7 @@
             provider_id: providerId,
             name: model.name,
             display_name: model.displayName,
+            family: model.family ?? "openai",
             token_limit: model.tokenLimit ?? 128000,
             vision: model.vision ?? false,
             reasoning: model.reasoning ?? false,
@@ -213,6 +287,7 @@
             provider_id: providerId,
             name: model.name,
             display_name: model.displayName,
+            family: model.family ?? "openai",
             hosting: model.hosting ?? "swe",
             is_active: true
           });
@@ -226,12 +301,6 @@
       toast.success(modelCount === 1 ? m.model_created_success() : m.models_created_success({ count: modelCount }));
 
       closeWizard();
-    } catch (e: any) {
-      error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
-    } finally {
-      isSubmitting = false;
-    }
   }
 
   function closeWizard() {
@@ -251,6 +320,8 @@
       models: []
     };
     error = null;
+    pendingValidationWarnings = [];
+    pendingModelsToCreate = [];
   }
 
   function handleCancel() {
@@ -320,6 +391,23 @@
           </div>
         {/if}
 
+        {#if pendingValidationWarnings.length > 0}
+          <!-- Validation warning — ask user to go back or create anyway -->
+          <div class="flex flex-col gap-4">
+            <div class="flex items-start gap-3 rounded-lg border border-warning-default/30 bg-warning-dimmer/50 p-4">
+              <AlertTriangle class="h-5 w-5 text-warning-default flex-shrink-0 mt-0.5" />
+              <div class="flex-1">
+                <p class="text-sm font-medium text-warning-stronger">{m.model_validation_warning_title()}</p>
+                <ul class="mt-2 space-y-1">
+                  {#each pendingValidationWarnings as warning}
+                    <li class="text-sm text-warning-default">{warning}</li>
+                  {/each}
+                </ul>
+              </div>
+            </div>
+          </div>
+        {:else}
+
         <!-- Step Content - Grid overlay technique for smooth crossfade without jumping -->
         <div class="grid min-h-[380px] items-start overflow-hidden" style="grid-template: 1fr / 1fr;">
           {#key $currentStep}
@@ -361,24 +449,40 @@
           </div>
         {/key}
       </div>
+        {/if}
     </Dialog.Section>
 
     <!-- Footer with visual separation -->
     <Dialog.Controls class="border-t border-dimmer pt-4">
-      <Button variant="outlined" on:click={handleCancel} class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">{m.cancel()}</Button>
-
-      {#if $currentStep === 3}
+      {#if pendingValidationWarnings.length > 0}
+        <Button variant="outlined" on:click={handleGoBackFromValidation}>{m.back()}</Button>
         <Button
           variant="primary"
-          on:click={() => handleComplete(new CustomEvent("complete", { detail: { skip: false } }))}
-          disabled={isSubmitting || !canFinishModels}
-          class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+          on:click={handleCreateAnyway}
+          disabled={isSubmitting}
+          class="gap-2"
         >
           {#if isSubmitting}
             <Loader2 class="h-4 w-4 animate-spin" />
           {/if}
-          {isSubmitting ? m.creating() : m.finish()}
+          {isSubmitting ? m.creating() : m.create_anyway()}
         </Button>
+      {:else}
+        <Button variant="outlined" on:click={handleCancel} class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">{m.cancel()}</Button>
+
+        {#if $currentStep === 3}
+          <Button
+            variant="primary"
+            on:click={() => handleComplete(new CustomEvent("complete", { detail: { skip: false } }))}
+            disabled={isSubmitting || isValidating || !canFinishModels}
+            class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+          >
+            {#if isSubmitting || isValidating}
+              <Loader2 class="h-4 w-4 animate-spin" />
+            {/if}
+            {isValidating ? m.validating_models() : isSubmitting ? m.creating() : m.finish()}
+          </Button>
+        {/if}
       {/if}
     </Dialog.Controls>
   </Dialog.Content>

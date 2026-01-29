@@ -36,10 +36,37 @@
     }
 
     if (model.hosting !== null) {
+      const hostingColorMap: Record<string, Label.LabelColor> = {
+        usa: "orange",
+        eu: "green",
+        swe: "green",
+        fra: "green",
+        deu: "green",
+        gbr: "green",
+        chn: "red",
+        can: "blue",
+        isr: "blue",
+        kor: "blue",
+        jpn: "blue",
+      };
+      const hostingNameMap: Record<string, () => string> = {
+        usa: m.hosting_usa,
+        eu: m.hosting_eu,
+        swe: m.hosting_swe,
+        chn: m.hosting_chn,
+        can: m.hosting_can,
+        gbr: m.hosting_gbr,
+        isr: m.hosting_isr,
+        kor: m.hosting_kor,
+        deu: m.hosting_deu,
+        fra: m.hosting_fra,
+        jpn: m.hosting_jpn,
+      };
+      const hostingName = hostingNameMap[model.hosting]?.() ?? model.hosting.toUpperCase();
       labels.push({
-        tooltip: m.model_tooltip_hosting(),
+        tooltip: `${m.model_tooltip_hosting()}: ${hostingName}`,
         label: model.hosting.toUpperCase(),
-        color: model.hosting === "usa" ? "orange" : "green"
+        color: hostingColorMap[model.hosting] ?? "gray"
       });
     }
 

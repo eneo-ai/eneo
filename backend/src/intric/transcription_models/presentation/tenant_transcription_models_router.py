@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelFamily, ModelStability
+from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.transcription_models.presentation.transcription_model_models import TranscriptionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -23,6 +23,7 @@ class TenantTranscriptionModelCreate(BaseModel):
     )
     display_name: str = Field(..., description="User-friendly display name")
     hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
+    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -81,7 +82,7 @@ async def create_tenant_transcription_model(
         name=model_create.display_name,  # User-friendly display name
         model_name=model_create.name,  # Actual model name from provider
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=ModelFamily.OPEN_AI.value,
+        family=model_create.family,
         hosting=model_create.hosting,
         org=None,
         stability=ModelStability.STABLE.value,
@@ -177,7 +178,7 @@ async def delete_tenant_transcription_model(
     """Delete a tenant-specific transcription model."""
     from intric.database.tables.ai_models_table import TranscriptionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
+    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(TranscriptionModels).where(
@@ -195,7 +196,11 @@ async def delete_tenant_transcription_model(
         raise UnauthorizedException("Cannot delete global models")
 
     # Delete the model (settings are now on the model itself)
-    await session.delete(model)
-    await session.commit()
+    try:
+        await session.delete(model)
+        await session.commit()
+    except sa.exc.IntegrityError:
+        await session.rollback()
+        raise BadRequestException("MODEL_IN_USE")
 
     return {"success": True}

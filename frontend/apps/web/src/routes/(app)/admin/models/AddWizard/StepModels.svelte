@@ -4,18 +4,49 @@
   import { Button, Input } from "@intric/ui";
   import { createEventDispatcher, onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus } from "lucide-svelte";
+  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
+  import { getIntric } from "$lib/core/Intric";
+
+  const intric = getIntric();
 
   // Hosting location options
   const hostingOptions = [
     { value: "swe", label: m.hosting_swe() },
     { value: "eu", label: m.hosting_eu() },
-    { value: "usa", label: m.hosting_usa() }
+    { value: "usa", label: m.hosting_usa() },
+    { value: "chn", label: m.hosting_chn() },
+    { value: "can", label: m.hosting_can() },
+    { value: "gbr", label: m.hosting_gbr() },
+    { value: "isr", label: m.hosting_isr() },
+    { value: "kor", label: m.hosting_kor() },
+    { value: "deu", label: m.hosting_deu() },
+    { value: "fra", label: m.hosting_fra() },
+    { value: "jpn", label: m.hosting_jpn() }
   ] as const;
+
+  // Default hosting region per provider type
+  const providerDefaultHosting: Record<string, string> = {
+    openai: "usa",
+    anthropic: "usa",
+    gemini: "usa",
+    google: "usa",
+    cohere: "can",
+    mistral: "fra",
+    deepseek: "chn",
+    ai21: "isr",
+    friendliai: "kor",
+    aleph_alpha: "deu",
+    nscale: "gbr",
+    zhipuai: "chn",
+    moonshot: "chn",
+    baidu: "chn",
+    volcengine: "chn",
+  };
 
   // Auto-focus first input on mount
   onMount(() => {
+    loadCapabilities();
     setTimeout(() => {
       const input = document.getElementById("model-name") as HTMLInputElement;
       input?.focus();
@@ -42,75 +73,103 @@
     back: void;
   }>();
 
-  // Model suggestions based on provider type
-  const modelSuggestions: Record<string, Record<string, Array<{ name: string; displayName: string; tokenLimit?: number; vision?: boolean; reasoning?: boolean }>>> = {
-    openai: {
-      completion: [
-        { name: "gpt-5.2", displayName: "GPT-5.2", tokenLimit: 200000, vision: true },
-        { name: "gpt-5.1", displayName: "GPT-5.1", tokenLimit: 200000, vision: true, reasoning: true },
-        { name: "gpt-5-mini", displayName: "GPT-5 Mini", tokenLimit: 128000, vision: true },
-        { name: "gpt-4o", displayName: "GPT-4o", tokenLimit: 128000, vision: true },
-        { name: "gpt-4o-mini", displayName: "GPT-4o Mini", tokenLimit: 128000, vision: true }
-      ],
-      embedding: [
-        { name: "text-embedding-3-large", displayName: "Text Embedding 3 Large" },
-        { name: "text-embedding-3-small", displayName: "Text Embedding 3 Small" },
-        { name: "text-embedding-ada-002", displayName: "Ada 002" }
-      ],
-      transcription: [
-        { name: "whisper-1", displayName: "Whisper" }
-      ]
-    },
-    anthropic: {
-      completion: [
-        { name: "claude-opus-4-5-20251101", displayName: "Claude Opus 4.5", tokenLimit: 200000, vision: true, reasoning: true },
-        { name: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4", tokenLimit: 200000, vision: true },
-        { name: "claude-3-7-sonnet-20250219", displayName: "Claude 3.7 Sonnet", tokenLimit: 200000, vision: true, reasoning: true },
-        { name: "claude-3-5-sonnet-20241022", displayName: "Claude 3.5 Sonnet", tokenLimit: 200000, vision: true },
-        { name: "claude-3-5-haiku-20241022", displayName: "Claude 3.5 Haiku", tokenLimit: 200000, vision: true }
-      ],
-      embedding: [],
-      transcription: []
-    },
-    gemini: {
-      completion: [
-        { name: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", tokenLimit: 1048576, vision: true, reasoning: true },
-        { name: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", tokenLimit: 1048576, vision: true, reasoning: true },
-        { name: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash", tokenLimit: 1048576, vision: true },
-        { name: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro", tokenLimit: 2097152, vision: true },
-        { name: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash", tokenLimit: 1048576, vision: true }
-      ],
-      embedding: [
-        { name: "text-embedding-004", displayName: "Text Embedding 004" }
-      ],
-      transcription: []
-    },
-    cohere: {
-      completion: [
-        { name: "command-r-plus", displayName: "Command R+", tokenLimit: 128000 },
-        { name: "command-r", displayName: "Command R", tokenLimit: 128000 }
-      ],
-      embedding: [
-        { name: "embed-english-v3.0", displayName: "Embed English v3" },
-        { name: "embed-multilingual-v3.0", displayName: "Embed Multilingual v3" }
-      ],
-      transcription: []
-    },
-    mistral: {
-      completion: [
-        { name: "mistral-large-latest", displayName: "Mistral Large", tokenLimit: 128000 },
-        { name: "mistral-medium-latest", displayName: "Mistral Medium", tokenLimit: 32000 },
-        { name: "mistral-small-latest", displayName: "Mistral Small", tokenLimit: 32000 }
-      ],
-      embedding: [
-        { name: "mistral-embed", displayName: "Mistral Embed" }
-      ],
-      transcription: []
-    }
+  // LiteLLM mode mapping
+  const modeMap: Record<string, string> = {
+    completion: "completion",
+    embedding: "embedding",
+    transcription: "transcription",
   };
 
-  // Get suggestions for current provider and model type
-  $: suggestions = modelSuggestions[providerType]?.[modelType] || [];
+  // Model info from capabilities API
+  interface ModelInfo {
+    name: string;
+    max_input_tokens?: number;
+    max_output_tokens?: number;
+    supports_vision?: boolean;
+    supports_function_calling?: boolean;
+    supports_reasoning?: boolean;
+    output_vector_size?: number;
+  }
+
+  // Dynamic capabilities from LiteLLM
+  let capabilities: Record<string, { modes: string[], models: Record<string, ModelInfo[]> }> = {};
+  async function loadCapabilities() {
+    try {
+      capabilities = await intric.modelProviders.getCapabilities();
+    } catch {
+      // Silently fail — fall back to no suggestions
+    }
+  }
+
+  // Providers that need live model listing from their API (not LiteLLM static data)
+  const liveListProviders = new Set(["vllm"]);
+
+  // Providers where LiteLLM names don't match user input (e.g. Azure uses deployment names)
+  const noSuggestionsProviders = new Set(["azure"]);
+
+  // Live models fetched from the provider's own API
+  let liveModels: ModelInfo[] = [];
+  let liveModelsLoaded = false;
+  let liveModelsError = "";
+  async function loadLiveModels() {
+    if (!providerId || liveModelsLoaded) return;
+    liveModelsError = "";
+    try {
+      const result = await intric.modelProviders.listModels({ id: providerId });
+      if (result && Array.isArray(result) && result.length > 0 && result[0]?.error) {
+        liveModelsError = result[0].error;
+      } else if (result && Array.isArray(result)) {
+        liveModels = result.map((m: any) => ({
+          name: m.model ? `${m.name} (${m.model})` : m.name,
+          max_input_tokens: undefined,
+          max_output_tokens: undefined,
+          supports_vision: false,
+          supports_reasoning: false,
+        }));
+      }
+    } catch {
+      liveModelsError = "Could not fetch models from provider";
+    }
+    liveModelsLoaded = true;
+  }
+  $: if (liveListProviders.has(providerType) && providerId) loadLiveModels();
+
+  // All models: live from provider API, static from LiteLLM, or none for Azure
+  $: allModels = noSuggestionsProviders.has(providerType)
+    ? []
+    : liveListProviders.has(providerType)
+      ? liveModels
+      : (capabilities[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[];
+
+  // Top 4 as quick suggestions (leaving room for "Browse all" chip)
+  $: suggestions = allModels.slice(0, 4);
+
+  // Check if provider is known in LiteLLM but doesn't support this model type.
+  // Unknown providers (e.g. vLLM, self-hosted) are not flagged — they can host any model type.
+  $: providerHasNoSupport = providerType !== ""
+    && Object.keys(capabilities).length > 0
+    && providerType in capabilities
+    && !capabilities[providerType]?.modes?.includes(modeMap[modelType]);
+
+  // Browse all models
+  let showAllModels = false;
+  let modelSearch = "";
+  $: filteredModels = modelSearch
+    ? allModels.filter(m => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+    : allModels;
+
+  function selectModelInfo(info: ModelInfo) {
+    currentModel.name = info.name;
+    currentModel.displayName = info.name;
+    if (modelType === "completion") {
+      currentModel.tokenLimit = info.max_input_tokens ?? 128000;
+      currentModel.vision = info.supports_vision ?? false;
+      currentModel.reasoning = info.supports_reasoning ?? false;
+    } else if (modelType === "embedding") {
+      currentModel.dimensions = info.output_vector_size;
+      currentModel.maxInput = info.max_input_tokens;
+    }
+  }
 
   // Current model being edited
   let currentModel = createEmptyModel();
@@ -122,10 +181,10 @@
       tokenLimit: 128000,
       vision: false,
       reasoning: false,
-      family: "openai",
+      family: modelType === "embedding" ? "openai" : (providerType || "openai"),
       dimensions: undefined as number | undefined,
       maxInput: undefined as number | undefined,
-      hosting: "swe"
+      hosting: providerDefaultHosting[providerType] ?? "swe"
     };
   }
 
@@ -147,10 +206,10 @@
       tokenLimit: suggestion.tokenLimit ?? 128000,
       vision: suggestion.vision ?? false,
       reasoning: suggestion.reasoning ?? false,
-      family: "openai",
+      family: modelType === "embedding" ? "openai" : (providerType || "openai"),
       dimensions: undefined,
       maxInput: undefined,
-      hosting: "swe"
+      hosting: providerDefaultHosting[providerType] ?? "swe"
     };
   }
 
@@ -184,6 +243,25 @@
     <p class="text-sm text-muted">{m.add_models_description()}</p>
   </div>
 
+  <!-- Warning when provider doesn't support this model type -->
+  {#if providerHasNoSupport}
+    <div class="flex items-start gap-3 rounded-lg border border-label-default bg-label-dimmer px-4 py-3 text-sm label-warning">
+      <TriangleAlert class="h-5 w-5 flex-shrink-0 text-label-stronger mt-0.5" />
+      <div>
+        <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType, modelType })}</p>
+        <p class="text-label-default mt-0.5">{m.provider_no_support_description()}</p>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Error fetching live models -->
+  {#if liveModelsError}
+    <div class="rounded-lg border border-dimmer bg-surface-dimmer px-4 py-3 text-sm text-muted">
+      <p>{liveModelsError}</p>
+      <p class="mt-1">{m.enter_model_manually()}</p>
+    </div>
+  {/if}
+
   <!-- Suggestions (if available) -->
   {#if suggestions.length > 0}
     <div class="flex flex-col gap-3">
@@ -196,15 +274,74 @@
         {#each suggestions as suggestion}
           <button
             type="button"
-            class="rounded-full border border-dimmer px-3 py-1.5 text-sm transition-all duration-150
-              hover:border-accent-default hover:bg-accent-dimmer
+            class="rounded-full border px-3 py-1.5 text-sm transition-all duration-150
+              {currentModel.name === suggestion.name
+                ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
+                : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}
               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-            on:click={() => useSuggestion(suggestion)}
+            on:click={() => selectModelInfo(suggestion)}
           >
-            {suggestion.displayName}
+            {suggestion.name}
           </button>
         {/each}
+        {#if allModels.length > 4}
+          <button
+            type="button"
+            class="rounded-full border border-dimmer px-3 py-1.5 text-sm transition-all duration-150
+              hover:border-accent-default hover:bg-accent-dimmer
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface
+              flex items-center gap-1.5"
+            on:click={() => { showAllModels = !showAllModels; modelSearch = ""; }}
+          >
+            <Search class="h-3.5 w-3.5" />
+            {showAllModels ? m.close() : m.browse_all()}
+          </button>
+        {/if}
       </div>
+
+      {#if showAllModels}
+        <div class="rounded-lg border border-dimmer bg-surface-dimmer p-3 flex flex-col gap-2">
+          <input
+            type="text"
+            bind:value={modelSearch}
+            placeholder={m.search_models()}
+            class="w-full rounded-md border border-dimmer bg-surface px-3 py-2 text-sm text-primary
+              placeholder:text-muted focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
+          />
+          <div class="max-h-48 overflow-y-auto flex flex-col gap-1">
+            {#each filteredModels as model}
+              <button
+                type="button"
+                class="w-full text-left rounded-md px-3 py-2 text-sm transition-all duration-100
+                  {currentModel.name === model.name
+                    ? 'bg-accent-dimmer text-accent-stronger'
+                    : 'text-primary hover:bg-hover'}
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60"
+                on:click={() => { selectModelInfo(model); showAllModels = false; }}
+              >
+                <span class="font-medium">{model.name}</span>
+                <span class="flex gap-3 text-xs text-muted mt-0.5">
+                  {#if model.max_input_tokens}
+                    <span>{(model.max_input_tokens / 1000).toFixed(0)}K context</span>
+                  {/if}
+                  {#if model.supports_vision}
+                    <span>Vision</span>
+                  {/if}
+                  {#if model.supports_reasoning}
+                    <span>Reasoning</span>
+                  {/if}
+                  {#if model.output_vector_size}
+                    <span>{model.output_vector_size}d</span>
+                  {/if}
+                </span>
+              </button>
+            {/each}
+            {#if filteredModels.length === 0}
+              <p class="text-sm text-muted px-3 py-2">{m.no_models_found()}</p>
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 

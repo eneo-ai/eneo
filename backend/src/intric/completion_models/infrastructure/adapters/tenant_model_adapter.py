@@ -308,9 +308,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            # Only pass reasoning_effort for models that support reasoning
-            if "reasoning_effort" in model_kwargs_dict and not self.model.reasoning:
-                del model_kwargs_dict["reasoning_effort"]
+            # Only pass reasoning_effort if the model actually supports it
+            # (per LiteLLM's supported_openai_params) and the value is meaningful
+            if "reasoning_effort" in model_kwargs_dict:
+                supported_params = litellm.get_supported_openai_params(model=self.litellm_model) or []
+                if "reasoning_effort" not in supported_params or model_kwargs_dict["reasoning_effort"] in (None, "none", ""):
+                    del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
