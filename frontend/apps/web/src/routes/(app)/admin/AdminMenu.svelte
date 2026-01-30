@@ -86,12 +86,7 @@
     isActive={isSelected("/admin/insights", currentRoute)}
     icon={IconBulb}
     label={m.insights()}
-  >
-    <span
-      class="hidden rounded-md border border-[var(--beta-indicator)] px-1 py-0.5 text-xs font-normal !tracking-normal text-[var(--beta-indicator)] md:block"
-      >{m.beta()}</span
-    >
-  </Navigation.Link>
+  />
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link
     href={localizeHref("/admin/users")}

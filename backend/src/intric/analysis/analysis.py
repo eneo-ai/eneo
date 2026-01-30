@@ -31,6 +31,17 @@ class MetadataStatistics(BaseModel):
     questions: list[QuestionMetadata]
 
 
+class MetadataCount(BaseModel):
+    created_at: datetime
+    count: int
+
+
+class MetadataStatisticsAggregated(BaseModel):
+    assistants: list[MetadataCount]
+    sessions: list[MetadataCount]
+    questions: list[MetadataCount]
+
+
 class Counts(BaseModel):
     assistants: int
     sessions: int

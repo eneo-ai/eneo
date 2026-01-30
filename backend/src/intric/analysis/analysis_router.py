@@ -15,6 +15,7 @@ from intric.analysis.analysis import (
     ConversationInsightResponse,
     Counts,
     MetadataStatistics,
+    MetadataStatisticsAggregated,
 )
 from intric.sessions.session import SessionPublic, SessionMetadataPublic
 from intric.sessions.session_protocol import (
@@ -44,8 +45,8 @@ async def get_counts(container: Container = Depends(get_container(with_user=True
 
 @router.get("/metadata-statistics/")
 async def get_metadata(
-    start_date: datetime = datetime.now(timezone.utc) - timedelta(days=30),
-    end_date: datetime = datetime.now(timezone.utc) + timedelta(hours=1, minutes=1),
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
     container: Container = Depends(get_container(with_user=True)),
 ) -> MetadataStatistics:
     """Data for analytics.
@@ -53,12 +54,45 @@ async def get_metadata(
     Note on datetime parameters:
     - If no time is provided in the datetime, time components default to 00:00:00
     """
+    if start_date is None or end_date is None:
+        now = datetime.now(timezone.utc)
+        if start_date is None:
+            start_date = now - timedelta(days=30)
+        if end_date is None:
+            end_date = now + timedelta(hours=1, minutes=1)
+
     service = container.analysis_service()
     assistants, sessions, questions = await service.get_metadata_statistics(
         start_date, end_date
     )
 
-    return analysis_protocol.to_metadata(
+    return analysis_protocol.to_metadata_from_rows(
+        assistants=assistants, sessions=sessions, questions=questions
+    )
+
+
+@router.get(
+    "/metadata-statistics/aggregated/", response_model=MetadataStatisticsAggregated
+)
+async def get_metadata_aggregated(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Aggregated data for analytics (hourly buckets)."""
+    if start_date is None or end_date is None:
+        now = datetime.now(timezone.utc)
+        if start_date is None:
+            start_date = now - timedelta(days=30)
+        if end_date is None:
+            end_date = now + timedelta(hours=1, minutes=1)
+
+    service = container.analysis_service()
+    assistants, sessions, questions = await service.get_metadata_statistics_aggregated(
+        start_date, end_date
+    )
+
+    return analysis_protocol.to_metadata_aggregated(
         assistants=assistants, sessions=sessions, questions=questions
     )
 

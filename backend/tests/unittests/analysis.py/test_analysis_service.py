@@ -165,12 +165,8 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
         MagicMock(),
     )
 
-    # Mock repository response
-    mock_sessions = [
-        MagicMock(questions=[MagicMock(), MagicMock()]),  # 2 questions
-        MagicMock(questions=[MagicMock()]),  # 1 question
-    ]
-    service.repo.get_assistant_sessions_since.return_value = mock_sessions
+    # Mock repository response - now using optimized count method
+    service.repo.get_assistant_conversation_counts.return_value = (2, 3)
 
     # Call the service method
     result = await service.get_conversation_stats(
@@ -180,7 +176,7 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 2
     assert result.total_questions == 3
-    service.repo.get_assistant_sessions_since.assert_called_once()
+    service.repo.get_assistant_conversation_counts.assert_called_once()
 
 
 async def test_get_conversation_stats_group_chat(service: AnalysisService):
@@ -190,13 +186,8 @@ async def test_get_conversation_stats_group_chat(service: AnalysisService):
 
     group_chat_id = uuid4()
 
-    # Mock repository response
-    mock_sessions = [
-        MagicMock(questions=[MagicMock(), MagicMock(), MagicMock()]),  # 3 questions
-        MagicMock(questions=[MagicMock()]),  # 1 question
-        MagicMock(questions=[]),  # 0 questions
-    ]
-    service.repo.get_group_chat_sessions_since.return_value = mock_sessions
+    # Mock repository response - now using optimized count method
+    service.repo.get_group_chat_conversation_counts.return_value = (3, 4)
 
     # Call the service method
     result = await service.get_conversation_stats(
@@ -206,7 +197,7 @@ async def test_get_conversation_stats_group_chat(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 3
     assert result.total_questions == 4
-    service.repo.get_group_chat_sessions_since.assert_called_once()
+    service.repo.get_group_chat_conversation_counts.assert_called_once()
 
 
 async def test_get_conversation_stats_with_date_range(service: AnalysisService):
@@ -218,9 +209,8 @@ async def test_get_conversation_stats_with_date_range(service: AnalysisService):
     start_time = datetime(2023, 1, 1, 0, 0)
     end_time = datetime(2023, 1, 31, 23, 59)
 
-    # Mock repository response
-    mock_sessions = [MagicMock(questions=[MagicMock()])]
-    service.repo.get_group_chat_sessions_since.return_value = mock_sessions
+    # Mock repository response - now using optimized count method
+    service.repo.get_group_chat_conversation_counts.return_value = (1, 1)
 
     # Call the service method
     result = await service.get_conversation_stats(
@@ -232,7 +222,7 @@ async def test_get_conversation_stats_with_date_range(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 1
     assert result.total_questions == 1
-    service.repo.get_group_chat_sessions_since.assert_called_once_with(
+    service.repo.get_group_chat_conversation_counts.assert_called_once_with(
         group_chat_id=group_chat_id,
         from_date=start_time,
         to_date=end_time,

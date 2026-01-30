@@ -20,7 +20,7 @@ export const load = async (event) => {
 
   return {
     assistants,
-    data: intric.analytics.get(timeframe),
+    data: intric.analytics.getAggregated(timeframe),
     timeframe
   };
 };

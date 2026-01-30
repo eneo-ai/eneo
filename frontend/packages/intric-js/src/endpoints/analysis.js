@@ -1,4 +1,5 @@
 /** @typedef {import('../types/resources').AnalyticsData} AnalyticsData */
+/** @typedef {import('../types/resources').AnalyticsAggregatedData} AnalyticsAggregatedData */
 /** @typedef {import('../types/resources').Assistant} Assistant */
 import { IntricError } from "../client/client";
 
@@ -15,6 +16,20 @@ export function initAnalytics(client) {
      * */
     get: async ({ start, end } = { start: undefined, end: undefined }) => {
       const res = await client.fetch("/api/v1/analysis/metadata-statistics/", {
+        method: "get",
+        params: { query: { start_date: start, end_date: end } }
+      });
+      return res;
+    },
+
+    /**
+     * Get aggregated counts of assistants, sessions and questions.
+     * @param {{start?: string, end?: string}} [params] Define start and end date for data; Expects UTC time string.
+     * @returns {Promise<AnalyticsAggregatedData>} The requested data
+     * @throws {IntricError}
+     * */
+    getAggregated: async ({ start, end } = { start: undefined, end: undefined }) => {
+      const res = await client.fetch("/api/v1/analysis/metadata-statistics/aggregated/", {
         method: "get",
         params: { query: { start_date: start, end_date: end } }
       });

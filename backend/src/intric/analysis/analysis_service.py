@@ -47,28 +47,70 @@ class AnalysisService:
 
     @validate_permissions(Permission.INSIGHTS)
     async def get_tenant_counts(self):
-        assistant_count = await self.repo.get_assistant_count(tenant_id=self.user.tenant_id)
-        session_count = await self.repo.get_session_count(tenant_id=self.user.tenant_id)
-        questions_count = await self.repo.get_question_count(tenant_id=self.user.tenant_id)
+        """Get total counts for assistants, sessions, and questions.
 
-        counts = Counts(
+        Uses a single query for consistent results.
+        """
+        (
+            assistant_count,
+            session_count,
+            questions_count,
+        ) = await self.repo.get_tenant_counts(tenant_id=self.user.tenant_id)
+
+        return Counts(
             assistants=assistant_count,
             sessions=session_count,
             questions=questions_count,
         )
 
-        return counts
-
     @validate_permissions(Permission.INSIGHTS)
     async def get_metadata_statistics(self, start_date: datetime, end_date: datetime):
-        assistants = await self.assistant_service.get_tenant_assistants(
-            start_date=start_date, end_date=end_date
+        """Get metadata statistics for the tenant using optimized queries.
+
+        Uses column-projection queries that only fetch id, created_at, and
+        necessary foreign keys instead of loading full objects with all
+        relationships.
+        """
+        assistants = await self.repo.get_assistant_metadata_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
         )
-        sessions = await self.session_repo.get_by_tenant(
-            self.user.tenant_id, start_date=start_date, end_date=end_date
+        sessions = await self.repo.get_session_metadata_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
         )
-        questions = await self.question_repo.get_by_tenant(
-            self.user.tenant_id, start_date=start_date, end_date=end_date
+        questions = await self.repo.get_question_metadata_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        return assistants, sessions, questions
+
+    @validate_permissions(Permission.INSIGHTS)
+    async def get_metadata_statistics_aggregated(
+        self, start_date: datetime, end_date: datetime
+    ):
+        """Get aggregated metadata statistics for the tenant.
+
+        Returns per-hour buckets to keep payloads small for large tenants.
+        """
+        assistants = await self.repo.get_assistant_counts_by_hour_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        sessions = await self.repo.get_session_counts_by_hour_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        questions = await self.repo.get_question_counts_by_hour_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         return assistants, sessions, questions
@@ -86,20 +128,32 @@ class AnalysisService:
         assistant_id: UUID = None,
     ):
         if assistant_id:
-            space = await self.space_service.get_space_by_assistant(assistant_id=assistant_id)
-            actor = self.space_service.actor_manager.get_space_actor_from_space(space=space)
+            space = await self.space_service.get_space_by_assistant(
+                assistant_id=assistant_id
+            )
+            actor = self.space_service.actor_manager.get_space_actor_from_space(
+                space=space
+            )
             assistant = space.get_assistant(assistant_id=assistant_id)
 
             if not actor.can_access_insight_assistant(assistant=assistant):
-                raise UnauthorizedException("Insights are not enabled for this assistant")
+                raise UnauthorizedException(
+                    "Insights are not enabled for this assistant"
+                )
 
         elif group_chat_id:
-            space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
-            actor = self.space_service.actor_manager.get_space_actor_from_space(space=space)
+            space = await self.space_service.get_space_by_group_chat(
+                group_chat_id=group_chat_id
+            )
+            actor = self.space_service.actor_manager.get_space_actor_from_space(
+                space=space
+            )
             group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
             if not actor.can_access_insight_group_chat(group_chat=group_chat):
-                raise UnauthorizedException("Insights are not enabled for this group chat")
+                raise UnauthorizedException(
+                    "Insights are not enabled for this group chat"
+                )
 
     async def get_questions_since(
         self,
@@ -188,7 +242,9 @@ class AnalysisService:
 
         days = (to_date - from_date).days
         prompt = ANALYSIS_PROMPT.format(days=days)
-        questions_string = "\n".join(f'"""{question.question}"""' for question in questions)
+        questions_string = "\n".join(
+            f'"""{question.question}"""' for question in questions
+        )
         prompt = f"{prompt}\n\n{questions_string}"
 
         ai_response = await assistant.get_response(
@@ -229,10 +285,14 @@ class AnalysisService:
             BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
         if not assistant_id and not group_chat_id:
-            raise BadRequestException("Either assistant_id or group_chat_id must be provided")
+            raise BadRequestException(
+                "Either assistant_id or group_chat_id must be provided"
+            )
 
         if assistant_id and group_chat_id:
-            raise BadRequestException("Provide either assistant_id or group_chat_id, not both")
+            raise BadRequestException(
+                "Provide either assistant_id or group_chat_id, not both"
+            )
 
         # Get the appropriate questions based on type
         if assistant_id:
@@ -248,11 +308,15 @@ class AnalysisService:
             model_to_use = assistant
         else:  # group_chat_id is provided
             await self._check_insight_access(group_chat_id=group_chat_id)
-            space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+            space = await self.space_service.get_space_by_group_chat(
+                group_chat_id=group_chat_id
+            )
             group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
             if not group_chat.assistants:
-                raise BadRequestException("Group chat has no assistants to process the analysis")
+                raise BadRequestException(
+                    "Group chat has no assistants to process the analysis"
+                )
 
             # Use the first assistant from the group chat for analysis
             model_to_use = group_chat.assistants[0].assistant
@@ -268,7 +332,9 @@ class AnalysisService:
         # Format the questions to pass to the LLM
         days = (to_date - from_date).days
         prompt = ANALYSIS_PROMPT.format(days=days)
-        questions_string = "\n".join(f'"""{question.question}"""' for question in questions)
+        questions_string = "\n".join(
+            f'"""{question.question}"""' for question in questions
+        )
         prompt = f"{prompt}\n\n{questions_string}"
 
         # Get the AI response
@@ -400,6 +466,8 @@ class AnalysisService:
         """
         Get statistics about conversations for either an assistant or a group chat.
 
+        Uses optimized COUNT queries instead of fetching full session data.
+
         Args:
             assistant_id: UUID of the assistant (optional)
             group_chat_id: UUID of the group chat (optional)
@@ -415,7 +483,9 @@ class AnalysisService:
 
         # check all permissions
         if not assistant_id and not group_chat_id:
-            raise BadRequestException("Either assistant_id or group_chat_id must be provided")
+            raise BadRequestException(
+                "Either assistant_id or group_chat_id must be provided"
+            )
 
         if assistant_id and group_chat_id:
             raise BadRequestException(
@@ -427,42 +497,32 @@ class AnalysisService:
         elif group_chat_id:
             await self._check_insight_access(group_chat_id=group_chat_id)
 
-        sessions = []
-        if assistant_id:
-            if start_time and end_time:
-                sessions = await self.repo.get_assistant_sessions_since(
-                    assistant_id=assistant_id,
-                    from_date=start_time,
-                    to_date=end_time,
-                )
-            else:
-                today = datetime.now()
-                last_month = today - timedelta(days=30)
-                sessions = await self.repo.get_assistant_sessions_since(
-                    assistant_id=assistant_id,
-                    from_date=last_month,
-                    to_date=today,
-                )
-        else:
-            if start_time and end_time:
-                sessions = await self.repo.get_group_chat_sessions_since(
-                    group_chat_id=group_chat_id,
-                    from_date=start_time,
-                    to_date=end_time,
-                )
-            else:
-                today = datetime.now()
-                last_month = today - timedelta(days=30)
-                sessions = await self.repo.get_group_chat_sessions_since(
-                    group_chat_id=group_chat_id,
-                    from_date=last_month,
-                    to_date=today,
-                )
+        # Use default date range if not provided
+        if not start_time or not end_time:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=30)
 
-        # count total questions
-        total_questions = sum(len(session.questions) for session in sessions)
+        # Use optimized count queries instead of fetching full session data
+        if assistant_id:
+            (
+                session_count,
+                question_count,
+            ) = await self.repo.get_assistant_conversation_counts(
+                assistant_id=assistant_id,
+                from_date=start_time,
+                to_date=end_time,
+            )
+        else:
+            (
+                session_count,
+                question_count,
+            ) = await self.repo.get_group_chat_conversation_counts(
+                group_chat_id=group_chat_id,
+                from_date=start_time,
+                to_date=end_time,
+            )
 
         return ConversationInsightResponse(
-            total_conversations=len(sessions),
-            total_questions=total_questions,
+            total_conversations=session_count,
+            total_questions=question_count,
         )

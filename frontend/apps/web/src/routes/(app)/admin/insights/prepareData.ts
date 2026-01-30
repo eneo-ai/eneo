@@ -4,103 +4,194 @@
     Licensed under the MIT License.
 */
 
-import type { AnalyticsData } from "@intric/intric-js";
+import type { AnalyticsAggregatedData } from "@intric/intric-js";
 import type { Chart } from "@intric/ui";
 import { fromAbsolute, getDayOfWeek, parseAbsolute, toCalendarDate } from "@internationalized/date";
 import { m } from "$lib/paraglide/messages";
 
 // {sessions: { "Monday": {count: 12, total: 12}}}
-type UsageData = Record<string, Record<string, Record<string, number>>>;
+type UsageData = Record<string, Record<string, { count: number; total: number }>>;
 
-type CountFn = <T extends keyof UsageData>(
-  obj: UsageData,
-  type: T,
-  field: string,
-  date: string | number
-) => void;
-
-const count: CountFn = (obj, type, field, date) => {
-  if (Object.hasOwn(obj[type], date)) {
-    obj[type][date][field] += 1;
+// Optimized count: avoids repeated hasOwn checks by using nullish coalescing assignment
+const count = (
+  typeData: Record<string, { count: number; total: number }>,
+  key: string | number,
+  increment = 1
+): void => {
+  const k = String(key);
+  const entry = typeData[k];
+  if (entry) {
+    entry.count += increment;
   } else {
-    obj[type][date] = {};
-    obj[type][date][field] = 1;
+    typeData[k] = { count: increment, total: 0 };
   }
 };
 
-const total = (objs: UsageData[]) => {
-  for (const obj of objs) {
-    for (const [resource, row] of Object.entries(obj)) {
-      let total = 0;
-      for (const [date, data] of Object.entries(row)) {
-        total += data.count;
-        obj[resource][date].total = total;
-      }
+// Optimized total: direct property access, no Object.entries allocation
+const computeTotals = (obj: UsageData): void => {
+  const keys = Object.keys(obj);
+  for (let i = 0; i < keys.length; i++) {
+    const resource = keys[i];
+    const row = obj[resource];
+    const dateKeys = Object.keys(row).sort();
+    let runningTotal = 0;
+    for (let j = 0; j < dateKeys.length; j++) {
+      const entry = row[dateKeys[j]];
+      runningTotal += entry.count;
+      entry.total = runningTotal;
     }
   }
 };
 
+// Optimized flatten: pre-allocate array, avoid intermediate allocations
 const flatten = (obj: UsageData) => {
-  const rows = Object.entries(obj)
-    .flatMap(([type, rows]) => {
-      return Object.entries(rows).map(([created_at, data]) => {
-        return { created_at, type, ...data };
-      });
-    })
-    .toSorted(
-      (a, b) =>
-        parseInt(a.created_at.replaceAll("-", "")) - parseInt(b.created_at.replaceAll("-", ""))
-    );
+  const types = Object.keys(obj);
+  // Count total entries first
+  let totalEntries = 0;
+  for (let i = 0; i < types.length; i++) {
+    totalEntries += Object.keys(obj[types[i]]).length;
+  }
+
+  const rows: Array<{ created_at: string; type: string; count: number; total: number }> =
+    new Array(totalEntries);
+  let idx = 0;
+
+  for (let i = 0; i < types.length; i++) {
+    const type = types[i];
+    const typeData = obj[type];
+    const dateKeys = Object.keys(typeData);
+    for (let j = 0; j < dateKeys.length; j++) {
+      const created_at = dateKeys[j];
+      const data = typeData[created_at];
+      rows[idx++] = { created_at, type, count: data.count, total: data.total };
+    }
+  }
+
+  // Sort by date: compare strings directly (YYYY-MM-DD format is lexicographically sortable)
+  rows.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
   return rows;
 };
 
-const getMaxCount = (obj: UsageData) => {
-  const counts = Object.values(obj.questions).map((item) => item.count);
-  return Math.ceil(Math.max(...counts) / 5) * 5;
+// Optimized getMaxCount: single pass, no intermediate array
+const getMaxCount = (obj: UsageData): number => {
+  const questions = obj.questions;
+  if (!questions) return 5;
+
+  let maxCount = 0;
+  const keys = Object.keys(questions);
+  for (let i = 0; i < keys.length; i++) {
+    const c = questions[keys[i]].count;
+    if (c > maxCount) maxCount = c;
+  }
+  return Math.ceil(maxCount / 5) * 5 || 5;
 };
 
-const days = [
-  m.monday(),
-  m.tuesday(),
-  m.wednesday(),
-  m.thursday(),
-  m.friday(),
-  m.saturday(),
-  m.sunday()
-];
+// Lazy-initialized days array
+let _days: string[] | null = null;
+const getDays = (): string[] => {
+  if (!_days) {
+    _days = [
+      m.monday(),
+      m.tuesday(),
+      m.wednesday(),
+      m.thursday(),
+      m.friday(),
+      m.saturday(),
+      m.sunday()
+    ];
+  }
+  return _days;
+};
 
 type PreparedData = Chart.Config["options"] & { dataset: Record<string, unknown>[] };
 
-export function prepareData(data: AnalyticsData, timeframe: { start: string; end: string }) {
+// Optimized: Find earliest and latest dates in single pass without array allocations
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+function getDataDateBounds(usageByDate: UsageData): { earliest: string | null; latest: string | null } {
+  let earliest: string | null = null;
+  let latest: string | null = null;
+
+  const sources = [usageByDate.sessions, usageByDate.questions];
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
+    if (!source) continue;
+    const keys = Object.keys(source);
+    for (let j = 0; j < keys.length; j++) {
+      const d = keys[j];
+      if (!DATE_REGEX.test(d)) continue;
+      if (earliest === null || d < earliest) earliest = d;
+      if (latest === null || d > latest) latest = d;
+    }
+  }
+
+  return { earliest, latest };
+}
+
+export function prepareData(
+  data: AnalyticsAggregatedData,
+  timeframe: { start: string; end: string }
+) {
   const usageByDate: UsageData = { sessions: {}, assistants: {}, questions: {} };
   const usageByWeekday: UsageData = { sessions: {}, assistants: {}, questions: {} };
   const usageByHour: UsageData = { sessions: {}, assistants: {}, questions: {} };
 
-  for (const [resource, rows] of Object.entries(data)) {
-    rows.forEach((row) => {
-      if (!row.created_at) return;
+  // Process each resource type with optimized loop
+  const resourceTypes = ["sessions", "assistants", "questions"] as const;
+  for (let r = 0; r < resourceTypes.length; r++) {
+    const resource = resourceTypes[r];
+    const rows = data[resource];
+    if (!rows) continue;
+
+    const dateData = usageByDate[resource];
+    const weekdayData = usageByWeekday[resource];
+    const hourData = usageByHour[resource];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.created_at) continue;
+
+      const increment = typeof row.count === "number" ? row.count : 1;
+
+      // Parse once, extract all values
       const timestamp = parseAbsolute(row.created_at, "Europe/Stockholm");
       const date = toCalendarDate(timestamp).toString();
       const day = getDayOfWeek(timestamp, "sv-SE");
       const hours = timestamp.hour;
 
-      count(usageByDate, resource, "count", date);
-      count(usageByWeekday, resource, "count", day);
-      count(usageByHour, resource, "count", hours);
-    });
+      // Direct reference to type-specific objects avoids repeated property lookups
+      count(dateData, date, increment);
+      count(weekdayData, day, increment);
+      count(hourData, hours, increment);
+    }
   }
 
-  total([usageByDate]);
+  computeTotals(usageByDate);
+
+  // Calculate actual data bounds
+  const dataBounds = getDataDateBounds(usageByDate);
+
+  // Extract date-only from timeframe (strip time component)
+  const requestedStartDate = timeframe.start.split("T")[0];
+
+  // Determine effective x-axis start: use actual data start if later than requested
+  const effectiveStartDate = dataBounds.earliest && dataBounds.earliest > requestedStartDate
+    ? dataBounds.earliest
+    : requestedStartDate;
 
   const byDate: PreparedData = {
     xAxis: {
       animation: false,
       type: "time",
-      min: parseAbsolute(timeframe.start, "Europe/Stockholm").subtract({ days: 1 }).toDate(),
+      // Use effective start (bounded by actual data) instead of requested timeframe
+      min: parseAbsolute(`${effectiveStartDate}T00:00:00+01:00`, "Europe/Stockholm").subtract({ days: 1 }).toDate(),
       max: timeframe.end,
       axisLabel: {
+        // Shorter date format: MM-DD instead of YYYY-MM-DD
         formatter: (value: number) => {
-          return toCalendarDate(fromAbsolute(value, "Europe/Stockholm")).toString();
+          const date = toCalendarDate(fromAbsolute(value, "Europe/Stockholm"));
+          const month = date.month.toString().padStart(2, "0");
+          const day = date.day.toString().padStart(2, "0");
+          return `${month}-${day}`;
         }
       }
     },
@@ -121,15 +212,13 @@ export function prepareData(data: AnalyticsData, timeframe: { start: string; end
     xAxis: {
       animation: false,
       type: "category",
-      data: Array.from(new Array(7), (x, i) => i),
+      data: [0, 1, 2, 3, 4, 5, 6], // Pre-allocated array instead of Array.from
       axisLabel: {
         // @ts-expect-error ignore any type
         formatter: (value) => {
-          if (typeof value === "string" && Object.hasOwn(days, value)) {
-            // @ts-expect-error type doesnt narrow properly
-            return days[value];
-          }
-          return "?";
+          const days = getDays();
+          const idx = typeof value === "string" ? parseInt(value, 10) : value;
+          return days[idx] ?? "?";
         }
       }
     },
@@ -146,11 +235,10 @@ export function prepareData(data: AnalyticsData, timeframe: { start: string; end
     xAxis: {
       animation: false,
       type: "category",
-      data: Array.from(new Array(24), (x, i) => i),
+      // Pre-allocated static array
+      data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
       axisLabel: {
-        formatter: (value: string) => {
-          return `${value}:00`;
-        }
+        formatter: (value: string) => `${value}:00`
       }
     },
     yAxis: { type: "value", min: 0, max: getMaxCount(usageByHour) },
@@ -170,12 +258,72 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
 
   return {
     options: {
-      xAxis: data.xAxis,
-      yAxis: data.yAxis,
+      grid: {
+        left: 48,
+        right: 24,
+        top: 24,
+        bottom: 48,
+        containLabel: true
+      },
+      xAxis: {
+        ...data.xAxis,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          ...data.xAxis?.axisLabel,
+          color: "var(--text-muted)",
+          fontSize: 10,
+          margin: 16,
+          hideOverlap: true
+        }
+      },
+      yAxis: {
+        ...data.yAxis,
+        axisLine: {
+          show: true,
+          lineStyle: {
+            color: "var(--border-default)",
+            width: 1,
+            opacity: 0.5
+          }
+        },
+        axisTick: { show: false },
+        axisLabel: {
+          color: "var(--text-muted)",
+          fontSize: 10,
+          margin: 8
+        },
+        splitLine: {
+          lineStyle: {
+            color: "var(--border-default)",
+            type: "dashed",
+            opacity: 0.5
+          }
+        }
+      },
       tooltip: {
         trigger: "axis",
+        backgroundColor: "rgba(255, 255, 255, 0.98)",
+        borderColor: "var(--border-default)",
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: [12, 16],
+        textStyle: {
+          color: "var(--text-primary)",
+          fontSize: 13
+        },
+        extraCssText: "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); backdrop-filter: blur(8px);",
+        // @ts-expect-error formatter typing
+        formatter: (params: { name: string; value: number; data: { count?: number } }[]) => {
+          const item = Array.isArray(params) ? params[0] : params;
+          const value = item.data?.count ?? item.value;
+          return `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">${item.name}</div><div style="font-size: 18px; font-weight: 600; color: var(--text-primary);">${value}</div>`;
+        },
         axisPointer: {
-          type: "line",
+          type: "shadow",
+          shadowStyle: {
+            color: "rgba(14, 165, 233, 0.06)"
+          },
           label: {
             // @ts-expect-errorignore any type
             formatter: (params) => {
@@ -200,7 +348,40 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           type: "bar",
           dimensions: ["created_at", "count"],
           name: `${m.new()} ${label}`,
-          datasetId: "filtered"
+          datasetId: "filtered",
+          barMaxWidth: 40,
+          barCategoryGap: "20%",
+          barGap: "10%",
+          itemStyle: {
+            borderRadius: [4, 4, 0, 0],
+            shadowColor: "rgba(59, 130, 246, 0.15)",
+            shadowBlur: 4,
+            shadowOffsetY: 1,
+            color: {
+              type: "linear",
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: "#60A5FA" },  // blue-400
+                { offset: 1, color: "#2563EB" }   // blue-600
+              ]
+            }
+          },
+          emphasis: {
+            itemStyle: {
+              // Shadow-only hover for Nordic minimalism - no color change
+              shadowBlur: 12,
+              shadowColor: "rgba(59, 130, 246, 0.3)",
+              shadowOffsetY: 3
+            }
+          },
+          animationDuration: 400,
+          animationEasing: "cubicOut",
+          animationDurationUpdate: 200,
+          animationEasingUpdate: "cubicOut",
+          animationDelay: (idx: number) => idx * 30
         }
       ]
     }
