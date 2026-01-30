@@ -67,8 +67,19 @@ const flatten = (obj: UsageData) => {
     }
   }
 
-  // Sort by date: compare strings directly (YYYY-MM-DD format is lexicographically sortable)
-  rows.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+  // Sort by created_at: use numeric comparison for hours/weekdays, string for dates
+  rows.sort((a, b) => {
+    const aVal = a.created_at;
+    const bVal = b.created_at;
+    // If both are numeric (hours 0-23 or weekdays 0-6), compare as numbers
+    const aNum = Number(aVal);
+    const bNum = Number(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum)) {
+      return aNum - bNum;
+    }
+    // Otherwise compare as strings (dates in YYYY-MM-DD format)
+    return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+  });
   return rows;
 };
 
@@ -271,7 +282,9 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         axisTick: { show: false },
         axisLabel: {
           ...data.xAxis?.axisLabel,
-          color: "var(--text-muted)",
+          // Use actual color value - ECharts canvas doesn't support CSS variables
+          // #9CA3AF (gray-400) is visible on both light and dark backgrounds
+          color: "#9CA3AF",
           fontSize: 10,
           margin: 16,
           hideOverlap: true
@@ -282,42 +295,41 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         axisLine: {
           show: true,
           lineStyle: {
-            color: "var(--border-default)",
-            width: 1,
-            opacity: 0.5
+            color: "rgba(156, 163, 175, 0.4)", // gray-400 with opacity
+            width: 1
           }
         },
         axisTick: { show: false },
         axisLabel: {
-          color: "var(--text-muted)",
+          // Use actual color value for canvas rendering
+          color: "#9CA3AF",
           fontSize: 10,
           margin: 8
         },
         splitLine: {
           lineStyle: {
-            color: "var(--border-default)",
-            type: "dashed",
-            opacity: 0.5
+            color: "rgba(156, 163, 175, 0.2)", // gray-400 with low opacity
+            type: "dashed"
           }
         }
       },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "rgba(255, 255, 255, 0.98)",
-        borderColor: "var(--border-default)",
+        backgroundColor: "rgba(30, 30, 30, 0.95)", // Dark background for tooltip
+        borderColor: "rgba(156, 163, 175, 0.3)",
         borderWidth: 1,
         borderRadius: 8,
         padding: [12, 16],
         textStyle: {
-          color: "var(--text-primary)",
+          color: "#F3F4F6", // gray-100 for readability
           fontSize: 13
         },
-        extraCssText: "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); backdrop-filter: blur(8px);",
+        extraCssText: "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); backdrop-filter: blur(8px);",
         // @ts-expect-error formatter typing
         formatter: (params: { name: string; value: number; data: { count?: number } }[]) => {
           const item = Array.isArray(params) ? params[0] : params;
           const value = item.data?.count ?? item.value;
-          return `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">${item.name}</div><div style="font-size: 18px; font-weight: 600; color: var(--text-primary);">${value}</div>`;
+          return `<div style="font-size: 11px; color: #9CA3AF; margin-bottom: 4px;">${item.name}</div><div style="font-size: 18px; font-weight: 600; color: #F3F4F6;">${value}</div>`;
         },
         axisPointer: {
           type: "shadow",

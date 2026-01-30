@@ -8,7 +8,7 @@
   import { IconSession } from "@intric/icons/session";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { Chart, Button } from "@intric/ui";
-  import { Info } from "lucide-svelte";
+  import { Info, BarChart3 } from "lucide-svelte";
   import type { AnalyticsAggregatedData } from "@intric/intric-js";
   import { getConfig, prepareData } from "./prepareData";
   import { m } from "$lib/paraglide/messages";
@@ -23,6 +23,11 @@
     timeframe: { start: string; end: string };
     partialDataInfo: { actualStart: string; requestedDays: number; actualDays: number } | null;
   } = $props();
+
+  // Detect empty state - no activity in selected period
+  let hasNoActivity = $derived(
+    data.sessions.length === 0 && data.questions.length === 0
+  );
 
   // Memoize prepareData - only recomputes when data or timeframe changes
   let datasets = $derived.by(() => prepareData(data, timeframe));
@@ -72,22 +77,22 @@
       <button
         class="rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-200
                {datasetKey === 'byDate'
-                 ? 'bg-white text-primary shadow-[0_1px_4px_rgba(0,0,0,0.1)]'
-                 : 'text-secondary hover:text-primary hover:bg-white/50'}"
+                 ? 'bg-[var(--background-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(0,0,0,0.1)]'
+                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--background-hover-dimmer)]'}"
         onclick={() => { datasetKey = 'byDate'; }}
       >Datum</button>
       <button
         class="rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-200
                {datasetKey === 'byWeekday'
-                 ? 'bg-white text-primary shadow-[0_1px_4px_rgba(0,0,0,0.1)]'
-                 : 'text-secondary hover:text-primary hover:bg-white/50'}"
+                 ? 'bg-[var(--background-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(0,0,0,0.1)]'
+                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--background-hover-dimmer)]'}"
         onclick={() => { datasetKey = 'byWeekday'; }}
       >Veckodag</button>
       <button
         class="rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-200
                {datasetKey === 'byHour'
-                 ? 'bg-white text-primary shadow-[0_1px_4px_rgba(0,0,0,0.1)]'
-                 : 'text-secondary hover:text-primary hover:bg-white/50'}"
+                 ? 'bg-[var(--background-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(0,0,0,0.1)]'
+                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--background-hover-dimmer)]'}"
         onclick={() => { datasetKey = 'byHour'; }}
       >Timme</button>
     </div>
@@ -95,14 +100,32 @@
 
   <!-- Chart Area -->
   <div class="relative h-full w-full px-8 pt-6 pb-5">
-    <Chart.Root {config}></Chart.Root>
-
-    <!-- Partial data info - bottom-left corner, subtle -->
-    {#if partialDataInfo}
-      <div class="absolute bottom-6 left-10 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
-        <Info class="h-3 w-3 opacity-40" />
-        <span>{partialDataInfo.actualStart} ({partialDataInfo.actualDays}/{partialDataInfo.requestedDays}d)</span>
+    {#if hasNoActivity}
+      <!-- Empty State - Ethereal design without heavy boxes -->
+      <div class="flex h-full flex-col items-center justify-center gap-6 text-center">
+        <!-- Floating icon - no container, just opacity -->
+        <div class="relative">
+          <BarChart3 class="h-14 w-14 text-[var(--text-muted)] opacity-20" strokeWidth={1.25} />
+        </div>
+        <div class="space-y-2">
+          <h3 class="text-sm font-medium text-[var(--text-primary)] tracking-tight">
+            {m.no_activity_title()}
+          </h3>
+          <p class="max-w-[280px] text-[13px] leading-relaxed text-[var(--text-muted)]">
+            {m.no_activity_description()}
+          </p>
+        </div>
       </div>
+    {:else}
+      <Chart.Root {config}></Chart.Root>
+
+      <!-- Partial data info - bottom-left corner, subtle -->
+      {#if partialDataInfo}
+        <div class="absolute bottom-6 left-10 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+          <Info class="h-3 w-3 opacity-40" />
+          <span>{partialDataInfo.actualStart} ({partialDataInfo.actualDays}/{partialDataInfo.requestedDays}d)</span>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>

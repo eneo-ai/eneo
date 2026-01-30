@@ -781,6 +781,7 @@
   "toggle_sidebar": "Växla sidofält",
   "token_summary": "Token-sammanfattning (Senaste 30 dagarna)",
   "tokens": "Tokens",
+  "token_fetch_error": "Kunde inte hämta tokens",
   "tokens_from_conversation_history": "{tokens} tokens från assistentens prompt och konversationshistorik",
   "tokens_from_new_message": "{tokens} tokens från nytt meddelande & filer",
   "tomorrow": "Imorgon",
@@ -898,6 +899,7 @@
   "x_of_y_classified": "{x} av {y} klassificerade",
   "see_public_spaces_storage": "Se denna organisations offentliga ytor och deras lagringsanvändning.",
   "see_token_usage_by_model": "Se denna organisations token-användning per modell och tidsram.",
+  "see_usage": "Se användning",
   "no_user_groups_configured": "Det finns för närvarande inga användargrupper konfigurerade",
   "required": "obligatorisk",
   "loading_ellipsis": "Laddar...",
@@ -2075,5 +2077,15 @@
   "could_not_add_user_to_group": "Kunde inte lägga till användare i gruppen.",
   "could_not_remove_user_from_group": "Kunde inte ta bort användare från gruppen.",
   "no_users_in_group": "Inga användare i denna grupp",
-  "no_users_found": "Inga användare hittades"
+  "no_users_found": "Inga användare hittades",
+  "compare": "Jämför",
+  "compare_loading": "Hämtar jämförelsedata…",
+  "compare_new_activity": "ny",
+  "compare_new_activity_tooltip": "Ny aktivitet utan tidigare data",
+  "compare_increase_tooltip": "Ökning med {percent}% jämfört med föregående period",
+  "compare_decrease_tooltip": "Minskning med {percent}% jämfört med föregående period",
+  "updated_at": "Uppdaterad {time}",
+  "days_range": "{days} dagar: {start}–{end}",
+  "no_activity_title": "Ingen aktivitet",
+  "no_activity_description": "Inga konversationer registrerades under vald tidsperiod. Prova att välja ett annat datumintervall."
 }
