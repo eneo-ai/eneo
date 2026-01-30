@@ -68,3 +68,12 @@ class ConversationInsightRequest(BaseModel):
 class ConversationInsightResponse(BaseModel):
     total_conversations: int
     total_questions: int
+
+
+class AssistantActivityStats(BaseModel):
+    """Statistics about assistant activity within a period."""
+
+    active_assistant_count: int
+    total_trackable_assistants: int
+    active_assistant_pct: float
+    active_user_count: int

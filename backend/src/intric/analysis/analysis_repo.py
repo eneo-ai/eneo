@@ -510,3 +510,86 @@ class AnalysisRepository:
         question_count = await self.session.scalar(question_count_stmt) or 0
 
         return session_count, question_count
+
+    async def get_active_assistant_count_for_tenant(
+        self,
+        tenant_id: UUID,
+        start_date: datetime = None,
+        end_date: datetime = None,
+    ) -> int:
+        """Count distinct trackable assistants that have sessions in the given period.
+
+        Only counts assistants that:
+        - Are published and have insights enabled (same criteria as trackable)
+        - Have at least one session by a non-deleted tenant user in the date range
+
+        This ensures active_count <= trackable_count, avoiding >100% percentages.
+        """
+        stmt = (
+            sa.select(sa.func.count(sa.distinct(Sessions.assistant_id)))
+            .join(Assistants, Sessions.assistant_id == Assistants.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Users.deleted_at.is_(None))  # Exclude deleted users
+            .where(Assistants.published == True)  # noqa: E712
+            .where(Assistants.insight_enabled == True)  # noqa: E712
+        )
+
+        if start_date is not None:
+            stmt = stmt.where(Sessions.created_at >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(Sessions.created_at <= end_date)
+
+        result = await self.session.scalar(stmt)
+        return result or 0
+
+    async def get_trackable_assistant_count_for_tenant(
+        self,
+        tenant_id: UUID,
+    ) -> int:
+        """Count assistants that are published and have insights enabled.
+
+        These are the assistants that can be tracked for analytics.
+        """
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(Assistants)
+            .join(Users, Assistants.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Assistants.published == True)  # noqa: E712
+            .where(Assistants.insight_enabled == True)  # noqa: E712
+        )
+
+        result = await self.session.scalar(stmt)
+        return result or 0
+
+    async def get_active_user_count_for_tenant(
+        self,
+        tenant_id: UUID,
+        start_date: datetime = None,
+        end_date: datetime = None,
+    ) -> int:
+        """Count distinct non-deleted users with sessions in the given period.
+
+        Excludes:
+        - Service-generated sessions (where service_id is not null)
+        - Deleted users (where deleted_at is not null)
+
+        Note: The schema doesn't have is_service_account or is_internal fields,
+        so service_id filtering is the best proxy for excluding automated sessions.
+        """
+        stmt = (
+            sa.select(sa.func.count(sa.distinct(Sessions.user_id)))
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Users.deleted_at.is_(None))  # Exclude deleted users
+            .where(Sessions.service_id.is_(None))  # Exclude service sessions
+        )
+
+        if start_date is not None:
+            stmt = stmt.where(Sessions.created_at >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(Sessions.created_at <= end_date)
+
+        result = await self.session.scalar(stmt)
+        return result or 0

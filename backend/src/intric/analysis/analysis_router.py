@@ -11,6 +11,7 @@ from intric.analysis import analysis_protocol
 from intric.analysis.analysis import (
     AnalysisAnswer,
     AskAnalysis,
+    AssistantActivityStats,
     ConversationInsightRequest,
     ConversationInsightResponse,
     Counts,
@@ -69,6 +70,34 @@ async def get_metadata(
     return analysis_protocol.to_metadata_from_rows(
         assistants=assistants, sessions=sessions, questions=questions
     )
+
+
+@router.get("/assistant-activity/", response_model=AssistantActivityStats)
+async def get_assistant_activity(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Get assistant activity statistics for the tenant.
+
+    Returns:
+    - active_assistant_count: Number of assistants with sessions in the period
+    - total_trackable_assistants: Number of published assistants with insights enabled
+    - active_assistant_pct: Percentage of trackable assistants that are active
+    - active_user_count: Number of unique users with sessions (excluding service accounts)
+
+    Note on datetime parameters:
+    - If no time is provided in the datetime, time components default to 00:00:00
+    """
+    if start_date is None or end_date is None:
+        now = datetime.now(timezone.utc)
+        if start_date is None:
+            start_date = now - timedelta(days=30)
+        if end_date is None:
+            end_date = now + timedelta(hours=1, minutes=1)
+
+    service = container.analysis_service()
+    return await service.get_assistant_activity_stats(start_date, end_date)
 
 
 @router.get(

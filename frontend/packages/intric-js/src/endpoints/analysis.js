@@ -47,6 +47,20 @@ export function initAnalytics(client) {
     },
 
     /**
+     * Get assistant activity statistics for the tenant.
+     * @param {{start?: string, end?: string}} [params] Define start and end date for data; Expects UTC time string.
+     * @returns {Promise<{active_assistant_count: number, total_trackable_assistants: number, active_assistant_pct: number, active_user_count: number}>} Activity stats
+     * @throws {IntricError}
+     * */
+    getAssistantActivity: async ({ start, end } = { start: undefined, end: undefined }) => {
+      const res = await client.fetch("/api/v1/analysis/assistant-activity/", {
+        method: "get",
+        params: { query: { start_date: start, end_date: end } }
+      });
+      return res;
+    },
+
+    /**
      * List all questions of an assistant in a specific period.
      * @param {Object} params
      * @param {{id: string} | Assistant} params.assistant

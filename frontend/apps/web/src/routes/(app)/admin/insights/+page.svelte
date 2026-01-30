@@ -13,7 +13,7 @@
   import { CalendarDate } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import type { AnalyticsAggregatedData } from "@intric/intric-js";
-  import { ArrowUp, ArrowDown, GitCompare, RefreshCw, Clock, Cpu, ExternalLink } from "lucide-svelte";
+  import { ArrowUp, ArrowDown, GitCompare, RefreshCw, Clock, Cpu, ExternalLink, Users, Activity } from "lucide-svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
   import InteractiveGraph from "./InteractiveGraph.svelte";
@@ -59,6 +59,17 @@
   let tokenUsage: TokenUsageSummary | null = $state(null);
   let isLoadingTokens = $state(false);
   let tokenError = $state(false);
+
+  // Assistant activity state
+  type AssistantActivityStats = {
+    active_assistant_count: number;
+    total_trackable_assistants: number;
+    active_assistant_pct: number;
+    active_user_count: number;
+  };
+  let activityStats: AssistantActivityStats | null = $state(null);
+  let isLoadingActivity = $state(false);
+  let activityError = $state(false);
 
   // Cache for previously fetched date ranges
   const analyticsCache = new Map<string, { data: AnalyticsAggregatedData; timeframe: { start: string; end: string } }>();
@@ -460,6 +471,35 @@
     }
   });
 
+  // Fetch assistant activity data
+  async function fetchActivityStats() {
+    if (!dateRange.start || !dateRange.end) return;
+
+    isLoadingActivity = true;
+    activityError = false;
+
+    try {
+      const result = await intric.analytics.getAssistantActivity({
+        start: dateRange.start.toString(),
+        end: dateRange.end.add({ days: 1 }).toString()
+      });
+      activityStats = result;
+    } catch (error) {
+      console.error("Failed to fetch activity stats:", error);
+      activityError = true;
+      activityStats = null;
+    } finally {
+      isLoadingActivity = false;
+    }
+  }
+
+  // Fetch activity stats when date range changes
+  $effect(() => {
+    if (mounted && dateRange.start && dateRange.end) {
+      fetchActivityStats();
+    }
+  });
+
   // Derived: tokens per conversation
   let tokensPerConversation = $derived.by(() => {
     if (!tokenUsage || sessionTotal === 0) return null;
@@ -550,26 +590,28 @@
                             <div class="h-2 w-20 bg-[var(--background-hover-dimmer)] rounded animate-pulse" style="animation-delay: 50ms"></div>
                           </div>
                         </div>
-                        {#each Array(3) as _, i}
-                          <div class="flex flex-1 flex-col justify-between px-5 py-5 bg-[var(--background-primary)] {i > 0 ? 'border-t border-[var(--border-dimmer)]' : ''}">
-                            <div class="flex items-center gap-2.5">
-                              <!-- Icon skeleton - just a small circle, no box -->
-                              <div class="h-4 w-4 bg-[var(--background-hover-dimmer)] rounded-full animate-pulse" style="animation-delay: {i * 80}ms"></div>
-                              <div class="h-3 w-28 bg-[var(--background-hover-dimmer)] rounded animate-pulse" style="animation-delay: {i * 80 + 30}ms"></div>
+                        <!-- Scrollable skeleton cards -->
+                        <div class="flex-1 overflow-y-auto">
+                          {#each Array(6) as _, i}
+                            <div class="flex flex-col px-5 py-4 bg-[var(--background-primary)] {i > 0 ? 'border-t border-[var(--border-dimmer)]' : ''}">
+                              <div class="flex items-center gap-2.5 mb-2">
+                                <div class="h-4 w-4 bg-[var(--background-hover-dimmer)] rounded-full animate-pulse" style="animation-delay: {i * 50}ms"></div>
+                                <div class="h-3 w-28 bg-[var(--background-hover-dimmer)] rounded animate-pulse" style="animation-delay: {i * 50 + 25}ms"></div>
+                              </div>
+                              <div class="self-end h-9 w-16 bg-[var(--background-secondary)] rounded animate-pulse" style="animation-delay: {i * 50 + 50}ms"></div>
                             </div>
-                            <div class="self-end h-10 w-20 bg-[var(--background-secondary)] rounded animate-pulse mt-3" style="animation-delay: {i * 80 + 60}ms"></div>
-                          </div>
-                        {/each}
+                          {/each}
+                        </div>
                       </div>
                     </div>
                   {:else}
                     <InteractiveGraph data={analyticsData} {timeframe} {partialDataInfo}></InteractiveGraph>
 
-                    <!-- Stat Cards Panel - Nordic Precision v2 -->
+                    <!-- Stat Cards Panel - Nordic Precision v4 (Uniform Cards with Scroll) -->
                     <div class="stat-panel flex w-72 -mr-px flex-shrink-0 flex-col border-l border-[var(--border-default)] rounded-r-xl bg-[var(--background-primary)]">
-                      <!-- Stats Header - Refined hierarchy -->
-                      <div class="stat-card-header flex items-center justify-between px-5 py-3.5 border-b border-[var(--border-dimmer)] bg-[var(--background-secondary)]" style="--delay: 0ms">
-                        <div class="flex flex-col gap-1">
+                      <!-- Stats Header - Fixed -->
+                      <div class="stat-card-header flex items-center justify-between px-5 py-3 border-b border-[var(--border-dimmer)] bg-[var(--background-secondary)]" style="--delay: 0ms">
+                        <div class="flex flex-col gap-0.5">
                           <span class="text-[12px] font-semibold text-[var(--text-primary)] tracking-tight leading-none">{formattedDateRange}</span>
                           {#if formattedLastUpdated}
                             <span class="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] opacity-70">
@@ -586,61 +628,20 @@
                         {/if}
                       </div>
 
-                      <!-- Assistants Created -->
-                      <div
-                        class="stat-card group relative flex flex-1 flex-col px-5 py-6 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)]
-                               {showComparison && assistantTrend ? 'cursor-help' : ''}"
-                        style="--delay: 50ms"
-                      >
-
-                        <div class="relative flex items-center gap-2.5 mb-3">
-                          <!-- Icon without box - elegant glyph -->
-                          <IconAssistants class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
-                          <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.assistants_created()}</span>
-                          <!-- Reserved badge space prevents layout shift -->
-                          <div class="h-5 flex items-center justify-end min-w-[52px] relative">
-                            {#if showComparison && assistantTrend}
-                              <!-- Tooltip on hover - theme-aware, positioned right to stay in view -->
-                              <div class="stat-tooltip absolute bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-md text-[11px] leading-snug shadow-lg z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-100 delay-75 pointer-events-none bg-[var(--background-primary)] text-[var(--text-primary)] border border-[var(--border-default)] whitespace-normal" style="width: max-content; max-width: 180px;">
-                                {assistantTrend.tooltip}
-                              </div>
-                              <div
-                                class="trend-badge flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium tabular-nums
-                                       {assistantTrend.direction === 'up' ? 'bg-[var(--accent-dimmer)] text-[var(--accent-stronger)] ring-1 ring-[var(--accent-default)]/30' : assistantTrend.direction === 'down' ? 'bg-[var(--negative-dimmer)] text-[var(--negative-stronger)] ring-1 ring-[var(--negative-default)]/30' : 'bg-[var(--background-secondary)] text-[var(--text-secondary)] ring-1 ring-[var(--border-default)]'}"
-                                aria-label={assistantTrend.tooltip}
-                              >
-                                {#if assistantTrend.direction === 'up'}
-                                  <ArrowUp class="h-2.5 w-2.5" />
-                                {:else if assistantTrend.direction === 'down'}
-                                  <ArrowDown class="h-2.5 w-2.5" />
-                                {/if}
-                                <span>{assistantTrend.value}</span>
-                              </div>
-                            {/if}
-                          </div>
-                        </div>
-
-                        <span class="stat-number text-4xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 50ms">
-                          {assistantTotal.toLocaleString("sv-SE")}
-                        </span>
-                      </div>
-
-                      <!-- Conversations Started -->
-                      <div
-                        class="stat-card group relative flex flex-1 flex-col px-5 py-6 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)]
-                               {showComparison && sessionTrend ? 'cursor-help' : ''}"
-                        style="--delay: 150ms"
-                      >
-
-                        <div class="relative flex items-center gap-2.5 mb-3">
-                          <!-- Icon without box - elegant glyph -->
-                          <IconSession class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
-                          <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.conversations_started()}</span>
-                          <!-- Reserved badge space prevents layout shift -->
-                          <div class="h-5 flex items-center justify-end min-w-[52px] relative">
+                      <!-- Scrollable Cards Container -->
+                      <div class="flex-1 overflow-y-auto overflow-x-hidden">
+                        <!-- Conversations Started -->
+                        <div
+                          class="stat-card group relative flex flex-col px-5 py-4 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)]
+                                 {showComparison && sessionTrend ? 'cursor-help' : ''}"
+                          style="--delay: 50ms"
+                        >
+                          <div class="relative flex items-center gap-2.5 mb-2">
+                            <IconSession class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
+                            <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.conversations_started()}</span>
                             {#if showComparison && sessionTrend}
-                              <!-- Tooltip on hover - theme-aware, positioned right to stay in view -->
-                              <div class="stat-tooltip absolute bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-md text-[11px] leading-snug shadow-lg z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-100 delay-75 pointer-events-none bg-[var(--background-primary)] text-[var(--text-primary)] border border-[var(--border-default)] whitespace-normal" style="width: max-content; max-width: 180px;">
+                              <!-- Tooltip positioned below badge to avoid clipping -->
+                              <div class="stat-tooltip absolute top-full right-0 mt-1 px-2.5 py-1.5 rounded-md text-[11px] leading-snug shadow-lg z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-100 delay-75 pointer-events-none bg-[var(--background-primary)] text-[var(--text-primary)] border border-[var(--border-default)] whitespace-normal" style="width: max-content; max-width: 180px;">
                                 {sessionTrend.tooltip}
                               </div>
                               <div
@@ -657,29 +658,23 @@
                               </div>
                             {/if}
                           </div>
+                          <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 50ms">
+                            {formatNumber(sessionTotal, "compact")}
+                          </span>
                         </div>
 
-                        <span class="stat-number text-4xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 150ms">
-                          {sessionTotal.toLocaleString("sv-SE")}
-                        </span>
-                      </div>
-
-                      <!-- Questions Asked -->
-                      <div
-                        class="stat-card group relative flex flex-1 flex-col px-5 py-6 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)]
-                               {showComparison && questionTrend ? 'cursor-help' : ''}"
-                        style="--delay: 250ms"
-                      >
-
-                        <div class="relative flex items-center gap-2.5 mb-3">
-                          <!-- Icon without box - elegant glyph -->
-                          <IconQuestionMark class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
-                          <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.questions_asked()}</span>
-                          <!-- Reserved badge space prevents layout shift -->
-                          <div class="h-5 flex items-center justify-end min-w-[52px] relative">
+                        <!-- Questions Asked -->
+                        <div
+                          class="stat-card group relative flex flex-col px-5 py-4 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)]
+                                 {showComparison && questionTrend ? 'cursor-help' : ''}"
+                          style="--delay: 100ms"
+                        >
+                          <div class="relative flex items-center gap-2.5 mb-2">
+                            <IconQuestionMark class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
+                            <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.questions_asked()}</span>
                             {#if showComparison && questionTrend}
-                              <!-- Tooltip on hover - theme-aware, positioned right to stay in view -->
-                              <div class="stat-tooltip absolute bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-md text-[11px] leading-snug shadow-lg z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-100 delay-75 pointer-events-none bg-[var(--background-primary)] text-[var(--text-primary)] border border-[var(--border-default)] whitespace-normal" style="width: max-content; max-width: 180px;">
+                              <!-- Tooltip positioned below badge to avoid clipping -->
+                              <div class="stat-tooltip absolute top-full right-0 mt-1 px-2.5 py-1.5 rounded-md text-[11px] leading-snug shadow-lg z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-100 delay-75 pointer-events-none bg-[var(--background-primary)] text-[var(--text-primary)] border border-[var(--border-default)] whitespace-normal" style="width: max-content; max-width: 180px;">
                                 {questionTrend.tooltip}
                               </div>
                               <div
@@ -696,75 +691,147 @@
                               </div>
                             {/if}
                           </div>
+                          <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 100ms">
+                            {formatNumber(questionTotal, "compact")}
+                          </span>
                         </div>
 
-                        <span class="stat-number text-4xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 250ms">
-                          {questionTotal.toLocaleString("sv-SE")}
-                        </span>
-                      </div>
-
-                      <!-- Token Usage - Clickable card linking to full usage -->
-                      <a
-                        href="/admin/usage?tab=tokens"
-                        class="stat-card group relative flex flex-1 flex-col px-5 py-6 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)] cursor-pointer no-underline"
-                        style="--delay: 350ms"
-                      >
-                        <div class="relative flex items-center gap-2.5 mb-3">
-                          <!-- Icon without box - elegant glyph -->
-                          <Cpu class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
-                          <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.tokens()}</span>
-                          <!-- External link indicator - visible on hover -->
-                          <ExternalLink class="h-3.5 w-3.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-60 transition-opacity duration-200" />
+                        <!-- Assistants Created -->
+                        <div
+                          class="stat-card group relative flex flex-col px-5 py-4 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)]
+                                 {showComparison && assistantTrend ? 'cursor-help' : ''}"
+                          style="--delay: 150ms"
+                        >
+                          <div class="relative flex items-center gap-2.5 mb-2">
+                            <IconAssistants class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
+                            <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.assistants_created()}</span>
+                            {#if showComparison && assistantTrend}
+                              <!-- Tooltip positioned below badge -->
+                              <div class="stat-tooltip absolute top-full right-0 mt-1 px-2.5 py-1.5 rounded-md text-[11px] leading-snug shadow-lg z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-100 delay-75 pointer-events-none bg-[var(--background-primary)] text-[var(--text-primary)] border border-[var(--border-default)] whitespace-normal" style="width: max-content; max-width: 180px;">
+                                {assistantTrend.tooltip}
+                              </div>
+                              <div
+                                class="trend-badge flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium tabular-nums
+                                       {assistantTrend.direction === 'up' ? 'bg-[var(--accent-dimmer)] text-[var(--accent-stronger)] ring-1 ring-[var(--accent-default)]/30' : assistantTrend.direction === 'down' ? 'bg-[var(--negative-dimmer)] text-[var(--negative-stronger)] ring-1 ring-[var(--negative-default)]/30' : 'bg-[var(--background-secondary)] text-[var(--text-secondary)] ring-1 ring-[var(--border-default)]'}"
+                                aria-label={assistantTrend.tooltip}
+                              >
+                                {#if assistantTrend.direction === 'up'}
+                                  <ArrowUp class="h-2.5 w-2.5" />
+                                {:else if assistantTrend.direction === 'down'}
+                                  <ArrowDown class="h-2.5 w-2.5" />
+                                {/if}
+                                <span>{assistantTrend.value}</span>
+                              </div>
+                            {/if}
+                          </div>
+                          <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 150ms">
+                            {formatNumber(assistantTotal, "compact")}
+                          </span>
                         </div>
 
-                        {#if isLoadingTokens}
-                          <div class="self-end h-10 w-16 bg-[var(--background-secondary)] rounded animate-pulse"></div>
-                        {:else if tokenError}
-                          <button
-                            class="text-sm text-[var(--text-muted)] hover:text-[var(--accent-default)] transition-colors text-right"
-                            onclick={(e) => { e.preventDefault(); fetchTokenUsage(); }}
-                          >
-                            {m.retry()}
-                          </button>
-                        {:else if tokenUsage}
-                          <!-- Tooltip with breakdown - labels left, numbers right for scannability -->
-                          <div class="stat-tooltip absolute bottom-full right-0 mb-2 px-3 py-2.5 rounded-md bg-[var(--background-primary)] border border-[var(--border-default)] shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-150 delay-75 pointer-events-none z-50">
-                            <div class="flex flex-col gap-1.5 text-[11px] min-w-[130px]">
-                              <!-- Input row -->
-                              <div class="flex items-center justify-between gap-4">
-                                <span class="text-[var(--text-muted)]">Inmatning</span>
-                                <span class="font-medium tabular-nums text-[var(--text-secondary)]">
-                                  {formatNumber(tokenUsage.total_input_token_usage, "compact")}
-                                </span>
-                              </div>
-                              <!-- Output row -->
-                              <div class="flex items-center justify-between gap-4">
-                                <span class="text-[var(--text-muted)]">Utmatning</span>
-                                <span class="font-medium tabular-nums text-[var(--text-secondary)]">
-                                  {formatNumber(tokenUsage.total_output_token_usage, "compact")}
-                                </span>
-                              </div>
-                              <!-- Tokens per conversation -->
-                              {#if tokensPerConversation}
-                                <div class="flex items-center justify-between gap-4 pt-1.5 mt-0.5 border-t border-[var(--border-dimmer)]">
-                                  <span class="text-[var(--text-muted)]">Per konv</span>
-                                  <span class="tabular-nums text-[var(--text-muted)]">
-                                    ~{formatNumber(tokensPerConversation, "compact")}
-                                  </span>
-                                </div>
+                        <!-- Active Users -->
+                        <div
+                          class="stat-card group relative flex flex-col px-5 py-4 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)]"
+                          style="--delay: 200ms"
+                          title={m.active_users_tooltip()}
+                        >
+                          <div class="relative flex items-center gap-2.5 mb-2">
+                            <Users class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
+                            <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.active_users()}</span>
+                          </div>
+                          {#if isLoadingActivity}
+                            <div class="h-9 w-16 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
+                          {:else if activityStats}
+                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 200ms">
+                              {formatNumber(activityStats.active_user_count, "compact")}
+                            </span>
+                          {:else}
+                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right">—</span>
+                          {/if}
+                        </div>
+
+                        <!-- Active Assistants -->
+                        <div
+                          class="stat-card group relative flex flex-col px-5 py-4 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)]"
+                          style="--delay: 250ms"
+                          title={m.active_assistants_tooltip()}
+                        >
+                          <div class="relative flex items-center gap-2.5 mb-2">
+                            <Activity class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
+                            <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.active_assistants()}</span>
+                          </div>
+                          {#if isLoadingActivity}
+                            <div class="h-9 w-20 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
+                          {:else if activityStats}
+                            <div class="flex items-baseline justify-end gap-1.5">
+                              <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300" style="--delay: 250ms">
+                                {formatNumber(activityStats.active_assistant_count, "compact")}
+                              </span>
+                              {#if activityStats.total_trackable_assistants > 0}
+                                <span class="text-lg text-[var(--text-muted)] font-normal">/ {formatNumber(activityStats.total_trackable_assistants, "compact")}</span>
+                              {:else}
+                                <span class="text-lg text-[var(--text-muted)] font-normal">/ 0</span>
                               {/if}
                             </div>
-                          </div>
+                          {:else}
+                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right">—</span>
+                          {/if}
+                        </div>
 
-                          <span class="stat-number text-4xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 350ms">
-                            {formatNumber(tokenUsage.total_token_usage, "compact")}
-                          </span>
-                        {:else}
-                          <span class="stat-number text-4xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right" style="--delay: 350ms">
-                            —
-                          </span>
-                        {/if}
-                      </a>
+                        <!-- Tokens - Clickable card linking to full usage -->
+                        <a
+                          href="/admin/usage?tab=tokens"
+                          class="stat-card group relative flex flex-col px-5 py-4 transition-all duration-300 ease-out bg-[var(--background-primary)] hover:bg-[var(--background-hover-dimmer)] border-l-2 border-l-transparent hover:border-l-[var(--accent-default)] border-t border-[var(--border-dimmer)] cursor-pointer no-underline"
+                          style="--delay: 300ms"
+                        >
+                          <div class="relative flex items-center gap-2.5 mb-2">
+                            <Cpu class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
+                            <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.tokens()}</span>
+                            <ExternalLink class="h-3.5 w-3.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-60 transition-opacity duration-200" />
+                          </div>
+                          {#if isLoadingTokens}
+                            <div class="h-9 w-16 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
+                          {:else if tokenError}
+                            <button
+                              class="text-sm text-[var(--text-muted)] hover:text-[var(--accent-default)] transition-colors text-right"
+                              onclick={(e) => { e.preventDefault(); fetchTokenUsage(); }}
+                            >
+                              {m.retry()}
+                            </button>
+                          {:else if tokenUsage}
+                            <!-- Token breakdown tooltip - positioned above since this is last card -->
+                            <div class="stat-tooltip absolute bottom-full right-0 mb-2 px-3 py-2.5 rounded-md bg-[var(--background-primary)] border border-[var(--border-default)] shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-150 delay-75 pointer-events-none z-50">
+                              <div class="flex flex-col gap-1.5 text-[11px] min-w-[130px]">
+                                <div class="flex items-center justify-between gap-4">
+                                  <span class="text-[var(--text-muted)]">Inmatning</span>
+                                  <span class="font-medium tabular-nums text-[var(--text-secondary)]">
+                                    {formatNumber(tokenUsage.total_input_token_usage, "compact")}
+                                  </span>
+                                </div>
+                                <div class="flex items-center justify-between gap-4">
+                                  <span class="text-[var(--text-muted)]">Utmatning</span>
+                                  <span class="font-medium tabular-nums text-[var(--text-secondary)]">
+                                    {formatNumber(tokenUsage.total_output_token_usage, "compact")}
+                                  </span>
+                                </div>
+                                {#if tokensPerConversation}
+                                  <div class="flex items-center justify-between gap-4 pt-1.5 mt-0.5 border-t border-[var(--border-dimmer)]">
+                                    <span class="text-[var(--text-muted)]">Per konv</span>
+                                    <span class="tabular-nums text-[var(--text-muted)]">
+                                      ~{formatNumber(tokensPerConversation, "compact")}
+                                    </span>
+                                  </div>
+                                {/if}
+                              </div>
+                            </div>
+                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 300ms">
+                              {formatNumber(tokenUsage.total_token_usage, "compact")}
+                            </span>
+                          {:else}
+                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right">—</span>
+                          {/if}
+                        </a>
+                      </div>
                     </div>
                   {/if}
                 </div>

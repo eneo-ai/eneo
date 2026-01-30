@@ -115,6 +115,44 @@ class AnalysisService:
 
         return assistants, sessions, questions
 
+    @validate_permissions(Permission.INSIGHTS)
+    async def get_assistant_activity_stats(
+        self, start_date: datetime, end_date: datetime
+    ):
+        """Get assistant activity statistics for the tenant.
+
+        Returns counts of active assistants, trackable assistants, and active users.
+        """
+        from intric.analysis.analysis import AssistantActivityStats
+
+        active_count = await self.repo.get_active_assistant_count_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        trackable_count = await self.repo.get_trackable_assistant_count_for_tenant(
+            tenant_id=self.user.tenant_id,
+        )
+        active_users = await self.repo.get_active_user_count_for_tenant(
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        # Calculate percentage, handling division by zero
+        active_pct = (
+            round((active_count / trackable_count) * 100, 1)
+            if trackable_count > 0
+            else 0.0
+        )
+
+        return AssistantActivityStats(
+            active_assistant_count=active_count,
+            total_trackable_assistants=trackable_count,
+            active_assistant_pct=active_pct,
+            active_user_count=active_users,
+        )
+
     async def _check_space_permissions(self, space_id: UUID):
         space = await self.space_service.get_space(space_id)
         if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
