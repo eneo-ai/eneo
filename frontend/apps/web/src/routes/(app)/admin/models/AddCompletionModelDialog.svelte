@@ -38,11 +38,13 @@
   let endpoint = "";
 
   $: providerTypes = [
-    { value: "openai", label: m.provider_type_openai() },
-    { value: "azure", label: m.provider_type_azure() },
-    { value: "anthropic", label: m.provider_type_anthropic() },
-    { value: "gemini", label: m.provider_type_gemini() },
-    { value: "cohere", label: m.provider_type_cohere() },
+    { value: "openai", label: "OpenAI" },
+    { value: "azure", label: "Azure OpenAI" },
+    { value: "anthropic", label: "Anthropic" },
+    { value: "gemini", label: "Google Gemini" },
+    { value: "cohere", label: "Cohere" },
+    { value: "mistral", label: "Mistral AI" },
+    { value: "hosted_vllm", label: "vLLM" },
   ];
 
   // Create options for provider select - add "Create New" option
