@@ -521,18 +521,18 @@ class AnalysisRepository:
 
         Only counts assistants that:
         - Are published and have insights enabled (same criteria as trackable)
-        - Have at least one session by a non-deleted tenant user in the date range
+        - Have at least one session in the date range
 
         This ensures active_count <= trackable_count, avoiding >100% percentages.
         """
         stmt = (
             sa.select(sa.func.count(sa.distinct(Sessions.assistant_id)))
             .join(Assistants, Sessions.assistant_id == Assistants.id)
-            .join(Users, Sessions.user_id == Users.id)
+            .join(Users, Assistants.user_id == Users.id)
             .where(Users.tenant_id == tenant_id)
             .where(Users.deleted_at.is_(None))  # Exclude deleted users
-            .where(Assistants.published == True)  # noqa: E712
-            .where(Assistants.insight_enabled == True)  # noqa: E712
+            .where(Assistants.published.is_(True))
+            .where(Assistants.insight_enabled.is_(True))
         )
 
         if start_date is not None:
@@ -556,8 +556,9 @@ class AnalysisRepository:
             .select_from(Assistants)
             .join(Users, Assistants.user_id == Users.id)
             .where(Users.tenant_id == tenant_id)
-            .where(Assistants.published == True)  # noqa: E712
-            .where(Assistants.insight_enabled == True)  # noqa: E712
+            .where(Users.deleted_at.is_(None))
+            .where(Assistants.published.is_(True))
+            .where(Assistants.insight_enabled.is_(True))
         )
 
         result = await self.session.scalar(stmt)

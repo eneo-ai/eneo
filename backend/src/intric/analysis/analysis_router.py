@@ -84,7 +84,8 @@ async def get_assistant_activity(
     - active_assistant_count: Number of assistants with sessions in the period
     - total_trackable_assistants: Number of published assistants with insights enabled
     - active_assistant_pct: Percentage of trackable assistants that are active
-    - active_user_count: Number of unique users with sessions (excluding service accounts)
+    - active_user_count: Number of unique users with sessions (excluding service sessions
+      and deleted users)
 
     Note on datetime parameters:
     - If no time is provided in the datetime, time components default to 00:00:00

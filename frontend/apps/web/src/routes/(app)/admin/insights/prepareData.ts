@@ -83,10 +83,27 @@ const flatten = (obj: UsageData) => {
   return rows;
 };
 
+// Get "nice" Y-axis max with explicit split count for consistent intervals
+const getNiceMaxWithSplits = (maxValue: number): { max: number; splits: number } => {
+  if (maxValue <= 0) return { max: 10, splits: 2 };
+  if (maxValue <= 10) return { max: 10, splits: 2 };
+  if (maxValue <= 25) return { max: 25, splits: 5 };
+  if (maxValue <= 50) return { max: 50, splits: 5 };
+  if (maxValue <= 100) return { max: 100, splits: 4 };
+  if (maxValue <= 250) return { max: 250, splits: 5 };
+  if (maxValue <= 500) return { max: 500, splits: 5 };
+  if (maxValue <= 1000) return { max: 1000, splits: 4 };
+  if (maxValue <= 2500) return { max: 2500, splits: 5 };
+  if (maxValue <= 5000) return { max: 5000, splits: 5 };
+  // For larger values, round up to nearest 1000
+  const max = Math.ceil(maxValue / 1000) * 1000;
+  return { max, splits: 4 };
+};
+
 // Optimized getMaxCount: single pass, no intermediate array
-const getMaxCount = (obj: UsageData): number => {
+const getMaxCount = (obj: UsageData): { max: number; splits: number } => {
   const questions = obj.questions;
-  if (!questions) return 5;
+  if (!questions) return { max: 10, splits: 2 };
 
   let maxCount = 0;
   const keys = Object.keys(questions);
@@ -94,7 +111,7 @@ const getMaxCount = (obj: UsageData): number => {
     const c = questions[keys[i]].count;
     if (c > maxCount) maxCount = c;
   }
-  return Math.ceil(maxCount / 5) * 5 || 5;
+  return getNiceMaxWithSplits(maxCount);
 };
 
 // Lazy-initialized days array
@@ -189,6 +206,12 @@ export function prepareData(
     ? dataBounds.earliest
     : requestedStartDate;
 
+  // Swedish month abbreviations for date formatting
+  const monthNames = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+
+  // Count unique dates to determine label density
+  const dateDataPointCount = Object.keys(usageByDate.sessions || {}).length;
+
   const byDate: PreparedData = {
     xAxis: {
       animation: false,
@@ -197,20 +220,43 @@ export function prepareData(
       min: parseAbsolute(`${effectiveStartDate}T00:00:00+01:00`, "Europe/Stockholm").subtract({ days: 1 }).toDate(),
       max: timeframe.end,
       axisLabel: {
-        // Shorter date format: MM-DD instead of YYYY-MM-DD
+        // Swedish date format with smart density based on data count
         formatter: (value: number) => {
           const date = toCalendarDate(fromAbsolute(value, "Europe/Stockholm"));
-          const month = date.month.toString().padStart(2, "0");
-          const day = date.day.toString().padStart(2, "0");
-          return `${month}-${day}`;
+          const day = date.day;
+          const month = monthNames[date.month - 1];
+
+          // For dense datasets (>45 days): only show month markers
+          if (dateDataPointCount > 45) {
+            return day === 1 ? `{month|${month.toUpperCase()}}` : "";
+          }
+
+          // For medium datasets (>20 days): show 1st and 15th
+          if (dateDataPointCount > 20) {
+            if (day === 1) return `{month|${month.toUpperCase()}}`;
+            if (day === 15) return `${day}`;
+            return "";
+          }
+
+          // For small datasets: show all with month on 1st
+          if (day === 1) {
+            return `{month|${month.toUpperCase()}}`;
+          }
+          return `${day} ${month}`;
+        },
+        rich: {
+          month: {
+            color: "#6B7280",
+            fontWeight: 600,
+            fontSize: 11
+          }
         }
       }
     },
-    yAxis: {
-      type: "value",
-      min: 0,
-      max: getMaxCount(usageByDate)
-    },
+    yAxis: (() => {
+      const { max, splits } = getMaxCount(usageByDate);
+      return { type: "value" as const, min: 0, max, splitNumber: splits };
+    })(),
     dataset: [
       {
         dimensions: ["created_at", "type", "count", "total"],
@@ -233,7 +279,10 @@ export function prepareData(
         }
       }
     },
-    yAxis: { type: "value", min: 0, max: getMaxCount(usageByWeekday) },
+    yAxis: (() => {
+      const { max, splits } = getMaxCount(usageByWeekday);
+      return { type: "value" as const, min: 0, max, splitNumber: splits };
+    })(),
     dataset: [
       {
         dimensions: ["created_at", "type", "count", "total"],
@@ -252,7 +301,10 @@ export function prepareData(
         formatter: (value: string) => `${value}:00`
       }
     },
-    yAxis: { type: "value", min: 0, max: getMaxCount(usageByHour) },
+    yAxis: (() => {
+      const { max, splits } = getMaxCount(usageByHour);
+      return { type: "value" as const, min: 0, max, splitNumber: splits };
+    })(),
     dataset: [
       {
         dimensions: ["created_at", "type", "count", "total"],
@@ -264,8 +316,69 @@ export function prepareData(
   return { byDate, byWeekday, byHour };
 }
 
+// Get adaptive animation config based on data count
+const getAnimationConfig = (dataPointCount: number) => {
+  const MAX_ANIMATION_TIME = 600; // Cap total animation at 600ms
+
+  if (dataPointCount > 60) {
+    // Large dataset: disable stagger, use single fade-in
+    return {
+      animationDuration: 250,
+      animationDelay: 0
+    };
+  } else if (dataPointCount > 30) {
+    // Medium dataset: fast stagger
+    const delayPerBar = Math.floor(MAX_ANIMATION_TIME / dataPointCount);
+    return {
+      animationDuration: 200,
+      animationDelay: (idx: number) => idx * delayPerBar
+    };
+  } else {
+    // Small dataset: full stagger effect
+    return {
+      animationDuration: 400,
+      animationDelay: (idx: number) => idx * 25
+    };
+  }
+};
+
+// Get adaptive bar styling based on data count
+const getBarConfig = (dataPointCount: number) => {
+  if (dataPointCount > 60) {
+    // Dense view with panning - comfortable bar width since we show ~40 at a time
+    return {
+      barMaxWidth: 16,
+      barMinWidth: 6,
+      barCategoryGap: "15%",
+      barGap: "5%"
+    };
+  } else if (dataPointCount > 30) {
+    // Medium density
+    return {
+      barMaxWidth: 28,
+      barMinWidth: 6,
+      barCategoryGap: "15%",
+      barGap: "5%"
+    };
+  } else {
+    // Comfortable spacing
+    return {
+      barMaxWidth: 40,
+      barMinWidth: 8,
+      barCategoryGap: "20%",
+      barGap: "10%"
+    };
+  }
+};
+
 export function getConfig(data: PreparedData, filter: "sessions" | "questions"): Chart.Config {
   const label = filter === "sessions" ? m.conversations() : filter;
+
+  // Get data point count for adaptive config
+  // @ts-expect-error dataset structure
+  const dataPointCount = data.dataset[0]?.source?.filter((d) => d.type === filter).length || 0;
+  const animConfig = getAnimationConfig(dataPointCount);
+  const barConfig = getBarConfig(dataPointCount);
 
   return {
     options: {
@@ -278,7 +391,14 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
       },
       xAxis: {
         ...data.xAxis,
-        axisLine: { show: false },
+        // Subtle baseline at y=0 for grounding
+        axisLine: {
+          show: true,
+          lineStyle: {
+            color: "rgba(156, 163, 175, 0.25)",
+            width: 1
+          }
+        },
         axisTick: { show: false },
         axisLabel: {
           ...data.xAxis?.axisLabel,
@@ -292,23 +412,20 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
       },
       yAxis: {
         ...data.yAxis,
-        axisLine: {
-          show: true,
-          lineStyle: {
-            color: "rgba(156, 163, 175, 0.4)", // gray-400 with opacity
-            width: 1
-          }
-        },
+        // Remove Y-axis left line for cleaner minimal look
+        axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
+          // Hide "0" label - baseline is visually implied
+          formatter: (value: number) => (value === 0 ? "" : value.toString()),
           // Use actual color value for canvas rendering
           color: "#9CA3AF",
           fontSize: 10,
-          margin: 8
+          margin: 12 // Increased for breathing room
         },
         splitLine: {
           lineStyle: {
-            color: "rgba(156, 163, 175, 0.2)", // gray-400 with low opacity
+            color: "rgba(156, 163, 175, 0.15)", // Slightly fainter
             type: "dashed"
           }
         }
@@ -337,7 +454,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
             color: "rgba(14, 165, 233, 0.06)"
           },
           label: {
-            // @ts-expect-errorignore any type
+            // @ts-expect-error ignore any type
             formatter: (params) => {
               // @ts-expect-error axisLabel is not properly typed?
               return data.xAxis?.axisLabel?.formatter(params.value) ?? params.value.toString();
@@ -345,6 +462,22 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           }
         }
       },
+      // Add dataZoom for large datasets to enable panning
+      ...(dataPointCount > 45
+        ? {
+            dataZoom: [
+              {
+                type: "inside", // Drag/scroll to pan
+                xAxisIndex: 0,
+                start: Math.max(0, 100 - (40 / dataPointCount) * 100), // Show last ~40 data points for comfortable bar width
+                end: 100,
+                zoomLock: true, // Prevent zoom, only pan
+                moveOnMouseMove: true,
+                moveOnMouseWheel: true
+              }
+            ]
+          }
+        : {}),
       dataset: [
         ...data.dataset,
         {
@@ -361,9 +494,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           dimensions: ["created_at", "count"],
           name: `${m.new()} ${label}`,
           datasetId: "filtered",
-          barMaxWidth: 40,
-          barCategoryGap: "20%",
-          barGap: "10%",
+          ...barConfig,
           itemStyle: {
             borderRadius: [4, 4, 0, 0],
             shadowColor: "rgba(59, 130, 246, 0.15)",
@@ -389,11 +520,10 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
               shadowOffsetY: 3
             }
           },
-          animationDuration: 400,
           animationEasing: "cubicOut",
-          animationDurationUpdate: 200,
+          animationDurationUpdate: 150,
           animationEasingUpdate: "cubicOut",
-          animationDelay: (idx: number) => idx * 30
+          ...animConfig
         }
       ]
     }

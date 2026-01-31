@@ -41,6 +41,15 @@
 
   // Memoize config - only recomputes when dataset or filter changes
   let config = $derived.by(() => getConfig(dataset, filter));
+
+  // Detect if panning is enabled (date view with >45 data points)
+  let hasPanning = $derived.by(() => {
+    if (datasetKey !== "byDate") return false;
+    const sessionCount = data.sessions?.length || 0;
+    const questionCount = data.questions?.length || 0;
+    // Rough estimate - actual count is computed in getConfig
+    return Math.max(sessionCount, questionCount) > 45;
+  });
 </script>
 
 <div class="flex w-[calc(100%_-_256px)] flex-col">
@@ -117,7 +126,20 @@
         </div>
       </div>
     {:else}
-      <Chart.Root {config}></Chart.Root>
+      <!-- Chart container with optional fade edges for pan indicator -->
+      <div class="relative h-full w-full">
+        <Chart.Root {config}></Chart.Root>
+
+        <!-- Left fade edge - indicates more data to the left when panning is enabled -->
+        {#if hasPanning}
+          <div
+            class="pointer-events-none absolute left-0 top-0 bottom-0 w-16
+                   bg-gradient-to-r from-[var(--background-primary)] via-[var(--background-primary)]/50 to-transparent
+                   opacity-70"
+            aria-hidden="true"
+          ></div>
+        {/if}
+      </div>
 
       <!-- Partial data info - bottom-left corner, subtle -->
       {#if partialDataInfo}
