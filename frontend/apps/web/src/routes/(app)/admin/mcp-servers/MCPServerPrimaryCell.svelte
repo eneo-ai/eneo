@@ -6,6 +6,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { Globe, Key, Shield, Settings2 } from "lucide-svelte";
 
   type Props = {
     mcpServer: {
@@ -18,43 +19,62 @@
 
   const { mcpServer }: Props = $props();
 
-  function getAuthTypeColor(type: string) {
+  // Nordic-inspired muted colors with better contrast for accessibility
+  function getAuthConfig(type: string) {
     switch (type) {
       case "none":
-        return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
+        return {
+          label: "Public",
+          icon: Globe,
+          classes: "bg-moss-100 text-moss-700 dark:bg-moss-900/50 dark:text-moss-300"
+        };
       case "bearer":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
+        return {
+          label: "Bearer",
+          icon: Shield,
+          classes: "bg-intric-100 text-intric-700 dark:bg-intric-900/50 dark:text-intric-300"
+        };
       case "api_key":
-        return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
+        return {
+          label: "API-nyckel",
+          icon: Key,
+          classes: "bg-ui-orange-100 text-ui-orange-700 dark:bg-ui-orange-900/50 dark:text-ui-orange-300"
+        };
       case "custom_headers":
-        return "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200";
+        return {
+          label: "Anpassad",
+          icon: Settings2,
+          classes: "bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300"
+        };
       default:
-        return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
+        return {
+          label: type,
+          icon: Globe,
+          classes: "bg-secondary text-secondary"
+        };
     }
   }
 
-  function formatAuthType(type: string) {
-    if (type === "none") return "Public";
-    if (type === "bearer") return "Bearer";
-    if (type === "api_key") return "API Key";
-    if (type === "custom_headers") return "Custom";
-    return type;
-  }
+  const authConfig = $derived(getAuthConfig(mcpServer.http_auth_type));
 </script>
 
-<div class="flex flex-col gap-0.5 py-1 min-w-0">
-  <div class="flex items-center gap-2 flex-wrap">
-    <span class="font-medium text-default truncate">{mcpServer.name}</span>
+<div class="flex flex-col gap-1 py-0.5 min-w-0">
+  <div class="flex items-center gap-2.5">
+    <span class="font-medium text-default truncate leading-tight">{mcpServer.name}</span>
     <span
-      class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 {getAuthTypeColor(
-        mcpServer.http_auth_type
-      )}"
+      class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium {authConfig.classes}"
+      role="status"
+      aria-label="Autentiseringstyp: {authConfig.label}"
     >
-      {formatAuthType(mcpServer.http_auth_type)}
+      <svelte:component this={authConfig.icon} class="h-3 w-3" aria-hidden="true" />
+      {authConfig.label}
     </span>
   </div>
   {#if mcpServer.description}
-    <span class="text-sm text-muted line-clamp-1">{mcpServer.description}</span>
+    <p class="text-sm text-muted line-clamp-1 leading-snug">{mcpServer.description}</p>
   {/if}
-  <span class="text-xs text-dimmer truncate">{mcpServer.http_url}</span>
+  <span class="inline-flex items-center gap-1.5 text-xs text-dimmer truncate font-mono" aria-label="Server URL">
+    <span class="inline-block h-1.5 w-1.5 rounded-full bg-positive-default animate-pulse" aria-hidden="true"></span>
+    {mcpServer.http_url}
+  </span>
 </div>

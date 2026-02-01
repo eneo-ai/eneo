@@ -131,7 +131,7 @@
   {/if}
 
   {#if mcpToolCalls && mcpToolCalls.length > 0}
-    <div class="mb-4 flex flex-col gap-1">
+    <div class="mb-5 flex flex-col gap-2">
       {#each mcpToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === mcpToolCalls.length - 1}
         {@const isPendingTool = toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
@@ -143,70 +143,103 @@
         {@const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
         {@const isExpanded = expandedToolCalls.has(idx)}
         {@const isSubmitting = toolCall.tool_call_id ? submittingToolIds.has(toolCall.tool_call_id) : false}
-        {@const pillColor = isDenied ? 'bg-negative-dimmer text-negative-stronger' : isApproved ? 'bg-positive-dimmer text-positive-stronger' : 'bg-accent-dimmer text-accent-stronger'}
-        <div class="flex flex-col">
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium {pillColor} {shouldPulse ? 'animate-pulse' : ''} {hasArgs ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}"
-              onclick={() => hasArgs && toggleToolCallExpanded(idx)}
-              disabled={!hasArgs}
-            >
-              {#if hasArgs}
-                <ChevronRight class="h-3 w-3 transition-transform {isExpanded ? 'rotate-90' : ''}" />
-              {/if}
-              <Wrench class="h-3.5 w-3.5" />
-              {isPendingTool ? m.tool_waiting_approval?.({ tool: toolCall.tool_name, server: toolCall.server_name }) ?? `${toolCall.server_name}: ${toolCall.tool_name}` : m.executing_tool({ tool: toolCall.tool_name, server: toolCall.server_name })}
-            </button>
-            {#if isDenied}
-              <span class="text-xs text-tertiary italic">{m.tool_rejected_by_user()}</span>
+        {@const statusStyle = isDenied
+          ? 'border-negative-default/20 bg-negative-dimmer/50'
+          : isApproved
+            ? 'border-positive-default/20 bg-positive-dimmer/50'
+            : 'border-default bg-secondary/80'}
+        <div class="group rounded-lg border {statusStyle} transition-all duration-200 {shouldPulse ? 'animate-pulse' : ''}">
+          <!-- Tool header -->
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 px-3 py-2.5 text-left {hasArgs ? 'cursor-pointer' : 'cursor-default'}"
+            onclick={() => hasArgs && toggleToolCallExpanded(idx)}
+            disabled={!hasArgs}
+          >
+            <!-- Status indicator -->
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md {isDenied ? 'bg-negative-default/10 text-negative-default' : isApproved ? 'bg-positive-default/10 text-positive-default' : 'bg-accent-default/10 text-accent-default'}">
+              <Wrench class="h-4 w-4" />
+            </div>
+
+            <!-- Tool info -->
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-sm font-medium text-default">{toolCall.tool_name}</span>
+                {#if isDenied}
+                  <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-negative-dimmer text-negative-default">
+                    {m.tool_rejected_by_user()}
+                  </span>
+                {:else if isApproved}
+                  <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-positive-dimmer text-positive-default">
+                    <Check class="h-2.5 w-2.5" />
+                  </span>
+                {/if}
+              </div>
+              <span class="text-xs text-muted">{toolCall.server_name}</span>
+            </div>
+
+            <!-- Expand indicator -->
+            {#if hasArgs}
+              <ChevronRight class="h-4 w-4 shrink-0 text-muted transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}" />
             {/if}
-            {#if isPendingTool && toolCall.tool_call_id}
+          </button>
+
+          <!-- Expanded arguments -->
+          {#if hasArgs && isExpanded}
+            <div class="border-t border-dimmer px-3 py-2.5">
+              <div class="rounded-md bg-primary/60 p-3">
+                <pre class="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-secondary leading-relaxed">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Approval actions -->
+          {#if isPendingTool && toolCall.tool_call_id}
+            <div class="flex items-center gap-2 border-t border-dimmer px-3 py-2.5">
+              <span class="mr-auto text-xs text-muted">{m.tool_waiting_approval?.({ tool: '', server: '' }) ?? 'Väntar på godkännande'}</span>
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded border border-positive-default bg-positive-default px-1.5 py-0.5 text-xs font-medium text-on-fill hover:bg-positive-stronger disabled:opacity-50"
+                class="inline-flex items-center gap-1.5 rounded-md bg-positive-default px-3 py-1.5 text-xs font-medium text-on-fill shadow-sm transition-colors hover:bg-positive-stronger disabled:opacity-50"
                 onclick={() => handleApproveTool(toolCall.tool_call_id!)}
                 disabled={isSubmitting}
               >
-                <Check class="h-3 w-3" />
+                <Check class="h-3.5 w-3.5" />
                 {m.tool_accept()}
               </button>
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded border border-dimmer bg-secondary px-1.5 py-0.5 text-xs font-medium text-secondary hover:bg-hover-default disabled:opacity-50"
+                class="inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-3 py-1.5 text-xs font-medium text-secondary shadow-sm transition-colors hover:bg-hover-default disabled:opacity-50"
                 onclick={() => handleDenyTool(toolCall.tool_call_id!)}
                 disabled={isSubmitting}
               >
-                <X class="h-3 w-3" />
+                <X class="h-3.5 w-3.5" />
                 {m.tool_deny()}
               </button>
-            {/if}
-          </div>
-          {#if hasArgs && isExpanded}
-            <div class="ml-4 mt-1 rounded-md border border-dimmer bg-secondary p-3 text-xs">
-              <pre class="overflow-x-auto whitespace-pre-wrap break-words text-secondary">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
             </div>
           {/if}
         </div>
       {/each}
+
+      <!-- Bulk approval actions -->
       {#if hasPendingApproval && hasMultiplePendingTools}
-        <div class="mt-2 flex items-center gap-2">
+        <div class="mt-1 flex items-center justify-end gap-2 rounded-lg border border-dashed border-default bg-secondary/50 px-3 py-2.5">
+          <span class="mr-auto text-xs text-muted">{pendingToolIds.length} verktyg väntar</span>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded border border-positive-default bg-positive-default px-2 py-1 text-xs font-medium text-on-fill hover:bg-positive-stronger disabled:opacity-50"
+            class="inline-flex items-center gap-1.5 rounded-md bg-positive-default px-3 py-1.5 text-xs font-medium text-on-fill shadow-sm transition-colors hover:bg-positive-stronger disabled:opacity-50"
             onclick={handleApproveAll}
             disabled={isSubmittingBulk}
           >
-            <Check class="h-3 w-3" />
+            <Check class="h-3.5 w-3.5" />
             {m.tool_accept_all({ count: pendingToolIds.length })}
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded border border-dimmer bg-secondary px-2 py-1 text-xs font-medium text-secondary hover:bg-hover-default disabled:opacity-50"
+            class="inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-3 py-1.5 text-xs font-medium text-secondary shadow-sm transition-colors hover:bg-hover-default disabled:opacity-50"
             onclick={handleDenyAll}
             disabled={isSubmittingBulk}
           >
-            <X class="h-3 w-3" />
+            <X class="h-3.5 w-3.5" />
             {m.tool_deny_all()}
           </button>
         </div>
