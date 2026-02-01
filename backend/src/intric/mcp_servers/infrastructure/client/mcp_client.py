@@ -173,7 +173,7 @@ class MCPClient:
 
         except Exception as e:
             logger.error(f"Failed to list tools from {self.mcp_server.name}: {e}")
-            return []
+            raise MCPClientError(f"Failed to list tools: {e}")
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """

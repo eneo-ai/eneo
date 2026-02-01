@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from intric.main.exceptions import UnauthorizedException
+from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
 if TYPE_CHECKING:
@@ -91,5 +91,5 @@ class MCPServerSettingsService:
         try:
             mcp_server = await self.mcp_server_repo.one(id=mcp_server_id)
             return mcp_server.tenant_id == tenant_id and mcp_server.is_enabled
-        except:
+        except NotFoundException:
             return False

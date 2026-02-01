@@ -56,7 +56,7 @@ from intric.database.tables.spaces_table import (
 )
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
-from intric.main.exceptions import NotFoundException, UniqueException
+from intric.main.exceptions import BadRequestException, NotFoundException, UniqueException
 from intric.spaces.api.space_models import SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
@@ -293,13 +293,20 @@ class SpaceRepository:
             await self.session.execute(stmt)
 
     async def _set_mcp_tools(
-        self, space_in_db: Spaces, tool_settings: list[tuple[UUID, bool]]
+        self,
+        space_in_db: Spaces,
+        tool_settings: list[tuple[UUID, bool]],
+        valid_server_ids: list[UUID],
     ):
         """Set space-level tool enablement settings.
 
         Args:
             space_in_db: The space database object
             tool_settings: List of (tool_id, is_enabled) tuples
+            valid_server_ids: List of MCP server IDs that are selected for this space
+
+        Raises:
+            BadRequestException: If any tool_id doesn't belong to the selected servers
         """
         # Delete all existing settings
         stmt = sa.delete(SpacesMCPServerTools).where(
@@ -308,6 +315,21 @@ class SpaceRepository:
         await self.session.execute(stmt)
 
         if tool_settings:
+            tool_ids = [t[0] for t in tool_settings]
+
+            # Validate all tools belong to selected servers
+            valid_query = (
+                sa.select(MCPServerToolsTable.id)
+                .where(MCPServerToolsTable.id.in_(tool_ids))
+                .where(MCPServerToolsTable.mcp_server_id.in_(valid_server_ids))
+            )
+            result = await self.session.execute(valid_query)
+            valid_tool_ids = set(row[0] for row in result.fetchall())
+
+            invalid_ids = set(tool_ids) - valid_tool_ids
+            if invalid_ids:
+                raise BadRequestException(f"Invalid tool IDs: {invalid_ids}")
+
             stmt = sa.insert(SpacesMCPServerTools).values(
                 [
                     dict(
@@ -1187,7 +1209,11 @@ class SpaceRepository:
         await self._set_transcription_models(entry_in_db, space.transcription_models)
         await self._set_mcp_servers(entry_in_db, space.mcp_servers)
         if mcp_tool_settings is not None:
-            await self._set_mcp_tools(entry_in_db, mcp_tool_settings)
+            await self._set_mcp_tools(
+                entry_in_db,
+                mcp_tool_settings,
+                valid_server_ids=[s.id for s in space.mcp_servers],
+            )
         await self._set_members(entry_in_db, space.members)
         await self._set_default_assistant(entry_in_db, space.default_assistant)
         await self._set_collections(entry_in_db, space.collections)

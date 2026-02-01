@@ -91,6 +91,15 @@ class MCPProxySession:
                 tool_name_sanitized = self._sanitize_name(tool.name)
                 prefixed_name = f"{server_prefix}__{tool_name_sanitized}"
 
+                # Check for collision before registering
+                if prefixed_name in self._tool_registry:
+                    existing_server, existing_tool = self._tool_registry[prefixed_name]
+                    logger.warning(
+                        f"[MCPProxy] Tool collision: '{prefixed_name}' from '{server.name}/{tool.name}' "
+                        f"skipped (already registered from '{existing_server.name}/{existing_tool}')"
+                    )
+                    continue  # Skip this tool entirely (no registry, no LLM list)
+
                 # Register tool -> (server, original_name) mapping
                 self._tool_registry[prefixed_name] = (server, tool.name)
 

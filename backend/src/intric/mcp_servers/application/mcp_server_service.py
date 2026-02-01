@@ -362,7 +362,18 @@ class MCPServerService:
 
         Returns:
             List of tools with effective tenant-level enablement
+
+        Raises:
+            NotFoundException: If server doesn't exist
+            UnauthorizedException: If server belongs to a different tenant
         """
+        from intric.main.exceptions import UnauthorizedException
+
+        # Verify server exists and belongs to current tenant
+        server = await self.repo.one(id=mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            raise UnauthorizedException("MCP server not accessible")
+
         import sqlalchemy as sa
         from intric.database.tables.mcp_server_table import MCPServerToolSettings
 

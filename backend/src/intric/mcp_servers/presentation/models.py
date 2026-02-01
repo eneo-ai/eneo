@@ -1,7 +1,7 @@
 from typing import Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field
+from pydantic import AnyHttpUrl, BaseModel, computed_field
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -20,12 +20,12 @@ class MCPServerPublic(BaseModel):
     id: UUID
     name: str
     description: Optional[str]
-    http_url: str
+    http_url: AnyHttpUrl
     http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
     http_auth_config_schema: Optional[dict]
     tags: Optional[list[str]]
-    icon_url: Optional[str]
-    documentation_url: Optional[str]
+    icon_url: Optional[AnyHttpUrl]
+    documentation_url: Optional[AnyHttpUrl]
 
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
@@ -36,26 +36,26 @@ class MCPServerCreate(BaseModel):
     """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: str
-    http_url: str
+    http_url: AnyHttpUrl
     http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None
-    icon_url: Optional[str] = None
-    documentation_url: Optional[str] = None
+    icon_url: Optional[AnyHttpUrl] = None
+    documentation_url: Optional[AnyHttpUrl] = None
 
 
 class MCPServerUpdate(BaseModel):
     """DTO for updating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: Optional[str] = None
-    http_url: Optional[str] = None
+    http_url: Optional[AnyHttpUrl] = None
     http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None
-    icon_url: Optional[str] = None
-    documentation_url: Optional[str] = None
+    icon_url: Optional[AnyHttpUrl] = None
+    documentation_url: Optional[AnyHttpUrl] = None
 
 
 class MCPServerSettingsPublic(MCPServerPublic):
