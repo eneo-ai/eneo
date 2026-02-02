@@ -1186,6 +1186,8 @@
   "scroll_to_bottom": "Scroll to bottom",
   "drop_files_here_conversation": "Drop files here to attach them to your conversation",
   "thinking": "Thinking...",
+  "assistant_is_typing": "Assistant is typing",
+  "assistant_is_thinking": "Assistant is thinking",
   "references": "references",
   "stop_recording": "Stop recording",
   "start_recording": "Start recording",

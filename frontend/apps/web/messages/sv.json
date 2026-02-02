@@ -1184,6 +1184,8 @@
   "scroll_to_bottom": "Rulla till botten",
   "drop_files_here_conversation": "Släpp filer här för att bifoga dem till din konversation",
   "thinking": "Tänker...",
+  "assistant_is_typing": "Assistenten skriver",
+  "assistant_is_thinking": "Assistenten tänker",
   "references": "referenser",
   "stop_recording": "Stoppa inspelning",
   "start_recording": "Starta inspelning",
