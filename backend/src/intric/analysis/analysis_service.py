@@ -1,6 +1,6 @@
 # MIT License
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple, cast
 from uuid import UUID
 
 from intric.analysis.analysis import ConversationInsightResponse, Counts
@@ -9,11 +9,15 @@ from intric.assistants.assistant_service import AssistantService
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
 from intric.group_chat.application.group_chat_service import GroupChatService
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.questions.questions_repo import QuestionRepository
 from intric.roles.permissions import Permission, validate_permissions
-from intric.sessions.session import SessionInDB, SessionPublic
+from intric.sessions.session import SessionInDB
 from intric.sessions.session_service import SessionService
 from intric.sessions.sessions_repo import SessionRepository
 from intric.spaces.space_service import SpaceService
@@ -394,7 +398,7 @@ class AnalysisService:
         name_filter: str = None,
         start_date: datetime = None,
         end_date: datetime = None,
-    ) -> List[SessionInDB]:
+    ) -> Tuple[List[SessionInDB], int]:
         """Get all sessions for an assistant across all users in the tenant (with insight access)
 
         Args:
@@ -424,7 +428,7 @@ class AnalysisService:
             start_date=start_date,
             end_date=end_date,
         )
-        return sessions, total
+        return cast(List[SessionInDB], sessions), int(total or 0)
 
     async def get_group_chat_insight_sessions(
         self,
@@ -435,7 +439,7 @@ class AnalysisService:
         name_filter: str = None,
         start_date: datetime = None,
         end_date: datetime = None,
-    ) -> List[SessionInDB]:
+    ) -> Tuple[List[SessionInDB], int]:
         """Get all sessions for a group chat across all users in the tenant (with insight access)
 
         Args:
@@ -465,12 +469,12 @@ class AnalysisService:
             start_date=start_date,
             end_date=end_date,
         )
-        return sessions, total
+        return cast(List[SessionInDB], sessions), int(total or 0)
 
     async def get_insight_session(
         self,
         session_id: UUID,
-    ) -> SessionPublic:
+    ) -> SessionInDB:
         """Get a specific session with insight access
 
         Args:
@@ -490,6 +494,8 @@ class AnalysisService:
         if session.group_chat_id is not None:
             await self._check_insight_access(group_chat_id=session.group_chat_id)
         else:
+            if session.assistant is None:
+                raise NotFoundException("Session assistant not found")
             await self._check_insight_access(assistant_id=session.assistant.id)
 
         return session
