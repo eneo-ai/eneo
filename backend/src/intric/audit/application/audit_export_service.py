@@ -176,12 +176,27 @@ class AuditExportService:
             AsyncIterator yielding raw log dicts from SQLAlchemy Core
         """
         if user_id:
+            if batch_size is None:
+                return self.repository.stream_user_logs_raw(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                )
             return self.repository.stream_user_logs_raw(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 from_date=from_date,
                 to_date=to_date,
                 batch_size=batch_size,
+            )
+        if batch_size is None:
+            return self.repository.stream_logs_raw(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action=action,
+                from_date=from_date,
+                to_date=to_date,
             )
         return self.repository.stream_logs_raw(
             tenant_id=tenant_id,

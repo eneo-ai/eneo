@@ -1191,6 +1191,8 @@
   "scroll_to_bottom": "Scroll to bottom",
   "drop_files_here_conversation": "Drop files here to attach them to your conversation",
   "thinking": "Thinking...",
+  "assistant_is_typing": "Assistant is typing",
+  "assistant_is_thinking": "Assistant is thinking",
   "references": "references",
   "stop_recording": "Stop recording",
   "start_recording": "Start recording",
@@ -1640,11 +1642,6 @@
   "select_provider_type": "Select provider type",
   "select_provider": "Select provider",
   "provider": "Provider",
-  "provider_type_openai": "OpenAI",
-  "provider_type_azure": "Azure OpenAI",
-  "provider_type_anthropic": "Anthropic (Claude)",
-  "provider_type_gemini": "Google Gemini",
-  "provider_type_cohere": "Cohere",
   "provider_name": "Provider Name",
   "provider_name_placeholder": "e.g., My Azure Instance, GDM",
   "provider_name_hint": "A unique name to identify this provider instance",
@@ -2055,5 +2052,10 @@
   "updated_at": "Updated {time}",
   "days_range": "{days} days: {start}–{end}",
   "no_activity_title": "No activity",
-  "no_activity_description": "No conversations were recorded during the selected time period. Try selecting a different date range."
+  "no_activity_description": "No conversations were recorded during the selected time period. Try selecting a different date range.",
+  "voice_input_start": "Record voice message",
+  "voice_input_stop": "Stop recording",
+  "voice_input_error_no_mic": "Microphone access denied",
+  "voice_input_error_transcription": "Transcription failed",
+  "voice_input_unsupported_browser": "Voice input is not supported in this browser"
 }
