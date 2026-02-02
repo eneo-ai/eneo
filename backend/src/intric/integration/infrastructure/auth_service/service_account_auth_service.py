@@ -80,9 +80,9 @@ class ServiceAccountAuthService:
         """Build credentials object from provided values.
 
         Args:
-            client_id: Azure AD application client ID
-            client_secret: Azure AD application client secret
-            tenant_domain: Azure AD tenant domain
+            client_id: Microsoft Entra ID application client ID
+            client_secret: Microsoft Entra ID application client secret
+            tenant_domain: Microsoft Entra ID tenant domain
             include_redirect_uri: Whether to include redirect_uri (only needed for OAuth flow)
         """
         redirect_uri = self._get_redirect_uri() if include_redirect_uri else None
@@ -123,9 +123,9 @@ class ServiceAccountAuthService:
 
         Args:
             state: OAuth state parameter for CSRF protection
-            client_id: Azure AD application client ID
-            client_secret: Azure AD application client secret
-            tenant_domain: Azure AD tenant domain (e.g., contoso.onmicrosoft.com)
+            client_id: Microsoft Entra ID application client ID
+            client_secret: Microsoft Entra ID application client secret
+            tenant_domain: Microsoft Entra ID tenant domain (e.g., contoso.onmicrosoft.com)
 
         Returns:
             Dictionary with 'auth_url' key containing the authorization URL
@@ -141,7 +141,7 @@ class ServiceAccountAuthService:
             "response_mode": "query",
             "scope": scope_param,
             "state": state,
-            "prompt": "consent",
+            "prompt": "login",
         }
 
         url = f"{auth_endpoint}?{urlencode(params)}"
@@ -159,9 +159,9 @@ class ServiceAccountAuthService:
 
         Args:
             auth_code: OAuth authorization code from callback
-            client_id: Azure AD application client ID
-            client_secret: Azure AD application client secret
-            tenant_domain: Azure AD tenant domain
+            client_id: Microsoft Entra ID application client ID
+            client_secret: Microsoft Entra ID application client secret
+            tenant_domain: Microsoft Entra ID tenant domain
 
         Returns:
             ServiceAccountTokenResult with access_token, refresh_token, and email

@@ -38,7 +38,7 @@ _oauth_states: Dict[str, Dict] = {}
     status_code=201,
     summary="Configure tenant SharePoint app",
     description=(
-        "Configure Azure AD application credentials for organization-wide SharePoint access. "
+        "Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. "
         "This eliminates person-dependency for shared and organization spaces by using "
         "application permissions instead of delegated user permissions. "
         "Requires admin role."
