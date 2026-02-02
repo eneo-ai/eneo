@@ -122,6 +122,8 @@
   "capabilities": "Capabilities",
   "cards": "Cards",
   "knowledge": "Knowledge",
+  "noPagesFound": "No pages found",
+  "pageCount": "{count} pages",
   "collections": "Collections",
   "websites": "Websites",
   "integrations": "Integrations",

@@ -122,6 +122,8 @@
   "capabilities": "Kapaciteter",
   "cards": "Kort",
   "knowledge": "Kunskap",
+  "noPagesFound": "Inga sidor hittades",
+  "pageCount": "{count} sidor",
   "collections": "Samlingar",
   "websites": "Webbplatser",
   "integrations": "Integrationer",
