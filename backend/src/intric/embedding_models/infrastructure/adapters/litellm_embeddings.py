@@ -82,8 +82,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         total_chunks = len(chunks)
         total_batches = (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
         logger.debug(
-            "[LiteLLM] Model %s batching %s chunks into %s batches (size=%s)",
+            "[LiteLLM] Model %s (family=%s) batching %s chunks into %s batches (size=%s)",
             self.model.name,
+            self.model.family,
             total_chunks,
             total_batches,
             batch_size,
@@ -93,8 +94,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == ModelFamily.E5:
                 texts_for_chunks = [f"passage: {chunk.text}" for chunk in chunked_chunks]
+                logger.debug("[LiteLLM] %s: Using 'passage:' prefix (family=%s)", self.model.name, self.model.family)
             else:
                 texts_for_chunks = [chunk.text for chunk in chunked_chunks]
+                logger.debug("[LiteLLM] %s: No prefix applied (family=%s)", self.model.name, self.model.family)
 
             embeddings_for_chunks = await self._get_embeddings(texts=texts_for_chunks)
             chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)
@@ -105,8 +108,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         # Add "query:" prefix for E5 models, use query directly for others
         if self.model.family == ModelFamily.E5:
             truncated_query = f"query: {query[: self.model.max_input]}"
+            logger.debug("[LiteLLM] %s: Using 'query:' prefix (family=%s)", self.model.name, self.model.family)
         else:
             truncated_query = query[: self.model.max_input]
+            logger.debug("[LiteLLM] %s: No query prefix applied (family=%s)", self.model.name, self.model.family)
         
         embeddings = await self._get_embeddings([truncated_query])
         return embeddings[0]
