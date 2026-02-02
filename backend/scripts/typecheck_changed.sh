@@ -24,6 +24,9 @@ normalize_paths() {
     | sort -u
 }
 
+warm_pyright() {
+  uv run pyright --version >/dev/null 2>&1 || true
+}
 FUTURE_CHANGED_FILES=$(
   git -C "$REPO_ROOT" diff --name-only --diff-filter=AMR \
     "$FUTURE_BASELINE_COMMIT"..HEAD -- "backend/src/intric" || true
@@ -71,6 +74,7 @@ if [ -z "$ALL_FILES" ]; then
   exit 0
 fi
 
+warm_pyright
 EXISTING_FILES=$(
   comm -23 \
     <(printf "%s\n" "$ALL_FILES") \
