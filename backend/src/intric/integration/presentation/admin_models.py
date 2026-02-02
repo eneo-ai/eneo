@@ -205,15 +205,3 @@ class ServiceAccountAuthCallback(BaseModel):
         ...,
         description="OAuth state parameter for verification"
     )
-    client_id: str = Field(
-        ...,
-        description="Microsoft Entra ID Application (Client) ID (must match auth/start)"
-    )
-    client_secret: str = Field(
-        ...,
-        description="Microsoft Entra ID Application Client Secret (must match auth/start)"
-    )
-    tenant_domain: str = Field(
-        ...,
-        description="Microsoft Entra ID Tenant Domain (must match auth/start)"
-    )

@@ -104,9 +104,6 @@
     serviceAccountFormData = {
       auth_code: code,
       state: state,
-      client_id: storedData.client_id,
-      client_secret: storedData.client_secret,
-      tenant_domain: storedData.tenant_domain,
     };
 
     // Trigger form submission programmatically
@@ -117,9 +114,6 @@
   let serviceAccountFormData = $state<{
     auth_code: string;
     state: string;
-    client_id: string;
-    client_secret: string;
-    tenant_domain: string;
   } | null>(null);
 
   let formElement: HTMLFormElement | undefined = $state();
@@ -280,9 +274,6 @@
     >
       <input type="hidden" name="auth_code" value={serviceAccountFormData.auth_code} />
       <input type="hidden" name="state" value={serviceAccountFormData.state} />
-      <input type="hidden" name="client_id" value={serviceAccountFormData.client_id} />
-      <input type="hidden" name="client_secret" value={serviceAccountFormData.client_secret} />
-      <input type="hidden" name="tenant_domain" value={serviceAccountFormData.tenant_domain} />
     </form>
   {/if}
 </main>

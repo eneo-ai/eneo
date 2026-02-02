@@ -899,9 +899,9 @@ async def service_account_auth_callback(
         service_account_auth_service = ServiceAccountAuthService()
         token_result = await service_account_auth_service.exchange_token(
             auth_code=callback.auth_code,
-            client_id=callback.client_id,
-            client_secret=callback.client_secret,
-            tenant_domain=callback.tenant_domain,
+            client_id=stored_state["client_id"],
+            client_secret=stored_state["client_secret"],
+            tenant_domain=stored_state["tenant_domain"],
         )
 
         # Configure service account
@@ -910,9 +910,9 @@ async def service_account_auth_callback(
 
         app = await tenant_app_service.configure_service_account(
             tenant_id=user.tenant_id,
-            client_id=callback.client_id,
-            client_secret=callback.client_secret,
-            tenant_domain=callback.tenant_domain,
+            client_id=stored_state["client_id"],
+            client_secret=stored_state["client_secret"],
+            tenant_domain=stored_state["tenant_domain"],
             refresh_token=token_result.refresh_token,
             service_account_email=token_result.email or "unknown",
             created_by=user.id,
