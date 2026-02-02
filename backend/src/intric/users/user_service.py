@@ -24,6 +24,7 @@ from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantState
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import (
+    PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
     UserBase,
@@ -75,32 +76,32 @@ class UserService:
             raise UniqueUserException("That username is already taken.")
 
     async def login(
-        self, 
-        email: str, 
-        password: str, 
-        correlation_id: str = None, 
-        source_ip: str = None
+        self,
+        email: str,
+        password: str,
+        correlation_id: str = None,
+        source_ip: str = None,
     ):
         """
         Authenticate user with username/password.
-        
+
         Implements timing attack mitigation by always performing password verification,
         even when user is not found (using dummy hash).
-        
+
         Args:
             email: User email address
             password: Plaintext password
             correlation_id: Request correlation ID for logging
             source_ip: Client IP address for security logging
-            
+
         Returns:
             AccessToken with JWT bearer token
-            
+
         Raises:
             AuthenticationException: On authentication failure (generic message)
         """
         correlation_id = correlation_id or "no-correlation-id"
-        
+
         # Log user lookup
         logger.debug(
             "Looking up user for authentication",
@@ -109,20 +110,18 @@ class UserService:
                 "auth_method": "password",
                 "email": email,
                 "source_ip": source_ip,
-            }
+            },
         )
-        
+
         user = await self.repo.get_user_by_email(email)
 
         # Timing attack mitigation: Always perform password verification
         # If user not found or password not set, verify against dummy hash
         # This ensures constant execution time regardless of user existence
         password_hash = (
-            user.password 
-            if (user and user.password) 
-            else self.auth_service.DUMMY_HASH
+            user.password if (user and user.password) else self.auth_service.DUMMY_HASH
         )
-        
+
         is_valid_password = self.auth_service.verify_password(password, password_hash)
 
         # Check all failure conditions and log appropriately
@@ -134,9 +133,11 @@ class UserService:
                     "auth_method": "password",
                     "email": email,
                     "source_ip": source_ip,
-                }
+                },
             )
-            raise AuthenticationException("Invalid credentials")  # Generic message for security
+            raise AuthenticationException(
+                "Invalid credentials"
+            )  # Generic message for security
 
         if not user.password:
             logger.warning(
@@ -149,9 +150,11 @@ class UserService:
                     "tenant_name": user.tenant.name,
                     "email": email,
                     "source_ip": source_ip,
-                }
+                },
             )
-            raise AuthenticationException("Invalid credentials")  # Generic message for security
+            raise AuthenticationException(
+                "Invalid credentials"
+            )  # Generic message for security
 
         if not is_valid_password:
             logger.warning(
@@ -164,9 +167,11 @@ class UserService:
                     "tenant_name": user.tenant.name,
                     "email": email,
                     "source_ip": source_ip,
-                }
+                },
             )
-            raise AuthenticationException("Invalid credentials")  # Generic message for security
+            raise AuthenticationException(
+                "Invalid credentials"
+            )  # Generic message for security
 
         # Check if the user or tenant state prevents login
         await self._check_user_and_tenant_state(user)
@@ -182,7 +187,7 @@ class UserService:
                 "tenant_id": str(user.tenant_id),
                 "tenant_name": user.tenant.name,
                 "source_ip": source_ip,
-            }
+            },
         )
 
         return AccessToken(
@@ -344,6 +349,15 @@ class UserService:
                 )
 
             # The hack continues
+            if self.predefined_roles_repo is None:
+                logger.error(
+                    "Predefined roles repository is not configured",
+                    extra={"correlation_id": correlation_id},
+                )
+                raise AuthenticationException(
+                    "System configuration error: Predefined roles repository not configured"
+                )
+
             user_role = await self.predefined_roles_repo.get_predefined_role_by_name(
                 PredefinedRoleName.USER
             )
@@ -481,7 +495,9 @@ class UserService:
         return user_in_db, access_token, api_key
 
     async def _get_user_from_token(self, token: str):
-        username = self.auth_service.get_username_from_token(token, get_settings().jwt_secret)
+        username = self.auth_service.get_username_from_token(
+            token, get_settings().jwt_secret
+        )
         return await self.repo.get_user_by_username(username)
 
     async def _get_user_from_api_key(self, api_key: str):
@@ -626,7 +642,8 @@ class UserService:
     async def get_total_count(
         self, tentant_id: Optional[UUID] = None, filters: Optional[str] = None
     ) -> int:
-        return await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
+        count = await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
+        return count or 0
 
     async def get_all_users(
         self,
@@ -648,6 +665,35 @@ class UserService:
             previous=previous,
             filters=filters,
         )
+
+    async def invite_user(self, user_invite: PropUserInvite, tenant_id: UUID):
+        await self._validate_email(user_invite)
+        username = getattr(user_invite, "username", None)
+        if username is not None:
+            await self._validate_username(user_invite)
+
+        tenant = await self.tenant_repo.get(tenant_id)
+        if tenant is None:
+            raise BadRequestException(f"Tenant {tenant_id} does not exist")
+
+        state = user_invite.state or UserState.INVITED
+        predefined_roles = (
+            [user_invite.predefined_role] if user_invite.predefined_role else []
+        )
+
+        user_add = UserAdd(
+            email=user_invite.email,
+            tenant_id=tenant_id,
+            state=state,
+            predefined_roles=predefined_roles,
+        )
+
+        user_in_db = await self.repo.add(user_add)
+
+        settings_upsert = SettingsUpsert(user_id=user_in_db.id)
+        await self.settings_repo.add(settings_upsert)
+
+        return user_in_db
 
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
         await self._validate_email(user_update_public)

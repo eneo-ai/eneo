@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, cast
 from uuid import UUID, uuid4
 import json
 import secrets
@@ -8,6 +8,7 @@ import traceback
 import aiohttp
 import jwt
 from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException
@@ -33,6 +34,7 @@ from intric.users.user import (
     UserProvision,
     UserPublic,
     UserSparse,
+    UserUpdatePublic,
 )
 
 # Audit logging - module level imports for consistency
@@ -63,8 +65,10 @@ async def user_login_with_email_and_password(
     set_request_context(correlation_id=correlation_id)
 
     # Capture source IP (proxy-aware)
-    source_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else None)
-    
+    source_ip = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else None
+    )
+
     email = form_data.username
     password = form_data.password
 
@@ -76,7 +80,7 @@ async def user_login_with_email_and_password(
             "auth_method": "password",
             "email": email,
             "source_ip": source_ip,
-        }
+        },
     )
 
     # Validate input format
@@ -91,7 +95,7 @@ async def user_login_with_email_and_password(
                 "email": email,
                 "source_ip": source_ip,
                 "errors": e.errors(),
-            }
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -101,10 +105,10 @@ async def user_login_with_email_and_password(
 
     # Authenticate user
     service = container.user_service()
-    
+
     try:
         result = await service.login(email, password, correlation_id, source_ip)
-        
+
         # Log successful authentication
         logger.info(
             "Username/password login successful",
@@ -113,11 +117,11 @@ async def user_login_with_email_and_password(
                 "auth_method": "password",
                 "email": email,
                 "source_ip": source_ip,
-            }
+            },
         )
-        
+
         return result
-        
+
     except AuthenticationException as e:
         # Expected authentication failure - use warning level (not error)
         logger.warning(
@@ -128,14 +132,14 @@ async def user_login_with_email_and_password(
                 "email": email,
                 "source_ip": source_ip,
                 "error": str(e),
-            }
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",  # Generic message for security
             headers={"X-Correlation-ID": correlation_id},
         )
-        
+
     except Exception as e:
         # Unexpected system error - use error level with full traceback
         logger.error(
@@ -148,7 +152,7 @@ async def user_login_with_email_and_password(
                 "source_ip": source_ip,
                 "error_type": type(e).__name__,
                 "error": str(e),
-            }
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -182,6 +186,7 @@ async def login_with_mobilityguard(
     # Compute redirect_uri server-side (ignore frontend-provided value)
     encryption_service = container.encryption_service()
     from intric.settings.credential_resolver import CredentialResolver
+
     credential_resolver = CredentialResolver(
         tenant=None,  # Single-tenant mode - no tenant context
         settings=settings,
@@ -555,7 +560,9 @@ async def generate_api_key(
         "truncated_key": api_key.truncated_key,
         "key_type": "user",
         "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.display_name or current_user.tenant.name if current_user.tenant else None,
+        "tenant_name": current_user.tenant.display_name or current_user.tenant.name
+        if current_user.tenant
+        else None,
     }
 
     # Audit logging for API key generation
@@ -597,10 +604,12 @@ async def invite_user(
 ):
     user_service = container.user_service()
     current_user = container.user()
-    session = container.session()
+    session = cast(AsyncSession, container.session())
 
     # Create user
-    new_user = await user_service.invite_user(user_invite)
+    new_user = await user_service.invite_user(
+        user_invite, tenant_id=current_user.tenant_id
+    )
 
     # Build comprehensive extra context for user creation
     extra = {
@@ -608,7 +617,9 @@ async def invite_user(
         "username": new_user.username,
         "state": user_invite.state.value if user_invite.state else "invited",
         "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.display_name or current_user.tenant.name if current_user.tenant else None,
+        "tenant_name": current_user.tenant.display_name or current_user.tenant.name
+        if current_user.tenant
+        else None,
     }
 
     # Fetch predefined role details if role was assigned
@@ -617,25 +628,27 @@ async def invite_user(
         import sqlalchemy as sa
 
         # Query for the predefined role details
-        role_query = sa.select(PredefinedRoles).where(PredefinedRoles.id == user_invite.predefined_role)
+        role_query = sa.select(PredefinedRoles).where(
+            PredefinedRoles.id == user_invite.predefined_role.id
+        )
         role_result = await session.execute(role_query)
         predefined_role = role_result.scalar_one_or_none()
 
         if predefined_role:
             extra["predefined_role"] = predefined_role.name
-            extra["permissions"] = sorted([p.value for p in predefined_role.permissions])
+            extra["permissions"] = sorted(predefined_role.permissions)
 
     # Include role/group information if available
-    if hasattr(new_user, 'predefined_roles') and new_user.predefined_roles:
+    if hasattr(new_user, "predefined_roles") and new_user.predefined_roles:
         extra["predefined_roles"] = [role.name for role in new_user.predefined_roles]
 
-    if hasattr(new_user, 'roles') and new_user.roles:
+    if hasattr(new_user, "roles") and new_user.roles:
         extra["roles"] = [role.name for role in new_user.roles]
 
-    if hasattr(new_user, 'user_groups') and new_user.user_groups:
+    if hasattr(new_user, "user_groups") and new_user.user_groups:
         extra["user_groups"] = [group.name for group in new_user.user_groups]
 
-    if hasattr(new_user, 'quota_limit') and new_user.quota_limit:
+    if hasattr(new_user, "quota_limit") and new_user.quota_limit:
         extra["quota_limit"] = new_user.quota_limit
 
     # Audit logging
@@ -669,41 +682,52 @@ async def update_user(
     # Get old state for change tracking
     old_user = await user_service.get_user(id)
 
+    update_kwargs = {}
+    if user_update.predefined_role:
+        update_kwargs["predefined_roles"] = [user_update.predefined_role]
+    if user_update.state:
+        update_kwargs["state"] = user_update.state
+
     # Update user
-    updated_user = await user_service.update_user(user_id=id, prop_user_update=user_update)
+    updated_user = await user_service.update_user(
+        user_id=id,
+        user_update_public=UserUpdatePublic(**update_kwargs),
+    )
 
     # Track comprehensive changes
     changes = {}
 
-    # Basic field changes
-    if hasattr(user_update, 'username') and user_update.username and user_update.username != old_user.username:
-        changes["username"] = {"old": old_user.username, "new": user_update.username}
-    if hasattr(user_update, 'email') and user_update.email and user_update.email != old_user.email:
-        changes["email"] = {"old": old_user.email, "new": user_update.email}
-
     # State change
-    if hasattr(user_update, 'state') and user_update.state:
-        old_state = old_user.state.value if hasattr(old_user, 'state') else None
+    if user_update.state:
+        old_state = old_user.state.value if hasattr(old_user, "state") else None
         if old_state and user_update.state.value != old_state:
             changes["state"] = {"old": old_state, "new": user_update.state.value}
 
     # Predefined role change (PropUserUpdate has single predefined_role)
-    if hasattr(user_update, 'predefined_role') and user_update.predefined_role:
+    if user_update.predefined_role:
         old_roles = []
-        if hasattr(old_user, 'predefined_roles') and old_user.predefined_roles:
+        if hasattr(old_user, "predefined_roles") and old_user.predefined_roles:
             old_roles = [role.name for role in old_user.predefined_roles]
 
         # After update, get the new roles
         new_roles = []
-        if hasattr(updated_user, 'predefined_roles') and updated_user.predefined_roles:
+        if hasattr(updated_user, "predefined_roles") and updated_user.predefined_roles:
             new_roles = [role.name for role in updated_user.predefined_roles]
 
         if old_roles != new_roles:
             changes["predefined_roles"] = {"old": old_roles, "new": new_roles}
 
     # Track permission changes (computed from role changes)
-    old_permissions = sorted([p.value for p in old_user.permissions]) if hasattr(old_user, 'permissions') else []
-    new_permissions = sorted([p.value for p in updated_user.permissions]) if hasattr(updated_user, 'permissions') else []
+    old_permissions = (
+        sorted([p.value for p in old_user.permissions])
+        if hasattr(old_user, "permissions")
+        else []
+    )
+    new_permissions = (
+        sorted([p.value for p in updated_user.permissions])
+        if hasattr(updated_user, "permissions")
+        else []
+    )
 
     if old_permissions != new_permissions:
         added_perms = list(set(new_permissions) - set(old_permissions))
@@ -719,22 +743,26 @@ async def update_user(
     extra = {
         "email": updated_user.email,
         "username": updated_user.username,
-        "state": updated_user.state.value if hasattr(updated_user, 'state') else None,
+        "state": updated_user.state.value if hasattr(updated_user, "state") else None,
         "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.display_name or current_user.tenant.name if current_user.tenant else None,
+        "tenant_name": current_user.tenant.display_name or current_user.tenant.name
+        if current_user.tenant
+        else None,
     }
 
     # Include current role/group information
-    if hasattr(updated_user, 'predefined_roles') and updated_user.predefined_roles:
-        extra["predefined_roles"] = [role.name for role in updated_user.predefined_roles]
+    if hasattr(updated_user, "predefined_roles") and updated_user.predefined_roles:
+        extra["predefined_roles"] = [
+            role.name for role in updated_user.predefined_roles
+        ]
 
-    if hasattr(updated_user, 'roles') and updated_user.roles:
+    if hasattr(updated_user, "roles") and updated_user.roles:
         extra["roles"] = [role.name for role in updated_user.roles]
 
-    if hasattr(updated_user, 'user_groups') and updated_user.user_groups:
+    if hasattr(updated_user, "user_groups") and updated_user.user_groups:
         extra["user_groups"] = [group.name for group in updated_user.user_groups]
 
-    if hasattr(updated_user, 'quota_limit') and updated_user.quota_limit:
+    if hasattr(updated_user, "quota_limit") and updated_user.quota_limit:
         extra["quota_limit"] = updated_user.quota_limit
 
     # Build change summary for description
@@ -748,7 +776,8 @@ async def update_user(
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
         entity_id=id,
-        description=f"Updated user '{updated_user.email}'" + (f" ({', '.join(change_summary)})" if change_summary else ""),
+        description=f"Updated user '{updated_user.email}'"
+        + (f" ({', '.join(change_summary)})" if change_summary else ""),
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=updated_user,
@@ -774,26 +803,34 @@ async def delete_user(
     extra = {
         "email": user_to_delete.email,
         "username": user_to_delete.username,
-        "state": user_to_delete.state.value if hasattr(user_to_delete, 'state') else None,
+        "state": user_to_delete.state.value
+        if hasattr(user_to_delete, "state")
+        else None,
         "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.display_name or current_user.tenant.name if current_user.tenant else None,
-        "created_at": user_to_delete.created_at.isoformat() if hasattr(user_to_delete, 'created_at') and user_to_delete.created_at else None,
+        "tenant_name": current_user.tenant.display_name or current_user.tenant.name
+        if current_user.tenant
+        else None,
+        "created_at": user_to_delete.created_at.isoformat()
+        if hasattr(user_to_delete, "created_at") and user_to_delete.created_at
+        else None,
     }
 
     # Include full context of what was deleted
-    if hasattr(user_to_delete, 'predefined_roles') and user_to_delete.predefined_roles:
-        extra["predefined_roles"] = [role.name for role in user_to_delete.predefined_roles]
+    if hasattr(user_to_delete, "predefined_roles") and user_to_delete.predefined_roles:
+        extra["predefined_roles"] = [
+            role.name for role in user_to_delete.predefined_roles
+        ]
 
-    if hasattr(user_to_delete, 'roles') and user_to_delete.roles:
+    if hasattr(user_to_delete, "roles") and user_to_delete.roles:
         extra["roles"] = [role.name for role in user_to_delete.roles]
 
-    if hasattr(user_to_delete, 'permissions'):
+    if hasattr(user_to_delete, "permissions"):
         extra["permissions"] = sorted([p.value for p in user_to_delete.permissions])
 
-    if hasattr(user_to_delete, 'user_groups') and user_to_delete.user_groups:
+    if hasattr(user_to_delete, "user_groups") and user_to_delete.user_groups:
         extra["user_groups"] = [group.name for group in user_to_delete.user_groups]
 
-    if hasattr(user_to_delete, 'quota_limit') and user_to_delete.quota_limit:
+    if hasattr(user_to_delete, "quota_limit") and user_to_delete.quota_limit:
         extra["quota_limit"] = user_to_delete.quota_limit
 
     # Delete user
