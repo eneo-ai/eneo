@@ -75,7 +75,9 @@
       class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
     >
       <option value="">Default</option>
-      <option value="none">None</option>
+      {#if supportsNoneReasoning}
+        <option value="none">None</option>
+      {/if}
       <option value="low">Low</option>
       <option value="medium">Medium</option>
       <option value="high">High</option>

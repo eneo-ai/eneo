@@ -50,20 +50,21 @@ export function initFiles(client) {
     },
 
     /**
-     * Generate a signed URL to access the uploaded file
+     * Generate a signed URL to access the uploaded file (returns full response with expires_at)
      * @param {Object} params
-     * @param {string} params.id The file to upload
-     * @param {boolean} [params.download] Show as "Save as" prompt?
-     * @param {number} [params.expiresIn] Expiry time in seconds´
+     * @param {string} params.fileId The file ID
+     * @param {number} [params.expiresIn] Expiry time in seconds (default: 3600)
+     * @param {"attachment" | "inline"} [params.contentDisposition] Content disposition (default: "inline")
+     * @returns {Promise<{url: string, expires_at: number}>}
      * @throws {IntricError}
      * */
-    url: async ({ id, download, expiresIn }) => {
+    generateSignedUrl: async ({ fileId, expiresIn, contentDisposition }) => {
       const expires_in = expiresIn ?? 3600;
-      const content_disposition = download ? "attachment" : "inline";
+      const content_disposition = contentDisposition ?? "inline";
 
       const res = await client.fetch(`/api/v1/files/{id}/signed-url/`, {
         method: "post",
-        params: { path: { id } },
+        params: { path: { id: fileId } },
         requestBody: {
           "application/json": {
             content_disposition,
@@ -75,7 +76,11 @@ export function initFiles(client) {
       // The backend does not necessarily know the protocol it uses, as it sits behind a reverse proxy
       const url = new URL(res.url);
       url.protocol = client.baseUrl.protocol;
-      return url.toString();
+
+      return {
+        url: url.toString(),
+        expires_at: res.expires_at
+      };
     }
   };
 }

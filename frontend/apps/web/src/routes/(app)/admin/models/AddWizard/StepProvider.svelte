@@ -17,6 +17,7 @@
   }>();
 
   // Provider types available for creation
+  // Note: type values must be LiteLLM-compatible provider types
   const providerTypes = [
     { type: "openai", label: "OpenAI", description: "OpenAI and compatible cloud APIs (Together, Groq, Fireworks)" },
     { type: "azure", label: "Azure OpenAI", description: "Enterprise Azure deployments" },
@@ -24,7 +25,7 @@
     { type: "gemini", label: "Google Gemini", description: "Gemini Pro, Gemini Flash" },
     { type: "cohere", label: "Cohere", description: "Command, Embed models" },
     { type: "mistral", label: "Mistral AI", description: "Mistral, Mixtral models" },
-    { type: "vllm", label: "vLLM", description: "Self-hosted vLLM inference server" }
+    { type: "hosted_vllm", label: "vLLM", description: "Self-hosted vLLM inference server" }
   ] as const;
 
   type ViewMode = "select" | "create";

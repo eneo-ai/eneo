@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
+from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -28,6 +28,7 @@ class TenantEmbeddingModelCreate(BaseModel):
     )
     dimensions: int | None = Field(default=None, description="Embedding dimensions")
     max_input: int | None = Field(default=None, description="Maximum input tokens")
+    hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -38,7 +39,7 @@ class TenantEmbeddingModelUpdate(BaseModel):
     family: str | None = Field(None, description="Model family")
     dimensions: int | None = Field(None, description="Embedding dimensions")
     max_input: int | None = Field(None, description="Maximum input tokens")
-    hosting: str | None = Field(None, description="Hosting location (eu, usa)")
+    hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(None, description="Model stability (stable, experimental)")
 
@@ -92,7 +93,7 @@ async def create_tenant_embedding_model(
         max_input=model_create.max_input,
         family=model_create.family,  # User-specified family
         # Simplified defaults for other fields
-        hosting=ModelHostingLocation.USA.value,
+        hosting=model_create.hosting,
         org=None,
         stability=ModelStability.STABLE.value,
         open_source=False,

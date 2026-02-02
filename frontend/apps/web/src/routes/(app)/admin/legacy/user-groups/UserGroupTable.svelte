@@ -7,6 +7,7 @@
 <script lang="ts">
   import { Table } from "@intric/ui";
   import UserActions from "./UserGroupActions.svelte";
+  import UserGroupMembersChips from "./UserGroupMembersChips.svelte";
   import { createRender } from "svelte-headless-table";
   import type { UserGroup } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
@@ -17,6 +18,22 @@
 
   const viewModel = table.createViewModel([
     table.column({ accessor: "name", header: m.name() }),
+    table.column({
+      header: m.members(),
+      accessor: "users",
+      cell: (item) => {
+        return createRender(UserGroupMembersChips, {
+          users: item.value ?? []
+        });
+      },
+      plugins: {
+        sort: {
+          getSortValue(item) {
+            return item?.length ?? 0;
+          }
+        }
+      }
+    }),
     table.columnActions({
       cell: (item) => {
         return createRender(UserActions, { userGroup: item.value });

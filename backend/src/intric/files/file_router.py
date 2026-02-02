@@ -235,8 +235,19 @@ async def download_file_signed(
         raise NotFoundException("File content not found")
 
     content_bytes = None
+    response_mimetype = file.mimetype
+    response_filename = file.name
+
     if file.file_type == FileType.TEXT and file.text:
         content_bytes = file.text.encode("utf-8")
+        # For text files (PDFs, DOCX, etc.), return as .txt with plain text mimetype
+        response_mimetype = "text/plain"
+        # Change file extension to .txt
+        if "." in file.name:
+            filename_without_ext = file.name.rsplit(".", 1)[0]
+            response_filename = f"{filename_without_ext}.txt"
+        else:
+            response_filename = f"{file.name}.txt"
     elif file.blob:
         content_bytes = file.blob
     else:
@@ -244,7 +255,7 @@ async def download_file_signed(
 
     total_size = len(content_bytes)
     headers = {
-        "Content-Disposition": f'{content_disposition.value}; filename="{file.name}"',
+        "Content-Disposition": f"{content_disposition.value}; filename=\"{response_filename}\"",
         "Accept-Ranges": "bytes",
     }
 
@@ -284,7 +295,7 @@ async def download_file_signed(
                 return StreamingResponse(
                     content,
                     status_code=206,  # Partial Content
-                    media_type=file.mimetype,
+                    media_type=response_mimetype,
                     headers=headers,
                 )
         except Exception:
@@ -295,4 +306,4 @@ async def download_file_signed(
     headers["Content-Length"] = str(total_size)
     content = io.BytesIO(content_bytes)
 
-    return StreamingResponse(content, media_type=file.mimetype, headers=headers)
+    return StreamingResponse(content, media_type=response_mimetype, headers=headers)

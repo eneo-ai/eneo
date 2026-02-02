@@ -191,10 +191,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not context.function_definitions:
             return []
 
-        # Only enable tools for vision models (same logic as other adapters)
-        if not self.model.vision:
-            return []
-
         # Use OpenAI format (compatible with most providers via LiteLLM)
         return [
             {

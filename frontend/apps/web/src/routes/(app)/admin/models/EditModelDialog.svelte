@@ -31,13 +31,14 @@
   let vision = false;
   let reasoning = false;
   let family = "";
-  let hosting: "eu" | "usa" = "eu";
+  let hosting: "swe" | "eu" | "usa" = "swe";
   let openSource = false;
   let isSubmitting = false;
   let error: string | null = null;
 
   // Hosting options
   const hostingOptions = [
+    { value: "swe", label: m.hosting_swe() },
     { value: "eu", label: m.hosting_eu() },
     { value: "usa", label: m.hosting_usa() }
   ];
@@ -51,7 +52,7 @@
     modelIdentifier = model.name;
     displayName = "nickname" in model ? (model.nickname || "") : model.name;
     description = model.description || "";
-    hosting = model.hosting as "eu" | "usa";
+    hosting = model.hosting as "swe" | "eu" | "usa";
     openSource = model.open_source ?? false;
 
     if ("token_limit" in model && model.token_limit !== null) {

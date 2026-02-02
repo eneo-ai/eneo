@@ -6,6 +6,7 @@ from fastapi import UploadFile
 from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
+from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.users.user import UserInDB
 
@@ -17,7 +18,9 @@ class FileService:
         self.protocol = protocol
 
     async def save_file(self, upload_file: UploadFile):
-        file = await self.protocol.to_domain(upload_file)
+        file = await self.protocol.to_domain(
+            upload_file, max_size=get_settings().upload_max_file_size
+        )
 
         saved_file = await self.repo.add(
             FileCreate(

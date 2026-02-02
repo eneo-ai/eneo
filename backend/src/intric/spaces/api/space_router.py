@@ -1,5 +1,7 @@
 from uuid import UUID
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 # Audit logging - module level imports for consistency
@@ -19,6 +21,7 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.spaces.api.space_models import (
+    AddSpaceGroupMemberRequest,
     AddSpaceMemberRequest,
     Applications,
     CreateSpaceAppRequest,
@@ -29,11 +32,13 @@ from intric.spaces.api.space_models import (
     CreateSpaceServiceRequest,
     CreateSpaceServiceResponse,
     Knowledge,
+    SpaceGroupMember,
     SpaceMember,
     SpacePublic,
     SpaceSparse,
     UpdateIntegrationKnowledgeRequest,
     UpdateSpaceDryRunResponse,
+    UpdateSpaceGroupMemberRequest,
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
@@ -44,7 +49,6 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 from intric.roles.permissions import Permission
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -819,9 +823,6 @@ async def change_role_of_member(
     update_space_member_req: UpdateSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    import logging
-    logger = logging.getLogger(__name__)
-
     service = container.space_service()
     current_user = container.user()
 
@@ -899,10 +900,6 @@ async def remove_space_member(
     user_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    import logging
-
-    logger = logging.getLogger(__name__)
-
     service = container.space_service()
     current_user = container.user()
 
@@ -947,6 +944,215 @@ async def remove_space_member(
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Removed {member_name} from {space_name}",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            space=space,
+            extra=extra,
+        ),
+    )
+
+
+# Group Member Endpoints
+
+
+@router.get(
+    "/{id}/group-members/",
+    response_model=PaginatedResponse[SpaceGroupMember],
+    responses=responses.get_responses([403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def get_space_group_members(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """List all user groups that are members of this space."""
+    service = container.space_service()
+
+    space = await service.get_space(id)
+    group_members = list(space.group_members.values())
+
+    return protocol.to_paginated_response(group_members)
+
+
+@router.post(
+    "/{id}/group-members/",
+    response_model=SpaceGroupMember,
+    status_code=201,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def add_space_group_member(
+    id: UUID,
+    request: AddSpaceGroupMemberRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Add a user group to a space with the specified role.
+
+    All members of the group will gain access to the space at that role level.
+    Groups cannot be added to personal spaces.
+    """
+    service = container.space_service()
+    current_user = container.user()
+
+    group_member = await service.add_group_member(
+        space_id=id,
+        group_id=request.id,
+        role=request.role,
+    )
+
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space = await service.get_space(id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch space context for audit log: {e}")
+
+    extra = {
+        "group": {
+            "id": str(request.id),
+            "name": group_member.name,
+            "user_count": group_member.user_count,
+        },
+        "role": request.role,
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_MEMBER_ADDED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Added group '{group_member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else group_member,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    return group_member
+
+
+@router.patch(
+    "/{id}/group-members/{group_id}/",
+    response_model=SpaceGroupMember,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def change_group_member_role(
+    id: UUID,
+    group_id: UUID,
+    request: UpdateSpaceGroupMemberRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Change the role of a user group in a space."""
+    service = container.space_service()
+    current_user = container.user()
+
+    current_group_member = await service.get_group_member(id, group_id)
+    old_role = current_group_member.role
+
+    updated_group_member = await service.change_group_member_role(
+        space_id=id,
+        group_id=group_id,
+        new_role=request.role,
+    )
+
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space = await service.get_space(id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch space context for audit log: {e}")
+
+    extra = {
+        "group": {
+            "id": str(group_id),
+            "name": updated_group_member.name,
+            "user_count": updated_group_member.user_count,
+        },
+    }
+
+    changes = {
+        "role": {
+            "old": old_role,
+            "new": request.role,
+        },
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ROLE_MODIFIED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Changed role of group '{updated_group_member.name}' in space '{space.name if space else 'unknown'}' from {old_role} to {request.role}",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else updated_group_member,
+            space=space,
+            changes=changes,
+            extra=extra,
+        ),
+    )
+
+    return updated_group_member
+
+
+@router.delete(
+    "/{id}/group-members/{group_id}/",
+    status_code=204,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def remove_space_group_member(
+    id: UUID,
+    group_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Remove a user group from a space.
+
+    All members of the group will lose access through this group membership.
+    Note: Users may still have access through direct membership or other groups.
+    """
+    service = container.space_service()
+    current_user = container.user()
+
+    # Snapshot data BEFORE deletion
+    group_snapshot = {"id": str(group_id), "name": None, "user_count": 0}
+    space = None
+
+    try:
+        space = await service.get_space(id)
+        group_member = space.group_members.get(group_id)
+        if group_member:
+            group_snapshot = {
+                "id": str(group_id),
+                "name": group_member.name,
+                "user_count": group_member.user_count,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch context for audit log: {e}")
+
+    # Perform the actual deletion
+    await service.remove_group_member(space_id=id, group_id=group_id)
+
+    extra = {
+        "group": group_snapshot,
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_MEMBER_REMOVED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Removed group '{group_snapshot['name'] or 'group'}' from space '{space.name if space else 'unknown'}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),

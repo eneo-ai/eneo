@@ -7,7 +7,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
-  import { ArrowLeft, Loader2, CheckCircle2, XCircle } from "lucide-svelte";
+  import { ArrowLeft, Loader2 } from "lucide-svelte";
 
   // Auto-focus first input on mount
   onMount(() => {
@@ -39,71 +39,22 @@
     gemini: "Google Gemini",
     cohere: "Cohere",
     mistral: "Mistral AI",
-    vllm: "vLLM"
+    hosted_vllm: "vLLM"
   };
 
   // State
   let isSubmitting = false;
-  let isTesting = false;
-  let testResult: "success" | "error" | null = null;
   let error: string | null = null;
 
   // Validation
   $: isAzure = providerType === "azure";
-  $: isVllm = providerType === "vllm";
+  $: isVllm = providerType === "hosted_vllm";
   $: requiresEndpoint = isAzure || isVllm;
   $: isValid =
     providerName.trim() !== "" &&
     apiKey.trim() !== "" &&
     (!requiresEndpoint || endpoint.trim() !== "") &&
     (!isAzure || (apiVersion.trim() !== "" && deploymentName.trim() !== ""));
-
-  async function testConnection() {
-    if (!isValid) return;
-
-    isTesting = true;
-    testResult = null;
-    error = null;
-
-    try {
-      // Create a temporary provider to test
-      const providerData: any = {
-        name: `_test_${Date.now()}`,
-        provider_type: providerType,
-        credentials: { api_key: apiKey },
-        config: {},
-        is_active: false // Create inactive to avoid polluting the list
-      };
-
-      if (endpoint.trim()) {
-        providerData.config.endpoint = endpoint;
-      }
-
-      if (isAzure) {
-        providerData.config.api_version = apiVersion;
-        providerData.config.deployment_name = deploymentName;
-      }
-
-      // Create and test
-      const tempProvider = await intric.modelProviders.create(providerData);
-
-      try {
-        await intric.modelProviders.test({ id: tempProvider.id });
-        testResult = "success";
-      } catch (testError) {
-        testResult = "error";
-        error = m.connection_test_failed();
-      }
-
-      // Clean up temporary provider
-      await intric.modelProviders.delete({ id: tempProvider.id });
-    } catch (e: any) {
-      testResult = "error";
-      error = e.message || m.connection_test_failed();
-    } finally {
-      isTesting = false;
-    }
-  }
 
   async function handleSubmit() {
     if (!isValid) return;
@@ -247,33 +198,6 @@
       </div>
     {/if}
 
-    <!-- Test Connection Button -->
-    <div class="flex items-center gap-3 pt-2">
-      <Button
-        type="button"
-        variant="outlined"
-        on:click={testConnection}
-        disabled={!isValid || isTesting}
-        class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-      >
-        {#if isTesting}
-          <Loader2 class="h-4 w-4 animate-spin" />
-          {m.testing_connection()}
-        {:else if testResult === "success"}
-          <CheckCircle2 class="h-4 w-4 text-positive-default" />
-          {m.connection_successful()}
-        {:else if testResult === "error"}
-          <XCircle class="h-4 w-4 text-negative-default" />
-          {m.connection_failed()}
-        {:else}
-          {m.test_connection()}
-        {/if}
-      </Button>
-
-      {#if testResult === "success"}
-        <span class="text-sm text-positive-stronger">{m.ready_to_continue()}</span>
-      {/if}
-    </div>
   </form>
 
   <!-- Navigation -->
