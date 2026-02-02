@@ -406,7 +406,8 @@ class IntegrationKnowledgeService:
             # Log but don't raise - this is fire-and-forget
             # The subscription will be cleaned up by the orphan cleanup cron job if needed
             logger.warning(
-                "Failed to cleanup subscription %s: %s",
+                "Failed to cleanup subscription %s: %s "
+                "(will be retried by daily orphan cleanup cron job at 02:00 UTC)",
                 subscription_id,
                 exc,
                 exc_info=True,

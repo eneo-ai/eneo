@@ -11,7 +11,7 @@ AUTH_METHOD_SERVICE_ACCOUNT = "service_account"
 
 
 class TenantSharePointApp(Entity):
-    """Azure AD application credentials for organization-wide SharePoint access.
+    """Microsoft Entra ID application credentials for organization-wide SharePoint access.
 
     Supports two authentication methods:
     - tenant_app: Application permissions using client credentials flow (Sites.Read.All)
