@@ -4,12 +4,19 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPClientError
+from intric.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPClientError,
+)
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
-    from intric.mcp_servers.domain.repositories.mcp_server_repo import MCPServerRepository
-    from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import MCPServerToolRepository
+    from intric.mcp_servers.domain.repositories.mcp_server_repo import (
+        MCPServerRepository,
+    )
+    from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
     from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
@@ -71,6 +78,12 @@ class MCPServerService:
 
         Validates connection BEFORE saving to database to avoid orphaned entries.
         """
+        http_url = str(http_url)
+        if icon_url is not None:
+            icon_url = str(icon_url)
+        if documentation_url is not None:
+            documentation_url = str(documentation_url)
+
         # Create domain object (not saved yet)
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
@@ -93,7 +106,9 @@ class MCPServerService:
         # Only save to database if connection succeeded
         if not connection_result.success:
             # Return error without saving - let user fix the URL
-            return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+            return MCPServerCreateResult(
+                server=mcp_server, connection=connection_result
+            )
 
         # Connection succeeded - save to database
         mcp_server = await self.repo.add(mcp_server)
@@ -131,7 +146,7 @@ class MCPServerService:
         if name is not None:
             mcp_server.name = name
         if http_url is not None:
-            mcp_server.http_url = http_url
+            mcp_server.http_url = str(http_url)
         if http_auth_type is not None:
             mcp_server.http_auth_type = http_auth_type
         if description is not None:
@@ -141,9 +156,9 @@ class MCPServerService:
         if tags is not None:
             mcp_server.tags = tags
         if icon_url is not None:
-            mcp_server.icon_url = icon_url
+            mcp_server.icon_url = str(icon_url)
         if documentation_url is not None:
-            mcp_server.documentation_url = documentation_url
+            mcp_server.documentation_url = str(documentation_url)
 
         return await self.repo.update(mcp_server)
 
@@ -172,16 +187,21 @@ class MCPServerService:
             Tuple of (list of tool definitions as dicts, connection result)
         """
         try:
-            logger.info(f"Testing connection to MCP server: {mcp_server.name} at {mcp_server.http_url}")
+            logger.info(
+                f"Testing connection to MCP server: {mcp_server.name} at {mcp_server.http_url}"
+            )
 
             # Connect with shorter timeout for faster feedback during creation
-            async with MCPClient(mcp_server, auth_credentials, timeout=timeout) as client:
+            async with MCPClient(
+                mcp_server, auth_credentials, timeout=timeout
+            ) as client:
                 tool_defs = await client.list_tools()
 
-            logger.info(f"Connection successful - discovered {len(tool_defs)} tools from {mcp_server.name}")
+            logger.info(
+                f"Connection successful - discovered {len(tool_defs)} tools from {mcp_server.name}"
+            )
             return tool_defs, ConnectionResult(
-                success=True,
-                tools_discovered=len(tool_defs)
+                success=True, tools_discovered=len(tool_defs)
             )
 
         except MCPClientError as e:
@@ -194,16 +214,15 @@ class MCPServerService:
             return [], ConnectionResult(success=False, error_message=error_msg)
 
         except Exception as e:
-            logger.error(f"Unexpected error testing connection to {mcp_server.name}: {e}")
+            logger.error(
+                f"Unexpected error testing connection to {mcp_server.name}: {e}"
+            )
             return [], ConnectionResult(
-                success=False,
-                error_message=f"Connection failed: {e}"
+                success=False, error_message=f"Connection failed: {e}"
             )
 
     async def discover_and_sync_tools(
-        self,
-        mcp_server: MCPServer,
-        auth_credentials: dict[str, str] | None = None
+        self, mcp_server: MCPServer, auth_credentials: dict[str, str] | None = None
     ) -> tuple[list[MCPServerTool], ConnectionResult]:
         """
         Connect to MCP server, discover tools, and sync them to database.
@@ -241,8 +260,7 @@ class MCPServerService:
 
             logger.info(f"Synced {len(synced_tools)} tools for {mcp_server.name}")
             return synced_tools, ConnectionResult(
-                success=True,
-                tools_discovered=len(synced_tools)
+                success=True, tools_discovered=len(synced_tools)
             )
 
         except MCPClientError as e:
@@ -258,15 +276,12 @@ class MCPServerService:
         except Exception as e:
             logger.error(f"Failed to discover tools for {mcp_server.name}: {e}")
             return [], ConnectionResult(
-                success=False,
-                error_message=f"Failed to connect: {e}"
+                success=False, error_message=f"Failed to connect: {e}"
             )
 
     @validate_permissions(Permission.ADMIN)
     async def refresh_tools(
-        self,
-        mcp_server_id: UUID,
-        auth_credentials: dict[str, str] | None = None
+        self, mcp_server_id: UUID, auth_credentials: dict[str, str] | None = None
     ) -> tuple[list[MCPServerTool], ConnectionResult]:
         """
         Manually refresh tools for an MCP server (admin only).
@@ -283,9 +298,7 @@ class MCPServerService:
 
     @validate_permissions(Permission.ADMIN)
     async def update_tool_default_enabled(
-        self,
-        tool_id: UUID,
-        is_enabled: bool
+        self, tool_id: UUID, is_enabled: bool
     ) -> MCPServerTool:
         """
         Update the global default enabled status for a tool (admin only).
@@ -303,9 +316,7 @@ class MCPServerService:
 
     @validate_permissions(Permission.ADMIN)
     async def update_tenant_tool_enabled(
-        self,
-        tool_id: UUID,
-        is_enabled: bool
+        self, tool_id: UUID, is_enabled: bool
     ) -> MCPServerTool:
         """
         Update tenant-level enablement for a tool (admin only).
@@ -333,14 +344,11 @@ class MCPServerService:
             mcp_server_tool_id=tool_id,
             is_enabled=is_enabled,
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=['tenant_id', 'mcp_server_tool_id'],
-            set_={
-                'is_enabled': is_enabled,
-                'updated_at': now
-            }
+            index_elements=["tenant_id", "mcp_server_tool_id"],
+            set_={"is_enabled": is_enabled, "updated_at": now},
         )
 
         await self.repo.session.execute(stmt)
@@ -351,8 +359,7 @@ class MCPServerService:
         return tool
 
     async def get_tools_with_tenant_settings(
-        self,
-        mcp_server_id: UUID
+        self, mcp_server_id: UUID
     ) -> list[MCPServerTool]:
         """
         Get all tools for an MCP server with tenant-level settings applied.
@@ -381,9 +388,8 @@ class MCPServerService:
         tools = await self.tool_repo.by_server(mcp_server_id)
 
         # Load tenant-level tool settings
-        tenant_settings_query = (
-            sa.select(MCPServerToolSettings)
-            .where(MCPServerToolSettings.tenant_id == self.user.tenant_id)
+        tenant_settings_query = sa.select(MCPServerToolSettings).where(
+            MCPServerToolSettings.tenant_id == self.user.tenant_id
         )
         tenant_settings_result = await self.repo.session.execute(tenant_settings_query)
         tenant_settings_db = tenant_settings_result.scalars().all()

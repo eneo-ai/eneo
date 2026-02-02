@@ -20,12 +20,12 @@ class MCPServerPublic(BaseModel):
     id: UUID
     name: str
     description: Optional[str]
-    http_url: AnyHttpUrl
+    http_url: str
     http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
     http_auth_config_schema: Optional[dict]
     tags: Optional[list[str]]
-    icon_url: Optional[AnyHttpUrl]
-    documentation_url: Optional[AnyHttpUrl]
+    icon_url: Optional[str]
+    documentation_url: Optional[str]
 
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
@@ -50,7 +50,9 @@ class MCPServerUpdate(BaseModel):
 
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
-    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = None
+    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = (
+        None
+    )
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict] = None
     tags: Optional[list[str]] = None

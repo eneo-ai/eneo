@@ -15,8 +15,15 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
-from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPClientError
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from intric.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPClientError,
+)
 from intric.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
 from intric.mcp_servers.presentation.models import (
     MCPServerCreate,
@@ -28,6 +35,7 @@ from intric.mcp_servers.presentation.models import (
 # =============================================================================
 # P1: list_tools() error propagation
 # =============================================================================
+
 
 class TestMCPClientListToolsErrorPropagation:
     """Test that list_tools() propagates errors instead of returning empty list."""
@@ -73,6 +81,7 @@ class TestMCPClientListToolsErrorPropagation:
 # P2: Tool name collision handling (skip + warn)
 # =============================================================================
 
+
 class TestMCPProxySessionToolCollision:
     """Test tool name collision handling - skip duplicate, keep first, log warning."""
 
@@ -98,14 +107,17 @@ class TestMCPProxySessionToolCollision:
     def test_collision_keeps_first_tool_skips_second(self):
         """When two tools sanitize to the same name, first wins, second is skipped."""
         # Both servers have same name, so tools will collide
-        server1 = self._create_mock_server("api_server", [
-            {"name": "list-items", "description": "First server's list"}
-        ])
-        server2 = self._create_mock_server("api_server", [
-            {"name": "list-items", "description": "Second server's list"}
-        ])
+        server1 = self._create_mock_server(
+            "api_server", [{"name": "list-items", "description": "First server's list"}]
+        )
+        server2 = self._create_mock_server(
+            "api_server",
+            [{"name": "list-items", "description": "Second server's list"}],
+        )
 
-        with patch("intric.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger") as mock_logger:
+        with patch(
+            "intric.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger"
+        ) as mock_logger:
             proxy = MCPProxySession([server1, server2])
 
             # Should only have 1 tool (the first one)
@@ -124,12 +136,12 @@ class TestMCPProxySessionToolCollision:
 
     def test_no_collision_with_different_server_names(self):
         """Tools from different servers don't collide if server names differ."""
-        server1 = self._create_mock_server("api_v1", [
-            {"name": "list-items", "description": "V1 list"}
-        ])
-        server2 = self._create_mock_server("api_v2", [
-            {"name": "list-items", "description": "V2 list"}
-        ])
+        server1 = self._create_mock_server(
+            "api_v1", [{"name": "list-items", "description": "V1 list"}]
+        )
+        server2 = self._create_mock_server(
+            "api_v2", [{"name": "list-items", "description": "V2 list"}]
+        )
 
         proxy = MCPProxySession([server1, server2])
 
@@ -143,15 +155,17 @@ class TestMCPProxySessionToolCollision:
 
     def test_collision_with_special_characters_sanitized(self):
         """Tools with special chars that sanitize to same name still collide."""
-        server1 = self._create_mock_server("server", [
-            {"name": "list.items", "description": "Dot version"}
-        ])
-        server2 = self._create_mock_server("server", [
-            {"name": "list@items", "description": "At version"}
-        ])
+        server1 = self._create_mock_server(
+            "server", [{"name": "list.items", "description": "Dot version"}]
+        )
+        server2 = self._create_mock_server(
+            "server", [{"name": "list@items", "description": "At version"}]
+        )
 
         # Both "list.items" and "list@items" sanitize to "list_items"
-        with patch("intric.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger") as mock_logger:
+        with patch(
+            "intric.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger"
+        ) as mock_logger:
             proxy = MCPProxySession([server1, server2])
 
             # Should only have 1 tool
@@ -168,6 +182,7 @@ class TestMCPProxySessionToolCollision:
 # =============================================================================
 # P3: Bare except fix in is_enabled_for_tenant
 # =============================================================================
+
 
 class TestMCPServerSettingsServiceBareExceptFix:
     """Test that is_enabled_for_tenant only catches NotFoundException."""
@@ -264,6 +279,7 @@ class TestMCPServerSettingsServiceBareExceptFix:
 # P4: Tenant ownership enforcement in get_tools_with_tenant_settings
 # =============================================================================
 
+
 class TestMCPServerServiceTenantOwnership:
     """Test tenant ownership check in get_tools_with_tenant_settings."""
 
@@ -315,6 +331,7 @@ class TestMCPServerServiceTenantOwnership:
 # =============================================================================
 # P5: URL validation in DTOs (AnyHttpUrl)
 # =============================================================================
+
 
 class TestMCPServerURLValidation:
     """Test URL validation in MCP server DTOs."""
@@ -388,40 +405,41 @@ class TestMCPServerURLValidation:
                 http_url="invalid",
             )
 
-    def test_public_with_localhost(self):
-        """Should accept localhost URLs (for development)."""
+    def test_public_accepts_non_url_strings(self):
+        """Public DTO should accept raw string URLs without validation."""
         dto = MCPServerPublic(
             id=uuid4(),
             name="dev-server",
             description=None,
-            http_url="http://localhost:3000",
+            http_url="localhost:3000",
             http_auth_type="none",
             http_auth_config_schema=None,
             tags=None,
             icon_url=None,
             documentation_url=None,
         )
-        assert "localhost" in str(dto.http_url)
+        assert dto.http_url == "localhost:3000"
 
-    def test_public_with_ip_address(self):
-        """Should accept IP address URLs."""
+    def test_public_with_ip_address_string(self):
+        """Public DTO should accept IP address strings."""
         dto = MCPServerPublic(
             id=uuid4(),
             name="dev-server",
             description=None,
-            http_url="http://192.168.1.100:8080",
+            http_url="192.168.1.100:8080",
             http_auth_type="none",
             http_auth_config_schema=None,
             tags=None,
             icon_url=None,
             documentation_url=None,
         )
-        assert "192.168.1.100" in str(dto.http_url)
+        assert dto.http_url == "192.168.1.100:8080"
 
 
 # =============================================================================
 # P6: Tool ownership validation in space updates
 # =============================================================================
+
 
 class TestSpaceRepoToolOwnershipValidation:
     """Test that _set_mcp_tools validates tool ownership."""
