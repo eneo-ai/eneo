@@ -212,6 +212,7 @@ class AnalysisService:
             assistant_id=assistant_id,
             from_date=from_date,
             to_date=to_date,
+            tenant_id=self.user.tenant_id,
         )
 
         if include_followups:
@@ -245,6 +246,7 @@ class AnalysisService:
             group_chat_id=group_chat_id,
             from_date=from_date,
             to_date=to_date,
+            tenant_id=self.user.tenant_id,
         )
 
         if include_followups:
@@ -427,6 +429,7 @@ class AnalysisService:
             name_filter=name_filter,
             start_date=start_date,
             end_date=end_date,
+            tenant_id=self.user.tenant_id,
         )
         return cast(List[SessionInDB], sessions), int(total or 0)
 
@@ -468,6 +471,7 @@ class AnalysisService:
             name_filter=name_filter,
             start_date=start_date,
             end_date=end_date,
+            tenant_id=self.user.tenant_id,
         )
         return cast(List[SessionInDB], sessions), int(total or 0)
 
@@ -555,6 +559,7 @@ class AnalysisService:
                 assistant_id=assistant_id,
                 from_date=start_time,
                 to_date=end_time,
+                tenant_id=self.user.tenant_id,
             )
         else:
             (
@@ -564,6 +569,7 @@ class AnalysisService:
                 group_chat_id=group_chat_id,
                 from_date=start_time,
                 to_date=end_time,
+                tenant_id=self.user.tenant_id,
             )
 
         return ConversationInsightResponse(

@@ -63,9 +63,9 @@ class AnalysisRepository:
 
         if tenant_id is not None:
             if table == Questions:
-                stmt = stmt.join(Sessions)
-
-            stmt = stmt.join(Users).where(Users.tenant_id == tenant_id)
+                stmt = stmt.where(Questions.tenant_id == tenant_id)
+            else:
+                stmt = stmt.join(Users).where(Users.tenant_id == tenant_id)
 
         count = await self.session.scalar(stmt)
 
@@ -117,6 +117,7 @@ class AnalysisRepository:
         assistant_id: UUID,
         from_date: datetime = None,
         to_date: datetime = None,
+        tenant_id: UUID = None,
     ):
         stmt = (
             sa.select(Sessions)
@@ -126,6 +127,11 @@ class AnalysisRepository:
             )
             .where(Assistants.id == assistant_id)
         )
+
+        if tenant_id is not None:
+            stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
+                Users.tenant_id == tenant_id
+            )
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -182,8 +188,14 @@ class AnalysisRepository:
         group_chat_id: UUID,
         from_date: datetime = None,
         to_date: datetime = None,
+        tenant_id: UUID = None,
     ):
         stmt = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
+
+        if tenant_id is not None:
+            stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
+                Users.tenant_id == tenant_id
+            )
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -236,6 +248,7 @@ class AnalysisRepository:
         assistant_id: UUID,
         from_date: datetime = None,
         to_date: datetime = None,
+        tenant_id: UUID = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for an assistant efficiently.
 
@@ -246,6 +259,11 @@ class AnalysisRepository:
         session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
             Sessions.assistant_id == assistant_id
         )
+
+        if tenant_id is not None:
+            session_count_stmt = session_count_stmt.join(
+                Users, Sessions.user_id == Users.id
+            ).where(Users.tenant_id == tenant_id)
 
         if from_date is not None:
             session_count_stmt = session_count_stmt.where(
@@ -264,6 +282,11 @@ class AnalysisRepository:
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(Sessions.assistant_id == assistant_id)
         )
+
+        if tenant_id is not None:
+            question_count_stmt = question_count_stmt.join(
+                Users, Sessions.user_id == Users.id
+            ).where(Users.tenant_id == tenant_id)
 
         if from_date is not None:
             question_count_stmt = question_count_stmt.where(
@@ -366,9 +389,7 @@ class AnalysisRepository:
                 Questions.session_id,
             )
             .where(Questions.session_id.isnot(None))
-            .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
             .order_by(Questions.created_at)
         )
 
@@ -447,9 +468,8 @@ class AnalysisRepository:
         bucket = sa.func.date_trunc("hour", Questions.created_at).label("created_at")
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
-            .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
+            .where(Questions.session_id.isnot(None))
             .group_by(bucket)
             .order_by(bucket)
         )
@@ -469,6 +489,7 @@ class AnalysisRepository:
         group_chat_id: UUID,
         from_date: datetime = None,
         to_date: datetime = None,
+        tenant_id: UUID = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for a group chat efficiently.
 
@@ -479,6 +500,11 @@ class AnalysisRepository:
         session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
             Sessions.group_chat_id == group_chat_id
         )
+
+        if tenant_id is not None:
+            session_count_stmt = session_count_stmt.join(
+                Users, Sessions.user_id == Users.id
+            ).where(Users.tenant_id == tenant_id)
 
         if from_date is not None:
             session_count_stmt = session_count_stmt.where(
@@ -497,6 +523,11 @@ class AnalysisRepository:
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(Sessions.group_chat_id == group_chat_id)
         )
+
+        if tenant_id is not None:
+            question_count_stmt = question_count_stmt.join(
+                Users, Sessions.user_id == Users.id
+            ).where(Users.tenant_id == tenant_id)
 
         if from_date is not None:
             question_count_stmt = question_count_stmt.where(

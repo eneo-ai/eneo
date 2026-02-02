@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -128,6 +128,54 @@ async def test_ask_question_personal_space_with_access(service: AnalysisService)
     )
 
 
+async def test_get_questions_since_passes_tenant_id(service: AnalysisService):
+    assistant_id = uuid4()
+    from_date = date.today()
+    to_date = from_date
+
+    service.assistant_service.get_assistant.return_value = (
+        AsyncMock(space_id=None, user=service.user),
+        MagicMock(),
+    )
+    service.repo.get_assistant_sessions_since = AsyncMock(return_value=[])
+
+    await service.get_questions_since(
+        assistant_id=assistant_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    service.repo.get_assistant_sessions_since.assert_awaited_once_with(
+        assistant_id=assistant_id,
+        from_date=from_date,
+        to_date=to_date,
+        tenant_id=service.user.tenant_id,
+    )
+
+
+async def test_get_questions_from_group_chat_passes_tenant_id(
+    service: AnalysisService,
+):
+    group_chat_id = uuid4()
+    from_date = date.today()
+    to_date = from_date
+
+    service.repo.get_group_chat_sessions_since = AsyncMock(return_value=[])
+
+    await service.get_questions_from_group_chat(
+        group_chat_id=group_chat_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    service.repo.get_group_chat_sessions_since.assert_awaited_once_with(
+        group_chat_id=group_chat_id,
+        from_date=from_date,
+        to_date=to_date,
+        tenant_id=service.user.tenant_id,
+    )
+
+
 async def test_get_conversation_stats_no_id(service: AnalysisService):
     """Test that an exception is raised when neither assistant_id nor group_chat_id is provided."""
     user = MagicMock(tenant_id=TEST_UUID, permissions=[Permission.INSIGHTS])
@@ -176,7 +224,12 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 2
     assert result.total_questions == 3
-    service.repo.get_assistant_conversation_counts.assert_called_once()
+    service.repo.get_assistant_conversation_counts.assert_called_once_with(
+        assistant_id=assistant_id,
+        from_date=ANY,
+        to_date=ANY,
+        tenant_id=service.user.tenant_id,
+    )
 
 
 async def test_get_conversation_stats_group_chat(service: AnalysisService):
@@ -197,7 +250,12 @@ async def test_get_conversation_stats_group_chat(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 3
     assert result.total_questions == 4
-    service.repo.get_group_chat_conversation_counts.assert_called_once()
+    service.repo.get_group_chat_conversation_counts.assert_called_once_with(
+        group_chat_id=group_chat_id,
+        from_date=ANY,
+        to_date=ANY,
+        tenant_id=service.user.tenant_id,
+    )
 
 
 async def test_get_conversation_stats_with_date_range(service: AnalysisService):
@@ -226,4 +284,45 @@ async def test_get_conversation_stats_with_date_range(service: AnalysisService):
         group_chat_id=group_chat_id,
         from_date=start_time,
         to_date=end_time,
+        tenant_id=service.user.tenant_id,
+    )
+
+
+async def test_get_assistant_insight_sessions_passes_tenant_id(
+    service: AnalysisService,
+):
+    assistant_id = uuid4()
+    service.session_repo.get_by_assistant = AsyncMock(return_value=([], 0))
+
+    await service.get_assistant_insight_sessions(assistant_id=assistant_id)
+
+    service.session_repo.get_by_assistant.assert_awaited_once_with(
+        assistant_id=assistant_id,
+        limit=ANY,
+        cursor=ANY,
+        previous=ANY,
+        name_filter=ANY,
+        start_date=ANY,
+        end_date=ANY,
+        tenant_id=service.user.tenant_id,
+    )
+
+
+async def test_get_group_chat_insight_sessions_passes_tenant_id(
+    service: AnalysisService,
+):
+    group_chat_id = uuid4()
+    service.session_repo.get_by_group_chat = AsyncMock(return_value=([], 0))
+
+    await service.get_group_chat_insight_sessions(group_chat_id=group_chat_id)
+
+    service.session_repo.get_by_group_chat.assert_awaited_once_with(
+        group_chat_id=group_chat_id,
+        limit=ANY,
+        cursor=ANY,
+        previous=ANY,
+        name_filter=ANY,
+        start_date=ANY,
+        end_date=ANY,
+        tenant_id=service.user.tenant_id,
     )

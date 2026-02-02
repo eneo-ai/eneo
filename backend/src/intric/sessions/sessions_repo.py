@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -94,8 +94,14 @@ class SessionRepository:
         group_chat_id: UUID = None,
         start_date: datetime = None,
         end_date: datetime = None,
+        tenant_id: UUID = None,
     ):
         query = sa.select(sa.func.count()).select_from(Sessions)
+
+        if tenant_id is not None:
+            query = query.join(Users, Sessions.user_id == Users.id).where(
+                Users.tenant_id == tenant_id
+            )
 
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
@@ -123,12 +129,18 @@ class SessionRepository:
         name_filter: str = None,
         start_date: datetime = None,
         end_date: datetime = None,
+        tenant_id: UUID = None,
     ):
         query = (
             sa.select(Sessions)
             .where(Sessions.assistant_id == assistant_id)
             .order_by(Sessions.created_at.desc())
         )
+
+        if tenant_id is not None:
+            query = query.join(Users, Sessions.user_id == Users.id).where(
+                Users.tenant_id == tenant_id
+            )
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -147,6 +159,7 @@ class SessionRepository:
             user_id=user_id,
             start_date=start_date,
             end_date=end_date,
+            tenant_id=tenant_id,
         )
 
         if limit is not None:
@@ -158,10 +171,9 @@ class SessionRepository:
                     Sessions.created_at > cursor
                 )
                 items = await self.delegate.get_models_from_query(query)
-                return (
-                    sorted(items, key=lambda x: x.created_at, reverse=True),
-                    total_count,
-                )
+                items = cast(list[SessionInDB], items)
+                items.reverse()
+                return (items, total_count)
             else:
                 query = query.where(Sessions.created_at <= cursor)
 
@@ -178,12 +190,18 @@ class SessionRepository:
         name_filter: str = None,
         start_date: datetime = None,
         end_date: datetime = None,
+        tenant_id: UUID = None,
     ):
         query = (
             sa.select(Sessions)
             .where(Sessions.group_chat_id == group_chat_id)
             .order_by(Sessions.created_at.desc())
         )
+
+        if tenant_id is not None:
+            query = query.join(Users, Sessions.user_id == Users.id).where(
+                Users.tenant_id == tenant_id
+            )
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -203,6 +221,7 @@ class SessionRepository:
             user_id=user_id,
             start_date=start_date,
             end_date=end_date,
+            tenant_id=tenant_id,
         )
 
         if limit is not None:
@@ -214,10 +233,9 @@ class SessionRepository:
                     Sessions.created_at > cursor
                 )
                 items = await self.delegate.get_models_from_query(query)
-                return (
-                    sorted(items, key=lambda x: x.created_at, reverse=True),
-                    total_count,
-                )
+                items = cast(list[SessionInDB], items)
+                items.reverse()
+                return (items, total_count)
             else:
                 query = query.where(Sessions.created_at <= cursor)
 
@@ -239,4 +257,4 @@ class SessionRepository:
         return sessions
 
     async def delete(self, id: int) -> SessionInDB:
-        return await self.delegate.delete(id)
+        return cast(SessionInDB, await self.delegate.delete(id))

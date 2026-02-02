@@ -30,7 +30,10 @@
 
   // Date range state
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const STOCKHOLM_TZ = "Europe/Stockholm";
+  const toStockholmIso = (date: CalendarDate, addDays = 0) =>
+    date.add({ days: addDays }).toDate(STOCKHOLM_TZ).toISOString();
   let dateRange = $state({
     start: today.subtract({ days: 30 }),
     end: today
@@ -203,8 +206,8 @@
 
   // Timeframe for the chart (needs full ISO datetime for parseAbsolute)
   let timeframe = $state({
-    start: `${today.subtract({ days: 30 }).toString()}T00:00:00+01:00`,
-    end: `${today.add({ days: 1 }).toString()}T00:00:00+01:00`
+    start: toStockholmIso(today.subtract({ days: 30 })),
+    end: toStockholmIso(today, 1)
   });
 
   // Preset options
@@ -296,8 +299,8 @@
       };
       // Convert date strings to full ISO datetime for parseAbsolute compatibility
       const newTimeframe = {
-        start: `${tf.start}T00:00:00+01:00`,
-        end: `${tf.end}T00:00:00+01:00`
+        start: toStockholmIso(range.start),
+        end: toStockholmIso(range.end, 1)
       };
 
       const result = await intric.analytics.getAggregated(tf);
@@ -352,13 +355,13 @@
 
       // Cache the initial SSR data
       const cacheKey = getCacheKey(initialStart, initialEnd);
-      setCache(cacheKey, {
-        data: initialData,
-        timeframe: {
-          start: `${initialStart}T00:00:00+01:00`,
-          end: `${today.add({ days: 1 }).toString()}T00:00:00+01:00`
-        }
-      });
+       setCache(cacheKey, {
+         data: initialData,
+         timeframe: {
+           start: toStockholmIso(today.subtract({ days: 30 })),
+           end: toStockholmIso(today, 1)
+         }
+       });
 
       isLoading = false;
       mounted = true;
@@ -565,7 +568,7 @@
                   class="relative border-default flex h-full w-full items-stretch overflow-clip rounded-lg border shadow-sm
                          hover:border-border-stronger hover:shadow transition-all duration-200"
                 >
-                  {#if isLoading || !analyticsData}
+                  {#if !analyticsData}
                     <!-- Skeleton loading state -->
                     <div class="flex h-full w-full">
                       <!-- Chart skeleton -->
@@ -606,6 +609,14 @@
                     </div>
                   {:else}
                     <InteractiveGraph data={analyticsData} {timeframe} {partialDataInfo}></InteractiveGraph>
+                    {#if isLoading}
+                      <div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background-primary)]/50">
+                        <div class="flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--background-primary)] px-3 py-1.5 text-xs text-[var(--text-secondary)] shadow-sm">
+                          <RefreshCw class="h-3 w-3 animate-spin" />
+                          <span>{m.refresh()}...</span>
+                        </div>
+                      </div>
+                    {/if}
 
                     <!-- Stat Cards Panel - Nordic Precision v4 (Uniform Cards with Scroll) -->
                     <div class="stat-panel flex w-72 -mr-px flex-shrink-0 flex-col border-l border-[var(--border-default)] rounded-r-xl bg-[var(--background-primary)]">
@@ -739,12 +750,17 @@
                             <Users class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
                             <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.active_users()}</span>
                           </div>
-                          {#if isLoadingActivity}
+                          {#if activityStats}
+                            <div class="flex items-center justify-end gap-2">
+                              <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right {isLoadingActivity ? 'opacity-60' : ''}" style="--delay: 200ms">
+                                {formatNumber(activityStats.active_user_count, "compact")}
+                              </span>
+                              {#if isLoadingActivity}
+                                <RefreshCw class="h-3 w-3 animate-spin text-[var(--text-muted)]" />
+                              {/if}
+                            </div>
+                          {:else if isLoadingActivity}
                             <div class="h-9 w-16 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
-                          {:else if activityStats}
-                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 200ms">
-                              {formatNumber(activityStats.active_user_count, "compact")}
-                            </span>
                           {:else}
                             <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right">—</span>
                           {/if}
@@ -760,11 +776,9 @@
                             <Activity class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 group-hover:text-[var(--accent-default)] transition-all duration-200" />
                             <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.active_assistants()}</span>
                           </div>
-                          {#if isLoadingActivity}
-                            <div class="h-9 w-20 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
-                          {:else if activityStats}
+                          {#if activityStats}
                             <div class="flex items-baseline justify-end gap-1.5">
-                              <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300" style="--delay: 250ms">
+                              <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 {isLoadingActivity ? 'opacity-60' : ''}" style="--delay: 250ms">
                                 {formatNumber(activityStats.active_assistant_count, "compact")}
                               </span>
                               {#if activityStats.total_trackable_assistants > 0}
@@ -772,7 +786,12 @@
                               {:else}
                                 <span class="text-lg text-[var(--text-muted)] font-normal">/ 0</span>
                               {/if}
+                              {#if isLoadingActivity}
+                                <RefreshCw class="h-3 w-3 animate-spin text-[var(--text-muted)]" />
+                              {/if}
                             </div>
+                          {:else if isLoadingActivity}
+                            <div class="h-9 w-20 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
                           {:else}
                             <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right">—</span>
                           {/if}
@@ -789,9 +808,7 @@
                             <span class="text-[11px] font-semibold tracking-[0.06em] uppercase text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors duration-200 flex-1">{m.tokens()}</span>
                             <ExternalLink class="h-3.5 w-3.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-60 transition-opacity duration-200" />
                           </div>
-                          {#if isLoadingTokens}
-                            <div class="h-9 w-16 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
-                          {:else if tokenError}
+                          {#if tokenError}
                             <button
                               class="text-sm text-[var(--text-muted)] hover:text-[var(--accent-default)] transition-colors text-right"
                               onclick={(e) => { e.preventDefault(); fetchTokenUsage(); }}
@@ -824,9 +841,16 @@
                                 {/if}
                               </div>
                             </div>
-                            <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right" style="--delay: 300ms">
-                              {formatNumber(tokenUsage.total_token_usage, "compact")}
-                            </span>
+                            <div class="flex items-center justify-end gap-2">
+                              <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent-stronger)] transition-colors duration-300 text-right {isLoadingTokens ? 'opacity-60' : ''}" style="--delay: 300ms">
+                                {formatNumber(tokenUsage.total_token_usage, "compact")}
+                              </span>
+                              {#if isLoadingTokens}
+                                <RefreshCw class="h-3 w-3 animate-spin text-[var(--text-muted)]" />
+                              {/if}
+                            </div>
+                          {:else if isLoadingTokens}
+                            <div class="h-9 w-16 self-end bg-[var(--background-secondary)] rounded animate-pulse"></div>
                           {:else}
                             <span class="stat-number text-3xl font-semibold tabular-nums tracking-tight text-[var(--text-muted)] text-right">—</span>
                           {/if}
@@ -842,7 +866,9 @@
       {/if}
     </Page.Tab>
     <Page.Tab id="assistants">
-      <TenantAssistantTable assistants={data.assistants} />
+      {#if $selectedTab === "assistants"}
+        <TenantAssistantTable assistants={data.assistants} />
+      {/if}
     </Page.Tab>
   </Page.Main>
 </Page.Root>

@@ -6,7 +6,7 @@
 
 import type { AnalyticsAggregatedData } from "@intric/intric-js";
 import type { Chart } from "@intric/ui";
-import { fromAbsolute, getDayOfWeek, parseAbsolute, toCalendarDate } from "@internationalized/date";
+import { fromAbsolute, getDayOfWeek, parseAbsolute, parseZonedDateTime, toCalendarDate } from "@internationalized/date";
 import { m } from "$lib/paraglide/messages";
 
 // {sessions: { "Monday": {count: 12, total: 12}}}
@@ -217,7 +217,9 @@ export function prepareData(
       animation: false,
       type: "time",
       // Use effective start (bounded by actual data) instead of requested timeframe
-      min: parseAbsolute(`${effectiveStartDate}T00:00:00+01:00`, "Europe/Stockholm").subtract({ days: 1 }).toDate(),
+      min: parseZonedDateTime(`${effectiveStartDate}T00:00:00[Europe/Stockholm]`)
+        .subtract({ days: 1 })
+        .toDate(),
       max: timeframe.end,
       axisLabel: {
         // Swedish date format with smart density based on data count
