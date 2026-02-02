@@ -105,6 +105,37 @@ export function getDiff<
       continue;
     }
 
+    // Case 1b: Handle null/undefined original values
+    // When origValue is null/undefined it is neither primitive nor a record,
+    // so subsequent cases that check isRecord(origValue) would all skip it.
+    if (origValue === null || origValue === undefined) {
+      if (copyValue !== origValue) {
+        if (compareValue === true) {
+          result[key] = JSON.parse(JSON.stringify(copyValue));
+        } else if (isRecord(compareValue) && isRecord(copyValue)) {
+          const allFieldsTrue = Object.values(compareValue).every((v) => v === true);
+          if (allFieldsTrue) {
+            result[key] = extractFields(
+              copyValue as Record<string, unknown>,
+              Object.keys(compareValue)
+            );
+          } else {
+            const nestedDiff = getDiff(
+              {} as Record<string, unknown>,
+              copyValue as Record<string, unknown>,
+              { compare: compareValue as CompareOptions<Record<string, unknown>> }
+            );
+            if (Object.keys(nestedDiff).length > 0) {
+              result[key] = nestedDiff;
+            }
+          }
+        } else {
+          result[key] = copyValue;
+        }
+      }
+      continue;
+    }
+
     // Case 2: Compare entire value (for objects or arrays)
     if (compareValue === true) {
       const originalStr = JSON.stringify(origValue);
