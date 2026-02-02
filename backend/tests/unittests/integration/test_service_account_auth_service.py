@@ -132,8 +132,8 @@ class TestGenAuthUrl:
 
         assert "redirect_uri=https%3A%2F%2Fmyapp.com%2Fcallback" in result["auth_url"]
 
-    def test_gen_auth_url_includes_prompt_consent(self, service):
-        """Auth URL includes prompt=consent."""
+    def test_gen_auth_url_includes_prompt_login(self, service):
+        """Auth URL includes prompt=login (not consent, to avoid requiring admin)."""
         result = service.gen_auth_url(
             state="state",
             client_id="client-123",
@@ -141,7 +141,7 @@ class TestGenAuthUrl:
             tenant_domain="contoso.onmicrosoft.com",
         )
 
-        assert "prompt=consent" in result["auth_url"]
+        assert "prompt=login" in result["auth_url"]
 
 
 class TestExchangeToken:

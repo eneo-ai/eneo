@@ -52,6 +52,8 @@ class ServiceAccountAuthService:
     - Refresh token for long-term access without re-authentication
     """
 
+    # User.Read is needed to retrieve the service account's email address
+    # after token exchange (personal OAuth doesn't need this)
     DEFAULT_SCOPES = ["Files.Read.All", "Sites.Read.All", "User.Read"]
 
     def __init__(self):

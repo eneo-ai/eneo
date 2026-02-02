@@ -1,7 +1,10 @@
+import json
 import secrets
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from typing import Dict, Optional
 from uuid import UUID
+
+import redis.asyncio as redis
 
 from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
 from intric.integration.infrastructure.auth_service.service_account_auth_service import (
@@ -20,6 +23,7 @@ from intric.integration.presentation.admin_models import (
     ServiceAccountAuthCallback,
 )
 from intric.main.container.container import Container
+from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
@@ -27,9 +31,42 @@ from intric.server.dependencies.container import get_container
 logger = get_logger(__name__)
 router = APIRouter()
 
-# In-memory storage for OAuth states (in production, use Redis or similar)
-# Format: {state: {client_id, client_secret, tenant_domain, tenant_id, created_at}}
-_oauth_states: Dict[str, Dict] = {}
+OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
+OAUTH_STATE_PREFIX = "sharepoint:oauth_state:"
+
+
+async def _get_redis_client() -> redis.Redis:
+    settings = get_settings()
+    return await redis.from_url(
+        f"redis://{settings.redis_host}:{settings.redis_port}",
+        encoding="utf8",
+        decode_responses=True,
+    )
+
+
+async def _store_oauth_state(state: str, data: dict) -> None:
+    client = await _get_redis_client()
+    try:
+        await client.set(
+            f"{OAUTH_STATE_PREFIX}{state}",
+            json.dumps(data),
+            ex=OAUTH_STATE_TTL_SECONDS,
+        )
+    finally:
+        await client.close()
+
+
+async def _pop_oauth_state(state: str) -> Optional[dict]:
+    client = await _get_redis_client()
+    try:
+        key = f"{OAUTH_STATE_PREFIX}{state}"
+        data = await client.get(key)
+        if data is not None:
+            await client.delete(key)
+            return json.loads(data)
+        return None
+    finally:
+        await client.close()
 
 
 @router.post(
@@ -813,16 +850,14 @@ async def start_service_account_auth(
         # Generate a secure state token
         state = secrets.token_urlsafe(32)
 
-        # Store state with credentials for callback verification
-        from datetime import datetime
-        _oauth_states[state] = {
+        # Store state with credentials in Redis for callback verification
+        await _store_oauth_state(state, {
             "client_id": app_config.client_id,
             "client_secret": app_config.client_secret,
             "tenant_domain": app_config.tenant_domain,
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
-            "created_at": datetime.utcnow().isoformat(),
-        }
+        })
 
         # Generate OAuth URL
         service_account_auth_service = ServiceAccountAuthService()
@@ -879,14 +914,13 @@ async def service_account_auth_callback(
         user = container.user()
         validate_permission(user, Permission.ADMIN)
 
-        # Verify state
-        if callback.state not in _oauth_states:
+        # Verify state (atomically retrieve and delete from Redis)
+        stored_state = await _pop_oauth_state(callback.state)
+        if stored_state is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired OAuth state. Please restart the authentication flow."
             )
-
-        stored_state = _oauth_states.pop(callback.state)
 
         # Verify tenant matches
         if stored_state["tenant_id"] != str(user.tenant_id):
