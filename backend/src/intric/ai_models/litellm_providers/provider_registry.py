@@ -3,6 +3,8 @@ from typing import Optional
 from .base_provider import BaseLiteLLMProvider
 from .berget_provider import BergetProvider
 from .gdm_provider import GDMProvider
+from .klang_provider import KlangProvider
+from .openrouter_provider import OpenRouterProvider
 
 
 class LiteLLMProviderRegistry:
@@ -58,6 +60,14 @@ class LiteLLMProviderRegistry:
         # Check for GDM models by litellm_model_name prefix
         if litellm_model_name and litellm_model_name.startswith("gdm/"):
             return GDMProvider()
+
+        # Check for Klang models by litellm_model_name prefix
+        if litellm_model_name and litellm_model_name.startswith("klang/"):
+            return KlangProvider()
+
+        # Check for OpenRouter models by litellm_model_name prefix
+        if litellm_model_name and litellm_model_name.startswith("openrouter/"):
+            return OpenRouterProvider()
 
         # Default provider for standard LiteLLM-supported providers
         return cls._default_provider

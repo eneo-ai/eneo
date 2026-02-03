@@ -22,4 +22,4 @@ fi
 
 echo "Starting Eneo backend with $workers workers"
 
-exec gunicorn src.intric.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+exec gunicorn src.intric.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --bind 0.0.0.0:8123

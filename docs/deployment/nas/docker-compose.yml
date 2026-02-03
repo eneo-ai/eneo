@@ -1,0 +1,105 @@
+# ============================================================================
+# ENEO SYNOLOGY NAS DEPLOYMENT - Docker Compose Configuration
+# ============================================================================
+# Simplified stack for Synology NAS with external SSL handling
+# SSL is managed by Synology's built-in reverse proxy
+#
+# Configure Synology Reverse Proxy:
+#   - eneo.neomeda.se → localhost:3000 (frontend)
+#   - eneo.neomeda.se/api/* → localhost:8000 (backend)
+#   - eneo.neomeda.se/docs → localhost:8000 (backend)
+#   - eneo.neomeda.se/openapi.json → localhost:8000 (backend)
+#   - eneo.neomeda.se/version → localhost:8000 (backend)
+# ============================================================================
+
+name: eneo
+
+services:
+  frontend:
+    image: ghcr.io/eneo-ai/eneo-frontend:latest
+    container_name: eneo_frontend
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    env_file:
+      - env_frontend.env
+    networks:
+      - eneo_network
+    depends_on:
+      - backend
+
+  backend:
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    container_name: eneo_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8123:8123"
+    env_file:
+      - env_backend.env
+    volumes:
+      - backend_data:/app/data
+      - temp_files:/tmp
+    networks:
+      - eneo_network
+    depends_on:
+      - db
+      - redis
+      - db-init
+
+  worker:
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    container_name: eneo_worker
+    restart: unless-stopped
+    environment:
+      - RUN_AS_WORKER=true
+    env_file:
+      - env_backend.env
+    volumes:
+      - backend_data:/app/data
+      - temp_files:/tmp
+    networks:
+      - eneo_network
+    depends_on:
+      - backend
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: eneo_db
+    restart: unless-stopped
+    env_file:
+      - env_db.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - eneo_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: eneo_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - eneo_network
+
+  db-init:
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    container_name: eneo_db_init
+    command: ["python", "init_db.py"]
+    env_file:
+      - env_backend.env
+    networks:
+      - eneo_network
+    depends_on:
+      - db
+
+networks:
+  eneo_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_data:
+  temp_files:

@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     vllm_api_key: Optional[str] = None
     berget_api_key: Optional[str] = None
     gdm_api_key: Optional[str] = None
+    klang_api_key: Optional[str] = None
+    klang_api_secret: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
     intric_marketplace_api_key: Optional[str] = None
     intric_marketplace_url: Optional[str] = None
     intric_super_api_key: Optional[str] = None

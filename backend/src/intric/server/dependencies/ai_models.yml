@@ -393,6 +393,60 @@ completion_models:
     org: Google
     vision: false
 
+  # Klang.ai - Swedish AI provider
+  - name: 'mistral-small-3.2-24b-instruct-2506'
+    nickname: 'Mistral Small (Klang)'
+    family: 'openai'
+    token_limit: 32000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'swe'
+    litellm_model_name: 'klang/mistral-small-3.2-24b-instruct-2506'
+    description: Mistral Small 24B instruction-tuned model, hosted by Klang.ai in Sweden.
+    org: Klang
+    vision: false
+    reasoning: false
+
+  # OpenRouter - Multi-provider aggregator
+  - name: 'anthropic/claude-3.5-sonnet'
+    nickname: 'Claude 3.5 Sonnet (OpenRouter)'
+    family: 'openai'
+    token_limit: 200000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    litellm_model_name: 'openrouter/anthropic/claude-3.5-sonnet'
+    description: Anthropic's Claude 3.5 Sonnet via OpenRouter.
+    org: OpenRouter
+    vision: true
+    reasoning: false
+
+  - name: 'google/gemini-2.0-flash-001'
+    nickname: 'Gemini 2.0 Flash (OpenRouter)'
+    family: 'openai'
+    token_limit: 1000000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    litellm_model_name: 'openrouter/google/gemini-2.0-flash-001'
+    description: Google's Gemini 2.0 Flash via OpenRouter.
+    org: OpenRouter
+    vision: true
+    reasoning: false
+
+  - name: 'deepseek/deepseek-r1'
+    nickname: 'DeepSeek R1 (OpenRouter)'
+    family: 'openai'
+    token_limit: 64000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    litellm_model_name: 'openrouter/deepseek/deepseek-r1'
+    description: DeepSeek R1 reasoning model via OpenRouter.
+    org: OpenRouter
+    vision: false
+    reasoning: true
+
 
 embedding_models:
   # ⚠️ CRITICAL: Embedding models have NO 'nickname' field!

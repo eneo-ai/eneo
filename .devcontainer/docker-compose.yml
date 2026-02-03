@@ -9,6 +9,8 @@ services:
     command: sleep infinity
     networks:
       - eneo
+    ports:
+      - "8123:8123"
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
