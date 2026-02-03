@@ -171,14 +171,12 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
         except litellm.AuthenticationError:
             provider = self.credential_resolver.provider_type if self.credential_resolver else "unknown"
-            tenant_id = self.credential_resolver.tenant.id if self.credential_resolver and hasattr(self.credential_resolver, 'tenant') and self.credential_resolver.tenant else None
-            tenant_name = self.credential_resolver.tenant.name if self.credential_resolver and hasattr(self.credential_resolver, 'tenant') and self.credential_resolver.tenant else None
+            provider_id = self.credential_resolver.provider_id if self.credential_resolver else None
 
             logger.error(
                 "Tenant API credential authentication failed",
                 extra={
-                    "tenant_id": str(tenant_id) if tenant_id else None,
-                    "tenant_name": tenant_name,
+                    "provider_id": str(provider_id) if provider_id else None,
                     "provider": provider,
                     "error_type": "AuthenticationError",
                     "model": self.litellm_model
