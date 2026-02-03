@@ -22,20 +22,17 @@ class TestPersistenceModuleImports:
     def test_import_from_crawl_package(self):
         """persist_batch should be importable from intric.worker.crawl."""
         from intric.worker.crawl import persist_batch
-
         assert callable(persist_batch)
 
     def test_import_from_crawl_tasks_backward_compat(self):
         """persist_batch should still be importable from crawl_tasks for backward compatibility."""
         from intric.worker.crawl_tasks import persist_batch
-
         assert callable(persist_batch)
 
     def test_both_imports_are_same_function(self):
         """Both import paths should resolve to the same function."""
         from intric.worker.crawl import persist_batch as pb1
         from intric.worker.crawl_tasks import persist_batch as pb2
-
         # Note: pb1 and pb2 might not be the exact same object due to re-export,
         # but they should have the same behavior. We test that both are callable.
         assert callable(pb1)
@@ -62,13 +59,11 @@ class TestPersistenceModuleSemantics:
             embedding_model_dimensions=1536,
         )
 
-        mock_container = MagicMock()
-
         success, failed, success_urls, failures_by_reason = await persist_batch(
             page_buffer=[],
             ctx=ctx,
             embedding_model=MagicMock(),
-            container=mock_container,
+            create_embeddings_service=MagicMock(),
         )
 
         assert success == 0
@@ -99,13 +94,11 @@ class TestPersistenceModuleSemantics:
             {"url": "https://example.com/page2", "content": "Test content 2"},
         ]
 
-        mock_container = MagicMock()
-
         success, failed, success_urls, failures_by_reason = await persist_batch(
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
-            container=mock_container,
+            create_embeddings_service=MagicMock(),
         )
 
         assert success == 0
@@ -121,7 +114,6 @@ class TestEmbeddingSemaphore:
     def test_semaphore_getter_is_callable(self):
         """_get_embedding_semaphore should be callable."""
         from intric.worker.crawl.persistence import _get_embedding_semaphore
-
         assert callable(_get_embedding_semaphore)
 
     def test_semaphore_returns_asyncio_semaphore(self):
