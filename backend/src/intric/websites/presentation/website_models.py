@@ -67,6 +67,7 @@ class CrawlRunPublic(BaseResponse):
     files_downloaded: Optional[int]
     pages_failed: Optional[int]
     files_failed: Optional[int]
+    failure_summary: Optional[dict[str, int]] = None
     status: Status
     result_location: Optional[str]
     finished_at: Optional[datetime]
@@ -81,6 +82,7 @@ class CrawlRunPublic(BaseResponse):
             files_downloaded=crawl_run.files_downloaded,
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
+            failure_summary=crawl_run.failure_summary,
             status=crawl_run.status,
             result_location=crawl_run.result_location,
             finished_at=crawl_run.finished_at,

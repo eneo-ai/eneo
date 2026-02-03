@@ -24,7 +24,7 @@ from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
-from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
+from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, FailureReason, PreparedPage
 
 if TYPE_CHECKING:
     from intric.main.container.container import Container
@@ -73,7 +73,7 @@ async def persist_batch(
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
-) -> tuple[int, int, list[str], list[str]]:
+) -> tuple[int, int, list[str], dict[str, list[str]]]:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
 
@@ -104,30 +104,41 @@ async def persist_batch(
         container: DI container for creating embedding service with proper session
 
     Returns:
-        Tuple of (success_count, failed_count, successful_urls, failed_urls)
+        Tuple of (success_count, failed_count, successful_urls, failures_by_reason)
         - success_count: Number of pages successfully persisted
         - failed_count: Number of pages that failed to persist
         - successful_urls: List of URLs that were ACTUALLY persisted (for accurate tracking)
-        - failed_urls: List of URLs that FAILED to persist (to prevent stale blob deletion)
+        - failures_by_reason: Dict mapping FailureReason codes to lists of failed URLs
 
     Note:
         - Deduplication uses delete-then-insert pattern (not idempotent across workers)
         - For true idempotency, add UNIQUE constraint on (tenant_id, website_id, title)
         - CRITICAL: Only URLs in successful_urls should be marked as crawled
-        - CRITICAL: URLs in failed_urls should NOT be deleted as stale (savepoint preserved data)
+        - CRITICAL: URLs in failures_by_reason should NOT be deleted as stale
     """
     from intric.database.database import sessionmanager
 
     if not page_buffer:
-        return 0, 0, [], []
+        return 0, 0, [], {}
+
+    # Track failures by reason code for detailed reporting
+    failures_by_reason: dict[str, list[str]] = {}
+
+    def add_failure(reason: FailureReason, url: str) -> None:
+        """Track a failure by reason code."""
+        reason_key = reason.value
+        if reason_key not in failures_by_reason:
+            failures_by_reason[reason_key] = []
+        failures_by_reason[reason_key].append(url)
 
     if embedding_model is None:
         logger.warning(
             "No embedding model configured for website",
             extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
         )
-        failed_urls = [page.get("url", "unknown") for page in page_buffer]
-        return 0, len(page_buffer), [], failed_urls
+        for page in page_buffer:
+            add_failure(FailureReason.NO_EMBEDDING_MODEL, page.get("url", "unknown"))
+        return 0, len(page_buffer), [], failures_by_reason
 
     # Validate embedding model has required provider_id for credential lookup
     if not getattr(embedding_model, 'provider_id', None):
@@ -139,13 +150,13 @@ async def persist_batch(
                 "embedding_model_id": str(getattr(embedding_model, 'id', None)),
             },
         )
-        failed_urls = [page.get("url", "unknown") for page in page_buffer]
-        return 0, len(page_buffer), [], failed_urls
+        for page in page_buffer:
+            add_failure(FailureReason.MISSING_PROVIDER, page.get("url", "unknown"))
+        return 0, len(page_buffer), [], failures_by_reason
 
     success_count = 0
     failed_count = 0
     successful_urls: list[str] = []
-    failed_urls: list[str] = []
     prepared_pages: list[PreparedPage] = []
     buffer_embedding_bytes = 0
 
@@ -165,8 +176,9 @@ async def persist_batch(
             },
         )
         await embedding_session.close()
-        failed_urls = [page.get("url", "unknown") for page in page_buffer]
-        return 0, len(page_buffer), [], failed_urls
+        for page in page_buffer:
+            add_failure(FailureReason.EMBEDDING_ERROR, page.get("url", "unknown"))
+        return 0, len(page_buffer), [], failures_by_reason
 
     # Create text splitter (matching datastore.py pattern)
     splitter = RecursiveCharacterTextSplitter(
@@ -203,7 +215,7 @@ async def persist_batch(
                     },
                 )
                 failed_count += 1
-                failed_urls.append(url)
+                add_failure(FailureReason.EMPTY_CONTENT, url)
                 continue
 
             try:
@@ -226,7 +238,7 @@ async def persist_batch(
                         },
                     )
                     failed_count += 1
-                    failed_urls.append(url)
+                    add_failure(FailureReason.NO_CHUNKS, url)
                     continue
 
                 # 3. Create InfoBlobChunk objects for embedding service
@@ -261,7 +273,7 @@ async def persist_batch(
                             },
                         )
                         failed_count += 1
-                        failed_urls.append(url)
+                        add_failure(FailureReason.EMBEDDING_TIMEOUT, url)
                         continue
 
                 # 5. Extract embeddings from ChunkEmbeddingList
@@ -308,7 +320,7 @@ async def persist_batch(
                     },
                 )
                 failed_count += 1
-                failed_urls.append(url)
+                add_failure(FailureReason.EMBEDDING_ERROR, url)
                 continue
     finally:
         # Close embedding session after Phase 1 completes
@@ -320,7 +332,7 @@ async def persist_batch(
             "No pages prepared after Phase 1",
             extra={"website_id": str(ctx.website_id), "failed_count": failed_count},
         )
-        return success_count, failed_count, [], failed_urls
+        return success_count, failed_count, [], failures_by_reason
 
     # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
     # This is the only part that holds a database connection.
@@ -400,7 +412,7 @@ async def persist_batch(
                     except Exception as e:
                         await savepoint.rollback()
                         failed_count += 1
-                        failed_urls.append(prepared.url)
+                        add_failure(FailureReason.DB_ERROR, prepared.url)
                         logger.error(
                             f"Phase 2: Failed to persist page {prepared.url}: {e}",
                             extra={
@@ -429,10 +441,10 @@ async def persist_batch(
                 "pages_attempted": len(prepared_pages),
             },
         )
-        # Mark all unpersisted pages as failed
+        # Mark all unpersisted pages as failed with DB_ERROR
         for p in prepared_pages:
             if p.url not in successful_urls:
-                failed_urls.append(p.url)
+                add_failure(FailureReason.DB_ERROR, p.url)
         failed_count += len(prepared_pages) - success_count
 
     except Exception as e:
@@ -443,10 +455,10 @@ async def persist_batch(
                 "error": str(e),
             },
         )
-        # Mark all unpersisted pages as failed
+        # Mark all unpersisted pages as failed with DB_ERROR
         for p in prepared_pages:
             if p.url not in successful_urls:
-                failed_urls.append(p.url)
+                add_failure(FailureReason.DB_ERROR, p.url)
         failed_count += len(prepared_pages) - success_count
 
-    return success_count, failed_count, successful_urls, failed_urls
+    return success_count, failed_count, successful_urls, failures_by_reason

@@ -13,6 +13,35 @@
   const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
   const SKIPPED_PREFIX = "skipped duplicate crawl";
 
+  // Map failure reason codes to i18n labels
+  function getFailureReasonLabel(reason: string): string {
+    const labels: Record<string, () => string> = {
+      EMPTY_CONTENT: () => m.failure_reason_EMPTY_CONTENT(),
+      NO_CHUNKS: () => m.failure_reason_NO_CHUNKS(),
+      EMBEDDING_TIMEOUT: () => m.failure_reason_EMBEDDING_TIMEOUT(),
+      EMBEDDING_ERROR: () => m.failure_reason_EMBEDDING_ERROR(),
+      DB_ERROR: () => m.failure_reason_DB_ERROR(),
+      NO_EMBEDDING_MODEL: () => m.failure_reason_NO_EMBEDDING_MODEL(),
+      MISSING_PROVIDER: () => m.failure_reason_MISSING_PROVIDER()
+    };
+    return labels[reason]?.() ?? reason;
+  }
+
+  // Build tooltip content from failure_summary
+  function getFailureTooltip(): string | undefined {
+    const summary = (crawl as CrawlRun & { failure_summary?: Record<string, number> })
+      .failure_summary;
+    if (!summary || Object.keys(summary).length === 0) {
+      return undefined;
+    }
+
+    const lines = Object.entries(summary)
+      .map(([reason, count]) => `${getFailureReasonLabel(reason)}: ${count}`)
+      .join("\n");
+
+    return `${m.failure_reasons_tooltip()}:\n${lines}`;
+  }
+
   function totalLabel(): { label: string; color: Label.LabelColor } {
     if ((crawl.files_downloaded ?? 0) > 0) {
       return {
@@ -30,21 +59,26 @@
     }
   }
 
-  function failedLabel(): { label: string; color: Label.LabelColor } {
+  function failedLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
+    const tooltip = getFailureTooltip();
+
     if (crawl.pages_failed && crawl.files_failed) {
       return {
         color: "orange",
-        label: m.pages_and_files_failed({ pages: crawl.pages_failed, files: crawl.files_failed })
+        label: m.pages_and_files_failed({ pages: crawl.pages_failed, files: crawl.files_failed }),
+        tooltip
       };
     } else if (crawl.pages_failed) {
       return {
         color: "orange",
-        label: m.pages_failed({ count: crawl.pages_failed })
+        label: m.pages_failed({ count: crawl.pages_failed }),
+        tooltip
       };
     } else {
       return {
         color: "orange",
-        label: m.files_failed({ count: crawl.files_failed })
+        label: m.files_failed({ count: crawl.files_failed }),
+        tooltip
       };
     }
   }

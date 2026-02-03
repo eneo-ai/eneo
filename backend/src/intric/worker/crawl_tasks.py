@@ -2,6 +2,7 @@ import hashlib
 import random
 import socket
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -329,7 +330,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     # This is safe because:
     # 1. crawl_task sets _job_already_handled=True, skipping complete_job/fail_job
     # 2. Status updates use execute_with_recovery() with its own sessions
-    # 3. set_status() has fallback to direct SQL when job_service is None
+    # 3. fail_job() has fallback to direct SQL when job_service is None
+    #    (ensures jobs are marked failed even when exceptions occur early)
     task_manager = TaskManager(
         user=container.user(),
         job_id=job_id,
@@ -911,6 +913,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_deleted_blobs = 0
             num_skipped_files = 0  # Files with unchanged content (hash match)
 
+            # Aggregate failure reasons across all batches
+            # Maps FailureReason codes to counts for final storage in failure_summary
+            failure_counts: dict[str, int] = defaultdict(int)
+
             # Use set for O(1) membership tests
             crawled_titles = set()
             failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
@@ -1026,7 +1032,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             success_count,
                             failed_count,
                             successful_urls,
-                            batch_failed_urls,
+                            batch_failures_by_reason,
                         ) = await persist_batch(
                             page_buffer=page_buffer,
                             ctx=crawl_context,
@@ -1034,7 +1040,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             container=container,
                         )
                         crawled_titles.update(successful_urls)
-                        failed_titles.update(batch_failed_urls)
+                        # Aggregate failure reasons and track failed URLs
+                        for reason, urls in batch_failures_by_reason.items():
+                            failure_counts[reason] += len(urls)
+                            failed_titles.update(urls)
                         num_failed_pages += failed_count
                         page_buffer.clear()
 
@@ -1054,7 +1063,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         success_count,
                         failed_count,
                         successful_urls,
-                        batch_failed_urls,
+                        batch_failures_by_reason,
                     ) = await persist_batch(
                         page_buffer=page_buffer,
                         ctx=crawl_context,
@@ -1062,7 +1071,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         container=container,
                     )
                     crawled_titles.update(successful_urls)
-                    failed_titles.update(batch_failed_urls)
+                    # Aggregate failure reasons and track failed URLs
+                    for reason, urls in batch_failures_by_reason.items():
+                        failure_counts[reason] += len(urls)
+                        failed_titles.update(urls)
                     num_failed_pages += failed_count
 
                     logger.debug(
@@ -1330,6 +1342,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Update crawl run with recovery wrapper
             from intric.database.tables.websites_table import CrawlRuns
 
+            # Convert failure_counts defaultdict to regular dict for JSONB storage
+            # Only store if there are any failures
+            failure_summary = dict(failure_counts) if failure_counts else None
+
             async def _do_crawl_run_update(sess):
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 stmt = (
@@ -1340,6 +1356,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         files_downloaded=num_files,
                         pages_failed=num_failed_pages,
                         files_failed=num_failed_files,
+                        failure_summary=failure_summary,
                     )
                 )
                 await sess.execute(stmt)
