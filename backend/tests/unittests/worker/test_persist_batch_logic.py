@@ -63,17 +63,21 @@ def create_mock_session():
     # These methods ARE coroutines, so use AsyncMock
     mock_session.execute = AsyncMock()
     mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
+    mock_session.close = AsyncMock()  # Support await session.close()
 
     return mock_session
 
 
 def create_mock_sessionmanager(mock_session):
     """
-    Create a properly structured mock for sessionmanager.session().
+    Create a properly structured mock for sessionmanager.session() and create_session().
 
     The real pattern is: async with sessionmanager.session() as session, session.begin():
     This requires sessionmanager.session() to return an async context manager,
     and session.begin() to also return an async context manager.
+
+    Additionally, sessionmanager.create_session() returns a session directly (not as
+    an async context manager) that supports await session.begin() and await session.close().
 
     CRITICAL: We use side_effect with a factory function so that EACH call to
     sessionmanager.session() returns a FRESH async context manager. Using
@@ -91,6 +95,10 @@ def create_mock_sessionmanager(mock_session):
 
     # Use side_effect with a lambda that creates fresh context managers
     mock_sm.session.side_effect = lambda: mock_session_context()
+
+    # create_session() returns a session directly (not an async context manager)
+    # The session needs to support await session.begin() and await session.close()
+    mock_sm.create_session.return_value = mock_session
 
     return mock_sm
 
@@ -181,7 +189,9 @@ class TestEmbeddingSemaphoreBehavior:
 
         # Create a service with tracking
         service = MagicMock()
-        service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings_with_tracking)
+        service.get_embeddings = AsyncMock(
+            side_effect=mock_get_embeddings_with_tracking
+        )
 
         # Patch the semaphore to have limit of 2
         semaphore = asyncio.Semaphore(2)
@@ -196,16 +206,23 @@ class TestEmbeddingSemaphoreBehavior:
         mock_session = create_mock_session()
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore", return_value=semaphore
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(return_value=service)
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=semaphore,
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=mock_container,
             )
 
         # Verify semaphore limited concurrency
@@ -235,6 +252,9 @@ class TestEmbeddingSemaphoreBehavior:
         service = MagicMock()
         service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings_with_failure)
 
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(return_value=service)
+
         # Use semaphore with limit 1 to ensure sequential execution
         semaphore = asyncio.Semaphore(1)
 
@@ -245,19 +265,25 @@ class TestEmbeddingSemaphoreBehavior:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore", return_value=semaphore
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=semaphore,
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=mock_container,
             )
 
         # Verify all pages were attempted (semaphore was released after failure)
@@ -283,11 +309,18 @@ class TestEmbeddingSemaphoreBehavior:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
-                await asyncio.sleep(10)  # Will timeout (ctx timeout is 15s, but we'll patch shorter)
+                await asyncio.sleep(
+                    10
+                )  # Will timeout (ctx timeout is 15s, but we'll patch shorter)
             return [(chunk, [0.1] * 384) for chunk in chunks]
 
         service = MagicMock()
-        service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings_with_slow_page)
+        service.get_embeddings = AsyncMock(
+            side_effect=mock_get_embeddings_with_slow_page
+        )
+
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(return_value=service)
 
         semaphore = asyncio.Semaphore(1)
 
@@ -315,20 +348,26 @@ class TestEmbeddingSemaphoreBehavior:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore", return_value=semaphore
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=semaphore,
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=mock_container,
             )
 
         # Page 2 timed out, but page 3 should have been attempted
@@ -365,6 +404,9 @@ class TestMemoryCapsEnforcement:
 
         service = MagicMock()
         service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
+
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(return_value=service)
 
         # Create context with very small embedding cap
         small_cap_ctx = CrawlContext(
@@ -406,21 +448,26 @@ class TestMemoryCapsEnforcement:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=small_cap_ctx,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=mock_container,
             )
 
         # Should have stopped early due to embedding bytes cap
@@ -459,21 +506,31 @@ class TestPhase2SavepointBehavior:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint_mock)
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(
+            return_value=mock_embeddings_service
+        )
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=mock_container,
             )
 
         # Verify begin_nested was called once per page
@@ -493,9 +550,7 @@ class TestPhase2SavepointBehavior:
         Scenario: 1 page
         Expected: DELETE and INSERT execute between begin_nested() and commit()
         """
-        page_buffer = [
-            {"url": "https://example.com/page1", "content": "Test content"}
-        ]
+        page_buffer = [{"url": "https://example.com/page1", "content": "Test content"}]
 
         operation_order = []
 
@@ -526,17 +581,25 @@ class TestPhase2SavepointBehavior:
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(
+            return_value=mock_embeddings_service
+        )
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=mock_container,
             )
 
         # Verify order: BEGIN_NESTED -> DELETE -> INSERT (blob) -> INSERT (chunks) -> COMMIT
@@ -544,7 +607,9 @@ class TestPhase2SavepointBehavior:
         assert "DELETE" in operation_order, "DELETE must occur"
         assert "INSERT" in operation_order, "INSERT must occur"
         delete_idx = operation_order.index("DELETE")
-        first_insert_idx = next(i for i, op in enumerate(operation_order) if op == "INSERT")
+        first_insert_idx = next(
+            i for i, op in enumerate(operation_order) if op == "INSERT"
+        )
         commit_idx = operation_order.index("COMMIT")
 
         assert delete_idx > 0, "DELETE must be after BEGIN_NESTED"
@@ -600,21 +665,31 @@ class TestSuccessfulUrlsTracking:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(side_effect=create_savepoint)
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(
+            return_value=mock_embeddings_service
+        )
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             success_count, failed_count, successful_urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=mock_container,
             )
 
         # Verify correct tracking
@@ -628,20 +703,26 @@ class TestSuccessfulUrlsTracking:
         )
 
     @pytest.mark.asyncio
-    async def test_empty_buffer_returns_empty_urls(self, crawl_context, mock_embedding_model):
+    async def test_empty_buffer_returns_empty_urls(
+        self, crawl_context, mock_embedding_model
+    ):
         """
         INVARIANT: Empty page_buffer should return (0, 0, [], {}).
         """
         from intric.worker.crawl_tasks import persist_batch
 
+        mock_container = MagicMock()
+
         result = await persist_batch(
             page_buffer=[],
             ctx=crawl_context,
             embedding_model=mock_embedding_model,
-            create_embeddings_service=MagicMock(),
+            container=mock_container,
         )
 
-        assert result == (0, 0, [], {}), f"Empty buffer should return (0, 0, [], {{}}), got {result}"
+        assert result == (0, 0, [], {}), (
+            f"Empty buffer should return (0, 0, [], {{}}), got {result}"
+        )
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_fails_all_pages(self, crawl_context):
@@ -656,14 +737,18 @@ class TestSuccessfulUrlsTracking:
             {"url": "https://example.com/page2", "content": "Content 2"},
         ]
 
+        mock_container = MagicMock()
+
         success, failed, urls, failures_by_reason = await persist_batch(
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
-            create_embeddings_service=MagicMock(),
+            container=mock_container,
         )
 
-        assert success == 0, f"Expected 0 successes with no embedding model, got {success}"
+        assert success == 0, (
+            f"Expected 0 successes with no embedding model, got {success}"
+        )
         assert failed == 2, f"Expected 2 failures with no embedding model, got {failed}"
         assert urls == [], f"Expected empty URLs with no embedding model, got {urls}"
         assert FailureReason.NO_EMBEDDING_MODEL.value in failures_by_reason
@@ -695,21 +780,31 @@ class TestSuccessfulUrlsTracking:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint)
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(
+            return_value=mock_embeddings_service
+        )
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             success, failed, urls, failures_by_reason = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=mock_container,
             )
 
         # Verify rollback was called
@@ -746,18 +841,23 @@ class TestPhaseIsolation:
 
         async def mock_get_embeddings(model, chunks):
             nonlocal embedding_completed_at
-            operation_timeline.append(("EMBEDDING_START", asyncio.get_event_loop().time()))
+            operation_timeline.append(
+                ("EMBEDDING_START", asyncio.get_event_loop().time())
+            )
             await asyncio.sleep(0.01)  # Small delay to simulate API call
-            operation_timeline.append(("EMBEDDING_END", asyncio.get_event_loop().time()))
+            operation_timeline.append(
+                ("EMBEDDING_END", asyncio.get_event_loop().time())
+            )
             embedding_completed_at = asyncio.get_event_loop().time()
             return [(chunk, [0.1] * 384) for chunk in chunks]
 
         service = MagicMock()
         service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
 
-        page_buffer = [
-            {"url": "https://example.com/page1", "content": "Content 1"}
-        ]
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(return_value=service)
+
+        page_buffer = [{"url": "https://example.com/page1", "content": "Content 1"}]
 
         class TrackingContextManager:
             """Tracks when session context is entered."""
@@ -772,16 +872,23 @@ class TestPhaseIsolation:
                 return self.session
 
             async def __aexit__(self, *args):
-                operation_timeline.append(("SESSION_CLOSED", asyncio.get_event_loop().time()))
+                operation_timeline.append(
+                    ("SESSION_CLOSED", asyncio.get_event_loop().time())
+                )
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager") as mock_sm:
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager") as mock_sm,
+        ):
             # CRITICAL: Use MagicMock for session (not AsyncMock) - see create_mock_session() docstring
             mock_session = MagicMock()
             mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
-            mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+            mock_session.execute = AsyncMock(
+                return_value=MagicMock(scalar_one=lambda: uuid4())
+            )
 
             # session.begin() returns an async context manager
             @asynccontextmanager
@@ -799,7 +906,7 @@ class TestPhaseIsolation:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=mock_container,
             )
 
         # Verify embedding completed BEFORE session was opened
@@ -865,17 +972,25 @@ class TestTransactionWallTimeGuard:
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
-        with patch(
-            "intric.worker.crawl.persistence._get_embedding_semaphore",
-            return_value=asyncio.Semaphore(10),
-        ), patch("intric.database.database.sessionmanager", mock_sm):
+        mock_container = MagicMock()
+        mock_container.create_embeddings_service = MagicMock(
+            return_value=mock_embeddings_service
+        )
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
             from intric.worker.crawl_tasks import persist_batch
 
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=mock_container,
             )
 
         # Due to timeout, not all pages could be persisted

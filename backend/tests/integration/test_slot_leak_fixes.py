@@ -53,16 +53,20 @@ class TestPersistBatchReturnType:
         # Import persist_batch
         from intric.worker.crawl_tasks import persist_batch
 
+        mock_container = MagicMock()
+
         # Call with empty buffer
         result = await persist_batch(
             page_buffer=[],
             ctx=ctx,
             embedding_model=None,
-            create_embeddings_service=MagicMock(),
+            container=mock_container,
         )
 
         # Should return (0, 0, [], [])
-        assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
+        assert result == (0, 0, [], []), (
+            f"Empty buffer should return (0, 0, [], []), got {result}"
+        )
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_returns_all_failed(self):
@@ -92,11 +96,13 @@ class TestPersistBatchReturnType:
             {"url": "https://example.com/page2", "content": "Content 2"},
         ]
 
+        mock_container = MagicMock()
+
         result = await persist_batch(
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
-            create_embeddings_service=MagicMock(),
+            container=mock_container,
         )
 
         success_count, failed_count, successful_urls, _ = result
@@ -237,7 +243,9 @@ class TestEmbeddingAPIFailures:
             {"url": "page3", "status": "success", "reason": "embedded and persisted"},
         ]
 
-        successful_urls = [p["url"] for p in pages_processed if p["status"] == "success"]
+        successful_urls = [
+            p["url"] for p in pages_processed if p["status"] == "success"
+        ]
         failed_count = sum(1 for p in pages_processed if p["status"] == "failed")
 
         assert successful_urls == ["page1", "page3"]
@@ -377,7 +385,9 @@ class TestCrawlContextSecurity:
         assert "testuser" in repr_output, "Username should be visible in repr"
 
         # Verify the field still holds the correct value
-        assert ctx.http_auth_pass == secret_password, "Password should still be accessible"
+        assert ctx.http_auth_pass == secret_password, (
+            "Password should still be accessible"
+        )
 
 
 # =============================================================================
