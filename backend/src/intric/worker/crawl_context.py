@@ -8,9 +8,35 @@ The frozen=True ensures immutability during the crawl lifecycle.
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
 from uuid import UUID
 
 from intric.ai_models.model_enums import ModelFamily
+
+
+class FailureReason(str, Enum):
+    """Categorized failure reasons for crawl page persistence.
+
+    These codes are stored in the failure_summary JSONB column on CrawlRuns
+    to provide visibility into why pages failed during crawling.
+
+    User-facing labels should be provided via i18n in the frontend.
+    """
+
+    # Content issues
+    EMPTY_CONTENT = "EMPTY_CONTENT"  # Page has no text content
+    NO_CHUNKS = "NO_CHUNKS"  # Content exists but produced no chunks after splitting
+
+    # Embedding service issues
+    EMBEDDING_TIMEOUT = "EMBEDDING_TIMEOUT"  # Embedding API call timed out
+    EMBEDDING_ERROR = "EMBEDDING_ERROR"  # Embedding API returned an error
+
+    # Database issues
+    DB_ERROR = "DB_ERROR"  # Database error during persistence
+
+    # Configuration issues
+    NO_EMBEDDING_MODEL = "NO_EMBEDDING_MODEL"  # No embedding model configured
+    MISSING_PROVIDER = "MISSING_PROVIDER"  # Embedding model has no provider_id
 
 
 @dataclass(frozen=True)

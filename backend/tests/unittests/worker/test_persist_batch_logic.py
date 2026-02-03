@@ -630,7 +630,7 @@ class TestSuccessfulUrlsTracking:
     @pytest.mark.asyncio
     async def test_empty_buffer_returns_empty_urls(self, crawl_context, mock_embedding_model):
         """
-        INVARIANT: Empty page_buffer should return (0, 0, [], []).
+        INVARIANT: Empty page_buffer should return (0, 0, [], {}).
         """
         from intric.worker.crawl_tasks import persist_batch
 
@@ -641,21 +641,22 @@ class TestSuccessfulUrlsTracking:
             create_embeddings_service=MagicMock(),
         )
 
-        assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
+        assert result == (0, 0, [], {}), f"Empty buffer should return (0, 0, [], {{}}), got {result}"
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_fails_all_pages(self, crawl_context):
         """
-        INVARIANT: When embedding_model is None, all pages fail with empty successful_urls.
+        INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
         """
         from intric.worker.crawl_tasks import persist_batch
+        from intric.worker.crawl_context import FailureReason
 
         page_buffer = [
             {"url": "https://example.com/page1", "content": "Content 1"},
             {"url": "https://example.com/page2", "content": "Content 2"},
         ]
 
-        success, failed, urls, _ = await persist_batch(
+        success, failed, urls, failures_by_reason = await persist_batch(
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
@@ -665,6 +666,8 @@ class TestSuccessfulUrlsTracking:
         assert success == 0, f"Expected 0 successes with no embedding model, got {success}"
         assert failed == 2, f"Expected 2 failures with no embedding model, got {failed}"
         assert urls == [], f"Expected empty URLs with no embedding model, got {urls}"
+        assert FailureReason.NO_EMBEDDING_MODEL.value in failures_by_reason
+        assert len(failures_by_reason[FailureReason.NO_EMBEDDING_MODEL.value]) == 2
 
     @pytest.mark.asyncio
     async def test_savepoint_rollback_excludes_url_from_successful(
@@ -675,6 +678,8 @@ class TestSuccessfulUrlsTracking:
 
         This is critical: rollback means the data was NOT persisted.
         """
+        from intric.worker.crawl_context import FailureReason
+
         page_buffer = [
             {"url": "https://example.com/will-rollback", "content": "Content"}
         ]
@@ -700,7 +705,7 @@ class TestSuccessfulUrlsTracking:
         ), patch("intric.database.database.sessionmanager", mock_sm):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
+            success, failed, urls, failures_by_reason = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
@@ -714,6 +719,8 @@ class TestSuccessfulUrlsTracking:
         assert success == 0
         assert failed == 1
         assert urls == [], "Rolled-back URL must NOT appear in successful_urls"
+        # DB error should be tracked
+        assert FailureReason.DB_ERROR.value in failures_by_reason
 
 
 # =============================================================================
