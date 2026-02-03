@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from typing import Callable
 from uuid import UUID
 
+from datetime import datetime, timezone
+
 from intric.jobs.job_service import JobService
 from intric.main.logging import get_logger
 from intric.main.models import Channel, ChannelType, RedisMessage, Status
@@ -158,3 +160,41 @@ class TaskManager:
                     "Failed to mark job as failed",
                     extra={"job_id": str(self.job_id), "error": str(exc)},
                 )
+        else:
+            # Fallback: Direct SQL update when job_service is None (e.g., crawl_task)
+            # This ensures the job is marked as failed even without a job_service
+            await self._fail_job_direct_sql(message)
+
+    async def _fail_job_direct_sql(self, message: str | None = None):
+        """Fallback method to mark job as failed using direct SQL.
+
+        Used when job_service is None (e.g., in crawl_task which handles
+        its own sessions). This ensures jobs are always marked as failed
+        in the database even when exceptions occur early in the task.
+        """
+        try:
+            import sqlalchemy as sa
+            from intric.database.database import sessionmanager
+            from intric.database.tables.job_table import Jobs
+
+            async with sessionmanager.session() as session, session.begin():
+                stmt = (
+                    sa.update(Jobs)
+                    .where(Jobs.id == self.job_id)
+                    .values(
+                        status=Status.FAILED.value,
+                        finished_at=datetime.now(timezone.utc),
+                        result_location=message[:512] if message else None,
+                    )
+                )
+                await session.execute(stmt)
+
+            logger.debug(
+                "Job marked as failed via direct SQL fallback",
+                extra={"job_id": str(self.job_id)},
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to mark job as failed via direct SQL",
+                extra={"job_id": str(self.job_id), "error": str(exc)},
+            )
