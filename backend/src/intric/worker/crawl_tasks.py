@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.ai_models.model_enums import ModelFamily
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.container.container import Container
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
@@ -798,7 +799,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 # Extract embedding model into EmbeddingModelSpec DTO
                 # This extracts ALL primitives from ORM while session is active,
-                # preventing DetachedInstanceError when session closes
+                # preventing DetachedInstanceError when session closes.
+                # Provider credentials are pre-resolved here so that embedding
+                # calls in Phase 1 (sessionless) don't need a DB lookup.
                 orm_embedding_model = website.embedding_model
                 embedding_model_spec: EmbeddingModelSpec | None = None
                 if orm_embedding_model:
@@ -817,15 +820,49 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 },
                             )
 
+                    # Pre-resolve provider data while session is active
+                    provider_type = None
+                    provider_credentials = None
+                    provider_config = None
+                    if orm_embedding_model.provider_id:
+                        provider_result = await bootstrap_session.execute(
+                            sa.select(ModelProviders).where(
+                                ModelProviders.id == orm_embedding_model.provider_id
+                            )
+                        )
+                        provider_db = provider_result.scalar_one_or_none()
+                        if provider_db and provider_db.is_active:
+                            provider_type = provider_db.provider_type
+                            provider_credentials = provider_db.credentials
+                            provider_config = provider_db.config
+                        elif provider_db and not provider_db.is_active:
+                            logger.warning(
+                                "Embedding model provider is inactive",
+                                extra={
+                                    "model_name": orm_embedding_model.name,
+                                    "provider_id": str(orm_embedding_model.provider_id),
+                                },
+                            )
+
+                    # Compute litellm_model_name: prefer provider-derived name,
+                    # fall back to value stored on the model
+                    litellm_model_name = orm_embedding_model.litellm_model_name
+                    if provider_type:
+                        litellm_model_name = f"{provider_type}/{orm_embedding_model.name}"
+
                     embedding_model_spec = EmbeddingModelSpec(
                         id=orm_embedding_model.id,
                         name=orm_embedding_model.name,
-                        litellm_model_name=orm_embedding_model.litellm_model_name,
+                        litellm_model_name=litellm_model_name,
                         family=family_enum,
                         max_input=orm_embedding_model.max_input,
                         max_batch_size=orm_embedding_model.max_batch_size,
                         dimensions=orm_embedding_model.dimensions,
                         open_source=orm_embedding_model.open_source,
+                        provider_id=orm_embedding_model.provider_id,
+                        provider_type=provider_type,
+                        provider_credentials=provider_credentials,
+                        provider_config=provider_config,
                     )
 
                 # Build CrawlContext DTO from ORM objects

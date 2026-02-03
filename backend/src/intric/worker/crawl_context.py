@@ -8,6 +8,7 @@ The frozen=True ensures immutability during the crawl lifecycle.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import UUID
 
 from intric.ai_models.model_enums import ModelFamily
@@ -30,6 +31,13 @@ class EmbeddingModelSpec:
     - max_input: Per-item character limit for truncation
     - max_batch_size: Items per batch for embedding API calls
     - dimensions: Optional embedding vector dimensions
+
+    Provider fields are pre-resolved during bootstrap so that embedding
+    calls don't require a database session:
+    - provider_id: FK to model_providers table
+    - provider_type: e.g. "openai", "azure", "infinity"
+    - provider_credentials: encrypted credentials dict from provider
+    - provider_config: additional provider config dict
     """
 
     id: UUID
@@ -40,6 +48,10 @@ class EmbeddingModelSpec:
     max_batch_size: int | None  # Adapters default to 32 if None
     dimensions: int | None
     open_source: bool = False
+    provider_id: UUID | None = None
+    provider_type: str | None = None
+    provider_credentials: dict[str, Any] | None = None
+    provider_config: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
