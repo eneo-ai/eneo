@@ -850,7 +850,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     # fall back to value stored on the model
                     litellm_model_name = orm_embedding_model.litellm_model_name
                     if provider_type:
-                        litellm_model_name = f"{provider_type}/{orm_embedding_model.name}"
+                        litellm_model_name = (
+                            f"{provider_type}/{orm_embedding_model.name}"
+                        )
 
                     embedding_model_spec = EmbeddingModelSpec(
                         id=orm_embedding_model.id,
@@ -1023,9 +1025,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Session-per-batch page processing (NO main session held)
                 # Bootstrap already returned session to pool. All DB operations
                 # use session_scope() or persist_batch() which manage their own sessions.
-                # Get services needed for persist_batch
                 # NOTE: embedding_model was extracted during bootstrap phase
-                create_embeddings_service = container.create_embeddings_service()
 
                 # Page buffer for batching (primitives only, NO ORM objects!)
                 page_buffer: list[dict] = []
@@ -1075,7 +1075,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             page_buffer=page_buffer,
                             ctx=crawl_context,
                             embedding_model=embedding_model_spec,
-                            create_embeddings_service=create_embeddings_service,
+                            container=container,
                         )
                         crawled_titles.update(successful_urls)
                         # Aggregate failure reasons and track failed URLs
@@ -1106,7 +1106,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         page_buffer=page_buffer,
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
-                        create_embeddings_service=create_embeddings_service,
+                        container=container,
                     )
                     crawled_titles.update(successful_urls)
                     # Aggregate failure reasons and track failed URLs
