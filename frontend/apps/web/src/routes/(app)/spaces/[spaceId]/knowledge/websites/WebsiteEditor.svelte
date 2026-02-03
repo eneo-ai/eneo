@@ -6,6 +6,8 @@
   import { type Website } from "@intric/intric-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { tick } from "svelte";
+  import { writable, type Writable } from "svelte/store";
 
   const emptyWebsite = () => {
     return {
@@ -40,6 +42,127 @@
   let httpAuthUsername = '';
   let httpAuthPassword = '';
   let showPassword = false;
+
+  // Duplicate URL warning state
+  type ExistingWebsite = {
+    website_id: string;
+    space_id: string;
+    space_name: string;
+    url: string;
+    name: string | null;
+    update_interval: string;
+    last_crawled_at: string | null;
+    pages_crawled: number | null;
+    pages_failed: number | null;
+    files_downloaded: number | null;
+    files_failed: number | null;
+    crawl_status: string | null;
+  };
+  let existingOnOrg: ExistingWebsite | null = null;
+  let showDuplicateWarning: Writable<boolean> = writable(false);
+  let duplicateCheckPending = false;
+
+  async function checkUrlBeforeCreate() {
+    console.log("=== checkUrlBeforeCreate START ===");
+    console.log("validUrl:", validUrl);
+    console.log("organization:", $currentSpace.organization);
+    console.log("url:", editableWebsite.url);
+
+    if (!validUrl) {
+      console.log("URL is not valid, skipping");
+      return;
+    }
+
+    if ($currentSpace.organization) {
+      // Skip check on organization space
+      console.log("On organization space, creating directly");
+      await createWebsite();
+      return;
+    }
+
+    duplicateCheckPending = true;
+    try {
+      console.log("Checking URL:", editableWebsite.url);
+      existingOnOrg = await intric.websites.checkUrl(editableWebsite.url);
+      console.log("Check result:", existingOnOrg);
+      if (existingOnOrg) {
+        // Show warning modal on top of the main dialog
+        console.log("Duplicate found, showing warning modal");
+        showDuplicateWarning.set(true);
+        await tick();
+      } else {
+        // No duplicate, proceed with creation
+        console.log("No duplicate, creating website");
+        await createWebsite();
+      }
+    } catch (e) {
+      // On error, just proceed with creation
+      console.error("Failed to check URL:", e);
+      await createWebsite();
+    } finally {
+      duplicateCheckPending = false;
+    }
+  }
+
+  function formatUpdateInterval(interval: string): string {
+    switch (interval) {
+      case "daily": return m.every_day();
+      case "every_other_day": return m.every_other_day();
+      case "weekly": return m.every_week();
+      default: return m.never();
+    }
+  }
+
+  function formatDateTime(dateString: string | null): string {
+    if (!dateString) return m.website_not_yet_crawled();
+    const date = new Date(dateString);
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  }
+
+  function formatCrawlResult(website: ExistingWebsite): { text: string; hasFailures: boolean } | null {
+    // If crawl is in progress
+    if (website.crawl_status === 'in progress' || website.crawl_status === 'queued') {
+      return { text: m.website_crawl_in_progress(), hasFailures: false };
+    }
+
+    // pages_crawled and files_downloaded are TOTAL counts (successful + failed)
+    const totalPages = website.pages_crawled ?? 0;
+    const pagesFailed = website.pages_failed ?? 0;
+    const pagesSuccess = totalPages - pagesFailed;
+
+    const totalFiles = website.files_downloaded ?? 0;
+    const filesFailed = website.files_failed ?? 0;
+    const filesSuccess = totalFiles - filesFailed;
+
+    // No data available
+    if (totalPages === 0 && totalFiles === 0) {
+      return null;
+    }
+
+    const hasFailures = pagesFailed > 0 || filesFailed > 0;
+
+    // Only pages, no files
+    if (totalFiles === 0) {
+      if (pagesFailed === 0) {
+        return { text: m.website_all_pages_indexed({ count: pagesSuccess.toString() }), hasFailures: false };
+      }
+      return {
+        text: m.website_pages_indexed({ success: pagesSuccess.toString(), total: totalPages.toString() }),
+        hasFailures: true
+      };
+    }
+
+    // Both pages and files
+    return {
+      text: m.website_pages_indexed_with_files({
+        successPages: pagesSuccess.toString(),
+        totalPages: totalPages.toString(),
+        successFiles: filesSuccess.toString(),
+        totalFiles: totalFiles.toString()
+      }),
+      hasFailures
+    };
+  }
 
   // Clear credentials when auth is disabled
   $: if (!httpAuthEnabled) {
@@ -304,16 +427,70 @@
       {#if mode === "create"}
         <Button
           variant="primary"
-          on:click={createWebsite}
-          type="submit"
-          disabled={isProcessing || $currentSpace.embedding_models.length === 0}
-          >{isProcessing ? m.creating() : m.create_website()}</Button
+          type="button"
+          on:click={checkUrlBeforeCreate}
+          disabled={isProcessing || duplicateCheckPending || $currentSpace.embedding_models.length === 0}
+          >{isProcessing || duplicateCheckPending ? m.creating() : m.create_website()}</Button
         >
       {:else if mode === "update"}
         <Button variant="primary" on:click={updateWebsite} disabled={isProcessing}
           >{isProcessing ? m.saving() : m.save_changes()}</Button
         >
       {/if}
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>
+
+<!-- Duplicate URL Warning Modal -->
+<Dialog.Root openController={showDuplicateWarning} alert>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.website_exists_on_org()}</Dialog.Title>
+    <Dialog.Description>
+      {#if existingOnOrg}
+        {m.website_exists_on_org_description({ spaceName: existingOnOrg.space_name })}
+      {/if}
+    </Dialog.Description>
+
+    {#if existingOnOrg}
+      {@const crawlResult = formatCrawlResult(existingOnOrg)}
+      <Dialog.Section class="p-4">
+        <div class="bg-hover-dimmer border-default rounded-lg border p-4">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 flex-shrink-0 text-warning-default">
+              <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+                <span class="text-dimmer">{m.website_last_crawled()}:</span>
+                <span>{formatDateTime(existingOnOrg.last_crawled_at)}</span>
+
+                {#if crawlResult}
+                  <span class="text-dimmer">{m.website_crawl_result()}:</span>
+                  <span class={crawlResult.hasFailures ? 'text-warning-stronger' : 'text-positive-stronger'}>
+                    {crawlResult.text}
+                  </span>
+                {/if}
+
+                <span class="text-dimmer">{m.website_sync_interval()}:</span>
+                <span>{formatUpdateInterval(existingOnOrg.update_interval)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Dialog.Section>
+    {/if}
+
+    <Dialog.Controls let:close>
+      <Button is={close}>{m.go_back()}</Button>
+      <Button
+        variant="primary"
+        on:click={async () => { showDuplicateWarning.set(false); await createWebsite(); }}
+        disabled={isProcessing}
+      >
+        {isProcessing ? m.creating() : m.create_anyway()}
+      </Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
