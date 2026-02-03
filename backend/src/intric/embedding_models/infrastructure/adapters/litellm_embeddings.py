@@ -40,26 +40,32 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     def __init__(
         self,
         model: "EmbeddingModelLike",
-        credential_resolver: Optional["CredentialResolver"] = None
+        credential_resolver: Optional["CredentialResolver"] = None,
+        litellm_model_name: Optional[str] = None,
     ):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
+        # Use provided litellm_model_name or fall back to model attribute
+        # This allows frozen dataclasses (like EmbeddingModelSpec) to be used
+        # without modification - the caller constructs the name and passes it in.
+        effective_model_name = litellm_model_name or model.litellm_model_name
+
         # Store the original model name for provider detection (before any transformation)
         # This is critical for correct credential resolution with custom providers
-        self._original_model_name = model.litellm_model_name
+        self._original_model_name = effective_model_name
 
         # Get provider configuration based on litellm_model_name
-        provider = LiteLLMProviderRegistry.get_provider_for_model(model.litellm_model_name)
+        provider = LiteLLMProviderRegistry.get_provider_for_model(effective_model_name)
 
         # Only apply custom configuration if needed
         if provider.needs_custom_config():
-            self.litellm_model = provider.get_litellm_model(model.litellm_model_name)
+            self.litellm_model = provider.get_litellm_model(effective_model_name)
             self.api_config = provider.get_api_config()
             logger.debug(f"[LiteLLM] Using custom provider config for embedding {model.name}: {list(self.api_config.keys())}")
         else:
             # Standard LiteLLM behavior for supported providers
-            self.litellm_model = model.litellm_model_name
+            self.litellm_model = effective_model_name
             self.api_config = {}
 
         logger.debug(f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}")

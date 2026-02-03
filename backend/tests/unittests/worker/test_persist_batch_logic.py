@@ -31,49 +31,55 @@ from intric.worker.crawl_context import CrawlContext
 # =============================================================================
 
 
+class AwaitableContextManager:
+    """A mock object that can be both awaited AND used as an async context manager."""
+
+    def __await__(self):
+        async def _await():
+            return None
+        return _await().__await__()
+
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *args):
+        return None
+
+
 def create_mock_session():
     """
-    Create a properly structured mock session for sessionmanager.session().
+    Create a properly structured mock session for sessionmanager.
 
-    CRITICAL: The session MUST be a MagicMock, NOT an AsyncMock!
-
-    Why? Python's AsyncMock wraps ALL method calls as coroutines, even when
-    you set side_effect to return something different (like an async context
-    manager). This breaks the pattern:
-
-        async with sessionmanager.session() as session, session.begin():
-
-    Here, session.begin() must return an async context manager (with __aenter__
-    and __aexit__), NOT a coroutine. Using MagicMock lets side_effect return
-    the async context manager directly.
+    Supports two usage patterns:
+    1. async with sessionmanager.session() as session, session.begin(): ...
+    2. session = sessionmanager.create_session(); await session.begin(); await session.close()
 
     Returns:
-        MagicMock configured to work with the combined async context manager pattern.
+        MagicMock configured to work with both patterns.
     """
-    # MUST be MagicMock, not AsyncMock - see docstring
     mock_session = MagicMock()
 
-    # session.begin() returns an async context manager (for transactions)
-    @asynccontextmanager
-    async def mock_begin_context():
-        yield None
-
-    mock_session.begin.side_effect = lambda: mock_begin_context()
+    # session.begin() needs to support BOTH patterns:
+    # Pattern 1: async with session.begin(): ... (returns async context manager)
+    # Pattern 2: await session.begin() (returns awaitable)
+    # Solution: Return AwaitableContextManager which supports both
+    mock_session.begin = MagicMock(side_effect=lambda: AwaitableContextManager())
 
     # These methods ARE coroutines, so use AsyncMock
     mock_session.execute = AsyncMock()
     mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
+    mock_session.close = AsyncMock()
 
     return mock_session
 
 
 def create_mock_sessionmanager(mock_session):
     """
-    Create a properly structured mock for sessionmanager.session().
+    Create a properly structured mock for sessionmanager.
 
-    The real pattern is: async with sessionmanager.session() as session, session.begin():
-    This requires sessionmanager.session() to return an async context manager,
-    and session.begin() to also return an async context manager.
+    Supports both patterns:
+    1. async with sessionmanager.session() as session, session.begin():
+    2. session = sessionmanager.create_session(); await session.begin()
 
     CRITICAL: We use side_effect with a factory function so that EACH call to
     sessionmanager.session() returns a FRESH async context manager. Using
@@ -92,7 +98,36 @@ def create_mock_sessionmanager(mock_session):
     # Use side_effect with a lambda that creates fresh context managers
     mock_sm.session.side_effect = lambda: mock_session_context()
 
+    # Support for create_session() - returns the session directly (not context manager)
+    mock_sm.create_session.return_value = mock_session
+
     return mock_sm
+
+
+def create_mock_container(mock_embeddings_service):
+    """
+    Create a mock container for persist_batch testing.
+
+    The persist_batch function now takes a container instead of a service directly.
+    The container needs to support:
+    1. session.override(providers.Object(session)) - to set the session
+    2. create_embeddings_service() - to return the embedding service
+
+    Args:
+        mock_embeddings_service: The mock embedding service to return from container.
+
+    Returns:
+        MagicMock configured to work with persist_batch.
+    """
+    mock_container = MagicMock()
+
+    # session.override() should be callable and do nothing (it's for DI)
+    mock_container.session.override = MagicMock()
+
+    # create_embeddings_service() returns the mock service
+    mock_container.create_embeddings_service.return_value = mock_embeddings_service
+
+    return mock_container
 
 
 # =============================================================================
@@ -205,7 +240,7 @@ class TestEmbeddingSemaphoreBehavior:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=create_mock_container(service),
             )
 
         # Verify semaphore limited concurrency
@@ -257,7 +292,7 @@ class TestEmbeddingSemaphoreBehavior:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=create_mock_container(service),
             )
 
         # Verify all pages were attempted (semaphore was released after failure)
@@ -328,7 +363,7 @@ class TestEmbeddingSemaphoreBehavior:
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=create_mock_container(service),
             )
 
         # Page 2 timed out, but page 3 should have been attempted
@@ -420,7 +455,7 @@ class TestMemoryCapsEnforcement:
                 page_buffer=page_buffer,
                 ctx=small_cap_ctx,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=create_mock_container(service),
             )
 
         # Should have stopped early due to embedding bytes cap
@@ -473,7 +508,7 @@ class TestPhase2SavepointBehavior:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify begin_nested was called once per page
@@ -536,7 +571,7 @@ class TestPhase2SavepointBehavior:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify order: BEGIN_NESTED -> DELETE -> INSERT (blob) -> INSERT (chunks) -> COMMIT
@@ -614,7 +649,7 @@ class TestSuccessfulUrlsTracking:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify correct tracking
@@ -638,7 +673,7 @@ class TestSuccessfulUrlsTracking:
             page_buffer=[],
             ctx=crawl_context,
             embedding_model=mock_embedding_model,
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
@@ -659,7 +694,7 @@ class TestSuccessfulUrlsTracking:
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0, f"Expected 0 successes with no embedding model, got {success}"
@@ -704,7 +739,7 @@ class TestSuccessfulUrlsTracking:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify rollback was called
@@ -722,27 +757,29 @@ class TestSuccessfulUrlsTracking:
 
 
 class TestPhaseIsolation:
-    """Tests that verify Phase 1 has ZERO database operations."""
+    """Tests that verify Phase 1 and Phase 2 use separate, short-lived sessions."""
 
     @pytest.mark.asyncio
-    async def test_no_session_opened_during_phase_1(
+    async def test_phase1_session_closed_before_phase2_session(
         self, crawl_context, mock_embedding_model
     ):
         """
-        INVARIANT: No database session should be opened during Phase 1 (embedding).
+        INVARIANT: Phase 1's embedding session must be closed before Phase 2's
+        persistence session is opened.
 
-        Phase 1 should complete ALL embedding work before any DB session is created.
+        Architecture:
+        - Phase 1: Short-lived session for loading provider credentials + embedding
+        - Phase 2: Separate short-lived session for DB persistence
+
+        This ensures neither session is held for extended periods.
         """
-        session_opened_at = None
-        embedding_completed_at = None
+        phase1_session_closed_at = None
+        phase2_session_opened_at = None
         operation_timeline = []
 
         async def mock_get_embeddings(model, chunks):
-            nonlocal embedding_completed_at
-            operation_timeline.append(("EMBEDDING_START", asyncio.get_event_loop().time()))
+            operation_timeline.append(("EMBEDDING", asyncio.get_event_loop().time()))
             await asyncio.sleep(0.01)  # Small delay to simulate API call
-            operation_timeline.append(("EMBEDDING_END", asyncio.get_event_loop().time()))
-            embedding_completed_at = asyncio.get_event_loop().time()
             return [(chunk, [0.1] * 384) for chunk in chunks]
 
         service = MagicMock()
@@ -752,39 +789,46 @@ class TestPhaseIsolation:
             {"url": "https://example.com/page1", "content": "Content 1"}
         ]
 
+        # Track Phase 1 session (create_session)
+        phase1_session = MagicMock()
+        phase1_session.begin = MagicMock(side_effect=lambda: AwaitableContextManager())
+
+        async def track_phase1_close():
+            nonlocal phase1_session_closed_at
+            phase1_session_closed_at = asyncio.get_event_loop().time()
+            operation_timeline.append(("PHASE1_SESSION_CLOSED", phase1_session_closed_at))
+
+        phase1_session.close = AsyncMock(side_effect=track_phase1_close)
+
+        # Track Phase 2 session (session context manager)
+        phase2_session = MagicMock()
+        phase2_session.begin_nested = AsyncMock(return_value=AsyncMock())
+        phase2_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
+        phase2_session.begin = MagicMock(side_effect=lambda: AwaitableContextManager())
+
         class TrackingContextManager:
-            """Tracks when session context is entered."""
+            """Tracks when Phase 2 session context is entered."""
 
             def __init__(self, session):
                 self.session = session
 
             async def __aenter__(self):
-                nonlocal session_opened_at
-                session_opened_at = asyncio.get_event_loop().time()
-                operation_timeline.append(("SESSION_OPENED", session_opened_at))
+                nonlocal phase2_session_opened_at
+                phase2_session_opened_at = asyncio.get_event_loop().time()
+                operation_timeline.append(("PHASE2_SESSION_OPENED", phase2_session_opened_at))
                 return self.session
 
             async def __aexit__(self, *args):
-                operation_timeline.append(("SESSION_CLOSED", asyncio.get_event_loop().time()))
+                operation_timeline.append(("PHASE2_SESSION_CLOSED", asyncio.get_event_loop().time()))
 
         with patch(
             "intric.worker.crawl.persistence._get_embedding_semaphore",
             return_value=asyncio.Semaphore(10),
         ), patch("intric.database.database.sessionmanager") as mock_sm:
-            # CRITICAL: Use MagicMock for session (not AsyncMock) - see create_mock_session() docstring
-            mock_session = MagicMock()
-            mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
-            mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=lambda: uuid4()))
-
-            # session.begin() returns an async context manager
-            @asynccontextmanager
-            async def mock_begin_context():
-                yield None
-
-            mock_session.begin.side_effect = lambda: mock_begin_context()
-
-            # Use tracking context manager for sessionmanager.session()
-            mock_sm.session.return_value = TrackingContextManager(mock_session)
+            # create_session() returns Phase 1 session
+            mock_sm.create_session.return_value = phase1_session
+            # session() context manager returns Phase 2 session
+            mock_sm.session.return_value = TrackingContextManager(phase2_session)
 
             from intric.worker.crawl_tasks import persist_batch
 
@@ -792,15 +836,15 @@ class TestPhaseIsolation:
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                container=create_mock_container(service),
             )
 
-        # Verify embedding completed BEFORE session was opened
-        assert embedding_completed_at is not None, "Embedding should have completed"
-        assert session_opened_at is not None, "Session should have been opened"
-        assert embedding_completed_at < session_opened_at, (
-            f"Embedding must complete before session opens. "
-            f"Embedding ended at {embedding_completed_at}, session opened at {session_opened_at}. "
+        # Verify Phase 1 session closed BEFORE Phase 2 session opened
+        assert phase1_session_closed_at is not None, "Phase 1 session should have been closed"
+        assert phase2_session_opened_at is not None, "Phase 2 session should have been opened"
+        assert phase1_session_closed_at < phase2_session_opened_at, (
+            f"Phase 1 session must close before Phase 2 session opens. "
+            f"Phase 1 closed at {phase1_session_closed_at}, Phase 2 opened at {phase2_session_opened_at}. "
             f"Timeline: {operation_timeline}"
         )
 
@@ -868,7 +912,7 @@ class TestTransactionWallTimeGuard:
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Due to timeout, not all pages could be persisted

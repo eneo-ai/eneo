@@ -25,6 +25,7 @@ class EmbeddingModelSpec:
 
     Fields match what adapters actually access on the model object:
     - name: Model display name (used in API calls for OpenAI/E5)
+    - provider_id: Links to ModelProvider for credential lookup (REQUIRED!)
     - litellm_model_name: LiteLLM router model identifier
     - family: ModelFamily enum for adapter selection and E5 prefix logic
     - max_input: Per-item character limit for truncation
@@ -34,6 +35,7 @@ class EmbeddingModelSpec:
 
     id: UUID
     name: str
+    provider_id: UUID | None  # Required for provider credential lookup
     litellm_model_name: str | None
     family: ModelFamily | None
     max_input: int

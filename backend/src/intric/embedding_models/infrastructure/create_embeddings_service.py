@@ -112,10 +112,6 @@ class CreateEmbeddingsService:
         # Construct LiteLLM model name with provider prefix
         litellm_model_name = f"{provider_db.provider_type}/{model.name}"
 
-        # Temporarily set litellm_model_name on the model for the adapter
-        # (the model object is not persisted, so this is safe)
-        model.litellm_model_name = litellm_model_name
-
         logger.info(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
             extra={
@@ -128,8 +124,12 @@ class CreateEmbeddingsService:
             }
         )
 
+        # Pass litellm_model_name as parameter instead of mutating model
+        # This supports frozen dataclasses like EmbeddingModelSpec
         return LiteLLMEmbeddingAdapter(
-            model, credential_resolver=credential_resolver
+            model,
+            credential_resolver=credential_resolver,
+            litellm_model_name=litellm_model_name,
         )
 
     async def get_embeddings(

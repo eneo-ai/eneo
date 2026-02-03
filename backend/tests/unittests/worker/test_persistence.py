@@ -16,6 +16,14 @@ from uuid import uuid4
 from intric.worker.crawl_context import CrawlContext, PreparedPage
 
 
+def create_mock_container(mock_embeddings_service):
+    """Create a mock container for persist_batch testing."""
+    mock_container = MagicMock()
+    mock_container.session.override = MagicMock()
+    mock_container.create_embeddings_service.return_value = mock_embeddings_service
+    return mock_container
+
+
 class TestPersistenceModuleImports:
     """Tests that the persistence module can be imported from both locations."""
 
@@ -63,7 +71,7 @@ class TestPersistenceModuleSemantics:
             page_buffer=[],
             ctx=ctx,
             embedding_model=MagicMock(),
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0
@@ -97,7 +105,7 @@ class TestPersistenceModuleSemantics:
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0
