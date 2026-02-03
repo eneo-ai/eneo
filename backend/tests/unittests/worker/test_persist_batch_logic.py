@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.worker.crawl_context import CrawlContext
+from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 
 
 # =============================================================================
@@ -69,11 +69,14 @@ def create_mock_session():
 
 def create_mock_sessionmanager(mock_session):
     """
-    Create a properly structured mock for sessionmanager.session().
+    Create a properly structured mock for sessionmanager.session() and create_session().
 
     The real pattern is: async with sessionmanager.session() as session, session.begin():
     This requires sessionmanager.session() to return an async context manager,
     and session.begin() to also return an async context manager.
+
+    Additionally, persist_batch uses sessionmanager.create_session() to create a session
+    for the embedding service initialization.
 
     CRITICAL: We use side_effect with a factory function so that EACH call to
     sessionmanager.session() returns a FRESH async context manager. Using
@@ -92,7 +95,43 @@ def create_mock_sessionmanager(mock_session):
     # Use side_effect with a lambda that creates fresh context managers
     mock_sm.session.side_effect = lambda: mock_session_context()
 
+    # Mock create_session() for embedding service initialization
+    # This returns a mock session that supports async methods
+    embedding_session_mock = MagicMock()
+    embedding_session_mock.begin = AsyncMock()
+    embedding_session_mock.close = AsyncMock()
+    mock_sm.create_session = MagicMock(return_value=embedding_session_mock)
+
     return mock_sm
+
+
+
+
+def create_mock_container(embeddings_service):
+    """
+    Create a mock Container for persist_batch testing.
+
+    The container provides:
+    - session.override(): For injecting a session into the embedding service
+    - create_embeddings_service(): Returns the provided mock service
+
+    Args:
+        embeddings_service: Mock CreateEmbeddingsService to return
+
+    Returns:
+        Mock container with properly configured session override and service factory
+    """
+    mock_container = MagicMock()
+
+    # Mock session.override() pattern
+    mock_session_provider = MagicMock()
+    mock_session_provider.override = MagicMock()
+    mock_container.session = mock_session_provider
+
+    # Mock create_embeddings_service() to return the provided service
+    mock_container.create_embeddings_service = MagicMock(return_value=embeddings_service)
+
+    return mock_container
 
 
 # =============================================================================
@@ -124,15 +163,22 @@ def crawl_context():
 
 
 @pytest.fixture
-def mock_embedding_model():
-    """Create a mock embedding model."""
-    model = MagicMock()
-    model.id = uuid4()
-    model.name = "test-embedding-model"
-    model.open_source = False
-    model.family = None
-    model.dimensions = 384
-    return model
+def embedding_model_spec():
+    """Create an EmbeddingModelSpec for testing."""
+    return EmbeddingModelSpec(
+        id=uuid4(),
+        name="test-embedding-model",
+        litellm_model_name="openai/text-embedding-ada-002",
+        family=None,
+        max_input=8191,
+        max_batch_size=32,
+        dimensions=384,
+        open_source=False,
+        provider_id=uuid4(),
+        provider_type="openai",
+        provider_credentials={"api_key": "test-key"},
+        provider_config={},
+    )
 
 
 @pytest.fixture
@@ -158,7 +204,7 @@ class TestEmbeddingSemaphoreBehavior:
 
     @pytest.mark.asyncio
     async def test_semaphore_limits_concurrent_embedding_calls(
-        self, crawl_context, mock_embedding_model
+        self, crawl_context, embedding_model_spec
     ):
         """
         INVARIANT: Embedding semaphore must limit concurrent API calls.
@@ -204,8 +250,8 @@ class TestEmbeddingSemaphoreBehavior:
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
             )
 
         # Verify semaphore limited concurrency
@@ -215,7 +261,7 @@ class TestEmbeddingSemaphoreBehavior:
 
     @pytest.mark.asyncio
     async def test_semaphore_released_on_embedding_exception(
-        self, crawl_context, mock_embedding_model
+        self, crawl_context, embedding_model_spec
     ):
         """
         INVARIANT: Semaphore must be released even when embedding API throws exception.
@@ -256,8 +302,8 @@ class TestEmbeddingSemaphoreBehavior:
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
             )
 
         # Verify all pages were attempted (semaphore was released after failure)
@@ -269,7 +315,7 @@ class TestEmbeddingSemaphoreBehavior:
 
     @pytest.mark.asyncio
     async def test_semaphore_released_on_timeout(
-        self, crawl_context, mock_embedding_model
+        self, crawl_context, embedding_model_spec
     ):
         """
         INVARIANT: Semaphore must be released when embedding times out.
@@ -327,8 +373,8 @@ class TestEmbeddingSemaphoreBehavior:
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
             )
 
         # Page 2 timed out, but page 3 should have been attempted
@@ -347,7 +393,7 @@ class TestMemoryCapsEnforcement:
 
     @pytest.mark.asyncio
     async def test_embedding_bytes_cap_triggers_early_exit(
-        self, crawl_context, mock_embedding_model
+        self, crawl_context, embedding_model_spec
     ):
         """
         INVARIANT: When embedding bytes exceed max_batch_embedding_bytes,
@@ -419,8 +465,8 @@ class TestMemoryCapsEnforcement:
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=small_cap_ctx,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
             )
 
         # Should have stopped early due to embedding bytes cap
@@ -439,7 +485,7 @@ class TestPhase2SavepointBehavior:
 
     @pytest.mark.asyncio
     async def test_each_page_gets_own_savepoint(
-        self, crawl_context, mock_embedding_model, mock_embeddings_service
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
         INVARIANT: Each page must get its own savepoint for atomic delete+insert.
@@ -472,8 +518,8 @@ class TestPhase2SavepointBehavior:
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify begin_nested was called once per page
@@ -483,7 +529,7 @@ class TestPhase2SavepointBehavior:
 
     @pytest.mark.asyncio
     async def test_delete_and_insert_within_same_savepoint(
-        self, crawl_context, mock_embedding_model, mock_embeddings_service
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
         INVARIANT: Delete (deduplication) and insert must happen within same savepoint.
@@ -535,8 +581,8 @@ class TestPhase2SavepointBehavior:
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify order: BEGIN_NESTED -> DELETE -> INSERT (blob) -> INSERT (chunks) -> COMMIT
@@ -562,7 +608,7 @@ class TestSuccessfulUrlsTracking:
 
     @pytest.mark.asyncio
     async def test_successful_urls_only_contains_committed_pages(
-        self, crawl_context, mock_embedding_model, mock_embeddings_service
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
         INVARIANT: successful_urls must contain ONLY URLs that were actually committed.
@@ -613,8 +659,8 @@ class TestSuccessfulUrlsTracking:
             success_count, failed_count, successful_urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify correct tracking
@@ -628,7 +674,7 @@ class TestSuccessfulUrlsTracking:
         )
 
     @pytest.mark.asyncio
-    async def test_empty_buffer_returns_empty_urls(self, crawl_context, mock_embedding_model):
+    async def test_empty_buffer_returns_empty_urls(self, crawl_context, embedding_model_spec):
         """
         INVARIANT: Empty page_buffer should return (0, 0, [], {}).
         """
@@ -637,8 +683,8 @@ class TestSuccessfulUrlsTracking:
         result = await persist_batch(
             page_buffer=[],
             ctx=crawl_context,
-            embedding_model=mock_embedding_model,
-            create_embeddings_service=MagicMock(),
+            embedding_model=embedding_model_spec,
+            container=create_mock_container(MagicMock()),
         )
 
         assert result == (0, 0, [], {}), f"Empty buffer should return (0, 0, [], {{}}), got {result}"
@@ -660,7 +706,7 @@ class TestSuccessfulUrlsTracking:
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0, f"Expected 0 successes with no embedding model, got {success}"
@@ -671,7 +717,7 @@ class TestSuccessfulUrlsTracking:
 
     @pytest.mark.asyncio
     async def test_savepoint_rollback_excludes_url_from_successful(
-        self, crawl_context, mock_embedding_model, mock_embeddings_service
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
         INVARIANT: When savepoint.rollback() is called, the URL must NOT appear in successful_urls.
@@ -708,8 +754,8 @@ class TestSuccessfulUrlsTracking:
             success, failed, urls, failures_by_reason = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Verify rollback was called
@@ -733,7 +779,7 @@ class TestPhaseIsolation:
 
     @pytest.mark.asyncio
     async def test_no_session_opened_during_phase_1(
-        self, crawl_context, mock_embedding_model
+        self, crawl_context, embedding_model_spec
     ):
         """
         INVARIANT: No database session should be opened during Phase 1 (embedding).
@@ -793,13 +839,19 @@ class TestPhaseIsolation:
             # Use tracking context manager for sessionmanager.session()
             mock_sm.session.return_value = TrackingContextManager(mock_session)
 
+            # Mock create_session() for embedding service initialization
+            embedding_session_mock = MagicMock()
+            embedding_session_mock.begin = AsyncMock()
+            embedding_session_mock.close = AsyncMock()
+            mock_sm.create_session = MagicMock(return_value=embedding_session_mock)
+
             from intric.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
             )
 
         # Verify embedding completed BEFORE session was opened
@@ -822,7 +874,7 @@ class TestTransactionWallTimeGuard:
 
     @pytest.mark.asyncio
     async def test_transaction_timeout_fails_remaining_pages(
-        self, crawl_context, mock_embedding_model, mock_embeddings_service
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
         INVARIANT: When Phase 2 exceeds max_transaction_wall_time_seconds,
@@ -874,8 +926,8 @@ class TestTransactionWallTimeGuard:
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
-                embedding_model=mock_embedding_model,
-                create_embeddings_service=mock_embeddings_service,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
             )
 
         # Due to timeout, not all pages could be persisted

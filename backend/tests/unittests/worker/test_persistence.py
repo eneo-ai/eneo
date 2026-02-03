@@ -13,7 +13,19 @@ import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.worker.crawl_context import CrawlContext, PreparedPage
+from intric.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
+
+
+def create_mock_container(embeddings_service):
+    """Create a mock Container for persist_batch testing."""
+    from unittest.mock import MagicMock
+
+    mock_container = MagicMock()
+    mock_session_provider = MagicMock()
+    mock_session_provider.override = MagicMock()
+    mock_container.session = mock_session_provider
+    mock_container.create_embeddings_service = MagicMock(return_value=embeddings_service)
+    return mock_container
 
 
 class TestPersistenceModuleImports:
@@ -59,11 +71,26 @@ class TestPersistenceModuleSemantics:
             embedding_model_dimensions=1536,
         )
 
+        embedding_model = EmbeddingModelSpec(
+            id=uuid4(),
+            name="test-model",
+            litellm_model_name="openai/text-embedding-ada-002",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            provider_id=uuid4(),
+            provider_type="openai",
+            provider_credentials={"api_key": "test"},
+            provider_config={},
+        )
+
         success, failed, success_urls, failures_by_reason = await persist_batch(
             page_buffer=[],
             ctx=ctx,
-            embedding_model=MagicMock(),
-            create_embeddings_service=MagicMock(),
+            embedding_model=embedding_model,
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0
@@ -98,7 +125,7 @@ class TestPersistenceModuleSemantics:
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0
