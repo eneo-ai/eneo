@@ -81,11 +81,9 @@ class CompletionModel(AIModel):
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
-        from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
-
-        # If litellm_model_name is set, use it for provider detection
-        if self.litellm_model_name:
-            return LiteLLMProviderRegistry.detect_provider_from_model_name(self.litellm_model_name)
+        # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
+        if self.litellm_model_name and "/" in self.litellm_model_name:
+            return self.litellm_model_name.split("/")[0].lower()
 
         # Fall back to base implementation (checks family)
         return super().get_credential_provider_name()
