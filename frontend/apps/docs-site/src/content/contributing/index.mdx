@@ -1,0 +1,99 @@
+---
+title: Contributing to Eneo
+---
+
+# Contributing to Eneo
+
+Eneo is an open-source project licensed under AGPL v3, and we welcome contributions from the community. However, Eneo's core development is led by a dedicated team with a clear vision for the platform. To keep the project focused and maintainable, all outside contributions must align with Eneo's goals and follow an **issue-first workflow**.
+
+---
+
+## How to Contribute
+
+Every contribution — whether a bug fix, new feature, or improvement — starts with an issue. This ensures alignment before any code is written.
+
+### 1. Check Existing Issues
+
+Before opening a new issue, search the [GitHub Issues](https://github.com/eneo-ai/eneo/issues) to see if your idea or bug has already been reported.
+
+### 2. Create an Issue
+
+Open a new issue describing the change you'd like to make. Be specific about:
+
+- **What** you want to change or add
+- **Why** the change is needed
+- **How** you plan to approach it (if you have a proposal)
+
+### 3. Discuss and Get Approval
+
+Wait for feedback from the maintainers. This step is important — it saves you from spending time on work that may not be accepted. Maintainers may suggest a different approach, ask clarifying questions, or confirm that the change is welcome.
+
+### 4. Fork, Implement, and Submit a PR
+
+Once your issue has been discussed and given the green light:
+
+1. Fork the repository
+2. Create a feature branch (`feature/your-feature-name`)
+3. Implement the change
+4. Submit a pull request referencing the issue
+
+---
+
+## What Makes a Good Contribution
+
+Contributions should be **generic** — they must benefit all users of the platform, not just a single organization.
+
+**Good contributions:**
+
+- "Improve vector search performance" — universal improvement
+- "Add accessibility features for screen readers" — platform-wide enhancement
+- "Implement batch processing for documents" — general capability
+
+**Contributions that won't be accepted:**
+
+- "Add custom branding for Municipality X" — too specific
+- "Implement Company Y's approval workflow" — organization-specific
+- "Change color scheme to match our brand" — violates design system
+- "Add hard-coded integration with our internal system" — not generic
+
+All UI contributions must follow Eneo's established design system and use existing components and patterns. No PR may break existing functionality.
+
+---
+
+## Pull Request Guidelines
+
+- **Reference the approved issue** in your PR description
+- **Keep the scope focused** — one feature or fix per PR
+- **Include tests** for new functionality
+- **Follow existing conventions** — code style, project structure, commit message format
+- **Update documentation** if your change affects user-facing behavior
+
+### Commit Message Format
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+type(scope): description
+```
+
+Examples:
+
+```
+feat(assistants): add system prompt validation
+fix(spaces): resolve permission check bug
+docs(api): update assistant endpoint documentation
+```
+
+---
+
+## Development Setup and Detailed Guidelines
+
+For the full development environment setup, architecture overview, testing guidelines, code standards, and more, see the [CONTRIBUTING.md](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md) file in the repository.
+
+---
+
+## Getting Help
+
+- **GitHub Issues** — for bugs and feature requests
+- **GitHub Discussions** — for questions and general discussion
+- **Email** — digitalisering@sundsvall.se (public sector organizations)
