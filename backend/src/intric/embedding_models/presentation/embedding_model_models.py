@@ -38,6 +38,9 @@ class EmbeddingModelPublic(BaseResponse):
     # Tenant model fields
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
+    # Provider info for grouped display in UI
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
     @classmethod
     def from_domain(cls, model: EmbeddingModel):
@@ -72,6 +75,8 @@ class EmbeddingModelPublic(BaseResponse):
             security_classification=security_classification,
             tenant_id=model.tenant_id,
             provider_id=model.provider_id,
+            provider_name=model.provider_name,
+            provider_type=model.provider_type,
         )
 
 

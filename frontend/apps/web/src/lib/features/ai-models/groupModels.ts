@@ -1,7 +1,7 @@
-import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
+import type { CompletionModel, TranscriptionModel, EmbeddingModel } from "@intric/intric-js";
 
 // Model with provider info
-type ModelWithProvider = (CompletionModel | TranscriptionModel) & {
+type ModelWithProvider = (CompletionModel | TranscriptionModel | EmbeddingModel) & {
   provider_id?: string | null;
   provider_name?: string | null;
   provider_type?: string | null;
