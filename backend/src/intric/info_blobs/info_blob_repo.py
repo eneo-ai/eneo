@@ -82,7 +82,8 @@ class InfoBlobRepository:
             embedding_model_id=embedding_model_id,
         )
 
-        return await self.delegate.add(info_blob_to_db)
+        record = await self.delegate.add(info_blob_to_db)
+        return InfoBlobInDB.model_validate(record)
 
     async def upsert_by_title_and_integration_knowledge(
         self, info_blob: InfoBlobAdd
@@ -126,7 +127,8 @@ class InfoBlobRepository:
             return await self.add(info_blob)
 
     async def update(self, info_blob: InfoBlobUpdate) -> InfoBlobInDB:
-        return await self.delegate.update(info_blob)
+        record = await self.delegate.update(info_blob)
+        return InfoBlobInDB.model_validate(record)
 
     async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB:
         chunks_size_subquery = (
@@ -168,26 +170,100 @@ class InfoBlobRepository:
         return [InfoBlobInDBNoText.model_validate(record) for record in items]
 
     async def get(self, id: UUID) -> InfoBlobInDB:
-        return await self.delegate.get(id)
+        record = await self.delegate.get(id)
+        return InfoBlobInDB.model_validate(record)
 
-    async def get_by_title_and_group(self, title: str, group_id: UUID):
-        return await self.delegate.get_by(
+    async def get_by_title_and_group(
+        self, title: str, group_id: UUID
+    ) -> InfoBlobInDB | None:
+        record = await self.delegate.get_by(
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
+        return InfoBlobInDB.model_validate(record) if record is not None else None
+
+    async def list_by_space_ids(
+        self,
+        *,
+        space_ids: list[UUID],
+        include_groups: bool,
+        include_websites: bool,
+        include_integrations: bool,
+        limit: int | None = None,
+        order_desc: bool = True,
+    ) -> list[InfoBlobInDBNoText]:
+        if not space_ids:
+            return []
+
+        conditions = []
+
+        if include_groups:
+            group_ids = await self.session.scalars(
+                sa.select(CollectionsTable.id).where(
+                    CollectionsTable.space_id.in_(space_ids)
+                )
+            )
+            group_ids_list = list(group_ids)
+            if group_ids_list:
+                conditions.append(InfoBlobs.group_id.in_(group_ids_list))
+
+        if include_websites:
+            website_ids = await self.session.scalars(
+                sa.select(Websites.id).where(Websites.space_id.in_(space_ids))
+            )
+            website_ids_list = list(website_ids)
+            if website_ids_list:
+                conditions.append(InfoBlobs.website_id.in_(website_ids_list))
+
+        if include_integrations:
+            integration_ids = await self.session.scalars(
+                sa.select(IntegrationKnowledge.id).where(
+                    IntegrationKnowledge.space_id.in_(space_ids)
+                )
+            )
+            integration_ids_list = list(integration_ids)
+            if integration_ids_list:
+                conditions.append(
+                    InfoBlobs.integration_knowledge_id.in_(integration_ids_list)
+                )
+
+        if not conditions:
+            return []
+
+        query = (
+            sa.select(InfoBlobs)
+            .where(sa.or_(*conditions))
+            .options(selectinload(InfoBlobs.group))
+            .options(selectinload(InfoBlobs.embedding_model))
+            .options(selectinload(InfoBlobs.website))
+            .options(defer(InfoBlobs.text))
+        )
+
+        if order_desc:
+            query = query.order_by(InfoBlobs.created_at.desc())
+        else:
+            query = query.order_by(InfoBlobs.created_at.asc())
+
+        if limit is not None:
+            query = query.limit(limit)
+
+        records = await self.delegate.get_records_from_query(query)
+        return [InfoBlobInDBNoText.model_validate(record) for record in records]
 
     async def delete_by_title_and_group(
         self, title: str, group_id: UUID
-    ) -> InfoBlobInDB:
-        return await self.delegate.delete_by(
+    ) -> InfoBlobInDB | None:
+        record = await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
+        return InfoBlobInDB.model_validate(record) if record is not None else None
 
     async def delete_by_title_and_website(
         self, title: str, website_id: UUID
-    ) -> InfoBlobInDB:
-        return await self.delegate.delete_by(
+    ) -> InfoBlobInDB | None:
+        record = await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.website_id: website_id}
         )
+        return InfoBlobInDB.model_validate(record) if record is not None else None
 
     async def delete_by_title_and_integration_knowledge(
         self, title: str, integration_knowledge_id: UUID
@@ -207,10 +283,10 @@ class InfoBlobRepository:
         blobs_to_delete = result.scalars().all()
 
         # Delete each one
-        deleted = []
+        deleted: list[InfoBlobInDB] = []
         for blob in blobs_to_delete:
             deleted_blob = await self.delegate.delete(blob.id)
-            deleted.append(deleted_blob)
+            deleted.append(InfoBlobInDB.model_validate(deleted_blob))
 
         return deleted
 
@@ -225,14 +301,15 @@ class InfoBlobRepository:
 
     async def get_by_title_and_integration_knowledge(
         self, title: str, integration_knowledge_id: UUID
-    ) -> InfoBlobInDB:
+    ) -> InfoBlobInDB | None:
         """Get an info_blob by title and integration_knowledge_id."""
-        return await self.delegate.get_by(
+        record = await self.delegate.get_by(
             conditions={
                 InfoBlobs.title: title,
                 InfoBlobs.integration_knowledge_id: integration_knowledge_id,
             }
         )
+        return InfoBlobInDB.model_validate(record) if record is not None else None
 
     async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDB]:
         query = (
@@ -242,15 +319,18 @@ class InfoBlobRepository:
             .options(selectinload(InfoBlobs.group))
             .options(selectinload(InfoBlobs.embedding_model))
         )
-        return await self.delegate.get_models_from_query(query)
+        records = await self.delegate.get_models_from_query(query)
+        return [InfoBlobInDB.model_validate(record) for record in records]
 
     async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
-        return await self.delegate.filter_by(
+        records = await self.delegate.filter_by(
             conditions={InfoBlobs.website_id: website_id}
         )
+        return [InfoBlobInDB.model_validate(record) for record in records]
 
     async def delete(self, id: int) -> InfoBlobInDB:
-        return await self.delegate.delete(id)
+        record = await self.delegate.delete(id)
+        return InfoBlobInDB.model_validate(record)
 
     async def get_count_of_group(self, group_id: UUID):
         stmt = (
@@ -276,7 +356,8 @@ class InfoBlobRepository:
             .where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
             .options(selectinload(InfoBlobs.embedding_model))
         )
-        return await self.delegate.get_models_from_query(query)
+        records = await self.delegate.get_models_from_query(query)
+        return [InfoBlobInDB.model_validate(record) for record in records]
 
     def _sum_stmt(self):
         return sa.select(sa.func.sum(InfoBlobs.size)).select_from(InfoBlobs)
@@ -321,7 +402,7 @@ class InfoBlobRepository:
     async def get_titles_of_website(self, website_id: UUID) -> list[str]:
         stmt = sa.select(InfoBlobs.title).where(InfoBlobs.website_id == website_id)
         result = await self.session.scalars(stmt)
-        return list(result)
+        return [title for title in result if title is not None]
 
     async def batch_delete_by_titles_and_website(
         self, titles: list[str], website_id: UUID
