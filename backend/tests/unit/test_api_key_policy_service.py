@@ -14,13 +14,25 @@ class DummyOrigin:
 class DummyOriginRepo:
     def __init__(self, patterns: list[str]):
         self.patterns = patterns
+        self.calls = 0
 
     async def get_by_tenant(self, tenant_id):
+        self.calls += 1
         return [DummyOrigin(url) for url in self.patterns]
 
 
 class DummySpaceService:
     pass
+
+
+def _service_with_user(patterns: list[str], *, permissions: list[object] | None = None):
+    tenant = SimpleNamespace(api_key_policy={})
+    user = SimpleNamespace(tenant=tenant, permissions=permissions or [])
+    return ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(patterns),
+        space_service=DummySpaceService(),
+        user=user,
+    )
 
 
 @pytest.mark.asyncio
@@ -182,3 +194,82 @@ async def test_ip_allowlist_requires_client_ip():
 
     with pytest.raises(ApiKeyValidationError):
         service._validate_ip(key=key, client_ip=None)
+
+
+@pytest.mark.asyncio
+async def test_ip_allowlist_rejects_malformed_client_ip():
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    key = SimpleNamespace(allowed_ips=["10.0.0.0/24"])
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        service._validate_ip(key=key, client_ip="not-an-ip")
+    assert exc.value.code == "ip_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_localhost_origin_supports_ipv6_loopback():
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+
+    assert service._is_localhost_origin("http://[::1]:5173")
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_zero_rejected():
+    service = _service_with_user([])
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_rate_limit(0)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+
+
+@pytest.mark.asyncio
+async def test_tenant_origin_cache_reuses_patterns_within_ttl():
+    tenant_id = uuid4()
+    repo = DummyOriginRepo(["https://example.com"])
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=repo,
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    service._tenant_origin_cache_ttl_seconds = 60
+
+    await service.validate_allowed_origins_subset(
+        allowed_origins=["https://example.com"], tenant_id=tenant_id
+    )
+    await service.validate_allowed_origins_subset(
+        allowed_origins=["https://example.com"], tenant_id=tenant_id
+    )
+
+    assert repo.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_tenant_origin_cache_invalidate_forces_reload():
+    tenant_id = uuid4()
+    repo = DummyOriginRepo(["https://example.com"])
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=repo,
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    service._tenant_origin_cache_ttl_seconds = 60
+
+    await service.validate_allowed_origins_subset(
+        allowed_origins=["https://example.com"], tenant_id=tenant_id
+    )
+    service.invalidate_tenant_origin_cache(tenant_id)
+    await service.validate_allowed_origins_subset(
+        allowed_origins=["https://example.com"], tenant_id=tenant_id
+    )
+
+    assert repo.calls == 2

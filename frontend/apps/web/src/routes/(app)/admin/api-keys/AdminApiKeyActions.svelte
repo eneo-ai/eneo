@@ -13,10 +13,10 @@
     onSecret: (response: ApiKeyCreatedResponse) => void;
   }>();
 
-  let showRevokeDialog: Dialog.OpenState;
-  let showSuspendDialog: Dialog.OpenState;
-  let errorMessage: string | null = null;
-  let reasonText = "";
+  let showRevokeDialog = $state(false);
+  let showSuspendDialog = $state(false);
+  let errorMessage = $state<string | null>(null);
+  let reasonText = $state("");
 
   const isActive = $derived(apiKey.state === "active");
   const isSuspended = $derived(apiKey.state === "suspended");
@@ -59,7 +59,7 @@
       await intric.apiKeys.admin.suspend({
         id: apiKey.id,
         request: {
-          reason_code: "security_concern",
+          reason_code: "admin_action",
           reason_text: reasonText || undefined
         }
       });
@@ -137,7 +137,7 @@
   <div class="text-xs text-red-600">{errorMessage}</div>
 {/if}
 
-<Dialog.Root alert bind:isOpen={showSuspendDialog}>
+<Dialog.Root bind:isOpen={showSuspendDialog} alert>
   <Dialog.Content width="small">
     <Dialog.Title>{m.api_keys_admin_suspend_title()}</Dialog.Title>
     <Dialog.Description>
@@ -146,12 +146,14 @@
     <Input.Text bind:value={reasonText} label={m.api_keys_admin_reason_optional()} />
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={suspendKey}>{m.api_keys_admin_action_suspend()}</Button>
+      <Button variant="destructive" on:click={suspendKey}
+        >{m.api_keys_admin_action_suspend()}</Button
+      >
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root alert bind:isOpen={showRevokeDialog}>
+<Dialog.Root bind:isOpen={showRevokeDialog} alert>
   <Dialog.Content width="small">
     <Dialog.Title>{m.api_keys_admin_revoke_title()}</Dialog.Title>
     <Dialog.Description>

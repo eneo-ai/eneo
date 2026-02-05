@@ -28,6 +28,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
@@ -49,7 +50,14 @@ class ApiKeyLifecycleService:
         self.user = user
         self.settings = get_settings()
 
-    async def create_key(self, request: ApiKeyCreateRequest) -> ApiKeyCreatedResponse:
+    async def create_key(
+        self,
+        request: ApiKeyCreateRequest,
+        *,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+    ) -> ApiKeyCreatedResponse:
         user = self._require_user()
         await self.policy_service.validate_create_request(request=request)
 
@@ -98,6 +106,9 @@ class ApiKeyLifecycleService:
                         else None,
                     },
                 ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
             )
 
         return ApiKeyCreatedResponse(
@@ -106,14 +117,35 @@ class ApiKeyLifecycleService:
         )
 
     async def rotate_key(
-        self, *, key_id: UUID, skip_manage_authorization: bool = False
+        self,
+        *,
+        key_id: UUID,
+        skip_manage_authorization: bool = False,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> ApiKeyCreatedResponse:
         user = self._require_user()
-        key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
-        if not skip_manage_authorization:
-            await self.policy_service.ensure_manage_authorized(key=key)
-        await self.policy_service.validate_key_state(key=key)
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
+            await self.policy_service.validate_key_state(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_ROTATED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
 
+        assert key is not None
         secret = self._generate_secret(key.key_prefix)
         key_hash = self._hash_hmac(secret)
 
@@ -163,6 +195,9 @@ class ApiKeyLifecycleService:
                         "rotation_grace_until": grace_until.isoformat(),
                     },
                 ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
             )
 
         return ApiKeyCreatedResponse(
@@ -175,27 +210,98 @@ class ApiKeyLifecycleService:
         *,
         key_id: UUID,
         request: ApiKeyUpdateRequest,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> ApiKeyV2:
         user = self._require_user()
-        key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
-        await self.policy_service.ensure_manage_authorized(key=key)
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            await self.policy_service.ensure_manage_authorized(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_UPDATED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
 
+        assert key is not None
         updates = request.model_dump(exclude_unset=True)
         if not updates:
             return ApiKeyV2.model_validate(key)
+
+        effective_state = compute_effective_state(
+            revoked_at=key.revoked_at,
+            suspended_at=key.suspended_at,
+            expires_at=key.expires_at,
+        )
+        if effective_state in (ApiKeyState.REVOKED, ApiKeyState.EXPIRED):
+            metadata_only_fields = {"name", "description"}
+            disallowed_fields = sorted(set(updates.keys()) - metadata_only_fields)
+            if disallowed_fields:
+                exc = ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message=(
+                        "Only name and description can be updated for revoked or expired "
+                        "API keys."
+                    ),
+                )
+                await self._log_lifecycle_failure(
+                    action=ActionType.API_KEY_UPDATED,
+                    user=user,
+                    key_id=key_id,
+                    key=key,
+                    error=exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                )
+                raise exc
 
         if "expires_at" in updates and updates.get("expires_at") is not None:
             expires_at = updates.get("expires_at")
             if isinstance(expires_at, datetime) and expires_at < datetime.now(
                 timezone.utc
             ):
-                raise ApiKeyValidationError(
+                exc = ApiKeyValidationError(
                     status_code=400,
                     code="invalid_request",
                     message="expires_at must be in the future.",
                 )
+                await self._log_lifecycle_failure(
+                    action=ActionType.API_KEY_UPDATED,
+                    user=user,
+                    key_id=key_id,
+                    key=key,
+                    error=exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                )
+                raise exc
 
-        await self.policy_service.validate_update_request(key=key, updates=updates)
+        try:
+            await self.policy_service.validate_update_request(key=key, updates=updates)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_UPDATED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
 
         updated = await self.api_key_repo.update(
             key_id=key.id,
@@ -233,6 +339,9 @@ class ApiKeyLifecycleService:
                     target=updated_key,
                     changes=changes or None,
                 ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
             )
 
         return ApiKeyV2.model_validate(updated_key)
@@ -243,29 +352,69 @@ class ApiKeyLifecycleService:
         key_id: UUID,
         request: ApiKeyStateChangeRequest | None = None,
         skip_manage_authorization: bool = False,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> ApiKeyV2:
         user = self._require_user()
-        key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
-        if not skip_manage_authorization:
-            await self.policy_service.ensure_manage_authorized(key=key)
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_SUSPENDED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
 
+        assert key is not None
         effective_state = compute_effective_state(
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
         )
         if effective_state == ApiKeyState.REVOKED:
-            raise ApiKeyValidationError(
+            exc = ApiKeyValidationError(
                 status_code=400,
                 code="invalid_request",
                 message="API key is revoked.",
             )
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_SUSPENDED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
         if effective_state == ApiKeyState.EXPIRED:
-            raise ApiKeyValidationError(
+            exc = ApiKeyValidationError(
                 status_code=400,
                 code="invalid_request",
                 message="API key is expired.",
             )
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_SUSPENDED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
 
         now = datetime.now(timezone.utc)
         reason_code = (
@@ -302,35 +451,81 @@ class ApiKeyLifecycleService:
                         "reason_text": reason_text,
                     },
                 ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
             )
 
         return ApiKeyV2.model_validate(updated_key)
 
     async def reactivate_key(
-        self, *, key_id: UUID, skip_manage_authorization: bool = False
+        self,
+        *,
+        key_id: UUID,
+        skip_manage_authorization: bool = False,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> ApiKeyV2:
         user = self._require_user()
-        key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
-        if not skip_manage_authorization:
-            await self.policy_service.ensure_manage_authorized(key=key)
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_REACTIVATED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
 
+        assert key is not None
         effective_state = compute_effective_state(
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
         )
         if effective_state == ApiKeyState.REVOKED:
-            raise ApiKeyValidationError(
+            exc = ApiKeyValidationError(
                 status_code=400,
                 code="invalid_request",
                 message="API key is revoked.",
             )
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_REACTIVATED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
         if effective_state == ApiKeyState.EXPIRED:
-            raise ApiKeyValidationError(
+            exc = ApiKeyValidationError(
                 status_code=400,
                 code="invalid_request",
                 message="API key is expired.",
             )
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_REACTIVATED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
         if key.suspended_at is None:
             return ApiKeyV2.model_validate(key)
 
@@ -361,6 +556,9 @@ class ApiKeyLifecycleService:
                     },
                     extra={"previous_suspended_at": key.suspended_at.isoformat()},
                 ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
             )
 
         return ApiKeyV2.model_validate(updated_key)
@@ -371,12 +569,30 @@ class ApiKeyLifecycleService:
         key_id: UUID,
         request: ApiKeyStateChangeRequest | None = None,
         skip_manage_authorization: bool = False,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> ApiKeyV2:
         user = self._require_user()
-        key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
-        if not skip_manage_authorization:
-            await self.policy_service.ensure_manage_authorized(key=key)
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_REVOKED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
 
+        assert key is not None
         effective_state = compute_effective_state(
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
@@ -420,6 +636,9 @@ class ApiKeyLifecycleService:
                         "reason_text": reason_text,
                     },
                 ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
             )
 
         return ApiKeyV2.model_validate(updated_key)
@@ -480,9 +699,12 @@ class ApiKeyLifecycleService:
         prefix: str,
         permission: ApiKeyPermission,
         name: str,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> ApiKeyCreatedResponse:
         secret = self._generate_secret(prefix)
-        key_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        key_hash = self._hash_hmac(secret)
 
         record = await self.api_key_repo.create(
             tenant_id=tenant_id,
@@ -493,13 +715,52 @@ class ApiKeyLifecycleService:
             permission=permission.value,
             key_type=ApiKeyType.SK.value,
             key_hash=key_hash,
-            hash_version=ApiKeyHashVersion.SHA256.value,
+            hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
             key_prefix=prefix,
             key_suffix=secret[-4:],
             name=name,
             description=None,
             state=ApiKeyState.ACTIVE.value,
         )
+
+        if self.audit_service is not None:
+            actor = self.user
+            metadata = (
+                AuditMetadata.standard(
+                    actor=actor,
+                    target=record,
+                    extra={
+                        "scope_type": record.scope_type,
+                        "scope_id": str(record.scope_id) if record.scope_id else None,
+                        "permission": record.permission,
+                        "legacy_prefix": prefix,
+                    },
+                )
+                if actor is not None
+                else AuditMetadata.system_action(
+                    description="Created legacy API key",
+                    target=record,
+                    extra={
+                        "scope_type": record.scope_type,
+                        "scope_id": str(record.scope_id) if record.scope_id else None,
+                        "permission": record.permission,
+                        "legacy_prefix": prefix,
+                    },
+                )
+            )
+            await self.audit_service.log_async(
+                tenant_id=tenant_id,
+                actor_id=actor.id if actor is not None else None,
+                actor_type=ActorType.USER if actor is not None else ActorType.SYSTEM,
+                action=ActionType.API_KEY_GENERATED,
+                entity_type=EntityType.API_KEY,
+                entity_id=record.id,
+                description=f"Created legacy API key '{record.name}'",
+                metadata=metadata,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
 
         return ApiKeyCreatedResponse(
             api_key=ApiKeyV2.model_validate(record),
@@ -525,3 +786,59 @@ class ApiKeyLifecycleService:
                 message="User context required.",
             )
         return self.user
+
+    async def _log_lifecycle_failure(
+        self,
+        *,
+        action: ActionType,
+        user: "UserInDB",
+        key_id: UUID,
+        key: ApiKeyV2InDB | None,
+        error: ApiKeyValidationError,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+
+        target_name = key.name if key is not None else None
+        actor_name = (
+            getattr(user, "username", None)
+            or getattr(user, "name", None)
+            or (getattr(user, "email", "") or "").split("@")[0]
+            or "unknown"
+        )
+        metadata: dict[str, object] = {
+            "actor": {
+                "id": str(user.id),
+                "name": actor_name,
+                "email": user.email,
+            },
+            "target": {
+                "id": str(key.id if key is not None else key_id),
+                "name": target_name,
+            },
+            "extra": {
+                "error_code": error.code,
+                "status_code": error.status_code,
+                "scope_type": key.scope_type if key is not None else None,
+                "scope_id": str(key.scope_id)
+                if key is not None and key.scope_id
+                else None,
+            },
+        }
+        await self.audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=action,
+            entity_type=EntityType.API_KEY,
+            entity_id=key.id if key is not None else key_id,
+            description=f"Failed API key lifecycle action '{action.value}'",
+            metadata=metadata,
+            outcome=Outcome.FAILURE,
+            error_message=error.message,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )

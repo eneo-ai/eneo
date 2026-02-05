@@ -41,10 +41,13 @@ class ApiKeysV2Repository:
         *,
         key_hash: str,
         hash_version: Optional[str] = None,
+        key_prefix: Optional[str] = None,
     ) -> Optional[ApiKeyV2InDB]:
         query = sa.select(self.table).where(self.table.key_hash == key_hash)
         if hash_version is not None:
             query = query.where(self.table.hash_version == hash_version)
+        if key_prefix is not None:
+            query = query.where(self.table.key_prefix == key_prefix)
         record = await self.session.scalar(query)
 
         if record is None:
@@ -109,6 +112,32 @@ class ApiKeysV2Repository:
         if limit is not None:
             query = query.limit(limit + 1)
 
+        records = await self.session.scalars(query)
+        return [ApiKeyV2InDB.model_validate(record) for record in records]
+
+    async def list_filtered(
+        self,
+        *,
+        tenant_id: UUID,
+        scope_type: ApiKeyScopeType | None = None,
+        scope_id: UUID | None = None,
+        state: ApiKeyState | None = None,
+        key_type: str | None = None,
+        created_by_user_id: UUID | None = None,
+    ) -> list[ApiKeyV2InDB]:
+        query = cast(
+            Select[Any],
+            sa.select(self.table).where(self.table.tenant_id == tenant_id),
+        )
+        query = self._apply_filters(
+            query,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            state=state,
+            key_type=key_type,
+            created_by_user_id=created_by_user_id,
+        )
+        query = query.order_by(self.table.created_at.desc())
         records = await self.session.scalars(query)
         return [ApiKeyV2InDB.model_validate(record) for record in records]
 

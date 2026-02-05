@@ -4,6 +4,7 @@
   import { Ban, MoreVertical, RefreshCw, RotateCcw } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
+  import { writable } from "svelte/store";
 
   const intric = getIntric();
 
@@ -13,8 +14,8 @@
     onSecret: (response: ApiKeyCreatedResponse) => void;
   }>();
 
-  let showRevokeDialog = $state<Dialog.OpenState>(undefined);
-  let showSuspendDialog = $state<Dialog.OpenState>(undefined);
+  const showRevokeDialog = writable(false);
+  const showSuspendDialog = writable(false);
   let errorMessage = $state<string | null>(null);
   let reasonText = $state("");
 
@@ -45,7 +46,7 @@
         }
       });
       onChanged();
-      showRevokeDialog = false;
+      $showRevokeDialog = false;
       reasonText = "";
     } catch (error) {
       console.error(error);
@@ -59,12 +60,12 @@
       await intric.apiKeys.suspend({
         id: apiKey.id,
         request: {
-          reason_code: "security_concern",
+          reason_code: "user_request",
           reason_text: reasonText || undefined
         }
       });
       onChanged();
-      showSuspendDialog = false;
+      $showSuspendDialog = false;
       reasonText = "";
     } catch (error) {
       console.error(error);
@@ -104,7 +105,7 @@
         is={item}
         padding="icon-leading"
         on:click={() => {
-          showSuspendDialog = true;
+          $showSuspendDialog = true;
         }}
       >
         <Ban size={16} />
@@ -124,7 +125,7 @@
       variant="destructive"
       padding="icon-leading"
       on:click={() => {
-        showRevokeDialog = true;
+        $showRevokeDialog = true;
       }}
     >
       <Ban size={16} />
@@ -137,7 +138,7 @@
   <div class="text-xs text-negative">{errorMessage}</div>
 {/if}
 
-<Dialog.Root alert bind:isOpen={showSuspendDialog}>
+<Dialog.Root alert openController={showSuspendDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.api_keys_action_suspend_title()}</Dialog.Title>
     <Dialog.Description>
@@ -151,7 +152,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root alert bind:isOpen={showRevokeDialog}>
+<Dialog.Root alert openController={showRevokeDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.api_keys_action_revoke_title()}</Dialog.Title>
     <Dialog.Description>

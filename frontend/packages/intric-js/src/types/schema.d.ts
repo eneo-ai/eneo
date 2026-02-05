@@ -799,6 +799,8 @@ export interface paths {
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
   };
   "/api/v1/admin/api-key-policy": {
+    /** Get Api Key Policy */
+    get: operations["get_api_key_policy_api_v1_admin_api_key_policy_get"];
     /** Update Api Key Policy */
     patch: operations["update_api_key_policy_api_v1_admin_api_key_policy_patch"];
   };
@@ -15624,6 +15626,17 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Api Key Policy */
+  get_api_key_policy_api_v1_admin_api_key_policy_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyPolicyResponse"];
         };
       };
     };

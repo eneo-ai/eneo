@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import AsyncMock
@@ -14,9 +15,11 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyStateChangeRequest,
     ApiKeyStateReasonCode,
+    ApiKeyUpdateRequest,
     ApiKeyType,
     ApiKeyV2InDB,
 )
+from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 
 
@@ -143,3 +146,72 @@ async def test_rotate_logs_audit(user):
     audit.log_async.assert_awaited()
     assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_ROTATED
     assert response.secret.startswith(ApiKeyType.SK.value)
+
+
+@pytest.mark.asyncio
+async def test_update_revoked_key_allows_metadata_only(user):
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        revoked_at=datetime.now(timezone.utc),
+        state=ApiKeyState.REVOKED,
+    )
+    updated_key = _make_key(
+        id=key.id,
+        tenant_id=user.tenant_id,
+        revoked_at=key.revoked_at,
+        state=ApiKeyState.REVOKED,
+        name="Renamed",
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.update.return_value = updated_key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        validate_update_request=AsyncMock(),
+    )
+    audit = AsyncMock()
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    response = await service.update_key(
+        key_id=key.id,
+        request=ApiKeyUpdateRequest(name="Renamed"),
+    )
+
+    assert response.name == "Renamed"
+    repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_revoked_key_rejects_policy_fields(user):
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        revoked_at=datetime.now(timezone.utc),
+        state=ApiKeyState.REVOKED,
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        validate_update_request=AsyncMock(),
+    )
+    audit = AsyncMock()
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.update_key(
+            key_id=key.id,
+            request=ApiKeyUpdateRequest(rate_limit=1000),
+        )
+
+    assert exc.value.code == "invalid_request"
+    assert "Only name and description" in exc.value.message

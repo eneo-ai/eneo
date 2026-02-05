@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Any, List, NoReturn, cast
+from typing import List, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
@@ -31,6 +31,12 @@ from intric.users.user import (
 )
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.authentication.api_key_router_helpers import (
+    error_responses,
+    extract_audit_context,
+    paginate_keys,
+    raise_api_key_http_error,
+)
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
@@ -41,11 +47,9 @@ from intric.authentication.auth_models import (
     ApiKeyStateChangeRequest,
     ApiKeyType,
     ApiKeyV2,
-    ApiKeyV2InDB,
     SuperApiKeyStatus,
 )
 from intric.main.models import CursorPaginatedResponse
-from intric.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -54,63 +58,6 @@ from intric.audit.domain.entity_types import EntityType
 
 logger = get_logger(__name__)
 router = APIRouter()
-
-
-def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
-    raise HTTPException(
-        status_code=exc.status_code,
-        detail={"code": exc.code, "message": exc.message},
-    ) from exc
-
-
-def _error_responses(codes: list[int]) -> dict[int | str, dict[str, Any]]:
-    return cast(dict[int | str, dict[str, Any]], responses.get_responses(codes))
-
-
-def _paginate_keys(
-    keys: list[ApiKeyV2InDB],
-    *,
-    total_count: int,
-    limit: int | None,
-    cursor: datetime | None,
-    previous: bool,
-) -> CursorPaginatedResponse[ApiKeyV2]:
-    if limit is None:
-        return CursorPaginatedResponse(
-            items=[ApiKeyV2.model_validate(key) for key in keys],
-            total_count=total_count,
-            limit=limit,
-        )
-
-    if not previous:
-        if len(keys) > limit:
-            next_cursor = keys[limit].created_at
-            page = keys[:limit]
-        else:
-            next_cursor = None
-            page = keys
-        return CursorPaginatedResponse(
-            items=[ApiKeyV2.model_validate(key) for key in page],
-            total_count=total_count,
-            limit=limit,
-            next_cursor=next_cursor,
-            previous_cursor=cursor,
-        )
-
-    if len(keys) > limit:
-        page = keys[1:]
-        previous_cursor = keys[0].created_at
-    else:
-        page = keys
-        previous_cursor = None
-
-    return CursorPaginatedResponse(
-        items=[ApiKeyV2.model_validate(key) for key in page],
-        total_count=total_count,
-        limit=limit,
-        next_cursor=cursor,
-        previous_cursor=previous_cursor,
-    )
 
 
 @router.get(
@@ -1080,7 +1027,73 @@ async def update_privacy_policy(
     return updated_tenant
 
 
-@router.get("/api-key-policy", response_model=ApiKeyPolicyResponse)
+_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE = {
+    "reason_code": "security_concern",
+    "reason_text": "Automated abuse detection triggered revocation.",
+}
+
+_ADMIN_API_KEY_EXAMPLE = {
+    "id": "3cbf5fde-7288-4f03-bf06-f71c14f76854",
+    "name": "Production Backend",
+    "description": "Used by tenant integration workers",
+    "key_type": "sk_",
+    "permission": "write",
+    "scope_type": "space",
+    "scope_id": "11111111-1111-1111-1111-111111111111",
+    "allowed_origins": None,
+    "allowed_ips": ["203.0.113.0/24"],
+    "rate_limit": 5000,
+    "state": "active",
+    "effective_state": "active",
+    "key_prefix": "sk_",
+    "key_suffix": "ab12cd34",
+    "expires_at": "2030-01-01T00:00:00Z",
+    "last_used_at": None,
+    "created_at": "2026-02-05T12:00:00Z",
+    "updated_at": "2026-02-05T12:00:00Z",
+    "revoked_at": None,
+    "suspended_at": None,
+}
+
+_ADMIN_API_KEY_LIST_EXAMPLE = {
+    "items": [_ADMIN_API_KEY_EXAMPLE],
+    "limit": 50,
+    "next_cursor": "2026-02-05T12:00:00Z",
+    "previous_cursor": None,
+    "total_count": 1,
+}
+
+_ADMIN_ROTATED_RESPONSE_EXAMPLE = {
+    "api_key": _ADMIN_API_KEY_EXAMPLE,
+    "secret": "sk_4d2a56d4207a...",
+}
+
+
+@router.get(
+    "/api-key-policy",
+    response_model=ApiKeyPolicyResponse,
+    tags=["Admin API Keys"],
+    summary="Get tenant API key policy",
+    description="Get API key policy settings for the current tenant.",
+    responses={
+        200: {
+            "description": "Current tenant API key policy.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "require_expiration": True,
+                        "max_expiration_days": 90,
+                        "auto_expire_unused_days": 180,
+                        "max_delegation_depth": 3,
+                        "revocation_cascade_enabled": True,
+                        "max_rate_limit_override": 10000,
+                    }
+                }
+            },
+        },
+        **error_responses([401, 403, 429]),
+    },
+)
 async def get_api_key_policy(
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -1091,9 +1104,40 @@ async def get_api_key_policy(
     return ApiKeyPolicyResponse.model_validate(user.tenant.api_key_policy or {})
 
 
-@router.patch("/api-key-policy", response_model=ApiKeyPolicyResponse)
+@router.patch(
+    "/api-key-policy",
+    response_model=ApiKeyPolicyResponse,
+    tags=["Admin API Keys"],
+    summary="Update tenant API key policy",
+    description="Update tenant policy guardrails used for API key creation and validation.",
+    responses={
+        200: {
+            "description": "Updated tenant API key policy.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "require_expiration": True,
+                        "max_expiration_days": 90,
+                        "auto_expire_unused_days": 180,
+                    }
+                }
+            },
+        },
+        **error_responses([400, 401, 403, 429]),
+    },
+)
 async def update_api_key_policy(
-    request: ApiKeyPolicyUpdate,
+    request: ApiKeyPolicyUpdate = Body(
+        ...,
+        examples=[
+            {
+                "require_expiration": True,
+                "max_expiration_days": 90,
+                "max_delegation_depth": 3,
+                "revocation_cascade_enabled": True,
+            }
+        ],
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
@@ -1129,7 +1173,27 @@ async def update_api_key_policy(
     return ApiKeyPolicyResponse.model_validate(after_policy)
 
 
-@router.get("/super-api-key-status", response_model=SuperApiKeyStatus)
+@router.get(
+    "/super-api-key-status",
+    response_model=SuperApiKeyStatus,
+    tags=["Admin API Keys"],
+    summary="Get super API key status",
+    description="Return whether super and super-duper API keys are configured in environment settings.",
+    responses={
+        200: {
+            "description": "Super key configuration status.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "super_api_key_configured": True,
+                        "super_duper_api_key_configured": False,
+                    }
+                }
+            },
+        },
+        **error_responses([401, 403, 429]),
+    },
+)
 async def get_super_api_key_status(
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -1146,7 +1210,16 @@ async def get_super_api_key_status(
 @router.get(
     "/api-keys",
     response_model=CursorPaginatedResponse[ApiKeyV2],
-    responses=_error_responses([401, 403, 429]),
+    tags=["Admin API Keys"],
+    summary="List tenant API keys",
+    description="List API keys across the tenant with filters and cursor pagination.",
+    responses={
+        200: {
+            "description": "Paginated tenant API key list.",
+            "content": {"application/json": {"example": _ADMIN_API_KEY_LIST_EXAMPLE}},
+        },
+        **error_responses([401, 403, 429]),
+    },
 )
 async def list_api_keys_admin(
     limit: int | None = Query(None, ge=1, description="Keys per page"),
@@ -1185,7 +1258,7 @@ async def list_api_keys_admin(
         created_by_user_id=created_by_user_id,
     )
 
-    return _paginate_keys(
+    return paginate_keys(
         keys,
         total_count=total_count,
         limit=limit,
@@ -1197,7 +1270,16 @@ async def list_api_keys_admin(
 @router.get(
     "/api-keys/{id}",
     response_model=ApiKeyV2,
-    responses=_error_responses([401, 403, 404, 429]),
+    tags=["Admin API Keys"],
+    summary="Get tenant API key",
+    description="Get a single API key by ID within the tenant.",
+    responses={
+        200: {
+            "description": "Tenant API key details.",
+            "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
+        },
+        **error_responses([401, 403, 404, 429]),
+    },
 )
 async def get_api_key_admin(
     id: UUID,
@@ -1220,104 +1302,190 @@ async def get_api_key_admin(
 @router.delete(
     "/api-keys/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=_error_responses([401, 403, 404, 429]),
+    tags=["Admin API Keys"],
+    summary="Revoke API key (deprecated alias)",
+    responses={
+        204: {"description": "API key revoked. No response body."},
+        **error_responses([401, 403, 404, 429]),
+    },
     deprecated=True,
     description="Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.",
 )
 async def revoke_api_key_admin_deprecated(
     id: UUID,
+    http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
-        await lifecycle.revoke_key(key_id=id, skip_manage_authorization=True)
+        await lifecycle.revoke_key(
+            key_id=id,
+            skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        raise_api_key_http_error(exc)
     return None
 
 
 @router.post(
     "/api-keys/{id}/revoke",
     response_model=ApiKeyV2,
-    responses=_error_responses([400, 401, 403, 404, 429]),
+    tags=["Admin API Keys"],
+    summary="Revoke tenant API key",
+    description="Revoke an API key as tenant admin with optional reason metadata.",
+    responses={
+        200: {
+            "description": "Revoked tenant API key.",
+            "content": {
+                "application/json": {
+                    "example": _ADMIN_API_KEY_EXAMPLE | {"state": "revoked"}
+                }
+            },
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
 )
 async def revoke_api_key_admin(
     id: UUID,
-    request: ApiKeyStateChangeRequest | None = None,
+    http_request: Request,
+    payload: ApiKeyStateChangeRequest | None = Body(
+        default=None, examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.revoke_key(
             key_id=id,
-            request=request,
+            request=payload,
             skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        raise_api_key_http_error(exc)
 
 
 @router.post(
     "/api-keys/{id}/suspend",
     response_model=ApiKeyV2,
-    responses=_error_responses([400, 401, 403, 404, 429]),
+    tags=["Admin API Keys"],
+    summary="Suspend tenant API key",
+    description="Suspend an API key so it cannot authenticate until reactivated.",
+    responses={
+        200: {
+            "description": "Suspended tenant API key.",
+            "content": {
+                "application/json": {
+                    "example": _ADMIN_API_KEY_EXAMPLE | {"state": "suspended"}
+                }
+            },
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
 )
 async def suspend_api_key_admin(
     id: UUID,
-    request: ApiKeyStateChangeRequest | None = None,
+    http_request: Request,
+    payload: ApiKeyStateChangeRequest | None = Body(
+        default=None, examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.suspend_key(
             key_id=id,
-            request=request,
+            request=payload,
             skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        raise_api_key_http_error(exc)
 
 
 @router.post(
     "/api-keys/{id}/reactivate",
     response_model=ApiKeyV2,
-    responses=_error_responses([400, 401, 403, 404, 429]),
+    tags=["Admin API Keys"],
+    summary="Reactivate tenant API key",
+    description="Reactivate a suspended API key.",
+    responses={
+        200: {
+            "description": "Reactivated tenant API key.",
+            "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
 )
 async def reactivate_api_key_admin(
     id: UUID,
+    http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
-        return await lifecycle.reactivate_key(key_id=id, skip_manage_authorization=True)
+        return await lifecycle.reactivate_key(
+            key_id=id,
+            skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        raise_api_key_http_error(exc)
 
 
 @router.post(
     "/api-keys/{id}/rotate",
     response_model=ApiKeyCreatedResponse,
-    responses=_error_responses([400, 401, 403, 404, 429]),
+    tags=["Admin API Keys"],
+    summary="Rotate tenant API key",
+    description="Rotate an API key and return the new one-time secret.",
+    responses={
+        200: {
+            "description": "Rotated tenant API key and one-time secret.",
+            "content": {
+                "application/json": {"example": _ADMIN_ROTATED_RESPONSE_EXAMPLE}
+            },
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
 )
 async def rotate_api_key_admin(
     id: UUID,
+    http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.rotate_key(
             key_id=id,
             skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        raise_api_key_http_error(exc)

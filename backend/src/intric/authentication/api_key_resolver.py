@@ -19,6 +19,10 @@ from intric.authentication.auth_models import (
     ApiKeyType,
     ApiKeyV2InDB,
 )
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
@@ -90,12 +94,16 @@ class ApiKeyAuthResolver:
     ) -> ResolvedApiKey | None:
         hmac_hash = self._hash_hmac(plain_key)
         record = await self.api_key_repo.get_by_hash(
-            key_hash=hmac_hash, hash_version=ApiKeyHashVersion.HMAC_SHA256.value
+            key_hash=hmac_hash,
+            hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
+            key_prefix=prefix,
         )
         if record is None:
             sha_hash = self._hash_sha256(plain_key)
             record = await self.api_key_repo.get_by_hash(
-                key_hash=sha_hash, hash_version=ApiKeyHashVersion.SHA256.value
+                key_hash=sha_hash,
+                hash_version=ApiKeyHashVersion.SHA256.value,
+                key_prefix=prefix,
             )
             if record is None:
                 return None
@@ -149,7 +157,7 @@ class ApiKeyAuthResolver:
             tenant_id, owner_user_id = await self._get_user_tenant(
                 legacy_record.user_id
             )
-            return await self.api_key_repo.create(
+            migrated = await self.api_key_repo.create(
                 tenant_id=tenant_id,
                 owner_user_id=owner_user_id,
                 created_by_user_id=owner_user_id,
@@ -165,12 +173,18 @@ class ApiKeyAuthResolver:
                 description=None,
                 state=ApiKeyState.ACTIVE.value,
             )
+            await self._log_legacy_migration(
+                migrated=migrated,
+                legacy_record=legacy_record,
+                prefix=prefix,
+            )
+            return migrated
 
         if legacy_record.assistant_id is not None:
             tenant_id, owner_user_id = await self._get_assistant_context(
                 legacy_record.assistant_id
             )
-            return await self.api_key_repo.create(
+            migrated = await self.api_key_repo.create(
                 tenant_id=tenant_id,
                 owner_user_id=owner_user_id,
                 created_by_user_id=owner_user_id,
@@ -186,6 +200,12 @@ class ApiKeyAuthResolver:
                 description=None,
                 state=ApiKeyState.ACTIVE.value,
             )
+            await self._log_legacy_migration(
+                migrated=migrated,
+                legacy_record=legacy_record,
+                prefix=prefix,
+            )
+            return migrated
 
         raise ApiKeyValidationError(
             status_code=401,
@@ -246,3 +266,37 @@ class ApiKeyAuthResolver:
 
     def _hash_sha256(self, plain_key: str) -> str:
         return hashlib.sha256(plain_key.encode("utf-8")).hexdigest()
+
+    async def _log_legacy_migration(
+        self,
+        *,
+        migrated: ApiKeyV2InDB,
+        legacy_record: ApiKeyInDB,
+        prefix: str,
+    ) -> None:
+        if self.audit_service is None:
+            return
+
+        await self.audit_service.log_async(
+            tenant_id=migrated.tenant_id,
+            actor_id=None,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.API_KEY_CREATED,
+            entity_type=EntityType.API_KEY,
+            entity_id=migrated.id,
+            description="Migrated legacy API key to v2",
+            metadata=AuditMetadata.system_action(
+                description="Legacy API key migrated",
+                target=migrated,
+                extra={
+                    "legacy_user_id": str(legacy_record.user_id)
+                    if legacy_record.user_id
+                    else None,
+                    "legacy_assistant_id": str(legacy_record.assistant_id)
+                    if legacy_record.assistant_id
+                    else None,
+                    "legacy_prefix": prefix,
+                    "hash_version": migrated.hash_version,
+                },
+            ),
+        )

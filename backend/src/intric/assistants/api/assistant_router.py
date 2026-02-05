@@ -15,6 +15,9 @@ from intric.assistants.api.assistant_models import (
     TokenEstimateBreakdown,
 )
 from intric.authentication.auth_models import ApiKey
+from intric.authentication.api_key_router_helpers import (
+    error_responses as api_key_error_responses,
+)
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -42,6 +45,11 @@ from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+_LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
+    "key": "ina_6f2c9b3a8f...7b31",
+    "truncated_key": "7b31",
+}
 
 # These limits keep the endpoint responsive while still supporting large-context models.
 DEFAULT_CHARS_PER_TOKEN = 6  # Generous factor to cover dense languages
@@ -835,10 +843,33 @@ async def leave_feedback(
 @router.get(
     "/{id}/api-keys/",
     response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy assistant API key",
     deprecated=True,
     description=(
-        "Legacy assistant API key endpoint. Use /api/v1/api-keys for scoped v2 keys."
+        "Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys."
+        " This returns a legacy assistant-scoped key."
     ),
+    responses={
+        200: {
+            "description": "Legacy assistant API key created and returned once.",
+            "content": {
+                "application/json": {"example": _LEGACY_ASSISTANT_API_KEY_EXAMPLE}
+            },
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
 )
 async def generate_read_only_assistant_key(
     id: UUID,

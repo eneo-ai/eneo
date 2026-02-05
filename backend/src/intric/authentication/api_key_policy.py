@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ipaddress
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
 from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
+from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
     ApiKeyPermission,
@@ -28,6 +30,12 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 
+@dataclass(slots=True)
+class _TenantOriginCacheEntry:
+    patterns: list[str]
+    expires_at: datetime
+
+
 class ApiKeyPolicyService:
     def __init__(
         self,
@@ -39,6 +47,10 @@ class ApiKeyPolicyService:
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
+        self._tenant_origin_cache: dict[UUID, _TenantOriginCacheEntry] = {}
+        self._tenant_origin_cache_ttl_seconds = max(
+            int(self.settings.api_key_origin_cache_ttl_seconds), 0
+        )
 
     def _require_space_service(self) -> "SpaceService":
         if self.space_service is None:
@@ -313,8 +325,7 @@ class ApiKeyPolicyService:
         if allowed_origins is None:
             return
 
-        tenant_origins = await self.allowed_origin_repo.get_by_tenant(tenant_id)
-        tenant_patterns = [origin.url for origin in tenant_origins]
+        tenant_patterns = await self._get_tenant_origin_patterns(tenant_id)
 
         if not tenant_patterns:
             for origin in allowed_origins:
@@ -381,6 +392,12 @@ class ApiKeyPolicyService:
         user = self._require_user()
         if rate_limit is None:
             return
+        if rate_limit == 0:
+            raise ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message="rate_limit must be null, -1, or a positive integer.",
+            )
         if rate_limit == -1 and Permission.ADMIN not in user.permissions:
             raise ApiKeyValidationError(
                 status_code=403,
@@ -426,8 +443,7 @@ class ApiKeyPolicyService:
         if self._is_localhost_origin(origin):
             return
 
-        tenant_origins = await self.allowed_origin_repo.get_by_tenant(key.tenant_id)
-        tenant_patterns = [entry.url for entry in tenant_origins]
+        tenant_patterns = await self._get_tenant_origin_patterns(key.tenant_id)
 
         if not tenant_patterns:
             raise ApiKeyValidationError(
@@ -478,28 +494,24 @@ class ApiKeyPolicyService:
             )
 
     def resolve_client_ip(self, request: "Request") -> str | None:
-        trusted_proxy_count = self.settings.trusted_proxy_count
-        trusted_proxy_headers = self.settings.trusted_proxy_headers
-
-        header_values: list[str] = []
-        for header_name in trusted_proxy_headers:
-            header_value = request.headers.get(header_name)
-            if header_value:
-                header_values.append(header_value)
-
-        if trusted_proxy_count > 0 and header_values:
-            forwarded_for = header_values[0]
-            parts = [part.strip() for part in forwarded_for.split(",") if part.strip()]
-            if len(parts) > trusted_proxy_count:
-                return parts[-(trusted_proxy_count + 1)]
-
-        client = request.client
-        return client.host if client else None
+        return resolve_client_ip(
+            request,
+            trusted_proxy_count=self.settings.trusted_proxy_count,
+            trusted_proxy_headers=self.settings.trusted_proxy_headers,
+        )
 
     def _ip_allowed(self, client_ip: str, allowlist: list[str]) -> bool:
+        try:
+            parsed_client_ip = ipaddress.ip_address(client_ip)
+        except ValueError:
+            return False
+
         for entry in allowlist:
-            network = ipaddress.ip_network(entry, strict=False)
-            if ipaddress.ip_address(client_ip) in network:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                continue
+            if parsed_client_ip in network:
                 return True
         return False
 
@@ -509,7 +521,7 @@ class ApiKeyPolicyService:
 
     def _is_localhost_origin(self, origin: str) -> bool:
         parsed = urlparse(origin)
-        if parsed.hostname in ("localhost", "127.0.0.1"):
+        if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
             return True
         return False
 
@@ -562,3 +574,26 @@ class ApiKeyPolicyService:
                 message="User context required.",
             )
         return self.user
+
+    async def _get_tenant_origin_patterns(self, tenant_id: UUID) -> list[str]:
+        now = datetime.now(timezone.utc)
+        if self._tenant_origin_cache_ttl_seconds > 0:
+            cached = self._tenant_origin_cache.get(tenant_id)
+            if cached is not None and cached.expires_at > now:
+                return cached.patterns
+
+        tenant_origins = await self.allowed_origin_repo.get_by_tenant(tenant_id)
+        patterns = [origin.url for origin in tenant_origins]
+        if self._tenant_origin_cache_ttl_seconds > 0:
+            self._tenant_origin_cache[tenant_id] = _TenantOriginCacheEntry(
+                patterns=patterns,
+                expires_at=now
+                + timedelta(seconds=self._tenant_origin_cache_ttl_seconds),
+            )
+        return patterns
+
+    def invalidate_tenant_origin_cache(self, tenant_id: UUID | None = None) -> None:
+        if tenant_id is None:
+            self._tenant_origin_cache.clear()
+            return
+        self._tenant_origin_cache.pop(tenant_id, None)

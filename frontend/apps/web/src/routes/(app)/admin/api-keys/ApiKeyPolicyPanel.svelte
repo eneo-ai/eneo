@@ -69,9 +69,7 @@
     };
   }
 
-  const hasChanges = $derived(
-    JSON.stringify(snapshot()) !== JSON.stringify(originalSnapshot())
-  );
+  const hasChanges = $derived(JSON.stringify(snapshot()) !== JSON.stringify(originalSnapshot()));
 
   async function loadPolicy() {
     loading = true;
@@ -201,7 +199,7 @@
       class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950/50"
       transition:fly={{ y: -8, duration: 150 }}
     >
-      <AlertCircle class="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+      <AlertCircle class="h-4 w-4 flex-shrink-0 text-red-600 dark:text-red-400" />
       <p class="text-sm text-red-700 dark:text-red-300">{errorMessage}</p>
     </div>
   {/if}
@@ -211,22 +209,22 @@
       class="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900 dark:bg-green-950/50"
       transition:fly={{ y: -8, duration: 150 }}
     >
-      <Check class="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+      <Check class="h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400" />
       <p class="text-sm text-green-700 dark:text-green-300">{successMessage}</p>
     </div>
   {/if}
 
   {#if loading}
-    <div class="space-y-4 animate-pulse">
+    <div class="animate-pulse space-y-4">
       {#each Array(6) as _}
-        <div class="rounded-lg border border-default bg-subtle/50 p-4">
+        <div class="border-default bg-subtle/50 rounded-lg border p-4">
           <div class="flex items-center gap-4">
-            <div class="h-10 w-10 rounded-lg bg-subtle"></div>
+            <div class="bg-subtle h-10 w-10 rounded-lg"></div>
             <div class="flex-1 space-y-2">
-              <div class="h-4 w-32 rounded bg-subtle"></div>
-              <div class="h-3 w-48 rounded bg-subtle"></div>
+              <div class="bg-subtle h-4 w-32 rounded"></div>
+              <div class="bg-subtle h-3 w-48 rounded"></div>
             </div>
-            <div class="h-6 w-12 rounded bg-subtle"></div>
+            <div class="bg-subtle h-6 w-12 rounded"></div>
           </div>
         </div>
       {/each}
@@ -235,15 +233,20 @@
     <!-- Policy Items -->
     <div class="space-y-3">
       {#each policyItems as item}
-        <div class="rounded-lg border border-default bg-subtle/30 p-4 hover:bg-subtle/50 transition-colors">
+        {@const PolicyIcon = item.icon}
+        <div
+          class="border-default bg-subtle/30 hover:bg-subtle/50 rounded-lg border p-4 transition-colors"
+        >
           <div class="flex items-center justify-between gap-4">
             <div class="flex items-center gap-4">
-              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary border border-default">
-                <svelte:component this={item.icon} class="h-5 w-5 text-muted" />
+              <div
+                class="bg-primary border-default flex h-10 w-10 items-center justify-center rounded-lg border"
+              >
+                <PolicyIcon class="text-muted h-5 w-5" />
               </div>
               <div>
-                <h4 class="text-sm font-semibold text-default">{item.title}</h4>
-                <p class="text-xs text-muted mt-0.5 max-w-md">{item.description}</p>
+                <h4 class="text-default text-sm font-semibold">{item.title}</h4>
+                <p class="text-muted mt-0.5 max-w-md text-xs">{item.description}</p>
               </div>
             </div>
 
@@ -262,7 +265,7 @@
                       placeholder={item.placeholder}
                       type="number"
                       min="1"
-                      class="!w-24 !h-9 text-sm text-right"
+                      class="!h-9 !w-24 text-right text-sm"
                     />
                   {:else if item.id === "autoExpireUnusedDays"}
                     <Input.Text
@@ -270,7 +273,7 @@
                       placeholder={item.placeholder}
                       type="number"
                       min="1"
-                      class="!w-24 !h-9 text-sm text-right"
+                      class="!h-9 !w-24 text-right text-sm"
                     />
                   {:else if item.id === "maxRateLimitOverride"}
                     <Input.Text
@@ -278,7 +281,7 @@
                       placeholder={item.placeholder}
                       type="number"
                       min="1"
-                      class="!w-24 !h-9 text-sm text-right"
+                      class="!h-9 !w-24 text-right text-sm"
                     />
                   {:else if item.id === "maxDelegationDepth"}
                     <Input.Text
@@ -286,11 +289,11 @@
                       placeholder={item.placeholder}
                       type="number"
                       min="1"
-                      class="!w-24 !h-9 text-sm text-right"
+                      class="!h-9 !w-24 text-right text-sm"
                     />
                   {/if}
                   {#if item.suffix}
-                    <span class="text-xs text-muted whitespace-nowrap">{item.suffix}</span>
+                    <span class="text-muted text-xs whitespace-nowrap">{item.suffix}</span>
                   {/if}
                 </div>
               {/if}
@@ -303,17 +306,17 @@
     <!-- Save bar -->
     {#if hasChanges}
       <div
-        class="sticky bottom-0 mt-4 rounded-lg border border-accent-default/30 bg-accent-default/5 backdrop-blur-sm p-4"
+        class="border-accent-default/30 bg-accent-default/5 sticky bottom-0 mt-4 rounded-lg border p-4 backdrop-blur-sm"
         transition:fly={{ y: 20, duration: 200 }}
       >
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <div class="rounded-md bg-accent-default/15 p-2">
-              <Check class="h-4 w-4 text-accent-default" />
+            <div class="bg-accent-default/15 rounded-md p-2">
+              <Check class="text-accent-default h-4 w-4" />
             </div>
             <div>
-              <p class="text-sm font-semibold text-default">{m.api_keys_admin_unsaved_changes()}</p>
-              <p class="text-xs text-muted">{m.api_keys_admin_changes_apply()}</p>
+              <p class="text-default text-sm font-semibold">{m.api_keys_admin_unsaved_changes()}</p>
+              <p class="text-muted text-xs">{m.api_keys_admin_changes_apply()}</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -323,7 +326,9 @@
             </Button>
             <Button variant="primary" on:click={savePolicy} disabled={saving} class="gap-2">
               {#if saving}
-                <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                ></div>
                 {m.api_keys_admin_saving()}
               {:else}
                 <Check class="h-4 w-4" />

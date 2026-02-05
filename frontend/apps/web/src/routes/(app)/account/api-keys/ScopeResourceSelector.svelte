@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { createCombobox, melt } from "@melt-ui/svelte";
-  import type { Space, Assistant } from "@intric/intric-js";
+  import { createCombobox } from "@melt-ui/svelte";
+  import type { SpaceSparse } from "@intric/intric-js";
   import { Search, Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
@@ -13,6 +13,8 @@
     spaceName?: string;
   };
 
+  type ResourceOption = { id: string; name: string; spaceName?: string };
+
   let {
     scopeType,
     value = $bindable<string | null>(null),
@@ -23,9 +25,9 @@
   } = $props<{
     scopeType: ResourceType;
     value?: string | null;
-    spaces?: Space[];
-    assistants?: Assistant[];
-    apps?: { id: string; name: string; spaceName?: string }[];
+    spaces?: SpaceSparse[];
+    assistants?: ResourceOption[];
+    apps?: ResourceOption[];
     disabled?: boolean;
   }>();
 
@@ -38,7 +40,8 @@
         return assistants.map((a) => ({
           id: a.id,
           name: a.name,
-          type: "assistant" as const
+          type: "assistant" as const,
+          spaceName: a.spaceName
         }));
       case "app":
         return apps.map((a) => ({
@@ -122,7 +125,7 @@
 </script>
 
 <div class="relative w-full">
-  <span use:melt={$label} class="mb-1.5 block text-sm font-medium text-default">
+  <span {...$label} class="mb-1.5 block text-sm font-medium text-default">
     {m.api_keys_select_resource({ scopeType })}
   </span>
 
@@ -132,7 +135,8 @@
 
     <!-- Input -->
     <input
-      use:melt={$input}
+      {...$input}
+      use:input
       class="h-11 w-full rounded-lg border border-default bg-primary pl-10 pr-16 text-sm
              placeholder:text-muted transition-all duration-150
              hover:border-dimmer focus:border-accent-default focus:ring-2 focus:ring-accent-default/20
@@ -177,7 +181,8 @@
   <!-- Dropdown menu -->
   {#if $open}
     <div
-      use:melt={$menu}
+      {...$menu}
+      use:menu
       class="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-default bg-primary shadow-lg"
       transition:fly={{ y: -4, duration: 150 }}
     >
@@ -196,7 +201,8 @@
           {#each filteredResources as resource (resource.id)}
             {@const selected = $isSelected(resource)}
             <button
-              use:melt={$option({ value: resource, label: resource.name })}
+              {...$option({ value: resource, label: resource.name })}
+              use:option
               type="button"
               class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors
                      hover:bg-hover-default

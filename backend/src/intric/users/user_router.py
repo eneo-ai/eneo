@@ -14,6 +14,9 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
 from intric.authentication import auth_dependencies
+from intric.authentication.api_key_router_helpers import (
+    error_responses as api_key_error_responses,
+)
 from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
 from intric.main import config
 from intric.main.exceptions import AuthenticationException
@@ -45,6 +48,11 @@ from intric.audit.domain.entity_types import EntityType
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+_LEGACY_USER_API_KEY_EXAMPLE = {
+    "key": "inp_3f5f2f7f7f...d9a1",
+    "truncated_key": "d9a1",
+}
 
 
 @router.post(
@@ -550,14 +558,60 @@ async def get_currently_authenticated_user(
 @router.post(
     "/api-keys/",
     response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy user API key",
     deprecated=True,
-    description=("Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys."),
+    description=(
+        "Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. "
+        "This endpoint rotates the old legacy key immediately."
+    ),
+    responses={
+        200: {
+            "description": "Legacy API key created and returned once.",
+            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
 )
 @router.get(
     "/api-keys/",
     response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy user API key (GET alias)",
     deprecated=True,
-    description=("Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys."),
+    description=(
+        "Legacy API key endpoint (GET alias). Use `/api/v1/api-keys` for scoped v2 keys. "
+        "This endpoint rotates the old legacy key immediately."
+    ),
+    responses={
+        200: {
+            "description": "Legacy API key created and returned once.",
+            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
 )
 async def generate_api_key(
     current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
