@@ -1230,7 +1230,7 @@
   "no_api_key_found_generate": "No api key found. Please generate a new one.",
   "copy_key": "Copy key",
   "generate_new_api_key_title": "Generate new API key",
-  "generate_api_key_warning": "Do you really want to generate a new API key? <br /><br />Your old API key will get deleted in the process and no longer work.<br /><br /> Write down your new API key once it is generated, you will not be able to retrieve it from the server in the future.",
+  "generate_api_key_warning": "Do you really want to generate a new API key? <br /><br />Your existing API keys will keep working unless you revoke them. <br /><br />Write down your new API key once it is generated — you will not be able to retrieve it from the server later.",
   "connect_account_description": "Connect your Eneo-account to one of these providers to import external knowledge.",
   "connecting": "Connecting...",
   "no_integrations_enabled": "Your organisation does currently not have any integrations enabled.",

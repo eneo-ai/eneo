@@ -1228,7 +1228,7 @@
   "no_api_key_found_generate": "Ingen API-nyckel hittades. Vänligen generera en ny.",
   "copy_key": "Kopiera nyckel",
   "generate_new_api_key_title": "Generera ny API-nyckel",
-  "generate_api_key_warning": "Vill du verkligen generera en ny API-nyckel? <br /><br />Din gamla API-nyckel kommer att raderas i processen och inte längre fungera.<br /><br /> Skriv ner din nya API-nyckel när den genereras, du kommer inte att kunna hämta den från servern i framtiden.",
+  "generate_api_key_warning": "Vill du verkligen generera en ny API-nyckel? <br /><br />Dina befintliga API-nycklar fortsätter att fungera om du inte återkallar dem. <br /><br />Skriv ner din nya API-nyckel när den genereras — du kommer inte att kunna hämta den från servern i efterhand.",
   "connect_account_description": "Anslut ditt Eneo-konto till en av dessa leverantörer för att importera extern kunskap.",
   "connecting": "Ansluter...",
   "no_integrations_enabled": "Din organisation har för närvarande inga integrationer aktiverade.",

@@ -139,12 +139,13 @@
   async function loadResources() {
     loadingResources = true;
     try {
-      spaces = await intric.spaces.list();
+      spaces = await intric.spaces.list({ include_personal: true });
       assistants = await intric.assistants.list();
       const appLists = await Promise.all(
         spaces.map(async (space) => {
           const apps = await intric.spaces.listApplications({ id: space.id });
-          return (apps?.items ?? []).map((app: { id: string; name: string }) => ({
+          const appItems = apps?.apps?.items ?? [];
+          return appItems.map((app: { id: string; name: string }) => ({
             id: app.id,
             name: app.name,
             spaceName: space.name
