@@ -94,6 +94,7 @@ from intric.tenants.presentation.tenant_federation_router import (
     router as tenant_federation_router,
 )
 from intric.authentication.federation_router import router as federation_router
+from intric.authentication.api_key_router import router as api_key_router
 from intric.api.documentation.openapi_endpoints import router as documentation_router
 
 from intric.model_providers.presentation.model_provider_router import (
@@ -106,23 +107,30 @@ router = APIRouter()
 router.include_router(crawl_run_router, prefix="/crawl-runs", tags=["crawl-runs"])
 router.include_router(app_router, prefix="/apps", tags=["apps"])
 router.include_router(app_run_router, prefix="/app-runs", tags=["app-runs"])
+router.include_router(api_key_router, tags=["api-keys"])
 router.include_router(users_router, prefix="/users", tags=["users"])
 router.include_router(info_blobs_router, prefix="/info-blobs", tags=["info-blobs"])
 router.include_router(groups_router, prefix="/groups", tags=["groups"])
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
 router.include_router(assistants_router, prefix="/assistants", tags=["assistants"])
 router.include_router(group_chat_router, prefix="/group-chats", tags=["group-chats"])
-router.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
+router.include_router(
+    conversations_router, prefix="/conversations", tags=["conversations"]
+)
 router.include_router(services_router, prefix="/services", tags=["services"])
 router.include_router(logging_router, prefix="/logging", tags=["logging"])
 router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
 router.include_router(tenant_self_credentials_router, prefix="/admin", tags=["admin"])
-router.include_router(assistant_template_admin_router, prefix="", tags=["admin-templates"])
+router.include_router(
+    assistant_template_admin_router, prefix="", tags=["admin-templates"]
+)
 router.include_router(app_template_admin_router, prefix="", tags=["admin-templates"])
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 router.include_router(user_groups_router, prefix="/user-groups", tags=["user-groups"])
-router.include_router(allowed_origins_router, prefix="/allowed-origins", tags=["allowed-origins"])
+router.include_router(
+    allowed_origins_router, prefix="/allowed-origins", tags=["allowed-origins"]
+)
 router.include_router(
     completion_models_router, prefix="/completion-models", tags=["completion-models"]
 )
@@ -182,18 +190,26 @@ router.include_router(
 )
 router.include_router(audit_router, prefix="", tags=["audit"])
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
-router.include_router(sharepoint_webhook_router, prefix="/integrations", tags=["integrations"])
+router.include_router(
+    sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
+)
 router.include_router(admin_sharepoint_router, prefix="/admin", tags=["admin"])
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 
-router.include_router(integration_auth_router, prefix="/integrations/auth", tags=["integrations"])
+router.include_router(
+    integration_auth_router, prefix="/integrations/auth", tags=["integrations"]
+)
 
 router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
-router.include_router(tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"])
+router.include_router(
+    tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"]
+)
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
-router.include_router(federation_router, prefix="", tags=["authentication"])  # Public auth endpoints (no prefix)
+router.include_router(
+    federation_router, prefix="", tags=["authentication"]
+)  # Public auth endpoints (no prefix)
 router.include_router(documentation_router, prefix="")
 
 if get_settings().using_access_management:

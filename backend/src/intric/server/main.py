@@ -6,7 +6,7 @@ import uuid
 import uvicorn
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -40,7 +40,9 @@ class HealthThresholds(BaseModel):
 class CrawlerActivity(BaseModel):
     """Real-time crawler activity from multiple sources."""
 
-    db_in_progress: Optional[int] = None  # Jobs with status=IN_PROGRESS, None if query failed
+    db_in_progress: Optional[int] = (
+        None  # Jobs with status=IN_PROGRESS, None if query failed
+    )
     db_query_ok: bool = True  # False if DB query timed out or failed
     arq_ongoing: int = 0  # From ARQ health string (j_ongoing)
     delta: Optional[int] = None  # Discrepancy between DB and ARQ, None if can't compute
@@ -134,7 +136,9 @@ def _remove_invalid_defaults(schema: dict) -> None:
     if "items" in schema and isinstance(schema["items"], dict):
         _remove_invalid_defaults(schema["items"])
 
-    if "additionalProperties" in schema and isinstance(schema["additionalProperties"], dict):
+    if "additionalProperties" in schema and isinstance(
+        schema["additionalProperties"], dict
+    ):
         _remove_invalid_defaults(schema["additionalProperties"])
 
     for key in ("anyOf", "oneOf", "allOf"):
@@ -164,6 +168,18 @@ def get_application():
     # Add handlers of all errors except 500
     add_exception_handlers(app)
 
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request, exc: HTTPException):
+        detail = exc.detail
+        headers = exc.headers or None
+        if isinstance(detail, dict) and "code" in detail and "message" in detail:
+            return JSONResponse(
+                status_code=exc.status_code, content=detail, headers=headers
+            )
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": detail}, headers=headers
+        )
+
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
@@ -178,7 +194,10 @@ def get_application():
 
         # WSO2 compatibility: Rename "default" security scheme to "APIKeyAuth"
         # WSO2 API Manager treats "default" as a reserved keyword expecting a boolean
-        if "components" in openapi_schema and "securitySchemes" in openapi_schema["components"]:
+        if (
+            "components" in openapi_schema
+            and "securitySchemes" in openapi_schema["components"]
+        ):
             schemes = openapi_schema["components"]["securitySchemes"]
             if "default" in schemes:
                 schemes["APIKeyAuth"] = schemes.pop("default")
@@ -234,7 +253,7 @@ def get_application():
                 "exception_type": type(exc).__name__,
                 "exception_message": str(exc),
                 "traceback": traceback.format_exc(),
-            }
+            },
         )
 
         # Build error response
@@ -259,9 +278,7 @@ def get_application():
         # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
         # Solving this like this response:
         #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
-        response = JSONResponse(
-            status_code=500, content=error_content
-        )
+        response = JSONResponse(status_code=500, content=error_content)
 
         origin = request.headers.get("origin")
 
@@ -314,7 +331,7 @@ def get_application():
                 "exception_type": type(exc).__name__,
                 "exception_message": str(exc),
                 "traceback": traceback.format_exc(),
-            }
+            },
         )
 
         # Build error response
@@ -519,7 +536,9 @@ def get_application():
 
         try:
             # 2 second timeout to keep endpoint responsive
-            db_in_progress = await asyncio.wait_for(_query_db_crawl_count(), timeout=2.0)
+            db_in_progress = await asyncio.wait_for(
+                _query_db_crawl_count(), timeout=2.0
+            )
         except asyncio.TimeoutError:
             db_query_error = True
             logger.warning("DB query timeout in crawler health check")
@@ -551,7 +570,9 @@ def get_application():
             status_reasons.append("Worker heartbeat key not found in Redis")
         elif arq_heartbeat_ttl == -1:
             status_flags.append("ARQ_HEARTBEAT_NO_TTL")
-            status_reasons.append("Worker heartbeat key has no expiry (misconfiguration)")
+            status_reasons.append(
+                "Worker heartbeat key has no expiry (misconfiguration)"
+            )
         elif arq_heartbeat_ttl == 0:
             status_flags.append("ARQ_HEARTBEAT_EXPIRED")
             status_reasons.append("Worker heartbeat key about to expire")
@@ -623,7 +644,9 @@ def get_application():
                     status_reasons.append("crawler activity consistent (delta=0)")
 
         # Build status reason string
-        status_reason = "; ".join(status_reasons) if status_reasons else "All signals healthy"
+        status_reason = (
+            "; ".join(status_reasons) if status_reasons else "All signals healthy"
+        )
 
         # Get redis_db for debug info
         redis_db = getattr(settings, "redis_db", None)
@@ -640,7 +663,9 @@ def get_application():
                 delta=activity_delta,
             ),
             arq=ARQHealth(
-                heartbeat_ttl_seconds=arq_heartbeat_ttl if arq_heartbeat_ttl > 0 else None,
+                heartbeat_ttl_seconds=arq_heartbeat_ttl
+                if arq_heartbeat_ttl > 0
+                else None,
                 age_seconds=arq_health.get("arq_health_age_seconds"),
                 j_complete=arq_health.get("j_complete", 0),
                 j_failed=arq_health.get("j_failed", 0),

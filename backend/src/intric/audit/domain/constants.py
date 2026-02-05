@@ -60,5 +60,5 @@ AUDIT_WORKER_TIMEOUT_SECONDS = 30
 """Maximum time for audit worker task execution."""
 
 # Security
-CSV_INJECTION_PREFIXES = ('=', '+', '-', '@', '\t', '\r')
+CSV_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 """Characters that trigger CSV injection protection."""

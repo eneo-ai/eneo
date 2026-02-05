@@ -166,7 +166,9 @@ class InfoBlobService:
 
         return info_blob_in_db
 
-    async def add_info_blobs(self, group_id: UUID, info_blobs: list[InfoBlobAdd]):
+    async def add_info_blobs(
+        self, group_id: UUID, info_blobs: list[InfoBlobAdd]
+    ) -> list[InfoBlobInDB]:
         await self._can_perform_action(group_id=group_id, action=SpaceAction.CREATE)
 
         return [await self.add_info_blob(blob) for blob in info_blobs]

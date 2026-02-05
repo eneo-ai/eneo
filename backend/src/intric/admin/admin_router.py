@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends, Query
-from typing import List
+from datetime import datetime
+from typing import Any, List, NoReturn, cast
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
     AdminUsersQueryParams,
@@ -10,6 +14,7 @@ from intric.admin.admin_models import (
     UserStateListItem,
 )
 from intric.main.container.container import Container
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse
@@ -24,6 +29,23 @@ from intric.users.user import (
     UserCreatedAdminView,
     UserUpdatePublic,
 )
+from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
+from intric.authentication.auth_models import (
+    ApiKeyCreatedResponse,
+    ApiKeyPolicyResponse,
+    ApiKeyPolicyUpdate,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyStateChangeRequest,
+    ApiKeyType,
+    ApiKeyV2,
+    ApiKeyV2InDB,
+    SuperApiKeyStatus,
+)
+from intric.main.models import CursorPaginatedResponse
+from intric.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -32,6 +54,63 @@ from intric.audit.domain.entity_types import EntityType
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": exc.message},
+    ) from exc
+
+
+def _error_responses(codes: list[int]) -> dict[int | str, dict[str, Any]]:
+    return cast(dict[int | str, dict[str, Any]], responses.get_responses(codes))
+
+
+def _paginate_keys(
+    keys: list[ApiKeyV2InDB],
+    *,
+    total_count: int,
+    limit: int | None,
+    cursor: datetime | None,
+    previous: bool,
+) -> CursorPaginatedResponse[ApiKeyV2]:
+    if limit is None:
+        return CursorPaginatedResponse(
+            items=[ApiKeyV2.model_validate(key) for key in keys],
+            total_count=total_count,
+            limit=limit,
+        )
+
+    if not previous:
+        if len(keys) > limit:
+            next_cursor = keys[limit].created_at
+            page = keys[:limit]
+        else:
+            next_cursor = None
+            page = keys
+        return CursorPaginatedResponse(
+            items=[ApiKeyV2.model_validate(key) for key in page],
+            total_count=total_count,
+            limit=limit,
+            next_cursor=next_cursor,
+            previous_cursor=cursor,
+        )
+
+    if len(keys) > limit:
+        page = keys[1:]
+        previous_cursor = keys[0].created_at
+    else:
+        page = keys
+        previous_cursor = None
+
+    return CursorPaginatedResponse(
+        items=[ApiKeyV2.model_validate(key) for key in page],
+        total_count=total_count,
+        limit=limit,
+        next_cursor=cursor,
+        previous_cursor=previous_cursor,
+    )
 
 
 @router.get(
@@ -133,7 +212,7 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
                                 "updated_at": "2025-10-15T14:20:00Z",
                                 "roles": [],
                                 "predefined_roles": [],
-                                "user_groups": []
+                                "user_groups": [],
                             }
                         ],
                         "metadata": {
@@ -142,11 +221,11 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
                             "total_count": 543,
                             "total_pages": 6,
                             "has_next": True,
-                            "has_previous": False
-                        }
+                            "has_previous": False,
+                        },
                     }
                 }
-            }
+            },
         },
         400: {
             "description": "Invalid pagination parameters (page/page_size out of bounds)",
@@ -157,24 +236,35 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
                         "title": "Bad Request",
                         "status": 400,
                         "detail": "page must not exceed 100 (max depth limit)",
-                        "instance": "/api/v1/admin/users/"
+                        "instance": "/api/v1/admin/users/",
                     }
                 }
-            }
+            },
         },
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def get_users(
     page: int = Query(1, ge=1, le=100, description="Page number (1-100)"),
     page_size: int = Query(100, ge=1, le=100, description="Users per page (1-100)"),
-    search_email: str | None = Query(None, description="Search by email (case-insensitive, partial match)"),
-    search_name: str | None = Query(None, description="Search by username (case-insensitive, partial match)"),
-    sort_by: SortField = Query(SortField.EMAIL, description="Sort field (default: alphabetical by email)"),
-    sort_order: SortOrder = Query(SortOrder.ASC, description="Sort order (default: ascending A-Z)"),
-    state_filter: StateFilter | None = Query(None, description="Filter by user state (active includes invited, inactive for temporary leave)"),
-    container: Container = Depends(get_container(with_user=True))
+    search_email: str | None = Query(
+        None, description="Search by email (case-insensitive, partial match)"
+    ),
+    search_name: str | None = Query(
+        None, description="Search by username (case-insensitive, partial match)"
+    ),
+    sort_by: SortField = Query(
+        SortField.EMAIL, description="Sort field (default: alphabetical by email)"
+    ),
+    sort_order: SortOrder = Query(
+        SortOrder.ASC, description="Sort order (default: ascending A-Z)"
+    ),
+    state_filter: StateFilter | None = Query(
+        None,
+        description="Filter by user state (active includes invited, inactive for temporary leave)",
+    ),
+    container: Container = Depends(get_container(with_user=True)),
 ):
     """
     List tenant users with pagination, search, and sorting.
@@ -222,7 +312,7 @@ async def get_users(
 
 
 @router.post(
-    "/users/", 
+    "/users/",
     response_model=UserCreatedAdminView,
     status_code=201,
     summary="Create new user in tenant",
@@ -233,7 +323,7 @@ async def get_users(
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
         409: {"description": "Username or email already exists in your tenant"},
-    }
+    },
 )
 async def register_user(
     new_user: UserAddAdmin,
@@ -241,17 +331,17 @@ async def register_user(
 ):
     """
     Create a new user account for your organization.
-    
+
     Required fields:
     - email: Valid email address (must be unique within your tenant)
-    
+
     Optional fields:
     - username: Unique identifier (if not provided, will use email prefix)
     - password: User password (minimum 7 characters, maximum 100)
-    - quota_limit: Storage limit in bytes (minimum 1000 bytes = 1KB) 
+    - quota_limit: Storage limit in bytes (minimum 1000 bytes = 1KB)
     - roles: List of custom role IDs to assign (empty list by default)
     - predefined_roles: List of predefined role IDs to assign (empty list by default)
-    
+
     Example request:
     {
       "email": "john.doe@municipality.se",
@@ -268,7 +358,7 @@ async def register_user(
 
     # Build extra context for user creation
     extra = {
-        "state": user.state.value if hasattr(user, 'state') else "active",
+        "state": user.state.value if hasattr(user, "state") else "active",
         "tenant_id": str(current_user.tenant_id),
         "tenant_name": current_user.tenant.display_name or current_user.tenant.name,
     }
@@ -278,7 +368,7 @@ async def register_user(
         from intric.database.tables.roles_table import PredefinedRoles
         import sqlalchemy as sa
 
-        session = container.session()
+        session = cast(AsyncSession, container.session())
         role_ids = [role.id for role in new_user.predefined_roles]
         role_query = sa.select(PredefinedRoles).where(PredefinedRoles.id.in_(role_ids))
         role_result = await session.execute(role_query)
@@ -298,7 +388,7 @@ async def register_user(
         from intric.database.tables.roles_table import Roles
         import sqlalchemy as sa
 
-        session = container.session()
+        session = cast(AsyncSession, container.session())
         custom_role_ids = [role.id for role in new_user.roles]
         role_query = sa.select(Roles).where(Roles.id.in_(custom_role_ids))
         role_result = await session.execute(role_query)
@@ -308,13 +398,17 @@ async def register_user(
             extra["roles"] = [role.name for role in custom_roles]
 
     # Check if user object has roles loaded (in case service returns them)
-    if hasattr(user, 'predefined_roles') and user.predefined_roles and 'predefined_roles' not in extra:
+    if (
+        hasattr(user, "predefined_roles")
+        and user.predefined_roles
+        and "predefined_roles" not in extra
+    ):
         extra["predefined_roles"] = [role.name for role in user.predefined_roles]
 
-    if hasattr(user, 'roles') and user.roles and 'roles' not in extra:
+    if hasattr(user, "roles") and user.roles and "roles" not in extra:
         extra["roles"] = [role.name for role in user.roles]
 
-    if hasattr(user, 'user_groups') and user.user_groups:
+    if hasattr(user, "user_groups") and user.user_groups:
         extra["user_groups"] = [group.name for group in user.user_groups]
 
     # Add quota limit if set
@@ -337,13 +431,15 @@ async def register_user(
         ),
     )
 
-    user_admin_view = UserCreatedAdminView(**user.model_dump(exclude={"api_key"}), api_key=api_key)
+    user_admin_view = UserCreatedAdminView(
+        **user.model_dump(exclude={"api_key"}), api_key=api_key
+    )
 
     return user_admin_view
 
 
 @router.get(
-    "/users/{username}/", 
+    "/users/{username}/",
     response_model=UserAdminView,
     summary="Get user details",
     description="Retrieves a single user's complete details using their username. User must exist in your tenant and not be soft-deleted. Returns the same detailed information format as other admin endpoints.",
@@ -353,7 +449,7 @@ async def register_user(
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
         404: {"description": "User not found in your tenant (may be soft-deleted)"},
-    }
+    },
 )
 async def get_user(
     username: str,
@@ -361,28 +457,28 @@ async def get_user(
 ):
     """
     Retrieve a single user's details by username.
-    
+
     Path parameter:
     - username: The username of the user to retrieve
-    
+
     Returns complete user information including:
     - Basic details (username, email, creation/update timestamps)
     - Status information (state, active status, email verification)
     - Usage statistics (token consumption, quota limits)
     - Role and group memberships
-    
+
     Example response:
     {
       "id": "123e4567-e89b-12d3-a456-426614174000",
       "username": "emma.andersson",
-      "email": "emma.andersson@municipality.se", 
+      "email": "emma.andersson@municipality.se",
       "state": "ACTIVE",
       "used_tokens": 1250,
       "is_active": true,
       "roles": [],
       "user_groups": []
     }
-    
+
     Note: This endpoint is useful for external systems that need to check individual user status
     without fetching the entire user list, providing better performance for single-user lookups.
     """
@@ -395,18 +491,20 @@ async def get_user(
 
 
 @router.post(
-    "/users/{username}/", 
+    "/users/{username}/",
     response_model=UserAdminView,
     summary="Update existing user",
     description="Updates an existing user's details using their username. Only fields provided in the request body will be updated. User must exist in your tenant and not be soft-deleted.",
     responses={
         200: {"description": "User successfully updated"},
-        400: {"description": "Invalid input data, validation errors, or cross-tenant access attempt"},
+        400: {
+            "description": "Invalid input data, validation errors, or cross-tenant access attempt"
+        },
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
         404: {"description": "User not found in your tenant (may be soft-deleted)"},
         409: {"description": "Email already exists in your tenant"},
-    }
+    },
 )
 async def update_user(
     username: str,
@@ -415,10 +513,10 @@ async def update_user(
 ):
     """
     Update an existing user's information.
-    
+
     Path parameter:
     - username: The username of the user to update
-    
+
     Optional fields (only provided fields are updated):
     - email: New email address (must be unique within your tenant)
     - password: New password (minimum 7 characters, maximum 100)
@@ -426,9 +524,9 @@ async def update_user(
     - state: User state (invited/active/inactive/deleted)
     - roles: List of custom role IDs (replaces existing roles)
     - predefined_roles: List of predefined role IDs (replaces existing)
-    
+
     Note: Username cannot be changed after creation.
-    
+
     Example request:
     {
       "email": "updated.email@municipality.se",
@@ -463,20 +561,45 @@ async def update_user(
 
     # Track role changes (UserUpdatePublic supports full role management)
     if user.roles is not None:
-        old_roles = [role.name for role in old_user.roles] if hasattr(old_user, 'roles') and old_user.roles else []
-        new_roles = [role.name for role in user_updated.roles] if hasattr(user_updated, 'roles') and user_updated.roles else []
+        old_roles = (
+            [role.name for role in old_user.roles]
+            if hasattr(old_user, "roles") and old_user.roles
+            else []
+        )
+        new_roles = (
+            [role.name for role in user_updated.roles]
+            if hasattr(user_updated, "roles") and user_updated.roles
+            else []
+        )
         if old_roles != new_roles:
             changes["roles"] = {"old": old_roles, "new": new_roles}
 
     if user.predefined_roles is not None:
-        old_pred_roles = [role.name for role in old_user.predefined_roles] if hasattr(old_user, 'predefined_roles') and old_user.predefined_roles else []
-        new_pred_roles = [role.name for role in user_updated.predefined_roles] if hasattr(user_updated, 'predefined_roles') and user_updated.predefined_roles else []
+        old_pred_roles = (
+            [role.name for role in old_user.predefined_roles]
+            if hasattr(old_user, "predefined_roles") and old_user.predefined_roles
+            else []
+        )
+        new_pred_roles = (
+            [role.name for role in user_updated.predefined_roles]
+            if hasattr(user_updated, "predefined_roles")
+            and user_updated.predefined_roles
+            else []
+        )
         if old_pred_roles != new_pred_roles:
             changes["predefined_roles"] = {"old": old_pred_roles, "new": new_pred_roles}
 
     # Track permission changes (computed from role changes)
-    old_permissions = sorted([p.value for p in old_user.permissions]) if hasattr(old_user, 'permissions') else []
-    new_permissions = sorted([p.value for p in user_updated.permissions]) if hasattr(user_updated, 'permissions') else []
+    old_permissions = (
+        sorted([p.value for p in old_user.permissions])
+        if hasattr(old_user, "permissions")
+        else []
+    )
+    new_permissions = (
+        sorted([p.value for p in user_updated.permissions])
+        if hasattr(user_updated, "permissions")
+        else []
+    )
 
     if old_permissions != new_permissions:
         added_perms = list(set(new_permissions) - set(old_permissions))
@@ -490,19 +613,21 @@ async def update_user(
 
     # Build extra context for current state
     extra = {
-        "state": user_updated.state.value if hasattr(user_updated, 'state') else None,
+        "state": user_updated.state.value if hasattr(user_updated, "state") else None,
     }
 
-    if hasattr(user_updated, 'predefined_roles') and user_updated.predefined_roles:
-        extra["predefined_roles"] = [role.name for role in user_updated.predefined_roles]
+    if hasattr(user_updated, "predefined_roles") and user_updated.predefined_roles:
+        extra["predefined_roles"] = [
+            role.name for role in user_updated.predefined_roles
+        ]
 
-    if hasattr(user_updated, 'roles') and user_updated.roles:
+    if hasattr(user_updated, "roles") and user_updated.roles:
         extra["roles"] = [role.name for role in user_updated.roles]
 
-    if hasattr(user_updated, 'user_groups') and user_updated.user_groups:
+    if hasattr(user_updated, "user_groups") and user_updated.user_groups:
         extra["user_groups"] = [group.name for group in user_updated.user_groups]
 
-    if hasattr(user_updated, 'quota_limit') and user_updated.quota_limit:
+    if hasattr(user_updated, "quota_limit") and user_updated.quota_limit:
         extra["quota_limit"] = user_updated.quota_limit
 
     # Audit logging
@@ -528,7 +653,7 @@ async def update_user(
 
 
 @router.delete(
-    "/users/{username}", 
+    "/users/{username}",
     response_model=DeleteResponse,
     summary="Soft delete user",
     description="Soft deletes a user by setting deleted_at timestamp and UserState.DELETED. The user's record is preserved for audit purposes but they can no longer authenticate. This operation is irreversible through the API.",
@@ -537,23 +662,27 @@ async def update_user(
         400: {"description": "Cannot delete yourself or cross-tenant access attempt"},
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
-        404: {"description": "User not found in your tenant (may already be soft-deleted)"},
-    }
+        404: {
+            "description": "User not found in your tenant (may already be soft-deleted)"
+        },
+    },
 )
-async def delete_user(username: str, container: Container = Depends(get_container(with_user=True))):
+async def delete_user(
+    username: str, container: Container = Depends(get_container(with_user=True))
+):
     """
     Soft delete a user account.
-    
+
     Path parameter:
     - username: The username of the user to delete
-    
+
     This operation:
     - Marks the user as deleted (sets deleted_at timestamp)
     - Sets user state to DELETED
     - Preserves the user record for audit purposes
     - Prevents the user from authenticating
     - Cannot be reversed through the API
-    
+
     Restrictions:
     - You cannot delete your own admin account
     - User must exist in your tenant
@@ -570,22 +699,26 @@ async def delete_user(username: str, container: Container = Depends(get_containe
 
     # Build extra context capturing what was deleted
     extra = {
-        "state": user_to_delete.state.value if hasattr(user_to_delete, 'state') else None,
+        "state": user_to_delete.state.value
+        if hasattr(user_to_delete, "state")
+        else None,
     }
 
-    if hasattr(user_to_delete, 'predefined_roles') and user_to_delete.predefined_roles:
-        extra["predefined_roles"] = [role.name for role in user_to_delete.predefined_roles]
+    if hasattr(user_to_delete, "predefined_roles") and user_to_delete.predefined_roles:
+        extra["predefined_roles"] = [
+            role.name for role in user_to_delete.predefined_roles
+        ]
 
-    if hasattr(user_to_delete, 'roles') and user_to_delete.roles:
+    if hasattr(user_to_delete, "roles") and user_to_delete.roles:
         extra["roles"] = [role.name for role in user_to_delete.roles]
 
-    if hasattr(user_to_delete, 'permissions'):
+    if hasattr(user_to_delete, "permissions"):
         extra["permissions"] = sorted([p.value for p in user_to_delete.permissions])
 
-    if hasattr(user_to_delete, 'user_groups') and user_to_delete.user_groups:
+    if hasattr(user_to_delete, "user_groups") and user_to_delete.user_groups:
         extra["user_groups"] = [group.name for group in user_to_delete.user_groups]
 
-    if hasattr(user_to_delete, 'quota_limit') and user_to_delete.quota_limit:
+    if hasattr(user_to_delete, "quota_limit") and user_to_delete.quota_limit:
         extra["quota_limit"] = user_to_delete.quota_limit
 
     # Audit logging
@@ -614,36 +747,37 @@ async def delete_user(username: str, container: Container = Depends(get_containe
     description="Sets user state to INACTIVE for temporary unavailability such as sick leave, vacation, or parental leave. User cannot login but account data is fully preserved. This is reversible through reactivation.",
     responses={
         200: {"description": "User successfully deactivated"},
-        400: {"description": "Cannot deactivate yourself or cross-tenant access attempt"},
+        400: {
+            "description": "Cannot deactivate yourself or cross-tenant access attempt"
+        },
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
         404: {"description": "User not found in your tenant"},
-    }
+    },
 )
 async def deactivate_user(
-    username: str, 
-    container: Container = Depends(get_container(with_user=True))
+    username: str, container: Container = Depends(get_container(with_user=True))
 ):
     """
     Deactivate a user account for temporary leave.
-    
+
     Path parameter:
     - username: The username of the user to deactivate
-    
+
     This operation:
     - Sets user state to INACTIVE
     - Prevents the user from logging in
     - Preserves all account data and settings
     - Records timestamp for external tracking
     - Is fully reversible through reactivation
-    
+
     Use cases:
     - Employee sick leave
     - Extended vacation or sabbatical
     - Parental leave
     - Training or educational leave
     - Temporary disciplinary suspension
-    
+
     Restrictions:
     - You cannot deactivate your own admin account
     - User must exist in your tenant
@@ -685,32 +819,31 @@ async def deactivate_user(
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
         404: {"description": "User not found in your tenant"},
-    }
+    },
 )
 async def reactivate_user(
-    username: str,
-    container: Container = Depends(get_container(with_user=True))
+    username: str, container: Container = Depends(get_container(with_user=True))
 ):
     """
     Reactivate a user account to restore full access.
-    
+
     Path parameter:
     - username: The username of the user to reactivate
-    
+
     This operation:
     - Sets user state to ACTIVE
     - Restores login capability immediately
     - Clears deletion timestamp if user was DELETED
     - Records timestamp for external tracking
     - Works from any previous state (INACTIVE or DELETED)
-    
+
     Use cases:
     - Employee returning from sick leave
     - End of vacation or sabbatical
     - Return from parental leave
     - End of training period
     - Rare rehire of previously departed employee
-    
+
     Restrictions:
     - User must exist in your tenant
     - User must not be from another tenant
@@ -752,24 +885,26 @@ async def reactivate_user(
         200: {"description": "List of inactive users successfully retrieved"},
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
-async def get_inactive_users(container: Container = Depends(get_container(with_user=True))):
+async def get_inactive_users(
+    container: Container = Depends(get_container(with_user=True)),
+):
     """
     Get all users currently in INACTIVE state.
-    
+
     This endpoint returns employees who are:
     - On sick leave
     - Taking vacation or sabbatical
     - On parental leave
     - In training or education programs
     - Under temporary disciplinary suspension
-    
+
     Each user entry includes:
     - Username and email for identification
     - Current state (always 'inactive' for this list)
     - Timestamp when they were deactivated
-    
+
     Use this for:
     - Tracking who is temporarily unavailable
     - Workforce planning and capacity management
@@ -782,35 +917,37 @@ async def get_inactive_users(container: Container = Depends(get_container(with_u
 @router.get(
     "/users/deleted",
     response_model=list[UserDeletedListItem],
-    summary="List deleted users", 
+    summary="List deleted users",
     description="Returns all users in DELETED state within your tenant. These are employees who have left the organization and cannot login. Records are preserved for audit purposes and potential cleanup by external systems.",
     responses={
         200: {"description": "List of deleted users successfully retrieved"},
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
-async def get_deleted_users(container: Container = Depends(get_container(with_user=True))):
+async def get_deleted_users(
+    container: Container = Depends(get_container(with_user=True)),
+):
     """
     Get all users currently in DELETED state.
-    
+
     This endpoint returns employees who have:
     - Quit or resigned
     - Been terminated or fired
     - Retired from the organization
     - Transferred to different systems/departments
-    
+
     Each user entry includes:
     - Username and email for identification
     - Current state (always 'deleted' for this list)
     - Timestamp when they were deleted (for compliance tracking)
-    
+
     Use this for:
     - Tracking departed employees
     - Compliance monitoring (90-day rules, GDPR)
     - Audit trail maintenance
     - Planning permanent data cleanup
-    
+
     Note: External systems handle business logic for when to
     permanently delete these records based on their own policies.
     """
@@ -834,25 +971,27 @@ async def get_deleted_users(container: Container = Depends(get_container(with_us
                             "name": "Owner",
                             "permissions": ["admin", "AI", "assistants", "group_chats"],
                             "created_at": "2024-01-15T10:30:00Z",
-                            "updated_at": "2024-01-15T10:30:00Z"
+                            "updated_at": "2024-01-15T10:30:00Z",
                         },
                         {
                             "id": "550e8400-e29b-41d4-a716-446655440002",
                             "name": "AI Configurator",
                             "permissions": ["AI", "assistants"],
                             "created_at": "2024-01-15T10:30:00Z",
-                            "updated_at": "2024-01-15T10:30:00Z"
-                        }
+                            "updated_at": "2024-01-15T10:30:00Z",
+                        },
                     ]
                 }
-            }
+            },
         },
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required (owner role)"},
         500: {"description": "Internal server error while fetching predefined roles"},
-    }
+    },
 )
-async def get_predefined_roles(container: Container = Depends(get_container(with_user=True))):
+async def get_predefined_roles(
+    container: Container = Depends(get_container(with_user=True)),
+):
     """
     Get all predefined roles available for your tenant.
 
@@ -939,3 +1078,246 @@ async def update_privacy_policy(
     )
 
     return updated_tenant
+
+
+@router.get("/api-key-policy", response_model=ApiKeyPolicyResponse)
+async def get_api_key_policy(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    user = container.user()
+    return ApiKeyPolicyResponse.model_validate(user.tenant.api_key_policy or {})
+
+
+@router.patch("/api-key-policy", response_model=ApiKeyPolicyResponse)
+async def update_api_key_policy(
+    request: ApiKeyPolicyUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    user = container.user()
+
+    await admin_service.validate_admin_permission()
+
+    updates = request.model_dump(exclude_unset=True)
+    if not updates:
+        return ApiKeyPolicyResponse.model_validate(user.tenant.api_key_policy or {})
+
+    tenant_service = container.tenant_service()
+    before_policy = dict(user.tenant.api_key_policy or {})
+    updated_tenant = await tenant_service.update_api_key_policy(user.tenant_id, updates)
+    after_policy = updated_tenant.api_key_policy or {}
+
+    audit_service = container.audit_service()
+    if audit_service is not None:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.TENANT_POLICY_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=user.tenant_id,
+            description="Updated tenant API key policy",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=updated_tenant,
+                changes={"api_key_policy": {"old": before_policy, "new": after_policy}},
+            ),
+        )
+
+    return ApiKeyPolicyResponse.model_validate(after_policy)
+
+
+@router.get("/super-api-key-status", response_model=SuperApiKeyStatus)
+async def get_super_api_key_status(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    settings = get_settings()
+    return SuperApiKeyStatus(
+        super_api_key_configured=bool(settings.intric_super_api_key),
+        super_duper_api_key_configured=bool(settings.intric_super_duper_api_key),
+    )
+
+
+@router.get(
+    "/api-keys",
+    response_model=CursorPaginatedResponse[ApiKeyV2],
+    responses=_error_responses([401, 403, 429]),
+)
+async def list_api_keys_admin(
+    limit: int | None = Query(None, ge=1, description="Keys per page"),
+    cursor: datetime | None = Query(None, description="Current cursor"),
+    previous: bool = Query(False, description="Show previous page"),
+    scope_type: ApiKeyScopeType | None = Query(None, description="Scope type filter"),
+    scope_id: UUID | None = Query(None, description="Scope id filter"),
+    state: ApiKeyState | None = Query(None, description="State filter"),
+    key_type: ApiKeyType | None = Query(None, description="Key type filter"),
+    created_by_user_id: UUID | None = Query(None, description="Creator user id filter"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    repo: ApiKeysV2Repository = container.api_key_v2_repo()
+    tenant_id = admin_service.user.tenant_id
+
+    keys = await repo.list_paginated(
+        tenant_id=tenant_id,
+        limit=limit,
+        cursor=cursor,
+        previous=previous,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        state=state,
+        key_type=key_type.value if key_type else None,
+        created_by_user_id=created_by_user_id,
+    )
+    total_count = await repo.count(
+        tenant_id=tenant_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        state=state,
+        key_type=key_type.value if key_type else None,
+        created_by_user_id=created_by_user_id,
+    )
+
+    return _paginate_keys(
+        keys,
+        total_count=total_count,
+        limit=limit,
+        cursor=cursor,
+        previous=previous,
+    )
+
+
+@router.get(
+    "/api-keys/{id}",
+    response_model=ApiKeyV2,
+    responses=_error_responses([401, 403, 404, 429]),
+)
+async def get_api_key_admin(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    repo: ApiKeysV2Repository = container.api_key_v2_repo()
+    key = await repo.get(key_id=id, tenant_id=admin_service.user.tenant_id)
+    if key is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "API key not found."},
+        )
+
+    return ApiKeyV2.model_validate(key)
+
+
+@router.delete(
+    "/api-keys/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=_error_responses([401, 403, 404, 429]),
+    deprecated=True,
+    description="Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.",
+)
+async def revoke_api_key_admin_deprecated(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    try:
+        await lifecycle.revoke_key(key_id=id, skip_manage_authorization=True)
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc)
+    return None
+
+
+@router.post(
+    "/api-keys/{id}/revoke",
+    response_model=ApiKeyV2,
+    responses=_error_responses([400, 401, 403, 404, 429]),
+)
+async def revoke_api_key_admin(
+    id: UUID,
+    request: ApiKeyStateChangeRequest | None = None,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    try:
+        return await lifecycle.revoke_key(
+            key_id=id,
+            request=request,
+            skip_manage_authorization=True,
+        )
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc)
+
+
+@router.post(
+    "/api-keys/{id}/suspend",
+    response_model=ApiKeyV2,
+    responses=_error_responses([400, 401, 403, 404, 429]),
+)
+async def suspend_api_key_admin(
+    id: UUID,
+    request: ApiKeyStateChangeRequest | None = None,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    try:
+        return await lifecycle.suspend_key(
+            key_id=id,
+            request=request,
+            skip_manage_authorization=True,
+        )
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc)
+
+
+@router.post(
+    "/api-keys/{id}/reactivate",
+    response_model=ApiKeyV2,
+    responses=_error_responses([400, 401, 403, 404, 429]),
+)
+async def reactivate_api_key_admin(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    try:
+        return await lifecycle.reactivate_key(key_id=id, skip_manage_authorization=True)
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc)
+
+
+@router.post(
+    "/api-keys/{id}/rotate",
+    response_model=ApiKeyCreatedResponse,
+    responses=_error_responses([400, 401, 403, 404, 429]),
+)
+async def rotate_api_key_admin(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    try:
+        return await lifecycle.rotate_key(
+            key_id=id,
+            skip_manage_authorization=True,
+        )
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc)

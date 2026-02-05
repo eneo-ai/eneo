@@ -272,6 +272,19 @@ class Settings(BaseSettings):
     api_prefix: str
     api_key_length: int
     api_key_header_name: str
+    api_key_hash_secret: Optional[str] = None
+    api_key_last_used_min_interval_seconds: int = 900
+    api_key_used_audit_sample_rate: float = 0.0
+    api_key_rotation_grace_hours: int = 24
+    api_key_legacy_endpoints_enabled: bool = True
+    api_key_rate_limit_window_seconds: int = 3600
+    api_key_rate_limit_fail_open: bool = True
+    api_key_rate_limit_tenant_default: int = 10000
+    api_key_rate_limit_space_default: int = 5000
+    api_key_rate_limit_assistant_default: int = 1000
+    api_key_rate_limit_app_default: int = 1000
+    trusted_proxy_count: int = 0
+    trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str
     jwt_issuer: str
     jwt_expiry_time: int
@@ -646,7 +659,7 @@ def get_settings() -> Settings:
     """
     global _settings
     if _settings is None:
-        _settings = Settings()
+        _settings = Settings()  # pyright: ignore[reportCallIssue]
     return _settings
 
 

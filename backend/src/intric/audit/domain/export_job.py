@@ -76,7 +76,9 @@ class ExportJob(BaseModel):
             "cancelled": self.cancelled,
             "created_at": self.created_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
             "expires_at": self.expires_at.isoformat(),
         }
 
@@ -96,8 +98,12 @@ class ExportJob(BaseModel):
             error_message=data.get("error_message"),
             cancelled=data.get("cancelled", False),
             created_at=datetime.fromisoformat(data["created_at"]),
-            started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
-            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            started_at=datetime.fromisoformat(data["started_at"])
+            if data.get("started_at")
+            else None,
+            completed_at=datetime.fromisoformat(data["completed_at"])
+            if data.get("completed_at")
+            else None,
             expires_at=datetime.fromisoformat(data["expires_at"]),
         )
 

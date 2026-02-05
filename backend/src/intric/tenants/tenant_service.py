@@ -70,12 +70,25 @@ class TenantService:
 
         return await self.repo.delete_tenant_by_id(tenant_id)
 
-    async def update_tenant(self, tenant_update: TenantUpdatePublic, id: UUID) -> TenantInDB:
+    async def update_tenant(
+        self, tenant_update: TenantUpdatePublic, id: UUID
+    ) -> TenantInDB:
         tenant = await self.get_tenant_by_id(id)
         self._validate(tenant, id)
 
-        tenant_update = TenantUpdate(**tenant_update.model_dump(exclude_unset=True), id=tenant.id)
+        tenant_update = TenantUpdate(
+            **tenant_update.model_dump(exclude_unset=True), id=tenant.id
+        )
         return await self.repo.update_tenant(tenant_update)
+
+    async def update_api_key_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get_tenant_by_id(tenant_id)
+        self._validate(tenant, tenant_id)
+        return await self.repo.update_api_key_policy(tenant_id, policy_updates)
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         return await self.repo.add_modules(list_of_module_ids, tenant_id)
@@ -125,7 +138,9 @@ class TenantService:
                 self.api_version = api_version
                 self.deployment_name = deployment_name
 
-        credential_data = CredentialData(api_key, endpoint, api_version, deployment_name)
+        credential_data = CredentialData(
+            api_key, endpoint, api_version, deployment_name
+        )
 
         # Validate provider-specific fields
         validation_errors = validate_provider_credentials(
@@ -261,7 +276,7 @@ class TenantService:
         for provider, metadata in credentials_metadata.items():
             credential_data = tenant_credentials.get(provider, {})
             config: dict[str, Any] = {}
-            configured_at: datetime = tenant.updated_at
+            configured_at: datetime | None = tenant.updated_at
 
             if isinstance(credential_data, dict):
                 # Extract config (all fields except sensitive ones)
@@ -272,7 +287,9 @@ class TenantService:
                 }
 
                 # Extract timestamp
-                timestamp_candidate = metadata.get("set_at") or credential_data.get("set_at")
+                timestamp_candidate = metadata.get("set_at") or credential_data.get(
+                    "set_at"
+                )
                 if not timestamp_candidate:
                     timestamp_candidate = credential_data.get("encrypted_at")
 
@@ -282,13 +299,15 @@ class TenantService:
                     except ValueError:
                         configured_at = tenant.updated_at
 
-            credentials.append({
-                "provider": provider,
-                "masked_key": metadata["masked_key"],
-                "configured_at": configured_at,
-                "encryption_status": metadata["encryption_status"],
-                "config": config,
-            })
+            credentials.append(
+                {
+                    "provider": provider,
+                    "masked_key": metadata["masked_key"],
+                    "configured_at": configured_at,
+                    "encryption_status": metadata["encryption_status"],
+                    "config": config,
+                }
+            )
 
         return credentials
 

@@ -7,20 +7,29 @@ from uuid import UUID
 
 import bcrypt
 import jwt
+import sqlalchemy as sa
 from pydantic import ValidationError
 
 from intric.authentication.api_key_repo import ApiKeysRepository
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKey,
     ApiKeyCreated,
+    ApiKeyHashVersion,
     JWTCreds,
     JWTMeta,
     JWTPayload,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
 )
 from intric.main.config import get_settings
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
 from intric.users.user import UserBase, UserInDB
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.users_table import Users
 
 logger = get_logger(__name__)
 
@@ -32,8 +41,13 @@ OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
 
 class AuthService:
-    def __init__(self, api_key_repo: ApiKeysRepository):
+    def __init__(
+        self,
+        api_key_repo: ApiKeysRepository,
+        api_key_v2_repo: ApiKeysV2Repository | None = None,
+    ):
         self.api_key_repo = api_key_repo
+        self.api_key_v2_repo = api_key_v2_repo
 
     # Dummy hash for timing attack mitigation
     # Pre-computed bcrypt hash of a random string to ensure constant-time password verification
@@ -82,7 +96,7 @@ class AuthService:
         secret_key: str = str(JWT_SECRET),
         audience: str = JWT_AUDIENCE,
         expires_in: int = JWT_EXPIRY_TIME_MINUTES,
-    ) -> str:
+    ) -> str | None:
         if not user or not isinstance(user, UserBase):
             return None
 
@@ -135,6 +149,9 @@ class AuthService:
             await self.api_key_repo.delete_by_user(user_id)
 
         await self.api_key_repo.add(api_key=key_to_save, user_id=user_id)
+        await self._create_v2_legacy_record_for_user(
+            api_key=api_key, prefix=prefix, user_id=user_id
+        )
 
         return api_key
 
@@ -153,8 +170,88 @@ class AuthService:
             await self.api_key_repo.delete_by_assistant(assistant_id)
 
         await self.api_key_repo.add(api_key=key_to_save, assistant_id=assistant_id)
+        await self._create_v2_legacy_record_for_assistant(
+            api_key=api_key, prefix=prefix, assistant_id=assistant_id
+        )
 
         return api_key
+
+    async def _create_v2_legacy_record_for_user(
+        self, *, api_key: ApiKeyCreated, prefix: str, user_id: UUID
+    ) -> None:
+        if self.api_key_v2_repo is None:
+            return
+        tenant_id = await self._get_user_tenant_id(user_id)
+        await self.api_key_v2_repo.create(
+            tenant_id=tenant_id,
+            owner_user_id=user_id,
+            created_by_user_id=user_id,
+            scope_type=ApiKeyScopeType.TENANT.value,
+            scope_id=None,
+            permission=ApiKeyPermission.WRITE.value,
+            key_type=ApiKeyType.SK.value,
+            key_hash=api_key.hashed_key,
+            hash_version=ApiKeyHashVersion.SHA256.value,
+            key_prefix=self._normalize_prefix(api_key.key, fallback=prefix),
+            key_suffix=api_key.truncated_key,
+            name="Legacy API key",
+            description=None,
+            state=ApiKeyState.ACTIVE.value,
+        )
+
+    async def _create_v2_legacy_record_for_assistant(
+        self, *, api_key: ApiKeyCreated, prefix: str, assistant_id: int
+    ) -> None:
+        if self.api_key_v2_repo is None:
+            return
+        tenant_id, owner_user_id = await self._get_assistant_owner_and_tenant(
+            assistant_id
+        )
+        await self.api_key_v2_repo.create(
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            created_by_user_id=owner_user_id,
+            scope_type=ApiKeyScopeType.ASSISTANT.value,
+            scope_id=assistant_id,
+            permission=ApiKeyPermission.READ.value,
+            key_type=ApiKeyType.SK.value,
+            key_hash=api_key.hashed_key,
+            hash_version=ApiKeyHashVersion.SHA256.value,
+            key_prefix=self._normalize_prefix(api_key.key, fallback=prefix),
+            key_suffix=api_key.truncated_key,
+            name="Legacy Assistant API key",
+            description=None,
+            state=ApiKeyState.ACTIVE.value,
+        )
+
+    async def _get_user_tenant_id(self, user_id: UUID) -> UUID:
+        stmt = sa.select(Users.tenant_id).where(Users.id == user_id).limit(1)
+        record = await self.api_key_repo.session.execute(stmt)
+        row = record.first()
+        if row is None:
+            raise AuthenticationException("No authenticated user.")
+        return row.tenant_id
+
+    async def _get_assistant_owner_and_tenant(
+        self, assistant_id: int
+    ) -> tuple[UUID, UUID]:
+        stmt = (
+            sa.select(Assistants.user_id, Users.tenant_id)
+            .join(Users, Users.id == Assistants.user_id)
+            .where(Assistants.id == assistant_id)
+            .limit(1)
+        )
+        record = await self.api_key_repo.session.execute(stmt)
+        row = record.first()
+        if row is None:
+            raise AuthenticationException("No authenticated user.")
+        return row.tenant_id, row.user_id
+
+    @staticmethod
+    def _normalize_prefix(plain_key: str, *, fallback: str) -> str:
+        if "_" in plain_key:
+            return f"{plain_key.split('_', 1)[0]}_"
+        return f"{fallback}_"
 
     async def get_api_key(self, plain_key: str, *, hash_key: bool = True):
         if hash_key:
@@ -164,7 +261,7 @@ class AuthService:
 
         return await self.api_key_repo.get(key)
 
-    def get_username_from_token(self, token: str, secret_key: str) -> str:
+    def get_username_from_token(self, token: str, secret_key: str) -> str | None:
         return self.get_jwt_payload(token, key=str(secret_key)).username
 
     def get_jwt_payload(
@@ -299,7 +396,9 @@ class AuthService:
                     iat_claim = unverified_claims.get("iat")
                     if isinstance(iat_claim, (int, float)):
                         drift_seconds = iat_claim - server_dt.timestamp()
-                        iat_iso = datetime.fromtimestamp(iat_claim, tz=timezone.utc).isoformat()
+                        iat_iso = datetime.fromtimestamp(
+                            iat_claim, tz=timezone.utc
+                        ).isoformat()
                 except Exception:
                     # Best-effort diagnostics only
                     pass

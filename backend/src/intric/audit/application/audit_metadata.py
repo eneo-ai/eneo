@@ -32,7 +32,7 @@ Security considerations:
 - Use IDs instead of names where possible for data minimization
 """
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from uuid import UUID
 
 
@@ -43,11 +43,11 @@ class AuditMetadata:
     def standard(
         actor: Any,
         target: Any,
-        changes: Optional[dict] = None,
-        extra: Optional[dict] = None,
+        changes: Optional[Mapping[str, object]] = None,
+        extra: Optional[Mapping[str, object]] = None,
         space: Optional[Any] = None,
         tenant: Optional[Any] = None,
-    ) -> dict:
+    ) -> Mapping[str, object]:
         """
         Create standard audit metadata with actor and target snapshots.
 
@@ -131,8 +131,8 @@ class AuditMetadata:
         actor: Any,
         targets: list[Any],
         operation: str,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> Mapping[str, object]:
         """
         Create metadata for operations affecting multiple entities.
 
@@ -194,8 +194,8 @@ class AuditMetadata:
         description: str,
         target: Optional[Any] = None,
         affected_count: Optional[int] = None,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> Mapping[str, object]:
         """
         Create metadata for system-initiated actions.
 
@@ -307,8 +307,8 @@ class AuditMetadata:
     def minimal(
         actor_id: UUID,
         target_id: UUID,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> Mapping[str, object]:
         """
         Create minimal metadata with just IDs (data minimization).
 

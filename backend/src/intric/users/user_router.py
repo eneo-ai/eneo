@@ -535,14 +535,30 @@ async def get_currently_authenticated_user(
     current_user: UserInDB = Depends(
         auth_dependencies.get_current_active_user_with_quota
     ),
+    container: Container = Depends(get_container()),
 ):
-    truncated_key = (
-        current_user.api_key.truncated_key if current_user.api_key is not None else None
+    api_key_repo = container.api_key_v2_repo()
+    latest_key = await api_key_repo.get_latest_active_by_owner(
+        tenant_id=current_user.tenant_id, owner_user_id=current_user.id
     )
+    truncated_key = latest_key.key_suffix if latest_key is not None else None
+    if truncated_key is None and current_user.api_key is not None:
+        truncated_key = current_user.api_key.truncated_key
     return UserPublic(**current_user.model_dump(), truncated_api_key=truncated_key)
 
 
-@router.get("/api-keys/", response_model=ApiKey)
+@router.post(
+    "/api-keys/",
+    response_model=ApiKey,
+    deprecated=True,
+    description=("Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys."),
+)
+@router.get(
+    "/api-keys/",
+    response_model=ApiKey,
+    deprecated=True,
+    description=("Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys."),
+)
 async def generate_api_key(
     current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
     container: Container = Depends(get_container()),
@@ -550,6 +566,15 @@ async def generate_api_key(
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
     after which only the truncated key will be shown."""
+    settings = config.get_settings()
+    if not settings.api_key_legacy_endpoints_enabled:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "deprecated_endpoint",
+                "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+            },
+        )
     service = container.user_service()
 
     # Generate API key
