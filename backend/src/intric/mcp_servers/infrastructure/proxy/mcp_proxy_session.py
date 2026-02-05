@@ -11,6 +11,7 @@ Provides:
 import asyncio
 import re
 import time
+from types import TracebackType
 from typing import Any
 from uuid import UUID
 
@@ -290,7 +291,7 @@ class MCPProxySession:
             await asyncio.gather(*connect_tasks, return_exceptions=True)
 
         # Execute all tool calls in parallel
-        async def execute_single(tool_name: str, arguments: dict) -> dict[str, Any]:
+        async def execute_single(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             try:
                 return await self.call_tool(tool_name, arguments)
             except Exception as e:
@@ -332,6 +333,11 @@ class MCPProxySession:
         """Async context manager entry - no connections yet (lazy)."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit - close all connections."""
         await self.close()

@@ -188,13 +188,13 @@ async def create_mcp_server(
 
     result = await service.create_mcp_server(
         name=data.name,
-        http_url=data.http_url,
+        http_url=str(data.http_url),
         http_auth_type=data.http_auth_type,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
-        icon_url=data.icon_url,
-        documentation_url=data.documentation_url,
+        icon_url=str(data.icon_url) if data.icon_url else None,
+        documentation_url=str(data.documentation_url) if data.documentation_url else None,
     )
 
     # If connection failed, return 400 error with message
@@ -230,13 +230,13 @@ async def update_mcp_server(
     mcp_server = await service.update_mcp_server(
         mcp_server_id=id,
         name=data.name,
-        http_url=data.http_url,
+        http_url=str(data.http_url) if data.http_url else None,
         http_auth_type=data.http_auth_type,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
-        icon_url=data.icon_url,
-        documentation_url=data.documentation_url,
+        icon_url=str(data.icon_url) if data.icon_url else None,
+        documentation_url=str(data.documentation_url) if data.documentation_url else None,
     )
     return assembler.from_domain_to_model(mcp_server)
 

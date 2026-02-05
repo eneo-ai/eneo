@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from types import TracebackType
 from typing import Any
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -31,12 +32,13 @@ class MCPManager:
         env_vars_map = env_vars_map or {}
 
         # Connect to all servers in parallel
-        connection_tasks = []
+        connection_tasks: list[asyncio.Task[None]] = []
         for server in mcp_servers:
             env_vars = env_vars_map.get(str(server.id), {})
             client = MCPClient(server, env_vars)
             self.clients[str(server.id)] = client
-            connection_tasks.append(self._connect_and_list_tools(client, str(server.id)))
+            task = asyncio.create_task(self._connect_and_list_tools(client, str(server.id)))
+            connection_tasks.append(task)
 
         # Wait for all connections
         await asyncio.gather(*connection_tasks, return_exceptions=True)
@@ -75,11 +77,11 @@ class MCPManager:
         Returns:
             List of tool definitions in OpenAI function calling format with metadata
         """
-        llm_tools = []
+        llm_tools: list[dict[str, Any]] = []
 
         for tool_name, tool_def in self.tools.items():
             # Convert MCP tool schema to OpenAI function calling format
-            llm_tool = {
+            llm_tool: dict[str, Any] = {
                 "type": "function",
                 "function": {
                     "name": tool_name,
@@ -139,6 +141,11 @@ class MCPManager:
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.disconnect_all()

@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
@@ -69,7 +69,7 @@ class MCPServerService:
         http_url: str,
         http_auth_type: str = "none",
         description: str | None = None,
-        http_auth_config_schema: dict | None = None,
+        http_auth_config_schema: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
@@ -135,7 +135,7 @@ class MCPServerService:
         http_url: str | None = None,
         http_auth_type: str | None = None,
         description: str | None = None,
-        http_auth_config_schema: dict | None = None,
+        http_auth_config_schema: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
@@ -172,7 +172,7 @@ class MCPServerService:
         mcp_server: MCPServer,
         auth_credentials: dict[str, str] | None = None,
         timeout: int = 10,
-    ) -> tuple[list[dict], ConnectionResult]:
+    ) -> tuple[list[dict[str, Any]], ConnectionResult]:
         """
         Test connection to MCP server and discover tools WITHOUT saving to database.
 
@@ -244,7 +244,7 @@ class MCPServerService:
             logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")
 
             # Convert to domain entities and upsert
-            synced_tools = []
+            synced_tools: list[MCPServerTool] = []
             for tool_def in tool_defs:
                 tool = MCPServerTool(
                     mcp_server_id=mcp_server.id,

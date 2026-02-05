@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.main.exceptions import NotFoundException, UnauthorizedException
@@ -30,12 +30,12 @@ class MCPServerSettingsService:
         http_url: str,
         http_auth_type: str = "none",
         description: str | None = None,
-        http_auth_config_schema: dict | None = None,
+        http_auth_config_schema: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
         is_enabled: bool = True,
-        env_vars: dict | None = None,
+        env_vars: dict[str, Any] | None = None,
     ) -> MCPServer:
         """Create a new MCP server for the current tenant (uses Streamable HTTP transport)."""
         mcp_server = MCPServer(
@@ -58,7 +58,7 @@ class MCPServerSettingsService:
         self,
         mcp_server_id: UUID,
         is_org_enabled: bool | None = None,
-        env_vars: dict | None = None,
+        env_vars: dict[str, Any] | None = None,
     ) -> MCPServer:
         """Update MCP server settings (enablement and credentials)."""
         mcp_server = await self.mcp_server_repo.one(id=mcp_server_id)

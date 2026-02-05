@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from intric.database.tables.mcp_server_table import MCPServerSettings as MCPServerSettingsTable
 from intric.mcp_servers.domain.entities.mcp_server import MCPServerSettings
@@ -14,15 +14,15 @@ class MCPServerSettingsMapper:
         return MCPServerSettings(
             tenant_id=table.tenant_id,
             mcp_server_id=table.mcp_server_id,
-            created_at=table.created_at,
-            updated_at=table.updated_at,
+            created_at=table.created_at,  # type: ignore[arg-type]
+            updated_at=table.updated_at,  # type: ignore[arg-type]
             is_org_enabled=table.is_org_enabled,
             env_vars=table.env_vars,
             mcp_server=MCPServerMapper.to_entity(table.mcp_server),
         )
 
     @staticmethod
-    def to_entities(tables: List[MCPServerSettingsTable]) -> List[MCPServerSettings]:
+    def to_entities(tables: Sequence[MCPServerSettingsTable]) -> List[MCPServerSettings]:
         """Convert list of database tables to list of domain entities."""
         return [MCPServerSettingsMapper.to_entity(table) for table in tables]
 

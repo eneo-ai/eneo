@@ -1,4 +1,4 @@
-from typing import Generic, Literal, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, computed_field
@@ -22,7 +22,7 @@ class MCPServerPublic(BaseModel):
     description: Optional[str]
     http_url: str
     http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
-    http_auth_config_schema: Optional[dict]
+    http_auth_config_schema: Optional[dict[str, Any]]
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
@@ -39,7 +39,7 @@ class MCPServerCreate(BaseModel):
     http_url: AnyHttpUrl
     http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
     description: Optional[str] = None
-    http_auth_config_schema: Optional[dict] = None
+    http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
@@ -54,7 +54,7 @@ class MCPServerUpdate(BaseModel):
         None
     )
     description: Optional[str] = None
-    http_auth_config_schema: Optional[dict] = None
+    http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
@@ -86,14 +86,14 @@ class MCPServerSettingsList(BaseListModel[MCPServerSettingsPublic]):
 class MCPServerSettingsCreate(BaseModel):
     """DTO for enabling an MCP server for tenant."""
 
-    env_vars: Optional[dict] = None  # Credentials/tokens for this MCP
+    env_vars: Optional[dict[str, Any]] = None  # Credentials/tokens for this MCP
 
 
 class MCPServerSettingsUpdate(BaseModel):
     """DTO for updating MCP server settings."""
 
     is_org_enabled: Optional[bool] = None
-    env_vars: Optional[dict] = None
+    env_vars: Optional[dict[str, Any]] = None
 
 
 class AssistantMCPServerPublic(BaseModel):
@@ -102,7 +102,7 @@ class AssistantMCPServerPublic(BaseModel):
     mcp_server_id: UUID
     mcp_server_name: str
     enabled: bool
-    config: Optional[dict]
+    config: Optional[dict[str, Any]]
     priority: int
 
 
@@ -110,7 +110,7 @@ class AssistantMCPServerUpdate(BaseModel):
     """DTO for updating assistant MCP association."""
 
     enabled: Optional[bool] = None
-    config: Optional[dict] = None
+    config: Optional[dict[str, Any]] = None
     priority: Optional[int] = None
 
 
@@ -121,7 +121,7 @@ class MCPServerToolPublic(BaseModel):
     mcp_server_id: UUID
     name: str
     description: Optional[str]
-    input_schema: Optional[dict]
+    input_schema: Optional[dict[str, Any]]
     is_enabled_by_default: bool
 
 

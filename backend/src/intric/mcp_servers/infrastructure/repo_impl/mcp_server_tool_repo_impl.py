@@ -95,6 +95,8 @@ class MCPServerToolRepoImpl(
         result = await self.session.scalar(stmt)
         await self.session.flush()
 
+        if result is None:
+            raise ValueError("Failed to upsert MCP server tool")
         return self.mapper.to_entity(result)
 
     async def delete_by_server(self, mcp_server_id: UUID) -> None:

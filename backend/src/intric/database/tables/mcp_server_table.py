@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Text, Boolean, UniqueConstraint
@@ -11,7 +11,7 @@ from intric.database.tables.tenant_table import Tenants
 
 class MCPServers(BasePublic):
     """Tenant MCP server catalog (HTTP-only)."""
-    __tablename__ = "mcp_servers"
+    __tablename__ = "mcp_servers"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint('tenant_id', 'name', name='uq_mcp_servers_tenant_name'),
     )
@@ -25,14 +25,14 @@ class MCPServers(BasePublic):
     # HTTP configuration (uses Streamable HTTP transport - MCP 2025-03-26+ standard)
     http_url: Mapped[str] = mapped_column(String, nullable=False)
     http_auth_type: Mapped[str] = mapped_column(String, nullable=False, server_default='none')
-    http_auth_config_schema: Mapped[Optional[dict]] = mapped_column(JSONB)
+    http_auth_config_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
 
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(Boolean, server_default='True', nullable=False)
-    env_vars: Mapped[Optional[dict]] = mapped_column(JSONB)  # Encrypted tenant credentials
+    env_vars: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)  # Encrypted tenant credentials
 
     # Metadata
-    tags: Mapped[Optional[list]] = mapped_column(JSONB)  # ["documentation", "code-search", etc.]
+    tags: Mapped[Optional[list[str]]] = mapped_column(JSONB)  # ["documentation", "code-search", etc.]
     icon_url: Mapped[Optional[str]] = mapped_column(String)
     documentation_url: Mapped[Optional[str]] = mapped_column(String)
 
@@ -45,7 +45,7 @@ class MCPServers(BasePublic):
 
 class MCPServerTools(BasePublic):
     """Tool catalog for MCP servers."""
-    __tablename__ = "mcp_server_tools"
+    __tablename__ = "mcp_server_tools"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint('mcp_server_id', 'name', name='uq_mcp_server_tools_server_name'),
     )
@@ -55,7 +55,7 @@ class MCPServerTools(BasePublic):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    input_schema: Mapped[Optional[dict]] = mapped_column(JSONB)
+    input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     is_enabled_by_default: Mapped[bool] = mapped_column(Boolean, server_default="True", nullable=False)
 
     # Relationships
@@ -64,7 +64,7 @@ class MCPServerTools(BasePublic):
 
 class MCPServerToolSettings(BaseCrossReference):
     """Tenant-level tool permissions."""
-    __tablename__ = "mcp_server_tool_settings"
+    __tablename__ = "mcp_server_tool_settings"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True
@@ -79,9 +79,27 @@ class MCPServerToolSettings(BaseCrossReference):
     tool: Mapped[MCPServerTools] = relationship()
 
 
+class MCPServerSettings(BaseCrossReference):
+    """Tenant-level MCP server settings (org-wide configuration)."""
+    __tablename__ = "mcp_server_settings"  # type: ignore[assignment]
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True
+    )
+    mcp_server_id: Mapped[UUID] = mapped_column(
+        ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
+    )
+
+    is_org_enabled: Mapped[bool] = mapped_column(Boolean, server_default="True", nullable=False)
+    env_vars: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)  # Org-level credentials
+
+    # Relationships
+    mcp_server: Mapped[MCPServers] = relationship()
+
+
 class SpacesMCPServers(BaseCrossReference):
     """Space-level MCP server selection."""
-    __tablename__ = "spaces_mcp_servers"
+    __tablename__ = "spaces_mcp_servers"  # type: ignore[assignment]
 
     space_id: Mapped[UUID] = mapped_column(
         ForeignKey("spaces.id", ondelete="CASCADE"), primary_key=True
@@ -93,7 +111,7 @@ class SpacesMCPServers(BaseCrossReference):
 
 class SpacesMCPServerTools(BaseCrossReference):
     """Space-level tool permissions."""
-    __tablename__ = "spaces_mcp_server_tools"
+    __tablename__ = "spaces_mcp_server_tools"  # type: ignore[assignment]
 
     space_id: Mapped[UUID] = mapped_column(
         ForeignKey("spaces.id", ondelete="CASCADE"), primary_key=True

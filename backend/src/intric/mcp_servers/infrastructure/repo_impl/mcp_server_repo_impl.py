@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.future import select
@@ -30,7 +31,9 @@ class MCPServerRepoImpl(
 
         return self.mapper.to_entities(result)
 
-    async def query(self, tags: list[str] | None = None) -> list[MCPServer]:
+    async def query(  # type: ignore[override]
+        self, tags: list[str] | None = None, **filters: object
+    ) -> list[MCPServer]:
         """Query MCP servers with optional tag filtering."""
         query = select(self._db_model)
 
@@ -40,6 +43,9 @@ class MCPServerRepoImpl(
                 sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])
             )
 
+        if filters:
+            query = query.filter_by(**filters)
+
         result = await self.session.scalars(query)
         result = result.all()
         if not result:
@@ -47,7 +53,7 @@ class MCPServerRepoImpl(
 
         return self.mapper.to_entities(result)
 
-    async def query_by_tenant(self, tenant_id) -> list[MCPServer]:
+    async def query_by_tenant(self, tenant_id: UUID) -> list[MCPServer]:
         """Get all MCP servers for a specific tenant with tools loaded."""
         query = (
             select(self._db_model)

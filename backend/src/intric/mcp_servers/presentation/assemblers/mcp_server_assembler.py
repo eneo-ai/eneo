@@ -1,3 +1,5 @@
+from typing import Any
+
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.mcp_servers.presentation.models import (
     MCPServerList,
@@ -12,7 +14,7 @@ class MCPServerAssembler:
     """Assembler for converting MCP domain entities to presentation DTOs."""
 
     @staticmethod
-    def to_dict_with_tools(mcp_server: MCPServer) -> dict:
+    def to_dict_with_tools(mcp_server: MCPServer) -> dict[str, Any]:
         """Convert MCPServer with tools to dict format (for assistant/space responses)."""
         # Sort tools by name for consistent ordering
         sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)

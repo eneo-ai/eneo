@@ -1,6 +1,7 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
 import asyncio
+from types import TracebackType
 from typing import Any, Optional
 
 from mcp import ClientSession
@@ -47,7 +48,7 @@ class MCPClient:
 
     def _build_auth_headers(self) -> dict[str, str]:
         """Build authentication headers based on server auth type."""
-        headers = {}
+        headers: dict[str, str] = {}
 
         if self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
@@ -159,7 +160,7 @@ class MCPClient:
 
         try:
             response = await self.session.list_tools()
-            tools = []
+            tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
                 tools.append({
@@ -193,32 +194,31 @@ class MCPClient:
             response = await self.session.call_tool(tool_name, arguments=arguments)
 
             # Extract content from response
-            result = {
-                "content": [],
-                "is_error": False,
-            }
+            content_list: list[dict[str, Any]] = []
 
             for content_item in response.content:
                 if content_item.type == "text":
-                    result["content"].append({
+                    content_list.append({
                         "type": "text",
                         "text": content_item.text,
                     })
                 elif content_item.type == "image":
-                    result["content"].append({
+                    content_list.append({
                         "type": "image",
                         "data": content_item.data,
                         "mime_type": content_item.mimeType,
                     })
                 elif content_item.type == "resource":
-                    result["content"].append({
+                    content_list.append({
                         "type": "resource",
-                        "uri": content_item.uri,
-                        "text": content_item.text if hasattr(content_item, "text") else None,
+                        "uri": getattr(content_item, "uri", None),
+                        "text": getattr(content_item, "text", None),
                     })
 
-            if response.isError:
-                result["is_error"] = True
+            result: dict[str, Any] = {
+                "content": content_list,
+                "is_error": bool(response.isError),
+            }
 
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
@@ -262,6 +262,11 @@ class MCPClient:
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.disconnect()

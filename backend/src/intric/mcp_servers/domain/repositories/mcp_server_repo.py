@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -9,13 +9,18 @@ if TYPE_CHECKING:
 class MCPServerRepository(ABC):
     """Abstract repository for MCP server operations."""
 
+    # Session for direct SQL operations (implementation detail exposed for service layer)
+    session: Any
+
     @abstractmethod
     async def all(self) -> list["MCPServer"]:
         """Get all MCP servers."""
         ...
 
     @abstractmethod
-    async def query(self, tags: list[str] | None = None) -> list["MCPServer"]:
+    async def query(
+        self, tags: list[str] | None = None, **filters: object
+    ) -> list["MCPServer"]:
         """Query MCP servers with optional tag filtering."""
         ...
 
