@@ -59,7 +59,9 @@ class ApiKeyAuthResolver:
         settings = get_settings()
         self.hash_secret = settings.api_key_hash_secret or settings.jwt_secret
 
-    async def resolve(self, plain_key: str) -> ResolvedApiKey:
+    async def resolve(
+        self, plain_key: str, expected_tenant_id: UUID | None = None
+    ) -> ResolvedApiKey:
         if not plain_key:
             raise ApiKeyValidationError(
                 status_code=401,
@@ -75,11 +77,15 @@ class ApiKeyAuthResolver:
                 message="API key format is invalid.",
             )
 
-        resolved = await self._resolve_from_v2(plain_key, prefix)
+        resolved = await self._resolve_from_v2(
+            plain_key, prefix, expected_tenant_id=expected_tenant_id
+        )
         if resolved is not None:
             return resolved
 
-        resolved = await self._resolve_from_legacy(plain_key, prefix)
+        resolved = await self._resolve_from_legacy(
+            plain_key, prefix, expected_tenant_id=expected_tenant_id
+        )
         if resolved is not None:
             return resolved
 
@@ -90,13 +96,17 @@ class ApiKeyAuthResolver:
         )
 
     async def _resolve_from_v2(
-        self, plain_key: str, prefix: str
+        self,
+        plain_key: str,
+        prefix: str,
+        expected_tenant_id: UUID | None = None,
     ) -> ResolvedApiKey | None:
         hmac_hash = self._hash_hmac(plain_key)
         record = await self.api_key_repo.get_by_hash(
             key_hash=hmac_hash,
             hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
             key_prefix=prefix,
+            tenant_id=expected_tenant_id,
         )
         if record is None:
             sha_hash = self._hash_sha256(plain_key)
@@ -104,6 +114,7 @@ class ApiKeyAuthResolver:
                 key_hash=sha_hash,
                 hash_version=ApiKeyHashVersion.SHA256.value,
                 key_prefix=prefix,
+                tenant_id=expected_tenant_id,
             )
             if record is None:
                 return None
@@ -120,6 +131,9 @@ class ApiKeyAuthResolver:
                 )
 
         if record is None:
+            return None
+
+        if expected_tenant_id is not None and record.tenant_id != expected_tenant_id:
             return None
 
         if record.key_prefix != prefix:
@@ -140,12 +154,27 @@ class ApiKeyAuthResolver:
         return ResolvedApiKey(key=record, plain_key=plain_key, prefix=prefix)
 
     async def _resolve_from_legacy(
-        self, plain_key: str, prefix: str
+        self,
+        plain_key: str,
+        prefix: str,
+        expected_tenant_id: UUID | None = None,
     ) -> ResolvedApiKey | None:
         sha_hash = self._hash_sha256(plain_key)
         legacy_record = await self.legacy_repo.get(sha_hash)
         if legacy_record is None:
             return None
+
+        if expected_tenant_id is not None:
+            if legacy_record.user_id is not None:
+                tenant_id, _ = await self._get_user_tenant(legacy_record.user_id)
+            elif legacy_record.assistant_id is not None:
+                tenant_id, _ = await self._get_assistant_context(
+                    legacy_record.assistant_id
+                )
+            else:
+                return None
+            if tenant_id != expected_tenant_id:
+                return None
 
         migrated = await self._migrate_legacy_key(plain_key, legacy_record, prefix)
         return ResolvedApiKey(key=migrated, plain_key=plain_key, prefix=prefix)

@@ -540,9 +540,14 @@ class UserService:
         return await self.repo.get_user_by_username(username)
 
     async def _resolve_api_key(
-        self, api_key: str, request: Request | None = None
+        self,
+        api_key: str,
+        request: Request | None = None,
+        expected_tenant_id: UUID | None = None,
     ) -> tuple["UserInDB", ApiKeyV2InDB]:
-        resolved = await self.api_key_auth_resolver.resolve(api_key)
+        resolved = await self.api_key_auth_resolver.resolve(
+            api_key, expected_tenant_id=expected_tenant_id
+        )
         user = await self.repo.get_user_by_id(resolved.key.owner_user_id)
         if user is None:
             raise ApiKeyValidationError(
@@ -650,7 +655,12 @@ class UserService:
             )
 
     async def _require_api_key_scope_for_assistant(
-        self, *, key: ApiKeyV2InDB, assistant_id: UUID
+        self,
+        *,
+        key: ApiKeyV2InDB,
+        assistant_id: UUID,
+        assistant_space_id: UUID | None = None,
+        assistant_tenant_id: UUID | None = None,
     ) -> None:
         scope_type = ApiKeyScopeType(key.scope_type)
         if scope_type == ApiKeyScopeType.ASSISTANT:
@@ -663,14 +673,24 @@ class UserService:
             return
 
         if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.TENANT):
-            space_id, tenant_id = await self._get_assistant_scope_context(assistant_id)
-            if scope_type == ApiKeyScopeType.SPACE and key.scope_id != space_id:
+            if assistant_space_id is None or assistant_tenant_id is None:
+                (
+                    assistant_space_id,
+                    assistant_tenant_id,
+                ) = await self._get_assistant_scope_context(assistant_id)
+            if (
+                scope_type == ApiKeyScopeType.SPACE
+                and key.scope_id != assistant_space_id
+            ):
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="insufficient_permission",
                     message="API key is not scoped to this assistant's space.",
                 )
-            if scope_type == ApiKeyScopeType.TENANT and key.tenant_id != tenant_id:
+            if (
+                scope_type == ApiKeyScopeType.TENANT
+                and key.tenant_id != assistant_tenant_id
+            ):
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="insufficient_permission",
@@ -859,15 +879,29 @@ class UserService:
         request: Request | None = None,
     ):
         user_in_db = None
+        assistant_space_id: UUID | None = None
+        assistant_tenant_id: UUID | None = None
         if token is not None:
             user_in_db = await self._get_user_from_token(token)
 
         elif api_key is not None:
-            user_in_db, key = await self._resolve_api_key(api_key, request=request)
+            if assistant_id is not None:
+                (
+                    assistant_space_id,
+                    assistant_tenant_id,
+                ) = await self._get_assistant_scope_context(assistant_id)
+            user_in_db, key = await self._resolve_api_key(
+                api_key,
+                request=request,
+                expected_tenant_id=assistant_tenant_id,
+            )
             try:
                 if assistant_id is not None:
                     await self._require_api_key_scope_for_assistant(
-                        key=key, assistant_id=assistant_id
+                        key=key,
+                        assistant_id=assistant_id,
+                        assistant_space_id=assistant_space_id,
+                        assistant_tenant_id=assistant_tenant_id,
                     )
                 self._require_api_key_permission(
                     key=key, required=ApiKeyPermission.READ

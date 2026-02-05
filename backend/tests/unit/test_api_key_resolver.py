@@ -114,6 +114,38 @@ async def test_resolve_returns_v2_hmac_match(resolver: ApiKeyAuthResolver):
 
 
 @pytest.mark.asyncio
+async def test_resolve_passes_expected_tenant_to_lookup(resolver: ApiKeyAuthResolver):
+    tenant_id = uuid4()
+    key = _make_v2_key(
+        key_prefix=ApiKeyType.SK.value,
+        key_type=ApiKeyType.SK,
+        tenant_id=tenant_id,
+    )
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+
+    await resolver.resolve("sk_abc123", expected_tenant_id=tenant_id)
+
+    assert resolver.api_key_repo.get_by_hash.await_count == 1
+    first_call = resolver.api_key_repo.get_by_hash.await_args_list[0]
+    assert first_call.kwargs["tenant_id"] == tenant_id
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_v2_key_outside_expected_tenant(
+    resolver: ApiKeyAuthResolver,
+):
+    resolver.api_key_repo.get_by_hash = AsyncMock(
+        return_value=_make_v2_key(tenant_id=uuid4())
+    )
+    resolver.legacy_repo.get = AsyncMock(return_value=None)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123", expected_tenant_id=uuid4())
+
+    assert exc.value.code == "invalid_api_key"
+
+
+@pytest.mark.asyncio
 async def test_resolve_migrates_sha_record_to_hmac(resolver: ApiKeyAuthResolver):
     key = _make_v2_key(
         hash_version=ApiKeyHashVersion.SHA256.value,

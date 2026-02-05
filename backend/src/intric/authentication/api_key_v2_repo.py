@@ -42,12 +42,15 @@ class ApiKeysV2Repository:
         key_hash: str,
         hash_version: Optional[str] = None,
         key_prefix: Optional[str] = None,
+        tenant_id: UUID | None = None,
     ) -> Optional[ApiKeyV2InDB]:
         query = sa.select(self.table).where(self.table.key_hash == key_hash)
         if hash_version is not None:
             query = query.where(self.table.hash_version == hash_version)
         if key_prefix is not None:
             query = query.where(self.table.key_prefix == key_prefix)
+        if tenant_id is not None:
+            query = query.where(self.table.tenant_id == tenant_id)
         record = await self.session.scalar(query)
 
         if record is None:
