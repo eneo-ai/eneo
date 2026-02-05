@@ -1,27 +1,31 @@
-import type { CompletionModel } from "@intric/intric-js";
+import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
 
-export type ModelGroup = {
+// Model with provider info
+type ModelWithProvider = (CompletionModel | TranscriptionModel) & {
+  provider_id?: string | null;
+  provider_name?: string | null;
+  provider_type?: string | null;
+};
+
+export type ModelGroup<T extends ModelWithProvider = ModelWithProvider> = {
   id: string | null;
   label: string;
   providerType: string | null;
-  models: CompletionModel[];
+  models: T[];
 };
 
 /**
- * Groups completion models by their provider.
+ * Groups models by their provider.
  * System models (provider_id === null) are placed in a separate group at the top.
  * Provider groups are sorted alphabetically by provider name.
  * Models within each group are sorted by nickname.
  */
-export function groupModelsByProvider(
-  models: CompletionModel[],
+export function groupModelsByProvider<T extends ModelWithProvider>(
+  models: T[],
   systemModelsLabel: string
-): ModelGroup[] {
-  const systemModels: CompletionModel[] = [];
-  const providerMap = new Map<
-    string,
-    { name: string; type: string | null; models: CompletionModel[] }
-  >();
+): ModelGroup<T>[] {
+  const systemModels: T[] = [];
+  const providerMap = new Map<string, { name: string; type: string | null; models: T[] }>();
 
   for (const model of models) {
     if (!model.provider_id) {
@@ -39,7 +43,7 @@ export function groupModelsByProvider(
     }
   }
 
-  const groups: ModelGroup[] = [];
+  const groups: ModelGroup<T>[] = [];
 
   // Add system models group first if there are any
   if (systemModels.length > 0) {

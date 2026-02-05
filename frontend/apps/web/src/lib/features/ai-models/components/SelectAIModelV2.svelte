@@ -18,14 +18,16 @@
 
   export let aria: AriaProps = { "aria-label": m.select_ai_model() };
 
-  // Check if this is a CompletionModel list (has provider info)
-  function isCompletionModelList(models: T[]): models is CompletionModel[] {
-    return models.length > 0 && "provider_id" in models[0];
+  // Check if models have provider info (provider_name field exists and at least one model has a provider)
+  function hasProviderInfo(models: T[]): boolean {
+    if (models.length === 0) return false;
+    // Check if provider_name field exists in the model type
+    return "provider_name" in models[0];
   }
 
-  // Group models by provider if they are CompletionModels
-  $: modelGroups = isCompletionModelList(availableModels)
-    ? groupModelsByProvider(availableModels, m.model_group_system())
+  // Group models by provider if they have provider info
+  $: modelGroups = hasProviderInfo(availableModels)
+    ? groupModelsByProvider(availableModels as (T & { provider_id?: string | null; provider_name?: string | null; provider_type?: string | null })[], m.model_group_system())
     : null;
 
   const {
