@@ -18,6 +18,7 @@ from pydantic_core import core_schema
 from intric.main.exceptions import ErrorCodes
 
 T = TypeVar("T")
+_M = TypeVar("_M", bound=BaseModel)
 
 
 # Sentinel class to distinguish between "not provided" and "explicitly set to None"
@@ -62,7 +63,7 @@ class ResourcePermission(Enum):
 
 
 # Taken from https://stackoverflow.com/questions/67699451/make-every-field-as-optional-with-pydantic
-def partial_model(model: Type[BaseModel]):
+def partial_model(model: Type[_M]) -> Type[_M]:
     def make_field_optional(
         field: FieldInfo, default: Any = None
     ) -> Tuple[Any, FieldInfo]:
@@ -73,7 +74,7 @@ def partial_model(model: Type[BaseModel]):
         return new.annotation, new
 
     return cast(
-        type[BaseModel],
+        Type[_M],
         cast(Any, create_model)(
             f"Partial{model.__name__}",
             __base__=model,

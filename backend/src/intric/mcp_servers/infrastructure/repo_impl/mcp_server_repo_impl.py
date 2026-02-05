@@ -25,11 +25,11 @@ class MCPServerRepoImpl(
     async def all(self) -> list[MCPServer]:
         query = select(self._db_model)
         result = await self.session.scalars(query)
-        result = result.all()
-        if not result:
+        records = result.all()
+        if not records:
             return []
 
-        return self.mapper.to_entities(result)
+        return self.mapper.to_entities(records)
 
     async def query(  # type: ignore[override]
         self, tags: list[str] | None = None, **filters: object
@@ -40,18 +40,18 @@ class MCPServerRepoImpl(
         if tags:
             # Filter by tags using JSONB contains operator
             query = query.where(
-                sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])
+                sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])  # type: ignore[union-attr]
             )
 
         if filters:
             query = query.filter_by(**filters)
 
         result = await self.session.scalars(query)
-        result = result.all()
-        if not result:
+        records = result.all()
+        if not records:
             return []
 
-        return self.mapper.to_entities(result)
+        return self.mapper.to_entities(records)
 
     async def query_by_tenant(self, tenant_id: UUID) -> list[MCPServer]:
         """Get all MCP servers for a specific tenant with tools loaded."""
@@ -61,8 +61,8 @@ class MCPServerRepoImpl(
             .options(selectinload(self._db_model.tools))
         )
         result = await self.session.scalars(query)
-        result = result.all()
-        if not result:
+        records = result.all()
+        if not records:
             return []
 
-        return self.mapper.to_entities(result)
+        return self.mapper.to_entities(records)

@@ -25,11 +25,11 @@ class MCPServerToolRepoImpl(
     async def all(self) -> list[MCPServerTool]:
         query = select(self._db_model)
         result = await self.session.scalars(query)
-        result = result.all()
-        if not result:
+        records = result.all()
+        if not records:
             return []
 
-        return self.mapper.to_entities(result)
+        return self.mapper.to_entities(records)
 
     async def by_server(self, mcp_server_id: UUID) -> list[MCPServerTool]:
         """Get all tools for a specific MCP server, ordered by name."""
@@ -39,11 +39,11 @@ class MCPServerToolRepoImpl(
             .order_by(self._db_model.name)
         )
         result = await self.session.scalars(query)
-        result = result.all()
-        if not result:
+        records = result.all()
+        if not records:
             return []
 
-        return self.mapper.to_entities(result)
+        return self.mapper.to_entities(records)
 
     async def find_by_name(self, mcp_server_id: UUID, name: str) -> MCPServerTool | None:
         """Find a tool by server ID and name."""
@@ -70,8 +70,8 @@ class MCPServerToolRepoImpl(
         result = await self.session.scalars(stmt)
         await self.session.flush()
 
-        tools = result.all()
-        return self.mapper.to_entities(tools)
+        records = result.all()
+        return self.mapper.to_entities(records)
 
     async def upsert_by_server_and_name(self, obj: MCPServerTool) -> MCPServerTool:
         """Upsert a tool (update if exists by server+name, insert otherwise)."""
@@ -92,12 +92,12 @@ class MCPServerToolRepoImpl(
             .returning(self._db_model)
         )
 
-        result = await self.session.scalar(stmt)
+        record = await self.session.scalar(stmt)
         await self.session.flush()
 
-        if result is None:
+        if record is None:
             raise ValueError("Failed to upsert MCP server tool")
-        return self.mapper.to_entity(result)
+        return self.mapper.to_entity(record)
 
     async def delete_by_server(self, mcp_server_id: UUID) -> None:
         """Delete all tools for a specific MCP server."""

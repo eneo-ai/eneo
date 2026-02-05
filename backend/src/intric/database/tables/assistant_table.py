@@ -129,7 +129,7 @@ class AssistantMCPServers(BaseCrossReference):
     Note: MCP servers are accessed via `Assistants.mcp_servers` (direct many-to-many).
     This association table follows the same pattern as AssistantsGroups/AssistantsWebsites.
     """
-    __tablename__ = "assistant_mcp_servers"
+    __tablename__ = "assistant_mcp_servers"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
@@ -141,7 +141,7 @@ class AssistantMCPServers(BaseCrossReference):
 
 class AssistantMCPServerTools(BaseCrossReference):
     """Assistant-level tool permissions."""
-    __tablename__ = "assistant_mcp_server_tools"
+    __tablename__ = "assistant_mcp_server_tools"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True

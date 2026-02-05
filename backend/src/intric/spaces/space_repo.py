@@ -843,7 +843,7 @@ class SpaceRepository:
                 )
 
                 # Store the filtered entities back on the assistant for the factory
-                assistant._mcp_server_entities = mcp_servers
+                setattr(assistant, '_mcp_server_entities', mcp_servers)
 
         return assistants
 

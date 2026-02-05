@@ -629,12 +629,12 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
 
             # Store context for MCP tool execution in iterate_stream
-            stream._eneo_context = {
+            setattr(stream, '_eneo_context', {
                 'messages': messages,
                 'kwargs': litellm_kwargs,
                 'has_tools': bool(all_tools),
                 'mcp_proxy': mcp_proxy,
-            }
+            })
 
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream connection created successfully"

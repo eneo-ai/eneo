@@ -1,3 +1,8 @@
+# pyright: reportMissingImports=false
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportUntypedFunctionDecorator=false
+"""Example MCP server using FastMCP - requires 'pip install fastmcp' for local testing."""
 from fastmcp import FastMCP
 
 # Create a basic server instance

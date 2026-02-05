@@ -1,6 +1,8 @@
-from typing import Any, Dict, List, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence
 
-from intric.database.tables.mcp_server_table import MCPServerSettings as MCPServerSettingsTable
+if TYPE_CHECKING:
+    from intric.database.tables.mcp_server_table import MCPServerSettings as MCPServerSettingsTable
+
 from intric.mcp_servers.domain.entities.mcp_server import MCPServerSettings
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 
@@ -9,20 +11,20 @@ class MCPServerSettingsMapper:
     """Mapper between MCPServerSettings table and MCPServerSettings domain entity."""
 
     @staticmethod
-    def to_entity(table: MCPServerSettingsTable) -> MCPServerSettings:
+    def to_entity(table: "MCPServerSettingsTable") -> MCPServerSettings:
         """Convert database table to domain entity."""
         return MCPServerSettings(
-            tenant_id=table.tenant_id,
-            mcp_server_id=table.mcp_server_id,
+            tenant_id=table.tenant_id,  # type: ignore[arg-type]
+            mcp_server_id=table.mcp_server_id,  # type: ignore[arg-type]
             created_at=table.created_at,  # type: ignore[arg-type]
             updated_at=table.updated_at,  # type: ignore[arg-type]
-            is_org_enabled=table.is_org_enabled,
-            env_vars=table.env_vars,
-            mcp_server=MCPServerMapper.to_entity(table.mcp_server),
+            is_org_enabled=table.is_org_enabled,  # type: ignore[arg-type]
+            env_vars=table.env_vars,  # type: ignore[arg-type]
+            mcp_server=MCPServerMapper.to_entity(table.mcp_server),  # type: ignore[arg-type]
         )
 
     @staticmethod
-    def to_entities(tables: Sequence[MCPServerSettingsTable]) -> List[MCPServerSettings]:
+    def to_entities(tables: Sequence["MCPServerSettingsTable"]) -> List[MCPServerSettings]:
         """Convert list of database tables to list of domain entities."""
         return [MCPServerSettingsMapper.to_entity(table) for table in tables]
 

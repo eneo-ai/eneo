@@ -778,27 +778,17 @@ class AssistantService:
             AssistantMCPServers.assistant_id == assistant_id
         )
         result = await self.repo.session.execute(stmt)
-        existing_associations = [
-            {
-                "mcp_server_id": row.mcp_server_id,
-                "enabled": row.enabled,
-                "config": row.config,
-                "priority": row.priority,
-            }
-            for row in result.scalars()
-        ]
+        existing_server_ids = [row.mcp_server_id for row in result.scalars()]
 
         # Check if already exists
-        if any(a["mcp_server_id"] == mcp_server_id for a in existing_associations):
+        if mcp_server_id in existing_server_ids:
             raise BadRequestException("MCP server already associated with assistant")
 
         # Add new association
-        existing_associations.append({
-            "mcp_server_id": mcp_server_id,
-            "enabled": enabled,
-            "config": config,
-            "priority": priority,
-        })
+        existing_server_ids.append(mcp_server_id)
+        existing_associations = [
+            {"mcp_server_id": server_id} for server_id in existing_server_ids
+        ]
 
         # Update via repository
         from intric.database.tables.assistant_table import Assistants
@@ -835,19 +825,14 @@ class AssistantService:
             AssistantMCPServers.assistant_id == assistant_id
         )
         result = await self.repo.session.execute(stmt)
-        existing_associations = [
-            {
-                "mcp_server_id": row.mcp_server_id,
-                "enabled": row.enabled,
-                "config": row.config,
-                "priority": row.priority,
-            }
-            for row in result.scalars()
-        ]
+        existing_server_ids = [row.mcp_server_id for row in result.scalars()]
 
         # Remove the association
+        existing_server_ids = [
+            server_id for server_id in existing_server_ids if server_id != mcp_server_id
+        ]
         existing_associations = [
-            a for a in existing_associations if a["mcp_server_id"] != mcp_server_id
+            {"mcp_server_id": server_id} for server_id in existing_server_ids
         ]
 
         # Update via repository
@@ -887,31 +872,17 @@ class AssistantService:
             AssistantMCPServers.assistant_id == assistant_id
         )
         result = await self.repo.session.execute(stmt)
-        existing_associations = [
-            {
-                "mcp_server_id": row.mcp_server_id,
-                "enabled": row.enabled,
-                "config": row.config,
-                "priority": row.priority,
-            }
-            for row in result.scalars()
-        ]
+        existing_server_ids = [row.mcp_server_id for row in result.scalars()]
 
-        # Find and update the association
-        found = False
-        for assoc in existing_associations:
-            if assoc["mcp_server_id"] == mcp_server_id:
-                found = True
-                if enabled is not None:
-                    assoc["enabled"] = enabled
-                if config is not None:
-                    assoc["config"] = config
-                if priority is not None:
-                    assoc["priority"] = priority
-                break
-
-        if not found:
+        # Check if the association exists
+        if mcp_server_id not in existing_server_ids:
             raise BadRequestException("MCP server not associated with assistant")
+
+        # Note: enabled/config/priority fields are not currently stored in the database schema
+        # The association table only stores assistant_id and mcp_server_id
+        existing_associations = [
+            {"mcp_server_id": server_id} for server_id in existing_server_ids
+        ]
 
         # Update via repository
         stmt = sa.select(Assistants).where(Assistants.id == assistant_id)

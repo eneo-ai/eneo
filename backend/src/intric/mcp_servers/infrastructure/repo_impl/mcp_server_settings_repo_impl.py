@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Type
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -21,24 +21,25 @@ if TYPE_CHECKING:
 
 
 class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
+    _db_model: Type[MCPServerSettingsTable] = MCPServerSettingsTable
+
     def __init__(self, session: "AsyncSession", mapper: MCPServerSettingsMapper):
         self.session = session
         self.mapper = mapper
-        self._db_model = MCPServerSettingsTable
 
     async def query(self, tenant_id: UUID) -> list[MCPServerSettings]:
         query = (
             select(self._db_model)
             .filter_by(tenant_id=tenant_id)
-            .options(selectinload(self._db_model.mcp_server))
+            .options(selectinload(self._db_model.mcp_server))  # type: ignore[arg-type]
         )
         result = await self.session.scalars(query)
-        result = result.all()
+        records = result.all()
 
-        if not result:
+        if not records:
             return []
 
-        return self.mapper.to_entities(result)
+        return self.mapper.to_entities(records)
 
     async def one(self, tenant_id: UUID, mcp_server_id: UUID) -> MCPServerSettings:
         result = await self.one_or_none(tenant_id, mcp_server_id)
@@ -52,7 +53,7 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
         query = (
             select(self._db_model)
             .filter_by(tenant_id=tenant_id, mcp_server_id=mcp_server_id)
-            .options(selectinload(self._db_model.mcp_server))
+            .options(selectinload(self._db_model.mcp_server))  # type: ignore[arg-type]
         )
         record = await self.session.scalar(query)
 
