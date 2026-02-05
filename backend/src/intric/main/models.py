@@ -1,7 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union, cast
 from uuid import UUID
 
 from pydantic import (
@@ -63,21 +63,26 @@ class ResourcePermission(Enum):
 
 # Taken from https://stackoverflow.com/questions/67699451/make-every-field-as-optional-with-pydantic
 def partial_model(model: Type[BaseModel]):
-    def make_field_optional(field: FieldInfo, default: Any = None) -> Tuple[Any, FieldInfo]:
+    def make_field_optional(
+        field: FieldInfo, default: Any = None
+    ) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
         new.default_factory = None  # Clear default_factory to avoid conflict with default
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 
-    return create_model(
-        f"Partial{model.__name__}",
-        __base__=model,
-        __module__=model.__module__,
-        **{
-            field_name: make_field_optional(field_info)
-            for field_name, field_info in model.model_fields.items()
-        },
+    return cast(
+        type[BaseModel],
+        cast(Any, create_model)(
+            f"Partial{model.__name__}",
+            __base__=model,
+            __module__=model.__module__,
+            **{
+                field_name: make_field_optional(field_info)
+                for field_name, field_info in model.model_fields.items()
+            },
+        ),
     )
 
 
@@ -111,7 +116,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
         return len(self.items)
 
 
-class CursorPaginatedResponse(PaginatedResponse):
+class CursorPaginatedResponse(PaginatedResponse[T], Generic[T]):
     limit: Optional[int] = None
     next_cursor: Optional[Union[datetime, str]] = None
     previous_cursor: Optional[Union[datetime, str]] = None

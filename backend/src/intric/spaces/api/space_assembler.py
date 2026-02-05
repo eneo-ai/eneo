@@ -24,6 +24,7 @@ from intric.spaces.api.space_models import (
     CreateSpaceServiceResponse,
     Knowledge,
     SpaceDashboard,
+    SpaceGroupMember,
     SpaceMember,
     SpacePublic,
     SpaceRole,
@@ -197,6 +198,24 @@ class SpaceAssembler:
 
         return permissions
 
+    def _get_group_member_permissions(self, space: Space):
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        permissions = []
+
+        if actor.can_read_group_members():
+            permissions.append(ResourcePermission.READ)
+
+        if actor.can_add_group_members():
+            permissions.append(ResourcePermission.ADD)
+
+        if actor.can_edit_group_members():
+            permissions.append(ResourcePermission.EDIT)
+
+        if actor.can_delete_group_members():
+            permissions.append(ResourcePermission.REMOVE)
+
+        return permissions
+
     def _get_space_permissions(self, space: Space):
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         permissions = []
@@ -344,6 +363,10 @@ class SpaceAssembler:
             items=self._sort_members(space),
             permissions=self._get_member_permissions(space),
         )
+        group_members = PaginatedPermissions[SpaceGroupMember](
+            items=list(space.group_members.values()),
+            permissions=self._get_group_member_permissions(space),
+        )
         embedding_models = [
             EmbeddingModelPublic.from_domain(model)
             for model in space.embedding_models
@@ -391,6 +414,7 @@ class SpaceAssembler:
             applications=applications,
             knowledge=knowledge,
             members=members,
+            group_members=group_members,
             personal=space.is_personal(),
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),

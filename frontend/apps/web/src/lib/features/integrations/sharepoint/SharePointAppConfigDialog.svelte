@@ -213,12 +213,9 @@
       oauthState = result.state;
       isOAuthInProgress = true;
 
-      // Store credentials in sessionStorage for callback
+      // Store state in sessionStorage for callback verification
       sessionStorage.setItem("sharepoint_service_account_oauth", JSON.stringify({
         state: result.state,
-        client_id: clientId,
-        client_secret: clientSecret,
-        tenant_domain: tenantDomain,
       }));
 
       // Redirect to Microsoft OAuth

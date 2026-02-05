@@ -7,6 +7,7 @@
 <script lang="ts">
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconSelectedItem } from "@intric/icons/selected-item";
+  import { IconTrash } from "@intric/icons/trash";
   import { Button, Dialog } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -17,7 +18,7 @@
   import { m } from "$lib/paraglide/messages";
 
   type Member = Space["members"]["items"][number];
-  type RoleOption = { label: string; value: SpaceRole["value"] | "remove" };
+  type RoleOption = { label: string; value: SpaceRole["value"] };
 
   type Props = {
     member: Member;
@@ -31,10 +32,7 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const options: RoleOption[] = [
-    ...$currentSpace.available_roles,
-    { label: m.remove_member(), value: "remove" }
-  ];
+  const options: RoleOption[] = [...$currentSpace.available_roles];
 
   const {
     elements: { trigger, menu, option, label },
@@ -83,62 +81,67 @@
   });
 
   async function handleMenuOption(option: RoleOption["value"]) {
-    switch (option) {
-      case "remove":
-        $showRemoveDialog = true;
-        break;
-      default:
-        changeRole(option);
-    }
+    changeRole(option);
   }
 
   let showRemoveDialog = $state<Dialog.OpenState>();
 </script>
 
-<div class="relative flex flex-col gap-1">
-  <label class="sr-only pl-3 font-medium" {...$label} use:label>
-    {m.select_role_for_member()}
-  </label>
+<div class="flex items-center gap-2">
+  <div class="relative flex flex-col gap-1">
+    <label class="sr-only pl-3 font-medium" {...$label} use:label>
+      {m.select_role_for_member()}
+    </label>
 
-  <Button is={[$trigger]}>
-    <div class="truncate capitalize">
-      {#if changeRole.isLoading}
-        <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
-      {:else}
-        {member.role}
-      {/if}
-    </div>
-    <IconChevronDown />
-  </Button>
-
-  <div
-    class="border-stronger bg-primary z-10 flex flex-col gap-1 overflow-y-auto rounded-lg border p-1 shadow-md focus:!ring-0"
-    {...$menu}
-    use:menu
-  >
-    {#each options as item (item.value)}
-      <div
-        class="text-primary hover:bg-hover-default data-[highlighted]:bg-secondary flex items-center gap-1 rounded-md hover:cursor-pointer data-[disabled]:opacity-30 data-[disabled]:hover:bg-transparent"
-        {...$option({ value: item.value })}
-        use:option
-      >
-        <Button
-          class="w-full !justify-start capitalize"
-          variant={item.value === "remove" ? "destructive" : "simple"}
-          on:click={() => {
-            handleMenuOption(item.value);
-          }}
-        >
-          <span>
-            {item.value}
-          </span>
-          {#if $isSelected(item.value)}
-            <IconSelectedItem class="text-accent-default" />
-          {/if}
-        </Button>
+    <Button is={[$trigger]}>
+      <div class="truncate capitalize">
+        {#if changeRole.isLoading}
+          <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
+        {:else}
+          {member.role}
+        {/if}
       </div>
-    {/each}
+      <IconChevronDown />
+    </Button>
+
+    <div
+      class="border-stronger bg-primary z-10 flex flex-col gap-1 overflow-y-auto rounded-lg border p-1 shadow-md focus:!ring-0"
+      {...$menu}
+      use:menu
+    >
+      {#each options as item (item.value)}
+        <div
+          class="text-primary hover:bg-hover-default data-[highlighted]:bg-secondary flex items-center gap-1 rounded-md hover:cursor-pointer data-[disabled]:opacity-30 data-[disabled]:hover:bg-transparent"
+          {...$option({ value: item.value })}
+          use:option
+        >
+          <Button
+            class="w-full !justify-start capitalize"
+            variant="simple"
+            on:click={() => {
+              handleMenuOption(item.value);
+            }}
+          >
+            <span>
+              {item.value}
+            </span>
+            {#if $isSelected(item.value)}
+              <IconSelectedItem class="text-accent-default" />
+            {/if}
+          </Button>
+        </div>
+      {/each}
+    </div>
   </div>
+
+  <Button
+    variant="destructive"
+    padding="icon"
+    label={m.remove_member()}
+    on:click={() => ($showRemoveDialog = true)}
+  >
+    <IconTrash class="h-4 w-4" />
+  </Button>
 </div>
 
 <Dialog.Root alert bind:isOpen={showRemoveDialog}>

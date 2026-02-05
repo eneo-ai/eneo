@@ -219,6 +219,38 @@ test("Omit nested property when no changes", () => {
   expect(diff).toEqual({});
 });
 
+test("Detect change from null to object with nested comparison", () => {
+  const a = { id: "1", completion_model: null as { id: string; name: string } | null };
+  const b = { id: "1", completion_model: { id: "model-1", name: "GPT-4" } };
+
+  expect(getDiff(a, b, { compare: { completion_model: { id: true } } })).toEqual({
+    completion_model: { id: "model-1" }
+  });
+});
+
+test("Detect change from undefined to object with nested comparison", () => {
+  const a = { id: "1", completion_model: undefined as { id: string; name: string } | undefined };
+  const b = { id: "1", completion_model: { id: "model-1", name: "GPT-4" } };
+
+  expect(getDiff(a, b, { compare: { completion_model: { id: true } } })).toEqual({
+    completion_model: { id: "model-1" }
+  });
+});
+
+test("No change when both null", () => {
+  const a = { id: "1", completion_model: null as { id: string } | null };
+  const b = { id: "1", completion_model: null as { id: string } | null };
+
+  expect(getDiff(a, b, { compare: { completion_model: { id: true } } })).toEqual({});
+});
+
+test("Detect change from null to value with full comparison", () => {
+  const a = { id: "1", name: null as string | null };
+  const b = { id: "1", name: "test" };
+
+  expect(getDiff(a, b, { compare: { name: true } })).toEqual({ name: "test" });
+});
+
 test("Multiple nested properties with changes", () => {
   const original = {
     id: "1",

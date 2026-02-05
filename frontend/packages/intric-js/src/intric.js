@@ -33,6 +33,7 @@ import { initIcons } from "./endpoints/icons";
 import { initModelProviders } from "./endpoints/model-providers";
 import { initTenantModels } from "./endpoints/tenant-models";
 
+
 /**
  * Create an Intric.js object to interact with the intric backend.
  * Requires either an api key or a user token to authenticate requests.

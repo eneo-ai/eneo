@@ -73,6 +73,9 @@ class Spaces(BasePublic):
     members: Mapped[list["SpacesUsers"]] = relationship(
         order_by="SpacesUsers.created_at", viewonly=True
     )
+    group_members: Mapped[list["SpacesUserGroups"]] = relationship(
+        order_by="SpacesUserGroups.created_at", viewonly=True
+    )
     collections: Mapped[list["CollectionsTable"]] = relationship(
         order_by="CollectionsTable.created_at"
     )
@@ -136,3 +139,22 @@ class SpacesUsers(BaseCrossReference):
 
     # Relationships
     user: Mapped["Users"] = relationship()
+
+
+class SpacesUserGroups(BaseCrossReference):
+    """Junction table for user group membership in spaces.
+
+    Groups can be added to shared/organization spaces with a role,
+    granting all members of the group access to the space at that role level.
+    """
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"), primary_key=True
+    )
+    user_group_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column()
+
+    # Relationships
+    from intric.database.tables.user_groups_table import UserGroups
+    user_group: Mapped["UserGroups"] = relationship()

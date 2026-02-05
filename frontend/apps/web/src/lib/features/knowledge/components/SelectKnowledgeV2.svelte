@@ -139,7 +139,6 @@
             // Integration knowledge - not yet supported
             blobs = [];
           }
-          console.log(`Fetched ${blobs.length} blobs for ${type} ${id}`);
           blobCache.set(id, blobs);
           blobCache = blobCache;
         } catch (error) {
@@ -363,7 +362,12 @@
           {:else}
             <IconCancel />
           {/if}
-          <span class="truncate px-2">{collection.name}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(collection.id, "collection", collection)}
+          >
+            {collection.name}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
@@ -434,8 +438,10 @@
       {@const totalPages = getTotalPages(allBlobs)}
       {@const currentPage = currentPages.get(website.id) || 1}
       {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+      {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
+      {@const hasFailures = pagesFailed > 0}
       <div class="knowledge-item-container">
-        <div class="knowledge-item">
+        <div class="knowledge-item" class:knowledge-item-warning={hasFailures}>
           {#if pagesCrawled && pagesCrawled > 0}
             <button
               class="expand-button"
@@ -452,12 +458,22 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{formatWebsiteName(website)}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(website.id, "website", website)}
+          >
+            {formatWebsiteName(website)}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
+          {#if hasFailures}
+            <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+              {m.pages_failed({ count: pagesFailed })}
+            </span>
+          {/if}
           {#if pagesCrawled && pagesCrawled > 0}
             <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {pagesCrawled} {pagesCrawled === 1 ? 'page' : 'pages'}
+              {m.pageCount({ count: pagesCrawled })}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -503,7 +519,7 @@
                 </div>
               {/if}
             {:else}
-              <div class="blob-item text-muted">No pages found</div>
+              <div class="blob-item text-muted">{m.noPagesFound()}</div>
             {/if}
           </div>
         {/if}
@@ -560,7 +576,12 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{collection.name}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(collection.id, "collection", collection)}
+          >
+            {collection.name}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
@@ -569,7 +590,7 @@
             </span>
           {:else}
             <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              Empty
+              {m.empty()}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -631,8 +652,10 @@
       {@const totalPages = getTotalPages(allBlobs)}
       {@const currentPage = currentPages.get(website.id) || 1}
       {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+      {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
+      {@const hasFailures = pagesFailed > 0}
       <div class="knowledge-item-container">
-        <div class="knowledge-item">
+        <div class="knowledge-item" class:knowledge-item-warning={hasFailures}>
           {#if pagesCrawled && pagesCrawled > 0}
             <button
               class="expand-button"
@@ -649,12 +672,22 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{formatWebsiteName(website)}</span>
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(website.id, "website", website)}
+          >
+            {formatWebsiteName(website)}
+          </button>
           {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
           <div class="flex-grow"></div>
+          {#if hasFailures}
+            <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+              {m.pages_failed({ count: pagesFailed })}
+            </span>
+          {/if}
           {#if pagesCrawled && pagesCrawled > 0}
             <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {pagesCrawled} {pagesCrawled === 1 ? 'page' : 'pages'}
+              {m.pageCount({ count: pagesCrawled })}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -700,7 +733,7 @@
                 </div>
               {/if}
             {:else}
-              <div class="blob-item text-muted">No pages found</div>
+              <div class="blob-item text-muted">{m.noPagesFound()}</div>
             {/if}
           </div>
         {/if}
@@ -806,11 +839,17 @@
               {/each}
 
               {#each section.websites as website (`website:${website.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { website } })} use:optionPersonal>
+                {@const wPagesFailed = website.latest_crawl?.pages_failed ?? 0}
+                <div class="knowledge-item cursor-pointer" class:knowledge-item-warning={wPagesFailed > 0} {...$optionPersonal({ value: { website } })} use:optionPersonal>
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconWeb />
                     <span class="truncate">{formatWebsiteName(website)}</span>
                   </div>
+                  {#if wPagesFailed > 0}
+                    <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+                      {m.pages_failed({ count: wPagesFailed })}
+                    </span>
+                  {/if}
                 </div>
               {/each}
 
@@ -909,11 +948,17 @@
               {/each}
 
               {#each section.websites as website (`website:${website.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { website } })} use:optionOrg>
+                {@const wPagesFailed = website.latest_crawl?.pages_failed ?? 0}
+                <div class="knowledge-item cursor-pointer" class:knowledge-item-warning={wPagesFailed > 0} {...$optionOrg({ value: { website } })} use:optionOrg>
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconWeb />
                     <span class="truncate">{formatWebsiteName(website)}</span>
                   </div>
+                  {#if wPagesFailed > 0}
+                    <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+                      {m.pages_failed({ count: wPagesFailed })}
+                    </span>
+                  {/if}
                 </div>
               {/each}
 
@@ -947,6 +992,10 @@
 
   .knowledge-item {
     @apply border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-2 border-b px-4;
+  }
+
+  .knowledge-item-warning {
+    @apply bg-orange-50 dark:bg-orange-950/30;
   }
 
   div[data-highlighted] {

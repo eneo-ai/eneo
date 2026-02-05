@@ -33,6 +33,7 @@ class CrawlRun(Entity):
         result_location: Optional[str],
         finished_at: Optional["datetime"],
         job_id: Optional["UUID"],
+        failure_summary: Optional[dict[str, int]] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.status = status
@@ -45,6 +46,7 @@ class CrawlRun(Entity):
         self.website_id = website_id
         self.tenant_id = tenant_id
         self.job_id = job_id
+        self.failure_summary = failure_summary
 
     @classmethod
     def create(cls, website: Union["Website", "WebsiteSparse"]) -> "CrawlRun":
@@ -62,6 +64,7 @@ class CrawlRun(Entity):
             result_location=None,
             finished_at=None,
             job_id=None,
+            failure_summary=None,
         )
 
     @classmethod
@@ -80,6 +83,7 @@ class CrawlRun(Entity):
             status=record.job.status if record.job else Status.QUEUED,
             result_location=record.job.result_location if record.job else None,
             finished_at=record.job.finished_at if record.job else None,
+            failure_summary=record.failure_summary,
         )
 
     def update(

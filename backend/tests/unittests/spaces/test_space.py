@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.spaces.space import UNAUTHORIZED_EXCEPTION_MESSAGE, Space, SpaceRoleValue
 
 
@@ -118,14 +118,15 @@ def test_get_default_model(space: Space):
     space.completion_models = [default_model]
     assert space.get_default_completion_model() is not None
 
-    # Disable access
+    # Disable access - falls back to get_latest_completion_model which raises BadRequestException
     default_model.can_access = False
-    with pytest.raises(NotFoundException):
+    with pytest.raises(BadRequestException):
         space.get_default_completion_model()
 
     non_default_model = MagicMock()
     non_default_model.is_org_default = False
     non_default_model.can_access = True
+    non_default_model.created_at = datetime.now()
     space.completion_models = [non_default_model]
     assert space.get_default_completion_model() is not None
 
@@ -252,3 +253,72 @@ def test_cannot_change_completion_models_of_personal_space(space: Space):
 
     with pytest.raises(BadRequestException):
         space.update(completion_models=[MagicMock()])
+
+
+# Group Member Tests
+
+
+def test_add_group_member(space: Space):
+    group = MagicMock(id=uuid4())
+
+    space.add_group_member(group)
+
+    assert group.id in space.group_members
+    assert space.group_members[group.id] == group
+
+
+def test_add_group_member_already_exists(space: Space):
+    group_id = uuid4()
+    space.group_members = {group_id: MagicMock(id=group_id)}
+
+    with pytest.raises(BadRequestException, match="already a member"):
+        space.add_group_member(MagicMock(id=group_id))
+
+
+def test_cannot_add_group_member_to_personal_space(space: Space):
+    space.user_id = MagicMock()  # Makes it a personal space
+
+    with pytest.raises(BadRequestException, match="personal spaces"):
+        space.add_group_member(MagicMock(id=uuid4()))
+
+
+def test_remove_group_member(space: Space):
+    group_id = uuid4()
+    space.group_members = {group_id: MagicMock(id=group_id)}
+
+    space.remove_group_member(group_id)
+
+    assert group_id not in space.group_members
+
+
+def test_remove_group_member_not_exists(space: Space):
+    space.group_members = {}
+
+    with pytest.raises(BadRequestException, match="not a member"):
+        space.remove_group_member(uuid4())
+
+
+def test_change_group_member_role(space: Space):
+    group_id = uuid4()
+    space.group_members = {group_id: MagicMock(id=group_id, role=SpaceRoleValue.ADMIN)}
+
+    space.change_group_member_role(group_id, SpaceRoleValue.VIEWER)
+
+    assert space.group_members[group_id].role == SpaceRoleValue.VIEWER
+
+
+def test_change_group_member_role_not_exists(space: Space):
+    space.group_members = {}
+
+    with pytest.raises(BadRequestException, match="not a member"):
+        space.change_group_member_role(uuid4(), SpaceRoleValue.ADMIN)
+
+
+def test_get_group_member(space: Space):
+    group_id = uuid4()
+    group = MagicMock(id=group_id)
+    space.group_members = {group_id: group}
+
+    result = space.get_group_member(group_id)
+
+    assert result == group

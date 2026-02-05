@@ -18,9 +18,12 @@
 	import { m } from '$lib/paraglide/messages';
 	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
 	import { ChartPie, Wrench } from 'lucide-svelte';
+	import VoiceRecordButton from './VoiceRecordButton.svelte';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
+
+	let voiceInterimText = $state('');
 
 	const {
 		state: { attachments, isUploading },
@@ -252,6 +255,12 @@
 
 	<MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
 
+	{#if voiceInterimText}
+		<div class="text-secondary px-2 py-1 text-sm italic opacity-60">
+			{voiceInterimText}
+		</div>
+	{/if}
+
 	<div class="flex justify-between mt-2">
 		<div class="flex items-center gap-2">
 			<AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
@@ -259,6 +268,16 @@
 				<MentionButton></MentionButton>
 			{/if}
 
+			<VoiceRecordButton
+				onTranscriptionComplete={(text) => {
+					voiceInterimText = '';
+					focusMentionInput();
+					document.execCommand('insertText', false, text);
+				}}
+				onInterimUpdate={(text) => {
+					voiceInterimText = text;
+				}}
+			/>
 			{#if chat.partner.type === 'default-assistant' && featureFlags.showWebSearch}
 				<div
 					class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"

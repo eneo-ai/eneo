@@ -12,6 +12,7 @@ import pytest
 from intric.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
     SimpleSharePointToken,
+    _extract_text_from_canvas_layout,
 )
 
 
@@ -679,4 +680,112 @@ class TestTokenRefreshCallback:
         mock_dependencies["oauth_token_service"].refresh_and_update_token.assert_called_once_with(
             token_id=token_id
         )
+
+
+class TestExtractTextFromCanvasLayout:
+    def test_extracts_text_from_horizontal_sections(self):
+        content = {
+            "canvasLayout": {
+                "horizontalSections": [
+                    {
+                        "columns": [
+                            {
+                                "webparts": [
+                                    {
+                                        "@odata.type": "#microsoft.graph.textWebPart",
+                                        "innerHtml": "<p>Hello <b>world</b></p>",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        result = _extract_text_from_canvas_layout(content)
+        assert "Hello" in result
+        assert "world" in result
+
+    def test_extracts_text_from_vertical_section(self):
+        content = {
+            "canvasLayout": {
+                "horizontalSections": [],
+                "verticalSection": {
+                    "webparts": [
+                        {
+                            "@odata.type": "#microsoft.graph.textWebPart",
+                            "innerHtml": "<h1>Sidebar content</h1>",
+                        }
+                    ]
+                },
+            }
+        }
+        result = _extract_text_from_canvas_layout(content)
+        assert "Sidebar content" in result
+
+    def test_ignores_non_text_webparts(self):
+        content = {
+            "canvasLayout": {
+                "horizontalSections": [
+                    {
+                        "columns": [
+                            {
+                                "webparts": [
+                                    {
+                                        "@odata.type": "#microsoft.graph.standardWebPart",
+                                        "data": {"some": "data"},
+                                    },
+                                    {
+                                        "@odata.type": "#microsoft.graph.textWebPart",
+                                        "innerHtml": "<p>Visible text</p>",
+                                    },
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        result = _extract_text_from_canvas_layout(content)
+        assert "Visible text" in result
+        assert "data" not in result
+
+    def test_returns_empty_string_when_no_canvas_layout(self):
+        assert _extract_text_from_canvas_layout({}) == ""
+        assert _extract_text_from_canvas_layout({"canvasLayout": None}) == ""
+
+    def test_combines_multiple_sections(self):
+        content = {
+            "canvasLayout": {
+                "horizontalSections": [
+                    {
+                        "columns": [
+                            {
+                                "webparts": [
+                                    {
+                                        "@odata.type": "#microsoft.graph.textWebPart",
+                                        "innerHtml": "<p>First section</p>",
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "columns": [
+                            {
+                                "webparts": [
+                                    {
+                                        "@odata.type": "#microsoft.graph.textWebPart",
+                                        "innerHtml": "<p>Second section</p>",
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                ],
+            }
+        }
+        result = _extract_text_from_canvas_layout(content)
+        assert "First section" in result
+        assert "Second section" in result
 

@@ -34,11 +34,13 @@
 
   // Provider type options with i18n labels
   const providerTypes = [
-    { value: "openai", label: m.provider_type_openai() },
-    { value: "azure", label: m.provider_type_azure() },
-    { value: "anthropic", label: m.provider_type_anthropic() },
-    { value: "gemini", label: m.provider_type_gemini() },
-    { value: "cohere", label: m.provider_type_cohere() },
+    { value: "openai", label: "OpenAI" },
+    { value: "azure", label: "Azure OpenAI" },
+    { value: "anthropic", label: "Anthropic" },
+    { value: "gemini", label: "Google Gemini" },
+    { value: "cohere", label: "Cohere" },
+    { value: "mistral", label: "Mistral AI" },
+    { value: "hosted_vllm", label: "vLLM" },
   ];
 
   const providerTypeStore = writable(providerTypes[0]);
@@ -215,8 +217,8 @@
     error = null;
   }
 
-  // Endpoint is required only for Azure
-  $: requiresEndpoint = providerType === "azure";
+  // Endpoint is required for Azure and vLLM
+  $: requiresEndpoint = providerType === "azure" || providerType === "hosted_vllm";
 </script>
 
 <Dialog.Root {openController}>
@@ -238,7 +240,7 @@
           <!-- Custom trigger wrapper with glyph overlay -->
           <div class="provider-type-select">
             <!-- Glyph positioned inside the trigger visually, centered vertically -->
-            <div class="absolute left-3 top-0 bottom-0 z-10 pointer-events-none flex items-center">
+            <div class="absolute left-3 top-0 h-10 z-10 pointer-events-none flex items-center">
               <ProviderGlyph providerType={providerType} size="sm" />
             </div>
 

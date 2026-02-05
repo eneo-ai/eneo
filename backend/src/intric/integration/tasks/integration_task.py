@@ -99,8 +99,10 @@ async def pull_sharepoint_content(
                 tenant_app_id=params.tenant_app_id,
                 integration_knowledge_id=knowledge.id,
                 site_id=params.site_id,
+                drive_id=params.drive_id,
                 folder_id=params.folder_id,
                 folder_path=params.folder_path,
+                resource_type=params.resource_type,
             )
 
             logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
@@ -170,6 +172,8 @@ async def sync_sharepoint_delta(
                 tenant_app_id=params.tenant_app_id,
                 integration_knowledge_id=knowledge.id,
                 site_id=params.site_id,
+                drive_id=params.drive_id,
+                resource_type=params.resource_type,
             )
             return result
         finally:

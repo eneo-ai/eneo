@@ -20,6 +20,37 @@ from intric.integration.infrastructure.office_change_key_service import (
 )
 from intric.main.logging import get_logger
 
+from html2text import html2text
+
+
+def _extract_text_from_canvas_layout(content: dict) -> str:
+    """Extract plain text from a SharePoint page's canvasLayout structure.
+
+    Parses horizontalSections and verticalSection to find textWebPart
+    elements and converts their innerHtml to plain text.
+    """
+    texts = []
+    canvas = content.get("canvasLayout", {})
+    if not canvas:
+        return ""
+
+    def _extract_from_webparts(webparts: list):
+        for wp in webparts:
+            if wp.get("@odata.type") == "#microsoft.graph.textWebPart":
+                inner_html = wp.get("innerHtml", "")
+                if inner_html:
+                    texts.append(html2text(inner_html).strip())
+
+    for section in canvas.get("horizontalSections", []):
+        for column in section.get("columns", []):
+            _extract_from_webparts(column.get("webparts", []))
+
+    vertical = canvas.get("verticalSection")
+    if vertical:
+        _extract_from_webparts(vertical.get("webparts", []))
+
+    return "\n\n".join(texts)
+
 
 def sanitize_text_for_db(text: str) -> str:
     """Remove null bytes and other invalid characters that PostgreSQL doesn't accept.
@@ -695,9 +726,12 @@ class SharePointContentService:
             site_id = page.get("parentReference", {}).get("siteId")
             content = await client.get_page_content(site_id=site_id, page_id=page.get("id"))
             if content:
+                page_text = _extract_text_from_canvas_layout(content)
+                if not page_text:
+                    page_text = content.get("description", "")
                 await self._process_info_blob(
                     title=content.get("title", ""),
-                    text=content.get("description", ""),
+                    text=page_text,
                     url=content.get("webUrl", ""),
                     integration_knowledge=integration_knowledge,
                 )

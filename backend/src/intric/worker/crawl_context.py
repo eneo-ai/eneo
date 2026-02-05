@@ -8,9 +8,36 @@ The frozen=True ensures immutability during the crawl lifecycle.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
+from enum import Enum
 from uuid import UUID
 
 from intric.ai_models.model_enums import ModelFamily
+
+
+class FailureReason(str, Enum):
+    """Categorized failure reasons for crawl page persistence.
+
+    These codes are stored in the failure_summary JSONB column on CrawlRuns
+    to provide visibility into why pages failed during crawling.
+
+    User-facing labels should be provided via i18n in the frontend.
+    """
+
+    # Content issues
+    EMPTY_CONTENT = "EMPTY_CONTENT"  # Page has no text content
+    NO_CHUNKS = "NO_CHUNKS"  # Content exists but produced no chunks after splitting
+
+    # Embedding service issues
+    EMBEDDING_TIMEOUT = "EMBEDDING_TIMEOUT"  # Embedding API call timed out
+    EMBEDDING_ERROR = "EMBEDDING_ERROR"  # Embedding API returned an error
+
+    # Database issues
+    DB_ERROR = "DB_ERROR"  # Database error during persistence
+
+    # Configuration issues
+    NO_EMBEDDING_MODEL = "NO_EMBEDDING_MODEL"  # No embedding model configured
+    MISSING_PROVIDER = "MISSING_PROVIDER"  # Embedding model has no provider_id
 
 
 @dataclass(frozen=True)
@@ -30,6 +57,13 @@ class EmbeddingModelSpec:
     - max_input: Per-item character limit for truncation
     - max_batch_size: Items per batch for embedding API calls
     - dimensions: Optional embedding vector dimensions
+
+    Provider fields are pre-resolved during bootstrap so that embedding
+    calls don't require a database session:
+    - provider_id: FK to model_providers table
+    - provider_type: e.g. "openai", "azure", "infinity"
+    - provider_credentials: encrypted credentials dict from provider
+    - provider_config: additional provider config dict
     """
 
     id: UUID
@@ -40,6 +74,10 @@ class EmbeddingModelSpec:
     max_batch_size: int | None  # Adapters default to 32 if None
     dimensions: int | None
     open_source: bool = False
+    provider_id: UUID | None = None
+    provider_type: str | None = None
+    provider_credentials: dict[str, Any] | None = None
+    provider_config: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

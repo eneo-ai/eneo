@@ -7,11 +7,8 @@ export const actions: Actions = {
     const data = await request.formData();
     const authCode = data.get("auth_code") as string;
     const state = data.get("state") as string;
-    const clientId = data.get("client_id") as string;
-    const clientSecret = data.get("client_secret") as string;
-    const tenantDomain = data.get("tenant_domain") as string;
 
-    if (!authCode || !state || !clientId || !clientSecret || !tenantDomain) {
+    if (!authCode || !state) {
       return fail(400, { error: "Missing required fields" });
     }
 
@@ -39,9 +36,6 @@ export const actions: Actions = {
           body: JSON.stringify({
             auth_code: authCode,
             state,
-            client_id: clientId,
-            client_secret: clientSecret,
-            tenant_domain: tenantDomain,
           }),
         }
       );

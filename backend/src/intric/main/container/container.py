@@ -847,6 +847,7 @@ class Container(containers.DeclarativeContainer):
         repo=space_repo,
         factory=space_factory,
         user_repo=user_repo,
+        user_groups_repo=user_groups_repo,
         embedding_model_crud_service=embedding_model_crud_service,
         completion_model_crud_service=completion_model_crud_service,
         transcription_model_crud_service=transcription_model_crud_service,
@@ -1102,13 +1103,6 @@ class Container(containers.DeclarativeContainer):
         integration_repo=integration_repo,
         user=user,
     )
-    user_integration_service = providers.Factory(
-        UserIntegrationService,
-        user_integration_repo=user_integration_repo,
-        tenant_integration_repo=tenant_integration_repo,
-        user=user,
-        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-    )
     confluence_auth_service = providers.Factory(ConfluenceAuthService)
 
     # Tenant app authentication services (partial setup)
@@ -1159,6 +1153,16 @@ class Container(containers.DeclarativeContainer):
         SharePointSubscriptionService,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
         oauth_token_service=oauth_token_service,
+    )
+
+    user_integration_service = providers.Factory(
+        UserIntegrationService,
+        user_integration_repo=user_integration_repo,
+        tenant_integration_repo=tenant_integration_repo,
+        user=user,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        oauth_token_repo=oauth_token_repo,
+        sharepoint_subscription_service=sharepoint_subscription_service,
     )
 
     integration_knowledge_service = providers.Factory(

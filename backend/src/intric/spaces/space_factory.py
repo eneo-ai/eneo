@@ -16,7 +16,7 @@ from intric.security_classifications.domain.entities.security_classification imp
     SecurityClassification,
 )
 from intric.services.service import Service
-from intric.spaces.api.space_models import SpaceMember
+from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from intric.spaces.space import Space
 from intric.users.user import UserInDBBase
 from intric.websites.domain.website import Website
@@ -68,6 +68,7 @@ class SpaceFactory:
             integration_knowledge_list=[],
             collections=[],
             members={},
+            group_members={},
         )
 
     def create_space_from_db(
@@ -154,6 +155,19 @@ class SpaceFactory:
             for space_user in space_in_db.members
             if space_user.user.deleted_at is None
         }
+
+        # Build group members from database
+        group_members = {}
+        for space_group in getattr(space_in_db, "group_members", []) or []:
+            user_group = space_group.user_group
+            if user_group:
+                group_members[user_group.id] = SpaceGroupMember(
+                    id=user_group.id,
+                    name=user_group.name,
+                    role=space_group.role,
+                    user_count=len(user_group.users) if user_group.users else 0,
+                )
+
         space_collections = [
             Collection.to_domain(
                 record=collection,
@@ -322,6 +336,7 @@ class SpaceFactory:
             collections=space_collections,
             websites=space_websites,
             members=members,
+            group_members=group_members,
             security_classification=security_classification,
             data_retention_days=space_in_db.data_retention_days,
             icon_id=space_in_db.icon_id,
