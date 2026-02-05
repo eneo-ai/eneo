@@ -484,21 +484,26 @@ class TenantRepository:
         if not config:
             return None
 
-        # Mask client_secret
+        # Extract and process client_secret
         client_secret = config.get("client_secret", "")
-        if len(client_secret) > 4:
-            masked_secret = f"...{client_secret[-4:]}"
-        else:
-            masked_secret = "***"
 
-        # Detect encryption status
-        # Check for Fernet encryption prefix (enc:fernet:v1:...)
+        # Detect encryption status BEFORE decryption
         if client_secret.startswith("enc:fernet:v"):
             encryption_status = "encrypted"
         elif client_secret and not client_secret.startswith("enc:"):
             encryption_status = "plaintext"
         else:
-            encryption_status = "plaintext"  # Fallback for empty or unknown format
+            encryption_status = "plaintext"
+
+        # Decrypt before masking so we show chars from the real secret
+        if self.encryption and client_secret:
+            try:
+                client_secret = self.encryption.decrypt(client_secret)
+            except ValueError:
+                # If decryption fails, fall through to mask the raw value
+                pass
+
+        masked_secret = mask_api_key(client_secret)
 
         return {
             "provider": config.get("provider"),
