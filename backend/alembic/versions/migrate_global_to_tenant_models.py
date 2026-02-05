@@ -378,6 +378,11 @@ def create_tenant_completion_models(conn, tenant_id: str, global_models: list,
 
         new_model_id = str(uuid4())
 
+        # For Azure models, use deployment_name as name since LiteLLM expects azure/{deployment_name}
+        model_name = model.name
+        if provider_type == "azure" and model.deployment_name:
+            model_name = model.deployment_name
+
         conn.execute(text("""
             INSERT INTO completion_models (
                 id, tenant_id, provider_id,
@@ -399,7 +404,7 @@ def create_tenant_completion_models(conn, tenant_id: str, global_models: list,
             "new_id": new_model_id,
             "tenant_id": tenant_id,
             "provider_id": provider_id,
-            "name": model.name,
+            "name": model_name,
             "nickname": model.nickname,
             "family": model.family,
             "token_limit": model.token_limit,
