@@ -808,6 +808,7 @@
   "unsupported_model_selected": "Unsupported model selected",
   "no_model_found": "No model found",
   "select_completion_model": "Select a completion model",
+  "model_group_system": "System models",
   "model_info_for": "Model info for",
   "basic": "Basic",
   "yes": "Yes",
