@@ -3,6 +3,7 @@
   import type { Space, Assistant } from "@intric/intric-js";
   import { Search, Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
   import { fly } from "svelte/transition";
+  import { m } from "$lib/paraglide/messages";
 
   type ResourceType = "space" | "assistant" | "app";
   type Resource = {
@@ -121,9 +122,9 @@
 </script>
 
 <div class="relative w-full">
-  <label use:melt={$label} class="mb-1.5 block text-sm font-medium text-default">
-    Select {scopeType}
-  </label>
+  <span use:melt={$label} class="mb-1.5 block text-sm font-medium text-default">
+    {m.api_keys_select_resource({ scopeType })}
+  </span>
 
   <div class="relative">
     <!-- Search Icon -->
@@ -136,7 +137,7 @@
              placeholder:text-muted transition-all duration-150
              hover:border-dimmer focus:border-accent-default focus:ring-2 focus:ring-accent-default/20
              disabled:cursor-not-allowed disabled:opacity-50"
-      placeholder="Search {scopeType}s..."
+      placeholder={m.api_keys_search_resource({ scopeType })}
       {disabled}
     />
 
@@ -164,7 +165,7 @@
       <div
         class="inline-flex items-center gap-2 rounded-lg border border-accent-default/30 bg-accent-default/5 px-3 py-1.5"
       >
-        <svelte:component this={Icon} class="h-4 w-4 text-accent-default" />
+        <Icon class="h-4 w-4 text-accent-default" />
         <span class="text-sm font-medium text-default">{selectedResource.name}</span>
         {#if selectedResource.spaceName}
           <span class="text-xs text-muted">· {selectedResource.spaceName}</span>
@@ -185,9 +186,9 @@
           <div class="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
             <Search class="h-5 w-5 text-muted" />
           </div>
-          <p class="text-sm text-muted">No {scopeType}s found</p>
+          <p class="text-sm text-muted">{m.api_keys_no_resource_found({ scopeType })}</p>
           {#if $inputValue}
-            <p class="mt-1 text-xs text-muted">Try a different search term</p>
+            <p class="mt-1 text-xs text-muted">{m.api_keys_try_different_search()}</p>
           {/if}
         </div>
       {:else}
@@ -208,14 +209,14 @@
                 class="flex h-8 w-8 items-center justify-center rounded-lg
                        {selected ? 'bg-accent-default/15 text-accent-default' : 'bg-secondary text-muted'}"
               >
-                <svelte:component this={Icon} class="h-4 w-4" />
+                <Icon class="h-4 w-4" />
               </div>
 
               <!-- Resource info -->
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-default truncate">{resource.name}</p>
                 {#if resource.spaceName}
-                  <p class="text-xs text-muted truncate">in {resource.spaceName}</p>
+                  <p class="text-xs text-muted truncate">{m.api_keys_in_space({ spaceName: resource.spaceName })}</p>
                 {:else}
                   <p class="text-xs text-muted font-mono truncate">{resource.id.slice(0, 8)}...</p>
                 {/if}

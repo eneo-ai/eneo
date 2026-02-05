@@ -50,13 +50,13 @@
   const relativeFormatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
   function formatRelativeDate(date: string | null | undefined): string {
-    if (!date) return "Never";
+    if (!date) return m.api_keys_never();
     const d = new Date(date);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
 
-    if (diffDays === 0) return "Today";
-    if (diffDays === 1) return "Yesterday";
+    if (diffDays === 0) return m.api_keys_today();
+    if (diffDays === 1) return m.api_keys_yesterday();
     if (diffDays < 7) return relativeFormatter.format(-diffDays, "day");
     if (diffDays < 30) return relativeFormatter.format(-Math.floor(diffDays / 7), "week");
     return formatter.format(d);
@@ -70,19 +70,19 @@
   }
 
   // Scope display helpers
-  const scopeConfig: Record<string, { label: string; icon: typeof Building2; color: string }> = {
-    tenant: { label: "Tenant", icon: Building2, color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" },
-    space: { label: "Space", icon: Building2, color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300" },
-    assistant: { label: "Assistant", icon: MessageSquare, color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" },
-    app: { label: "App", icon: AppWindow, color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300" }
-  };
+  const scopeConfig = $derived<Record<string, { label: string; icon: typeof Building2; color: string }>>({
+    tenant: { label: m.api_keys_admin_scope_tenant(), icon: Building2, color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" },
+    space: { label: m.api_keys_admin_scope_space(), icon: Building2, color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300" },
+    assistant: { label: m.api_keys_admin_scope_assistant(), icon: MessageSquare, color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" },
+    app: { label: m.api_keys_admin_scope_app(), icon: AppWindow, color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300" }
+  });
 
-  const stateConfig: Record<string, { label: string; color: Label.LabelColor; dotColor: string }> = {
-    active: { label: "Active", color: "green", dotColor: "bg-green-500" },
-    suspended: { label: "Suspended", color: "yellow", dotColor: "bg-yellow-500" },
-    revoked: { label: "Revoked", color: "gray", dotColor: "bg-red-500" },
-    expired: { label: "Expired", color: "gray", dotColor: "bg-gray-500" }
-  };
+  const stateConfig = $derived<Record<string, { label: string; color: Label.LabelColor; dotColor: string }>>({
+    active: { label: m.api_keys_admin_state_active(), color: "green", dotColor: "bg-green-500" },
+    suspended: { label: m.api_keys_admin_state_suspended(), color: "yellow", dotColor: "bg-yellow-500" },
+    revoked: { label: m.api_keys_admin_state_revoked(), color: "gray", dotColor: "bg-red-500" },
+    expired: { label: m.api_keys_admin_state_expired(), color: "gray", dotColor: "bg-gray-500" }
+  });
 
   const permissionConfig: Record<string, { color: string; icon: typeof Eye }> = {
     read: { color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300", icon: Eye },
@@ -92,8 +92,8 @@
 
   function getKeyTypeConfig(keyType: string) {
     return keyType === "pk_"
-      ? { label: "Public", icon: Globe, color: "text-orange-600 dark:text-orange-400", bgColor: "bg-orange-100 dark:bg-orange-900/30" }
-      : { label: "Secret", icon: Lock, color: "text-blue-600 dark:text-blue-400", bgColor: "bg-blue-100 dark:bg-blue-900/30" };
+      ? { label: m.api_keys_admin_key_type_public_label(), icon: Globe, color: "text-orange-600 dark:text-orange-400", bgColor: "bg-orange-100 dark:bg-orange-900/30" }
+      : { label: m.api_keys_admin_key_type_secret_label(), icon: Lock, color: "text-blue-600 dark:text-blue-400", bgColor: "bg-blue-100 dark:bg-blue-900/30" };
   }
 </script>
 
@@ -119,9 +119,9 @@
     <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-default/10">
       <Key class="h-8 w-8 text-accent-default" />
     </div>
-    <h3 class="text-lg font-semibold text-default">No API Keys Found</h3>
+    <h3 class="text-lg font-semibold text-default">{m.api_keys_admin_no_keys_found()}</h3>
     <p class="mt-2 text-sm text-muted max-w-md mx-auto">
-      No API keys match your current filters. Try adjusting your search criteria.
+      {m.api_keys_admin_no_keys_match()}
     </p>
   </div>
 {:else}
@@ -191,25 +191,25 @@
             <div class="hidden lg:flex items-center gap-6 text-sm">
               <!-- Rate limit -->
               <div class="text-right">
-                <p class="text-xs text-muted">Rate limit</p>
+                <p class="text-xs text-muted">{m.api_keys_admin_rate_limit()}</p>
                 <p class="font-medium text-default">
-                  {key.rate_limit ? `${key.rate_limit}/hr` : "Default"}
+                  {key.rate_limit ? `${key.rate_limit}/hr` : m.api_keys_default()}
                 </p>
               </div>
 
               <!-- Expiration -->
               {#if daysUntil !== null}
                 <div class="text-right">
-                  <p class="text-xs text-muted">Expires</p>
+                  <p class="text-xs text-muted">{m.api_keys_expires()}</p>
                   <p class="font-medium {daysUntil <= 7 ? 'text-yellow-600 dark:text-yellow-400' : daysUntil <= 0 ? 'text-red-600 dark:text-red-400' : 'text-default'}">
-                    {daysUntil <= 0 ? "Expired" : daysUntil === 1 ? "Tomorrow" : `${daysUntil} days`}
+                    {daysUntil <= 0 ? m.api_keys_admin_expired_label() : daysUntil === 1 ? m.api_keys_tomorrow() : m.api_keys_days({ count: daysUntil })}
                   </p>
                 </div>
               {/if}
 
               <!-- Last used -->
               <div class="text-right">
-                <p class="text-xs text-muted">Last used</p>
+                <p class="text-xs text-muted">{m.api_keys_last_used()}</p>
                 <p class="font-medium text-default">{formatRelativeDate(key.last_used_at)}</p>
               </div>
             </div>
@@ -251,7 +251,7 @@
                     <User class="h-4 w-4 text-muted" />
                   </div>
                   <div>
-                    <p class="text-xs text-muted">Created by</p>
+                    <p class="text-xs text-muted">{m.api_keys_admin_created_by_label()}</p>
                     <p class="text-sm font-mono text-default truncate max-w-[180px]" title={key.created_by_user_id}>
                       {key.created_by_user_id.slice(0, 8)}...
                     </p>
@@ -265,7 +265,7 @@
                   <Calendar class="h-4 w-4 text-muted" />
                 </div>
                 <div>
-                  <p class="text-xs text-muted">Created</p>
+                  <p class="text-xs text-muted">{m.api_keys_created()}</p>
                   <p class="text-sm font-medium text-default">
                     {key.created_at ? formatter.format(new Date(key.created_at)) : "—"}
                   </p>
@@ -278,9 +278,9 @@
                   <Activity class="h-4 w-4 text-muted" />
                 </div>
                 <div>
-                  <p class="text-xs text-muted">Last Used</p>
+                  <p class="text-xs text-muted">{m.api_keys_last_used()}</p>
                   <p class="text-sm font-medium text-default">
-                    {key.last_used_at ? formatter.format(new Date(key.last_used_at)) : "Never"}
+                    {key.last_used_at ? formatter.format(new Date(key.last_used_at)) : m.api_keys_never()}
                   </p>
                 </div>
               </div>
@@ -291,9 +291,9 @@
                   <Clock class="h-4 w-4 text-muted" />
                 </div>
                 <div>
-                  <p class="text-xs text-muted">Expires</p>
+                  <p class="text-xs text-muted">{m.api_keys_expires()}</p>
                   <p class="text-sm font-medium text-default">
-                    {key.expires_at ? formatter.format(new Date(key.expires_at)) : "Never"}
+                    {key.expires_at ? formatter.format(new Date(key.expires_at)) : m.api_keys_never()}
                   </p>
                 </div>
               </div>
@@ -304,9 +304,9 @@
                   <Shield class="h-4 w-4 text-muted" />
                 </div>
                 <div>
-                  <p class="text-xs text-muted">Rate Limit</p>
+                  <p class="text-xs text-muted">{m.api_keys_rate_limit_label()}</p>
                   <p class="text-sm font-medium text-default">
-                    {key.rate_limit ? `${key.rate_limit}/hr` : "Default"}
+                    {key.rate_limit ? `${key.rate_limit}/hr` : m.api_keys_default()}
                   </p>
                 </div>
               </div>
@@ -314,7 +314,7 @@
               <!-- Full Scope ID -->
               {#if key.scope_id}
                 <div class="sm:col-span-2">
-                  <p class="text-xs text-muted mb-2">Scope ID</p>
+                  <p class="text-xs text-muted mb-2">{m.api_keys_admin_scope_id_label()}</p>
                   <code class="inline-block rounded-md bg-primary border border-default px-3 py-1.5 text-xs font-mono text-default">
                     {key.scope_id}
                   </code>
@@ -324,7 +324,7 @@
               <!-- Allowed Origins (for pk_ keys) -->
               {#if key.key_type === "pk_" && key.allowed_origins?.length}
                 <div class="sm:col-span-2">
-                  <p class="text-xs text-muted mb-2">Allowed Origins</p>
+                  <p class="text-xs text-muted mb-2">{m.api_keys_admin_allowed_origins_label()}</p>
                   <div class="flex flex-wrap gap-1.5">
                     {#each key.allowed_origins as origin}
                       <span class="inline-flex items-center gap-1.5 rounded-md bg-primary border border-default px-2.5 py-1 text-xs font-mono text-default">
@@ -339,7 +339,7 @@
               <!-- Allowed IPs (for sk_ keys) -->
               {#if key.key_type === "sk_" && key.allowed_ips?.length}
                 <div class="sm:col-span-2">
-                  <p class="text-xs text-muted mb-2">Allowed IPs</p>
+                  <p class="text-xs text-muted mb-2">{m.api_keys_admin_allowed_ips_label()}</p>
                   <div class="flex flex-wrap gap-1.5">
                     {#each key.allowed_ips as ip}
                       <span class="inline-flex items-center gap-1.5 rounded-md bg-primary border border-default px-2.5 py-1 text-xs font-mono text-default">
@@ -356,7 +356,7 @@
                 <div class="sm:col-span-2 lg:col-span-4">
                   <div class="rounded-lg border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20 p-3">
                     <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                      <strong>Suspended:</strong> {formatter.format(new Date(key.suspended_at))}
+                      <strong>{m.api_keys_admin_suspended_label()}</strong> {formatter.format(new Date(key.suspended_at))}
                       {#if key.suspended_reason_text}
                         <br /><span class="text-yellow-600 dark:text-yellow-400">{key.suspended_reason_text}</span>
                       {/if}
@@ -370,7 +370,7 @@
                 <div class="sm:col-span-2 lg:col-span-4">
                   <div class="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20 p-3">
                     <p class="text-sm text-red-700 dark:text-red-300">
-                      <strong>Revoked:</strong> {formatter.format(new Date(key.revoked_at))}
+                      <strong>{m.api_keys_admin_revoked_label()}</strong> {formatter.format(new Date(key.revoked_at))}
                       {#if key.revoked_reason_text}
                         <br /><span class="text-red-600 dark:text-red-400">{key.revoked_reason_text}</span>
                       {/if}

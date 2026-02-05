@@ -58,13 +58,13 @@
   function getStatusTooltip(state: string): string {
     switch (state) {
       case "active":
-        return "This key is active and can be used for API requests";
+        return m.api_keys_status_active_tooltip();
       case "suspended":
-        return "This key is temporarily suspended and cannot make requests";
+        return m.api_keys_status_suspended_tooltip();
       case "revoked":
-        return "This key has been permanently revoked and cannot be reactivated";
+        return m.api_keys_status_revoked_tooltip();
       case "expired":
-        return "This key has expired and is no longer valid";
+        return m.api_keys_status_expired_tooltip();
       default:
         return "Unknown status";
     }
@@ -78,13 +78,13 @@
   const relativeFormatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
   function formatRelativeDate(date: string | null | undefined): string {
-    if (!date) return "Never";
+    if (!date) return m.api_keys_never();
     const d = new Date(date);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
 
-    if (diffDays === 0) return "Today";
-    if (diffDays === 1) return "Yesterday";
+    if (diffDays === 0) return m.api_keys_today();
+    if (diffDays === 1) return m.api_keys_yesterday();
     if (diffDays < 7) return relativeFormatter.format(-diffDays, "day");
     if (diffDays < 30) return relativeFormatter.format(-Math.floor(diffDays / 7), "week");
     return formatter.format(d);
@@ -101,13 +101,13 @@
   function getScopeStyle(scopeType: string) {
     switch (scopeType) {
       case "tenant":
-        return { label: "Tenant", classes: "bg-gray-700 dark:bg-gray-600 text-white" };
+        return { label: m.api_keys_scope_tenant(), classes: "bg-gray-700 dark:bg-gray-600 text-white" };
       case "space":
-        return { label: "Space", classes: "bg-emerald-600 dark:bg-emerald-500 text-white" };
+        return { label: m.api_keys_scope_space(), classes: "bg-emerald-600 dark:bg-emerald-500 text-white" };
       case "assistant":
-        return { label: "Assistant", classes: "bg-violet-600 dark:bg-violet-500 text-white" };
+        return { label: m.api_keys_scope_assistant(), classes: "bg-violet-600 dark:bg-violet-500 text-white" };
       case "app":
-        return { label: "App", classes: "bg-orange-600 dark:bg-orange-500 text-white" };
+        return { label: m.api_keys_scope_app(), classes: "bg-orange-600 dark:bg-orange-500 text-white" };
       default:
         return { label: "Unknown", classes: "bg-gray-500 dark:bg-gray-400 text-white" };
     }
@@ -126,13 +126,13 @@
   function getStateStyle(state: string) {
     switch (state) {
       case "active":
-        return { label: "Active", dotClasses: "bg-emerald-500 dark:bg-emerald-400" };
+        return { label: m.api_keys_status_active(), dotClasses: "bg-emerald-500 dark:bg-emerald-400" };
       case "suspended":
-        return { label: "Suspended", dotClasses: "bg-amber-500 dark:bg-amber-400" };
+        return { label: m.api_keys_status_suspended(), dotClasses: "bg-amber-500 dark:bg-amber-400" };
       case "revoked":
-        return { label: "Revoked", dotClasses: "bg-red-500 dark:bg-red-400" };
+        return { label: m.api_keys_status_revoked(), dotClasses: "bg-red-500 dark:bg-red-400" };
       case "expired":
-        return { label: "Expired", dotClasses: "bg-gray-400 dark:bg-gray-500" };
+        return { label: m.api_keys_status_expired(), dotClasses: "bg-gray-400 dark:bg-gray-500" };
       default:
         return { label: "Unknown", dotClasses: "bg-gray-400 dark:bg-gray-500" };
     }
@@ -154,8 +154,8 @@
   function getKeyTypeStyle(keyType: string) {
     // Using theme-aware classes that work in both light and dark mode
     return keyType === "pk_"
-      ? { label: "Public", iconClass: "text-amber-600 dark:text-amber-400", bgClass: "bg-amber-50 dark:bg-amber-900/30" }
-      : { label: "Secret", iconClass: "text-indigo-600 dark:text-indigo-400", bgClass: "bg-indigo-50 dark:bg-indigo-900/30" };
+      ? { label: m.api_keys_public_key(), iconClass: "text-amber-600 dark:text-amber-400", bgClass: "bg-amber-50 dark:bg-amber-900/30" }
+      : { label: m.api_keys_secret_key(), iconClass: "text-indigo-600 dark:text-indigo-400", bgClass: "bg-indigo-50 dark:bg-indigo-900/30" };
   }
 </script>
 
@@ -197,10 +197,9 @@
     >
       <Key class="h-8 w-8 text-accent-default" />
     </div>
-    <h3 class="text-lg font-semibold text-default">No API Keys</h3>
+    <h3 class="text-lg font-semibold text-default">{m.api_keys_no_keys()}</h3>
     <p class="mt-2 text-sm text-muted max-w-md mx-auto">
-      Create your first API key to start integrating with the Eneo API.
-      Keys provide secure access to your resources.
+      {m.api_keys_no_keys_desc()}
     </p>
   </div>
 {:else}
@@ -208,7 +207,7 @@
   <div class="space-y-3">
     {#if !hasExpandedAny && keys.length > 0}
       <p class="text-xs text-muted text-center mb-2 opacity-70">
-        Click on a key to view details
+        {m.api_keys_click_to_view()}
       </p>
     {/if}
     {#each keys as key (key.id)}
@@ -291,16 +290,16 @@
               <!-- Expiration -->
               {#if daysUntil !== null}
                 <div class="text-right">
-                  <p class="text-xs text-muted">Expires</p>
+                  <p class="text-xs text-muted">{m.api_keys_expires()}</p>
                   <p class="font-medium {daysUntil <= 7 ? 'text-caution' : daysUntil <= 0 ? 'text-negative' : 'text-default'}">
-                    {daysUntil <= 0 ? "Expired" : daysUntil === 1 ? "Tomorrow" : `${daysUntil} days`}
+                    {daysUntil <= 0 ? m.api_keys_status_expired() : daysUntil === 1 ? m.api_keys_tomorrow() : m.api_keys_days({ count: daysUntil })}
                   </p>
                 </div>
               {/if}
 
               <!-- Last used -->
               <div class="text-right">
-                <p class="text-xs text-muted">Last used</p>
+                <p class="text-xs text-muted">{m.api_keys_last_used()}</p>
                 <p class="font-medium text-default">{formatRelativeDate(key.last_used_at)}</p>
               </div>
             </div>
@@ -346,7 +345,7 @@
                   <Calendar class="h-4 w-4 text-muted" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="text-xs font-medium text-muted uppercase tracking-wide">Created</p>
+                  <p class="text-xs font-medium text-muted uppercase tracking-wide">{m.api_keys_created()}</p>
                   <p class="text-sm font-medium text-default mt-0.5 truncate">
                     {key.created_at ? formatter.format(new Date(key.created_at)) : "—"}
                   </p>
@@ -362,9 +361,9 @@
                   <Activity class="h-4 w-4 text-muted" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="text-xs font-medium text-muted uppercase tracking-wide">Last Used</p>
+                  <p class="text-xs font-medium text-muted uppercase tracking-wide">{m.api_keys_last_used()}</p>
                   <p class="text-sm font-medium text-default mt-0.5 truncate">
-                    {key.last_used_at ? formatter.format(new Date(key.last_used_at)) : "Never"}
+                    {key.last_used_at ? formatter.format(new Date(key.last_used_at)) : m.api_keys_never()}
                   </p>
                 </div>
               </div>
@@ -378,9 +377,9 @@
                   <Clock class="h-4 w-4 text-muted" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="text-xs font-medium text-muted uppercase tracking-wide">Expires</p>
+                  <p class="text-xs font-medium text-muted uppercase tracking-wide">{m.api_keys_expires()}</p>
                   <p class="text-sm font-medium text-default mt-0.5 truncate">
-                    {key.expires_at ? formatter.format(new Date(key.expires_at)) : "Never"}
+                    {key.expires_at ? formatter.format(new Date(key.expires_at)) : m.api_keys_never()}
                   </p>
                 </div>
               </div>
@@ -394,9 +393,9 @@
                   <Shield class="h-4 w-4 text-muted" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="text-xs font-medium text-muted uppercase tracking-wide">Rate Limit</p>
+                  <p class="text-xs font-medium text-muted uppercase tracking-wide">{m.api_keys_rate_limit_label()}</p>
                   <p class="text-sm font-medium text-default mt-0.5 truncate">
-                    {key.rate_limit ? `${key.rate_limit}/hr` : "Default"}
+                    {key.rate_limit ? `${key.rate_limit}/hr` : m.api_keys_default()}
                   </p>
                 </div>
               </div>
@@ -405,7 +404,7 @@
             <!-- Allowed Origins (for pk_ keys) -->
             {#if key.key_type === "pk_" && key.allowed_origins?.length}
               <div class="mt-5 pt-4 border-t border-dimmer">
-                <p class="text-xs font-medium text-muted uppercase tracking-wide mb-2.5">Allowed Origins</p>
+                <p class="text-xs font-medium text-muted uppercase tracking-wide mb-2.5">{m.api_keys_allowed_origins()}</p>
                 <div class="flex flex-wrap gap-2">
                   {#each key.allowed_origins as origin}
                     <span
@@ -424,7 +423,7 @@
             <!-- Allowed IPs (for sk_ keys) -->
             {#if key.key_type === "sk_" && key.allowed_ips?.length}
               <div class="mt-5 pt-4 border-t border-dimmer">
-                <p class="text-xs font-medium text-muted uppercase tracking-wide mb-2.5">Allowed IPs</p>
+                <p class="text-xs font-medium text-muted uppercase tracking-wide mb-2.5">{m.api_keys_allowed_ips()}</p>
                 <div class="flex flex-wrap gap-2">
                   {#each key.allowed_ips as ip}
                     <span
@@ -452,7 +451,7 @@
                       <Shield class="h-4 w-4 text-caution" />
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-semibold text-caution">Key Suspended</p>
+                      <p class="text-sm font-semibold text-caution">{m.api_keys_key_suspended()}</p>
                       <p class="text-sm text-caution/80 mt-1">
                         {formatter.format(new Date(key.suspended_at))}
                       </p>
@@ -477,7 +476,7 @@
                       <Lock class="h-4 w-4 text-negative" />
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-semibold text-negative">Key Revoked</p>
+                      <p class="text-sm font-semibold text-negative">{m.api_keys_key_revoked()}</p>
                       <p class="text-sm text-negative/80 mt-1">
                         {formatter.format(new Date(key.revoked_at))}
                       </p>

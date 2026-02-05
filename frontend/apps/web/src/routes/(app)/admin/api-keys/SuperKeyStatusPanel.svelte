@@ -12,7 +12,7 @@
   let status = $state<SuperApiKeyStatus | null>(null);
 
   const statusLabel = (configured: boolean) => ({
-    label: configured ? "Configured" : "Not configured",
+    label: configured ? m.api_keys_admin_status_configured() : m.api_keys_admin_status_not_configured(),
     color: configured ? "green" : "red"
   });
 
@@ -54,8 +54,7 @@
       </div>
     </div>
     <p class="text-muted text-sm">
-      Super keys are configured via environment variables only. Rotate by updating the
-      environment value and restarting the backend.
+      {m.api_keys_admin_super_keys_info()}
     </p>
   {/if}
 </div>

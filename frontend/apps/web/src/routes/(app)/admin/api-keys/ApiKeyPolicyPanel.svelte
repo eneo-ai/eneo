@@ -119,7 +119,7 @@
       const policy = await intric.apiKeys.admin.updatePolicy(updates);
       originalPolicy = policy;
       syncFromPolicy(policy);
-      successMessage = "Policy updated successfully";
+      successMessage = m.api_keys_admin_policy_updated();
       setTimeout(() => (successMessage = null), 3000);
     } catch (error) {
       console.error(error);
@@ -140,58 +140,58 @@
   });
 
   // Policy items configuration
-  const policyItems = [
+  const policyItems = $derived([
     {
       id: "requireExpiration",
-      title: "Require expiration",
-      description: "Force all new API keys to include an expiration date for improved security",
+      title: m.api_keys_admin_policy_require_expiration(),
+      description: m.api_keys_admin_policy_require_expiration_desc(),
       icon: Calendar,
       type: "toggle" as const
     },
     {
       id: "maxExpirationDays",
-      title: "Maximum expiration days",
-      description: "Maximum allowed expiration period for new keys. Leave empty for no limit.",
+      title: m.api_keys_admin_policy_max_expiration(),
+      description: m.api_keys_admin_policy_max_expiration_desc(),
       icon: Clock,
       type: "number" as const,
-      placeholder: "No limit",
-      suffix: "days"
+      placeholder: m.api_keys_admin_policy_placeholder_no_limit(),
+      suffix: m.api_keys_admin_policy_suffix_days()
     },
     {
       id: "autoExpireUnusedDays",
-      title: "Auto-expire unused keys",
-      description: "Automatically revoke keys that haven't been used for this many days",
+      title: m.api_keys_admin_policy_auto_expire(),
+      description: m.api_keys_admin_policy_auto_expire_desc(),
       icon: Clock,
       type: "number" as const,
-      placeholder: "Disabled",
-      suffix: "days"
+      placeholder: m.api_keys_admin_policy_placeholder_disabled(),
+      suffix: m.api_keys_admin_policy_suffix_days()
     },
     {
       id: "maxRateLimitOverride",
-      title: "Maximum rate limit override",
-      description: "Upper bound for per-key rate limits. Users cannot set higher limits.",
+      title: m.api_keys_admin_policy_max_rate_limit(),
+      description: m.api_keys_admin_policy_max_rate_limit_desc(),
       icon: Gauge,
       type: "number" as const,
-      placeholder: "No limit",
-      suffix: "req/hr"
+      placeholder: m.api_keys_admin_policy_placeholder_no_limit(),
+      suffix: m.api_keys_admin_policy_suffix_req_hr()
     },
     {
       id: "maxDelegationDepth",
-      title: "Maximum delegation depth",
-      description: "Maximum depth for key delegation chains (applies when delegation is enabled)",
+      title: m.api_keys_admin_policy_max_delegation(),
+      description: m.api_keys_admin_policy_max_delegation_desc(),
       icon: Layers,
       type: "number" as const,
-      placeholder: "No limit",
-      suffix: "levels"
+      placeholder: m.api_keys_admin_policy_placeholder_no_limit(),
+      suffix: m.api_keys_admin_policy_suffix_levels()
     },
     {
       id: "revocationCascadeEnabled",
-      title: "Revocation cascade",
-      description: "Automatically revoke all child keys when a parent key is revoked",
+      title: m.api_keys_admin_policy_revocation_cascade(),
+      description: m.api_keys_admin_policy_revocation_cascade_desc(),
       icon: Link,
       type: "toggle" as const
     }
-  ];
+  ]);
 </script>
 
 <div class="space-y-4">
@@ -312,22 +312,22 @@
               <Check class="h-4 w-4 text-accent-default" />
             </div>
             <div>
-              <p class="text-sm font-semibold text-default">Unsaved changes</p>
-              <p class="text-xs text-muted">Changes will apply to all new API keys</p>
+              <p class="text-sm font-semibold text-default">{m.api_keys_admin_unsaved_changes()}</p>
+              <p class="text-xs text-muted">{m.api_keys_admin_changes_apply()}</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
             <Button variant="ghost" on:click={resetPolicy} disabled={saving} class="gap-2">
               <RotateCcw class="h-4 w-4" />
-              Discard
+              {m.api_keys_admin_discard()}
             </Button>
             <Button variant="primary" on:click={savePolicy} disabled={saving} class="gap-2">
               {#if saving}
                 <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                Saving...
+                {m.api_keys_admin_saving()}
               {:else}
                 <Check class="h-4 w-4" />
-                Save changes
+                {m.api_keys_admin_save_changes()}
               {/if}
             </Button>
           </div>

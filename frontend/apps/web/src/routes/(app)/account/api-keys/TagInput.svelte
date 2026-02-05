@@ -2,6 +2,7 @@
   import { X, Plus, Globe, Server, AlertCircle } from "lucide-svelte";
   import { fly, scale } from "svelte/transition";
   import { flip } from "svelte/animate";
+  import { m } from "$lib/paraglide/messages";
 
   type TagType = "origin" | "ip";
 
@@ -27,19 +28,19 @@
   let inputElement: HTMLInputElement;
   let validationError = $state<string | null>(null);
 
-  // Quick-add patterns for origins
-  const originQuickAdd = [
-    { label: "localhost", pattern: "http://localhost:*" },
-    { label: "HTTPS wildcard", pattern: "https://*" }
+  // Quick-add patterns for origins (using getter for translations)
+  const getOriginQuickAdd = () => [
+    { label: m.api_keys_tag_localhost(), pattern: "http://localhost:*" },
+    { label: m.api_keys_tag_https_wildcard(), pattern: "https://*" }
   ];
 
-  // Quick-add patterns for IPs
-  const ipQuickAdd = [
-    { label: "Private (10.x)", pattern: "10.0.0.0/8" },
-    { label: "Private (192.168.x)", pattern: "192.168.0.0/16" }
+  // Quick-add patterns for IPs (using getter for translations)
+  const getIpQuickAdd = () => [
+    { label: m.api_keys_tag_private_10(), pattern: "10.0.0.0/8" },
+    { label: m.api_keys_tag_private_192(), pattern: "192.168.0.0/16" }
   ];
 
-  const quickAddOptions = $derived(type === "origin" ? originQuickAdd : ipQuickAdd);
+  const quickAddOptions = $derived(type === "origin" ? getOriginQuickAdd() : getIpQuickAdd());
 
   // Validate origin URL pattern
   function validateOrigin(val: string): string | null {
@@ -47,7 +48,7 @@
     if (val.includes("*")) {
       // Check if it's a valid wildcard pattern
       if (!/^https?:\/\/(\*|[\w.-]+\*?|\*\.[\w.-]+)(:\d+|\:\*)?$/.test(val)) {
-        return "Invalid wildcard pattern. Use format: https://*.example.com or http://localhost:*";
+        return m.api_keys_tag_invalid_wildcard();
       }
       return null;
     }
@@ -57,7 +58,7 @@
       new URL(val);
       return null;
     } catch {
-      return "Invalid URL format. Include protocol (e.g., https://example.com)";
+      return m.api_keys_tag_invalid_origin();
     }
   }
 
@@ -76,16 +77,16 @@
         const [ip, cidr] = val.split("/");
         const octets = ip.split(".").map(Number);
         if (octets.some((o) => o < 0 || o > 255)) {
-          return "Invalid IP address: octets must be 0-255";
+          return m.api_keys_tag_invalid_octet();
         }
         if (cidr && (Number(cidr) < 0 || Number(cidr) > 32)) {
-          return "Invalid CIDR: must be 0-32 for IPv4";
+          return m.api_keys_tag_invalid_cidr();
         }
       }
       return null;
     }
 
-    return "Invalid format. Use CIDR notation (e.g., 192.168.1.0/24) or single IP";
+    return m.api_keys_tag_invalid_ip();
   }
 
   // Validate input based on type
@@ -106,7 +107,7 @@
     }
 
     if (value.includes(trimmed)) {
-      validationError = "This value is already added";
+      validationError = m.api_keys_tag_already_added();
       return;
     }
 
@@ -147,12 +148,12 @@
 <div class="space-y-2">
   <!-- Label and description -->
   {#if label}
-    <label class="block text-sm font-medium text-default">
+    <span id="tag-input-label" class="block text-sm font-medium text-default">
       {label}
       {#if required}
         <span class="text-negative">*</span>
       {/if}
-    </label>
+    </span>
   {/if}
   {#if description}
     <p class="text-xs text-muted">{description}</p>
@@ -177,7 +178,7 @@
           in:scale={{ duration: 150 }}
           out:scale={{ duration: 150 }}
         >
-          <svelte:component this={Icon} class="h-3 w-3 text-muted" />
+          <Icon class="h-3 w-3 text-muted" />
           <span class="text-sm font-mono text-default max-w-[200px] truncate" title={tag}>
             {tag}
           </span>
@@ -240,7 +241,7 @@
   <!-- Quick-add buttons -->
   {#if !disabled && quickAddOptions.length > 0}
     <div class="flex flex-wrap items-center gap-2">
-      <span class="text-xs text-muted">Quick add:</span>
+      <span class="text-xs text-muted">{m.api_keys_tag_quick_add()}</span>
       {#each quickAddOptions as opt}
         <button
           type="button"

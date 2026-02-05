@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Calendar, Clock, AlertTriangle, Infinity } from "lucide-svelte";
   import { fly } from "svelte/transition";
+  import { m } from "$lib/paraglide/messages";
 
   let {
     value = $bindable<string | null>(null),
@@ -18,13 +19,14 @@
   let customDate = $state("");
   let customTime = $state("23:59");
 
-  // Preset options with their days
-  const presets = [
-    { label: "7 days", days: 7 },
-    { label: "30 days", days: 30 },
-    { label: "90 days", days: 90 },
-    { label: "1 year", days: 365 }
+  // Preset options with their days (using getter for translations)
+  const getPresets = () => [
+    { label: m.api_keys_exp_7_days(), days: 7 },
+    { label: m.api_keys_exp_30_days(), days: 30 },
+    { label: m.api_keys_exp_90_days(), days: 90 },
+    { label: m.api_keys_exp_1_year(), days: 365 }
   ];
+  const presets = $derived(getPresets());
 
   // Filter presets based on maxDays policy
   const availablePresets = $derived(
@@ -134,15 +136,15 @@
 </script>
 
 <div class="space-y-3">
-  <label class="block text-sm font-medium text-default">
-    Expiration
+  <span id="expiration-label" class="block text-sm font-medium text-default">
+    {m.api_keys_expiration()}
     {#if requireExpiration}
       <span class="text-negative">*</span>
     {/if}
-  </label>
+  </span>
 
   <!-- Preset buttons -->
-  <div class="flex flex-wrap gap-2">
+  <div role="group" aria-labelledby="expiration-label" class="flex flex-wrap gap-2">
     {#each availablePresets as preset}
       <button
         type="button"
@@ -171,7 +173,7 @@
              disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <Calendar class="h-4 w-4" />
-      Custom
+      {m.api_keys_exp_custom()}
     </button>
 
     <!-- No expiration button -->
@@ -188,7 +190,7 @@
                disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Infinity class="h-4 w-4" />
-        No expiration
+        {m.api_keys_exp_no_expiration()}
       </button>
     {/if}
   </div>
@@ -201,8 +203,9 @@
     >
       <div class="grid gap-3 sm:grid-cols-2">
         <div>
-          <label class="mb-1.5 block text-xs font-medium text-muted">Date</label>
+          <label for="expiration-date" class="mb-1.5 block text-xs font-medium text-muted">{m.api_keys_exp_date()}</label>
           <input
+            id="expiration-date"
             type="date"
             bind:value={customDate}
             min={minDate()}
@@ -214,10 +217,11 @@
           />
         </div>
         <div>
-          <label class="mb-1.5 block text-xs font-medium text-muted">Time</label>
+          <label for="expiration-time" class="mb-1.5 block text-xs font-medium text-muted">{m.api_keys_exp_time()}</label>
           <div class="relative">
             <Clock class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted pointer-events-none" />
             <input
+              id="expiration-time"
               type="time"
               bind:value={customTime}
               disabled={disabled}
@@ -232,7 +236,7 @@
       {#if maxDays}
         <p class="text-xs text-muted flex items-center gap-1.5">
           <AlertTriangle class="h-3.5 w-3.5" />
-          Maximum allowed: {maxDays} days from now
+          {m.api_keys_exp_max_days({ days: maxDays })}
         </p>
       {/if}
     </div>
@@ -251,10 +255,10 @@
         </div>
         <div>
           <p class="text-sm font-medium text-default">
-            Expires {formatDisplayDate(value)}
+            {m.api_keys_exp_expires_on({ date: formatDisplayDate(value) })}
           </p>
           <p class="text-xs text-muted">
-            {daysUntil === 1 ? "1 day" : `${daysUntil} days`} from now
+            {daysUntil === 1 ? m.api_keys_exp_1_day_from_now() : m.api_keys_exp_days_from_now({ count: daysUntil })}
           </p>
         </div>
       </div>
@@ -268,8 +272,8 @@
         <Infinity class="h-4 w-4 text-accent-default" />
       </div>
       <div>
-        <p class="text-sm font-medium text-default">No expiration</p>
-        <p class="text-xs text-muted">This key will remain valid until manually revoked</p>
+        <p class="text-sm font-medium text-default">{m.api_keys_exp_no_expiration()}</p>
+        <p class="text-xs text-muted">{m.api_keys_exp_valid_until_revoked()}</p>
       </div>
     </div>
   {/if}
@@ -278,7 +282,7 @@
   {#if !value && !requireExpiration}
     <div class="flex items-start gap-2.5 rounded-lg border border-caution/20 bg-caution/5 px-3 py-2.5 text-xs text-caution">
       <AlertTriangle class="h-4 w-4 flex-shrink-0" />
-      <span>Keys without expiration pose a security risk. Consider setting an expiration date.</span>
+      <span>{m.api_keys_exp_warning()}</span>
     </div>
   {/if}
 </div>

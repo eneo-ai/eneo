@@ -85,12 +85,13 @@
   let appOptions = $state<{ id: string; name: string; spaceName?: string }[]>([]);
   let loadingResources = $state(false);
 
-  // Step definitions
-  const steps = [
-    { number: 1, title: "Basic Info", icon: Key, subtitle: "Name and key type" },
-    { number: 2, title: "Scope & Permissions", icon: Shield, subtitle: "Access level" },
-    { number: 3, title: "Security", icon: Settings2, subtitle: "Origins, IPs, expiration" }
+  // Step definitions - using a getter function to access translations
+  const getSteps = () => [
+    { number: 1, title: m.api_keys_step_basic_info(), icon: Key, subtitle: m.api_keys_step_basic_subtitle() },
+    { number: 2, title: m.api_keys_step_scope(), icon: Shield, subtitle: m.api_keys_step_scope_subtitle() },
+    { number: 3, title: m.api_keys_step_security(), icon: Settings2, subtitle: m.api_keys_step_security_subtitle() }
   ];
+  const steps = $derived(getSteps());
 
   // Transition config
   const transitionDuration = 250;
@@ -165,16 +166,16 @@
   function validateStep(step: number): string | null {
     switch (step) {
       case 1:
-        if (!name.trim()) return "Name is required";
+        if (!name.trim()) return m.api_keys_name_required();
         return null;
       case 2:
         if (permissionMode === "simple" && scopeType !== "tenant" && !scopeId && !manualScopeId.trim()) {
-          return `Please select a ${scopeType} or enter its ID`;
+          return m.api_keys_select_scope({ scopeType });
         }
         return null;
       case 3:
         if (keyType === "pk_" && allowedOrigins.length === 0) {
-          return "At least one allowed origin is required for public keys";
+          return m.api_keys_origin_required();
         }
         return null;
       default:
@@ -313,10 +314,10 @@
 
   function getLevelLabel(level: ResourcePermission) {
     switch (level) {
-      case "none": return "No access";
-      case "read": return "Read";
-      case "write": return "Write";
-      case "admin": return "Admin";
+      case "none": return m.api_keys_permission_no_access();
+      case "read": return m.api_keys_permission_read();
+      case "write": return m.api_keys_permission_write();
+      case "admin": return m.api_keys_permission_admin();
     }
   }
 </script>
@@ -415,7 +416,7 @@
               {!isActive && !isCompleted ? 'bg-tertiary' : ''}
               disabled:opacity-40"
             aria-label="Step {step.number}"
-          />
+          ></button>
         {/each}
       </div>
       <p class="text-center text-sm font-medium text-default mt-2 sm:hidden">
@@ -454,24 +455,26 @@
                 <h3 class="sr-only">Step 1 of 3: Basic Info - Name and key type</h3>
                 <div class="space-y-5">
                   <div>
-                    <label class="mb-2 block text-sm font-semibold tracking-wide text-default">
+                    <label for="api-key-name" class="mb-2 block text-sm font-semibold tracking-wide text-default">
                       {m.name()} <span class="text-negative">*</span>
                     </label>
                     <Input.Text
+                      id="api-key-name"
                       bind:value={name}
                       placeholder="Production Backend Key"
                       class="!h-12 !text-base"
                     />
                     <p class="mt-2 text-xs text-muted">
-                      A descriptive name to help you identify this key
+                      {m.api_keys_name_help()}
                     </p>
                   </div>
 
                   <div>
-                    <label class="mb-2 block text-sm font-semibold tracking-wide text-default">
+                    <label for="api-key-description" class="mb-2 block text-sm font-semibold tracking-wide text-default">
                       {m.description()}
                     </label>
                     <Input.TextArea
+                      id="api-key-description"
                       bind:value={description}
                       placeholder="Used for production backend API integration..."
                       rows={3}
@@ -481,7 +484,7 @@
 
                 <!-- Key Type Selection -->
                 <fieldset>
-                  <legend id="key-type-label" class="mb-3 block text-sm font-semibold tracking-wide text-default">Key Type</legend>
+                  <legend id="key-type-label" class="mb-3 block text-sm font-semibold tracking-wide text-default">{m.api_keys_key_type()}</legend>
                   <div class="grid gap-3 sm:grid-cols-2" role="group" aria-labelledby="key-type-label">
                     <!-- Secret Key -->
                     <button
@@ -504,13 +507,13 @@
                         </div>
                         <div class="flex-1">
                           <div class="flex items-center gap-2">
-                            <span class="text-base font-semibold tracking-wide text-default">Secret Key</span>
+                            <span class="text-base font-semibold tracking-wide text-default">{m.api_keys_secret_key()}</span>
                             <span class="rounded-md px-2 py-0.5 text-xs font-mono font-bold bg-accent-default/15 text-accent-default">
                               sk_
                             </span>
                           </div>
                           <p class="mt-1 text-sm leading-relaxed text-muted">
-                            For server-side use. Keep secure and never expose in client code.
+                            {m.api_keys_secret_key_desc()}
                           </p>
                         </div>
                       </div>
@@ -544,13 +547,13 @@
                         </div>
                         <div class="flex-1">
                           <div class="flex items-center gap-2">
-                            <span class="text-base font-semibold tracking-wide text-default">Public Key</span>
+                            <span class="text-base font-semibold tracking-wide text-default">{m.api_keys_public_key()}</span>
                             <span class="rounded-md px-2 py-0.5 text-xs font-mono font-bold bg-orange-500/15 text-orange-600 dark:text-orange-400">
                               pk_
                             </span>
                           </div>
                           <p class="mt-1 text-sm leading-relaxed text-muted">
-                            For client-side use. Requires allowed origins for security.
+                            {m.api_keys_public_key_desc()}
                           </p>
                         </div>
                       </div>
@@ -573,10 +576,10 @@
                 <!-- Permission Mode Toggle -->
                 <div class="flex items-center justify-between pb-4 border-b border-default">
                   <div>
-                    <label class="text-sm font-semibold tracking-wide text-default">Permission Type</label>
-                    <p class="text-xs mt-0.5 text-muted">Choose how to configure access</p>
+                    <span id="permission-type-label" class="text-sm font-semibold tracking-wide text-default">{m.api_keys_permission_type()}</span>
+                    <p class="text-xs mt-0.5 text-muted">{m.api_keys_permission_choose()}</p>
                   </div>
-                  <div class="flex items-center gap-1 rounded-lg p-1 border border-default bg-subtle">
+                  <div role="group" aria-labelledby="permission-type-label" class="flex items-center gap-1 rounded-lg p-1 border border-default bg-subtle">
                     <button
                       type="button"
                       onclick={() => (permissionMode = "simple")}
@@ -585,7 +588,7 @@
                                ? 'bg-primary text-default shadow-sm'
                                : 'text-muted hover:text-secondary'}"
                     >
-                      Simple
+                      {m.api_keys_simple()}
                     </button>
                     <button
                       type="button"
@@ -598,7 +601,7 @@
                                  ? 'text-muted cursor-not-allowed opacity-50'
                                  : 'text-muted hover:text-secondary'}"
                     >
-                      Fine-grained
+                      {m.api_keys_fine_grained()}
                     </button>
                   </div>
                 </div>
@@ -608,13 +611,13 @@
                   <div class="space-y-6">
                     <!-- Scope Type Selection -->
                     <fieldset>
-                      <legend id="scope-type-label" class="mb-3 block text-sm font-semibold tracking-wide text-default">Scope</legend>
+                      <legend id="scope-type-label" class="mb-3 block text-sm font-semibold tracking-wide text-default">{m.api_keys_scope()}</legend>
                       <div class="grid gap-3 grid-cols-2 lg:grid-cols-4" role="group" aria-labelledby="scope-type-label">
                         {#each [
-                          { value: "tenant", label: "Tenant", icon: Building2, desc: "All resources" },
-                          { value: "space", label: "Space", icon: Building2, desc: "Single space" },
-                          { value: "assistant", label: "Assistant", icon: MessageSquare, desc: "Single assistant" },
-                          { value: "app", label: "App", icon: AppWindow, desc: "Single app" }
+                          { value: "tenant", label: m.api_keys_scope_tenant(), icon: Building2, desc: m.api_keys_scope_tenant_desc() },
+                          { value: "space", label: m.api_keys_scope_space(), icon: Building2, desc: m.api_keys_scope_space_desc() },
+                          { value: "assistant", label: m.api_keys_scope_assistant(), icon: MessageSquare, desc: m.api_keys_scope_assistant_desc() },
+                          { value: "app", label: m.api_keys_scope_app(), icon: AppWindow, desc: m.api_keys_scope_app_desc() }
                         ] as opt}
                           {@const isSelected = scopeType === opt.value}
                           {@const ScopeIcon = opt.icon}
@@ -678,9 +681,9 @@
                           <div class="mt-4 pt-4 border-t border-default">
                             <button type="button" class="flex items-center gap-2 text-xs text-muted transition-colors mb-2 hover:text-secondary">
                               <Info class="h-3.5 w-3.5" />
-                              Or enter {scopeType} ID manually
+                              {m.api_keys_enter_id_manually({ scopeType })}
                             </button>
-                            <Input.Text bind:value={manualScopeId} placeholder="Enter UUID..." class="!font-mono !text-sm" />
+                            <Input.Text bind:value={manualScopeId} placeholder={m.api_keys_enter_uuid()} class="!font-mono !text-sm" />
                           </div>
                         {/if}
                       </div>
@@ -688,12 +691,12 @@
 
                     <!-- Simple Permission Level -->
                     <fieldset>
-                      <legend id="permission-level-label" class="mb-3 block text-sm font-semibold tracking-wide text-default">Permission Level</legend>
+                      <legend id="permission-level-label" class="mb-3 block text-sm font-semibold tracking-wide text-default">{m.api_keys_permission_level()}</legend>
                       <div class="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-labelledby="permission-level-label">
                         {#each [
-                          { value: "read", label: "Read", icon: Eye, desc: "View resources only" },
-                          { value: "write", label: "Write", icon: Pencil, desc: "Create and modify" },
-                          { value: "admin", label: "Admin", icon: ShieldCheck, desc: "Full access" }
+                          { value: "read", label: m.api_keys_permission_read(), icon: Eye, desc: m.api_keys_permission_read_desc() },
+                          { value: "write", label: m.api_keys_permission_write(), icon: Pencil, desc: m.api_keys_permission_write_desc() },
+                          { value: "admin", label: m.api_keys_permission_admin(), icon: ShieldCheck, desc: m.api_keys_permission_admin_desc() }
                         ] as opt}
                           {@const isSelected = permission === opt.value}
                           {@const isDisabled = keyType === "pk_" && opt.value !== "read"}
@@ -739,7 +742,7 @@
                               </div>
                             {/if}
                             {#if isDisabled}
-                              <p class="mt-2 text-xs text-yellow-600 dark:text-yellow-400">Not available for public keys</p>
+                              <p class="mt-2 text-xs text-yellow-600 dark:text-yellow-400">{m.api_keys_not_available_public()}</p>
                             {/if}
                           </button>
                         {/each}
@@ -752,7 +755,7 @@
                     <!-- Quick actions -->
                     <div class="flex items-center justify-between rounded-lg border border-default bg-secondary/30 px-4 py-3">
                       <div class="flex items-center gap-3">
-                        <span class="text-sm text-muted">Quick set all:</span>
+                        <span class="text-sm text-muted">{m.api_keys_quick_set_all()}</span>
                         <div class="flex gap-1">
                           {#each ["none", "read", "write", "admin"] as level}
                             <button
@@ -766,7 +769,7 @@
                         </div>
                       </div>
                       <span class="text-xs text-muted">
-                        {activeResourceCount} of 4 enabled
+                        {m.api_keys_of_enabled({ count: activeResourceCount })}
                       </span>
                     </div>
 
@@ -781,8 +784,8 @@
                                 <MessageSquare class="h-5 w-5 text-secondary" />
                               </div>
                               <div>
-                                <h4 class="font-semibold text-sm text-default">Assistants</h4>
-                                <p class="text-xs text-muted">AI assistants and conversations</p>
+                                <h4 class="font-semibold text-sm text-default">{m.api_keys_resource_assistants()}</h4>
+                                <p class="text-xs text-muted">{m.api_keys_resource_assistants_desc()}</p>
                               </div>
                             </div>
                             <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(assistantsPermission)}">
@@ -814,8 +817,8 @@
                                 <AppWindow class="h-5 w-5 text-secondary" />
                               </div>
                               <div>
-                                <h4 class="font-semibold text-sm text-default">Applications</h4>
-                                <p class="text-xs text-muted">Apps and workflow execution</p>
+                                <h4 class="font-semibold text-sm text-default">{m.api_keys_resource_applications()}</h4>
+                                <p class="text-xs text-muted">{m.api_keys_resource_applications_desc()}</p>
                               </div>
                             </div>
                             <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(appsPermission)}">
@@ -847,8 +850,8 @@
                                 <Building2 class="h-5 w-5 text-secondary" />
                               </div>
                               <div>
-                                <h4 class="font-semibold text-sm text-default">Spaces</h4>
-                                <p class="text-xs text-muted">Workspace management</p>
+                                <h4 class="font-semibold text-sm text-default">{m.api_keys_resource_spaces()}</h4>
+                                <p class="text-xs text-muted">{m.api_keys_resource_spaces_desc()}</p>
                               </div>
                             </div>
                             <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(spacesPermission)}">
@@ -880,8 +883,8 @@
                                 <Sparkles class="h-5 w-5 text-secondary" />
                               </div>
                               <div>
-                                <h4 class="font-semibold text-sm text-default">Knowledge</h4>
-                                <p class="text-xs text-muted">Knowledge bases and documents</p>
+                                <h4 class="font-semibold text-sm text-default">{m.api_keys_resource_knowledge()}</h4>
+                                <p class="text-xs text-muted">{m.api_keys_resource_knowledge_desc()}</p>
                               </div>
                             </div>
                             <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(knowledgePermission)}">
@@ -909,8 +912,7 @@
                     <div class="flex items-start gap-3 rounded-lg border border-accent-default/30 bg-accent-default/5 px-4 py-3">
                       <Info class="h-4 w-4 flex-shrink-0 mt-0.5 text-accent-default" />
                       <p class="text-xs leading-relaxed text-accent-default">
-                        Fine-grained permissions let you set different access levels for each resource type.
-                        For example, set <strong>Read</strong> for Assistants and Apps, but <strong>No access</strong> for others.
+                        {@html m.api_keys_fine_grained_info()}
                       </p>
                     </div>
                   </div>
@@ -945,18 +947,19 @@
                 <ExpirationPicker bind:value={expiresAt} />
 
                 <div>
-                  <label class="mb-2 block text-sm font-semibold tracking-wide text-default">
-                    Rate Limit (requests per hour)
+                  <label for="api-key-rate-limit" class="mb-2 block text-sm font-semibold tracking-wide text-default">
+                    {m.api_keys_rate_limit()}
                   </label>
                   <Input.Text
+                    id="api-key-rate-limit"
                     bind:value={rateLimit}
-                    placeholder="Leave empty for default"
+                    placeholder={m.api_keys_rate_limit_placeholder()}
                     type="number"
                     min="1"
                     class="!h-11"
                   />
                   <p class="mt-2 text-xs text-muted">
-                    Custom rate limit for this key. Leave empty to use default tenant limit.
+                    {m.api_keys_rate_limit_help()}
                   </p>
                 </div>
               </div>
@@ -972,7 +975,7 @@
         {#if currentStep > 1}
           <Button variant="ghost" on:click={prevStep} class="gap-2">
             <ChevronLeft class="h-4 w-4" />
-            Back
+            {m.api_keys_back()}
           </Button>
         {/if}
       </div>
@@ -984,18 +987,18 @@
 
         {#if currentStep < totalSteps}
           <Button variant="primary" on:click={nextStep} class="gap-2 min-w-[80px] sm:min-w-[100px]">
-            Next
+            {m.api_keys_next()}
             <ChevronRight class="h-4 w-4" />
           </Button>
         {:else}
           <Button variant="primary" on:click={createKey} disabled={isSubmitting} class="gap-2 min-w-[100px] sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}">
             {#if isSubmitting}
               <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-              <span class="hidden sm:inline">Creating...</span>
+              <span class="hidden sm:inline">{m.api_keys_creating()}</span>
             {:else}
               <Key class="h-4 w-4" />
-              <span class="hidden sm:inline">Create API Key</span>
-              <span class="sm:hidden">Create</span>
+              <span class="hidden sm:inline">{m.api_keys_create()}</span>
+              <span class="sm:hidden">{m.api_keys_create_short()}</span>
             {/if}
           </Button>
         {/if}

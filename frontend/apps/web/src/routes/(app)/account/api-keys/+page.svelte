@@ -93,7 +93,7 @@
       <div slot="actions" class="flex items-center gap-3">
         <Button variant="ghost" on:click={loadKeys} class="gap-2">
           <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
-          Refresh
+          {m.api_keys_refresh()}
         </Button>
         <CreateApiKeyDialog onCreated={handleSecret} />
       </div>
@@ -101,7 +101,7 @@
   </Page.Header>
 
   <Page.Main>
-    <div class="space-y-6 px-1">
+    <div class="space-y-6 pr-4 py-4">
       <!-- Header section with info and search -->
       {#if mounted}
         <div
@@ -114,10 +114,9 @@
               <Key class="h-6 w-6 text-accent-default" />
             </div>
             <div class="flex-1">
-              <h2 class="text-lg font-semibold text-default">Your API Keys</h2>
+              <h2 class="text-lg font-semibold text-default">{m.api_keys_your_keys()}</h2>
               <p class="mt-1 text-sm text-muted max-w-2xl">
-                API keys provide secure access to Eneo resources. Create keys for server-side integrations
-                or client-side applications with appropriate access controls.
+                {m.api_keys_description()}
               </p>
             </div>
             <!-- Create button in header for visibility -->
@@ -134,7 +133,7 @@
               <Search class="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
               <Input.Text
                 bind:value={searchQuery}
-                placeholder="Search keys by name or description..."
+                placeholder={m.api_keys_search_placeholder()}
                 class="!pl-10 !h-10 !bg-primary !border-default/60 focus:!border-accent-default/50"
               />
               {#if searchQuery}
@@ -174,10 +173,10 @@
               <ShieldAlert class="h-5 w-5 text-caution" />
             </div>
             <div class="flex-1">
-              <h3 class="font-semibold text-caution">Legacy API Key Detected</h3>
+              <h3 class="font-semibold text-caution">{m.api_keys_legacy_detected()}</h3>
               <p class="mt-1 text-sm text-muted">
-                You have a legacy API key ending in <code class="font-mono bg-caution/15 dark:bg-caution/20 px-1.5 py-0.5 rounded text-caution">****{user.truncated_api_key}</code>.
-                We recommend creating a new API key with improved security features.
+                {m.api_keys_legacy_ending_in()} <code class="font-mono bg-caution/15 dark:bg-caution/20 px-1.5 py-0.5 rounded text-caution">****{user.truncated_api_key}</code>.
+                {m.api_keys_legacy_recommend()}
               </p>
               <div class="mt-3">
                 <CreateApiKeyDialog onCreated={handleSecret} />
@@ -198,11 +197,11 @@
             <div>
               <h3 class="font-semibold text-default">
                 {filteredKeys.length === keys.length
-                  ? `${keys.length} API Key${keys.length !== 1 ? "s" : ""}`
-                  : `${filteredKeys.length} of ${keys.length} keys`}
+                  ? (keys.length !== 1 ? m.api_keys_count_plural({ count: keys.length }) : m.api_keys_count({ count: keys.length }))
+                  : m.api_keys_filtered({ filtered: filteredKeys.length, total: keys.length })}
               </h3>
               <p class="text-xs text-muted mt-0.5">
-                {loading ? "Loading..." : "Click on a key to view details"}
+                {loading ? m.api_keys_loading() : m.api_keys_click_to_view()}
               </p>
             </div>
             <!-- Mobile create button -->
@@ -233,20 +232,19 @@
       <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-positive/10 dark:bg-positive/15">
         <Key class="h-5 w-5 text-positive" />
       </div>
-      <span class="text-default">API Key Created</span>
+      <span class="text-default">{m.api_keys_created_title()}</span>
     </Dialog.Title>
     <Dialog.Description>
       <div class="mt-3 flex items-start gap-3 rounded-lg border border-caution/30 bg-caution/5 dark:bg-caution/10 px-4 py-3">
         <AlertCircle class="h-5 w-5 text-caution flex-shrink-0 mt-0.5" />
         <div class="text-sm text-muted">
-          <strong class="text-caution">Important:</strong> This is the only time you'll see this key.
-          Copy it now and store it securely. You won't be able to view it again.
+          <strong class="text-caution">{m.api_keys_important()}</strong> {m.api_keys_copy_warning()}
         </div>
       </div>
     </Dialog.Description>
     {#if latestSecret}
       <div class="mt-5">
-        <label class="block text-sm font-medium text-muted mb-2">Your new API key</label>
+        <span class="block text-sm font-medium text-muted mb-2">{m.api_keys_your_new_key()}</span>
         <div class="relative">
           <CodeBlock code={latestSecret} />
         </div>
@@ -260,10 +258,10 @@
               <span in:fly={{ y: -8, duration: 150 }}>
                 <Check class="h-4 w-4" />
               </span>
-              <span in:fly={{ y: 8, duration: 150 }}>Copied!</span>
+              <span in:fly={{ y: 8, duration: 150 }}>{m.api_keys_copied()}</span>
             {:else}
               <Copy class="h-4 w-4" />
-              Copy to clipboard
+              {m.api_keys_copy_to_clipboard()}
             {/if}
           </Button>
           {#if copied}
@@ -272,7 +270,7 @@
               in:fade={{ duration: 150 }}
               out:fade={{ duration: 150 }}
             >
-              Key copied to clipboard
+              {m.api_keys_copied_message()}
             </span>
           {/if}
         </div>

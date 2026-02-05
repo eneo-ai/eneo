@@ -47,35 +47,35 @@
   let latestSecret = $state<string | null>(null);
 
   // Quick filter chips
-  const quickFilters = [
-    { label: "Active", filter: { state: "active" }, color: "green" as const },
-    { label: "Suspended", filter: { state: "suspended" }, color: "yellow" as const },
-    { label: "Expired", filter: { state: "expired" }, color: "gray" as const },
-    { label: "Secret keys", filter: { keyType: "sk_" }, color: "blue" as const },
-    { label: "Public keys", filter: { keyType: "pk_" }, color: "orange" as const }
-  ];
+  const quickFilters = $derived([
+    { label: m.api_keys_admin_quick_active(), filter: { state: "active" }, color: "green" as const },
+    { label: m.api_keys_admin_quick_suspended(), filter: { state: "suspended" }, color: "yellow" as const },
+    { label: m.api_keys_admin_quick_expired(), filter: { state: "expired" }, color: "gray" as const },
+    { label: m.api_keys_admin_quick_secret(), filter: { keyType: "sk_" }, color: "blue" as const },
+    { label: m.api_keys_admin_quick_public(), filter: { keyType: "pk_" }, color: "orange" as const }
+  ]);
 
-  const scopeOptions = [
-    { value: "", label: "All scopes" },
-    { value: "tenant", label: "Tenant" },
-    { value: "space", label: "Space" },
-    { value: "assistant", label: "Assistant" },
-    { value: "app", label: "App" }
-  ];
+  const scopeOptions = $derived([
+    { value: "", label: m.api_keys_admin_scope_all() },
+    { value: "tenant", label: m.api_keys_admin_scope_tenant() },
+    { value: "space", label: m.api_keys_admin_scope_space() },
+    { value: "assistant", label: m.api_keys_admin_scope_assistant() },
+    { value: "app", label: m.api_keys_admin_scope_app() }
+  ]);
 
-  const stateOptions = [
-    { value: "", label: "All states" },
-    { value: "active", label: "Active" },
-    { value: "suspended", label: "Suspended" },
-    { value: "revoked", label: "Revoked" },
-    { value: "expired", label: "Expired" }
-  ];
+  const stateOptions = $derived([
+    { value: "", label: m.api_keys_admin_state_all() },
+    { value: "active", label: m.api_keys_admin_state_active() },
+    { value: "suspended", label: m.api_keys_admin_state_suspended() },
+    { value: "revoked", label: m.api_keys_admin_state_revoked() },
+    { value: "expired", label: m.api_keys_admin_state_expired() }
+  ]);
 
-  const keyTypeOptions = [
-    { value: "", label: "All types" },
-    { value: "pk_", label: "Public (pk_)" },
-    { value: "sk_", label: "Secret (sk_)" }
-  ];
+  const keyTypeOptions = $derived([
+    { value: "", label: m.api_keys_admin_key_type_all() },
+    { value: "pk_", label: m.api_keys_admin_key_type_public() },
+    { value: "sk_", label: m.api_keys_admin_key_type_secret() }
+  ]);
 
   // Active filter count
   const activeFilterCount = $derived(
@@ -188,14 +188,14 @@
       <div slot="actions" class="flex items-center gap-3">
         <Button variant="ghost" on:click={() => loadKeys({ reset: true })} class="gap-2">
           <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
-          Refresh
+          {m.api_keys_refresh()}
         </Button>
       </div>
     </Page.Title>
   </Page.Header>
 
   <Page.Main>
-    <div class="space-y-6">
+    <div class="space-y-6 pr-4 py-4">
       <!-- Filter Section -->
       <div class="rounded-xl border border-default bg-primary shadow-sm overflow-hidden">
         <!-- Filter Header -->
@@ -209,11 +209,13 @@
               <Filter class="h-4 w-4 text-muted" />
             </div>
             <div class="text-left">
-              <h3 class="font-semibold text-default text-sm">Filters & Search</h3>
+              <h3 class="font-semibold text-default text-sm">{m.api_keys_admin_filters_search()}</h3>
               <p class="text-xs text-muted">
                 {activeFilterCount > 0
-                  ? `${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} active`
-                  : "Filter API keys by scope, state, or creator"}
+                  ? activeFilterCount > 1
+                    ? m.api_keys_admin_filters_active_plural({ count: activeFilterCount })
+                    : m.api_keys_admin_filters_active({ count: activeFilterCount })
+                  : m.api_keys_admin_filters_description()}
               </p>
             </div>
             {#if activeFilterCount > 0}
@@ -233,7 +235,7 @@
               <Search class="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
               <Input.Text
                 bind:value={searchQuery}
-                placeholder="Search by name, key suffix, or scope ID..."
+                placeholder={m.api_keys_admin_search_placeholder()}
                 class="!pl-10 !h-11"
               />
               {#if searchQuery}
@@ -284,35 +286,35 @@
             <!-- Advanced Filters -->
             <div class="grid gap-4 md:grid-cols-3">
               <Select.Simple bind:value={scopeType} options={scopeOptions} resourceName="scope">
-                Scope type
+                {m.api_keys_admin_label_scope_type()}
               </Select.Simple>
               <Select.Simple bind:value={stateFilter} options={stateOptions} resourceName="state">
-                State
+                {m.api_keys_admin_label_state()}
               </Select.Simple>
               <Select.Simple bind:value={keyType} options={keyTypeOptions} resourceName="key type">
-                Key type
+                {m.api_keys_admin_label_key_type()}
               </Select.Simple>
             </div>
 
             <div class="grid gap-4 md:grid-cols-3">
-              <Input.Text bind:value={scopeId} label="Scope ID" placeholder="UUID" />
-              <Input.Text bind:value={createdByUserId} label="Created by user ID" placeholder="UUID" />
-              <Input.Text bind:value={limit} label="Results limit" placeholder="100" />
+              <Input.Text bind:value={scopeId} label={m.api_keys_admin_label_scope_id()} placeholder="UUID" />
+              <Input.Text bind:value={createdByUserId} label={m.api_keys_admin_label_created_by()} placeholder="UUID" />
+              <Input.Text bind:value={limit} label={m.api_keys_admin_label_results_limit()} placeholder="100" />
             </div>
 
             <!-- Filter Actions -->
             <div class="flex items-center justify-between pt-2 border-t border-default">
               <p class="text-xs text-muted">
-                {totalCount !== null ? `${filteredKeys.length} of ${totalCount} keys` : ""}
+                {totalCount !== null ? m.api_keys_admin_keys_count({ filtered: filteredKeys.length, total: totalCount }) : ""}
               </p>
               <div class="flex items-center gap-2">
                 <Button variant="ghost" on:click={resetFilters} class="text-sm">
                   <X class="h-4 w-4 mr-1.5" />
-                  Clear all
+                  {m.api_keys_admin_clear_all()}
                 </Button>
                 <Button variant="primary" on:click={applyFilters} class="text-sm">
                   <Filter class="h-4 w-4 mr-1.5" />
-                  Apply filters
+                  {m.api_keys_admin_apply_filters()}
                 </Button>
               </div>
             </div>
@@ -340,13 +342,13 @@
                 <Key class="h-5 w-5 text-accent-default" />
               </div>
               <div>
-                <h3 class="font-semibold text-default">API Keys</h3>
+                <h3 class="font-semibold text-default">{m.api_keys()}</h3>
                 <p class="text-xs text-muted">
                   {totalCount !== null
-                    ? `Showing ${filteredKeys.length} of ${totalCount} total keys`
+                    ? m.api_keys_admin_showing_keys({ filtered: filteredKeys.length, total: totalCount })
                     : loading
-                      ? "Loading keys..."
-                      : `${filteredKeys.length} keys`}
+                      ? m.api_keys_admin_loading_keys()
+                      : m.api_keys_admin_keys_count_simple({ count: filteredKeys.length })}
                 </p>
               </div>
             </div>
@@ -366,9 +368,9 @@
               <Button variant="outlined" on:click={() => loadKeys({ reset: false })} class="gap-2">
                 {#if loadingMore}
                   <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                  Loading...
+                  {m.api_keys_loading()}
                 {:else}
-                  Load more
+                  {m.api_keys_admin_load_more()}
                 {/if}
               </Button>
             </div>
@@ -384,8 +386,8 @@
               <Shield class="h-5 w-5 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <h3 class="font-semibold text-default">Tenant Policy</h3>
-              <p class="text-xs text-muted">Configure API key policies and restrictions</p>
+              <h3 class="font-semibold text-default">{m.api_keys_admin_tenant_policy()}</h3>
+              <p class="text-xs text-muted">{m.api_keys_admin_policy_description()}</p>
             </div>
           </div>
         </div>
@@ -402,8 +404,8 @@
               <Building2 class="h-5 w-5 text-orange-600 dark:text-orange-400" />
             </div>
             <div>
-              <h3 class="font-semibold text-default">Super Key Status</h3>
-              <p class="text-xs text-muted">Tenant-wide API key administration</p>
+              <h3 class="font-semibold text-default">{m.api_keys_admin_super_key_status()}</h3>
+              <p class="text-xs text-muted">{m.api_keys_admin_super_key_description()}</p>
             </div>
           </div>
         </div>
@@ -440,7 +442,7 @@
             }}
             class="gap-2"
           >
-            Copy key
+            {m.api_keys_admin_copy_key()}
           </Button>
         </div>
       </div>

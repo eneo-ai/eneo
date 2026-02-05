@@ -95,7 +95,7 @@
     {#if canRotate}
       <Button is={item} padding="icon-leading" on:click={rotateKey}>
         <RotateCcw size={16} />
-        Rotate
+        {m.api_keys_action_rotate()}
       </Button>
     {/if}
 
@@ -108,14 +108,14 @@
         }}
       >
         <Ban size={16} />
-        Suspend
+        {m.api_keys_action_suspend()}
       </Button>
     {/if}
 
     {#if isSuspended}
       <Button is={item} padding="icon-leading" on:click={reactivateKey}>
         <RefreshCw size={16} />
-        Reactivate
+        {m.api_keys_action_reactivate()}
       </Button>
     {/if}
 
@@ -128,7 +128,7 @@
       }}
     >
       <Ban size={16} />
-      Revoke
+      {m.api_keys_action_revoke()}
     </Button>
   </Dropdown.Menu>
 </Dropdown.Root>
@@ -139,28 +139,28 @@
 
 <Dialog.Root alert bind:isOpen={showSuspendDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Suspend API key</Dialog.Title>
+    <Dialog.Title>{m.api_keys_action_suspend_title()}</Dialog.Title>
     <Dialog.Description>
-      This key will be temporarily disabled and can be reactivated later.
+      {m.api_keys_action_suspend_description()}
     </Dialog.Description>
-    <Input.Text bind:value={reasonText} label="Reason (optional)" />
+    <Input.Text bind:value={reasonText} label={m.api_keys_action_reason_optional()} />
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={suspendKey}>Suspend</Button>
+      <Button variant="destructive" on:click={suspendKey}>{m.api_keys_action_suspend()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
 
 <Dialog.Root alert bind:isOpen={showRevokeDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>Revoke API key</Dialog.Title>
+    <Dialog.Title>{m.api_keys_action_revoke_title()}</Dialog.Title>
     <Dialog.Description>
-      This key will be permanently revoked. Existing integrations will stop working.
+      {m.api_keys_action_revoke_description()}
     </Dialog.Description>
-    <Input.Text bind:value={reasonText} label="Reason (optional)" />
+    <Input.Text bind:value={reasonText} label={m.api_keys_action_reason_optional()} />
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={revokeKey}>Revoke</Button>
+      <Button variant="destructive" on:click={revokeKey}>{m.api_keys_action_revoke()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
