@@ -100,7 +100,7 @@ async def create_tenant_completion_model(
         token_limit=model_create.token_limit,
         vision=model_create.vision,
         reasoning=model_create.reasoning,
-        supports_tool_calling=model_create.supports_tool_calling,
+        supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
         family=ModelFamily.OPEN_AI.value,
         hosting=model_create.hosting,

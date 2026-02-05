@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
 from intric.spaces.utils.space_utils import effective_space_ids
@@ -700,7 +700,7 @@ class SpaceRepository:
             .order_by(MCPServerToolsTable.name)
         )
         tools_result = await self.session.execute(tools_query)
-        tools_db = tools_result.scalars().all()
+        tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
 
         # Load tenant-level tool settings
         tenant_tool_settings_query = (
@@ -708,10 +708,10 @@ class SpaceRepository:
             .where(MCPServerToolSettingsTable.tenant_id == self.user.tenant_id)
         )
         tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
-        tenant_settings_db = tenant_settings_result.scalars().all()
+        tenant_settings_db: list[MCPServerToolSettingsTable] = list(tenant_settings_result.scalars().all())
 
         # Create map: tool_id -> is_enabled (tenant level)
-        tenant_tool_settings = {
+        tenant_tool_settings: dict[UUID, bool] = {
             setting.mcp_server_tool_id: setting.is_enabled for setting in tenant_settings_db
         }
 
@@ -747,11 +747,13 @@ class SpaceRepository:
 
         from intric.mcp_servers.domain.entities.mcp_server import MCPServerTool
 
-        tools_by_server = defaultdict(list)
+        tools_by_server: defaultdict[UUID, list[MCPServerTool]] = defaultdict(list)
         for tool_db in tools_db:
             # Determine effective is_enabled status
             # Priority: assistant override > space override > tenant override > tool default
-            tenant_enabled = tenant_tool_settings.get(tool_db.id, tool_db.is_enabled_by_default)
+            tenant_enabled = tenant_tool_settings.get(
+                cast(UUID, tool_db.id), tool_db.is_enabled_by_default
+            )
 
             # If tenant disabled this tool, skip it entirely (don't show in space/assistant)
             if tool_db.id in tenant_tool_settings and not tenant_tool_settings[tool_db.id]:
@@ -980,7 +982,7 @@ class SpaceRepository:
             .order_by(MCPServerToolsTable.name)
         )
         tools_result = await self.session.execute(tools_query)
-        tools_db = tools_result.scalars().all()
+        tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
 
         # Load tenant-level tool settings
         tenant_tool_settings_query = (
@@ -988,10 +990,10 @@ class SpaceRepository:
             .where(MCPServerToolSettingsTable.tenant_id == self.user.tenant_id)
         )
         tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
-        tenant_settings_db = tenant_settings_result.scalars().all()
+        tenant_settings_db: list[MCPServerToolSettingsTable] = list(tenant_settings_result.scalars().all())
 
         # Create map: tool_id -> is_enabled (tenant level)
-        tenant_tool_settings = {
+        tenant_tool_settings: dict[UUID, bool] = {
             setting.mcp_server_tool_id: setting.is_enabled
             for setting in tenant_settings_db
         }
@@ -1014,11 +1016,13 @@ class SpaceRepository:
         from collections import defaultdict
         from intric.mcp_servers.domain.entities.mcp_server import MCPServerTool
 
-        tools_by_server = defaultdict(list)
+        tools_by_server: defaultdict[UUID, list[MCPServerTool]] = defaultdict(list)
         for tool_db in tools_db:
             # Determine effective is_enabled status
             # Priority: space override > tenant override > tool default
-            tenant_enabled = tenant_tool_settings.get(tool_db.id, tool_db.is_enabled_by_default)
+            tenant_enabled = tenant_tool_settings.get(
+                cast(UUID, tool_db.id), tool_db.is_enabled_by_default
+            )
 
             # If tenant disabled this tool, skip it entirely (don't show in space)
             if tool_db.id in tenant_tool_settings and not tenant_tool_settings[tool_db.id]:

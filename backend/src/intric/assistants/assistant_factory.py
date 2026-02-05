@@ -186,8 +186,9 @@ class AssistantFactory:
         ]
 
         # Use filtered MCP servers if available (set by space repo), otherwise map from DB
-        if hasattr(assistant_in_db, '_mcp_server_entities') and assistant_in_db._mcp_server_entities is not None:
-            mcp_servers = assistant_in_db._mcp_server_entities
+        _mcp_server_entities = getattr(assistant_in_db, '_mcp_server_entities', None)
+        if _mcp_server_entities is not None:
+            mcp_servers = _mcp_server_entities
         else:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
