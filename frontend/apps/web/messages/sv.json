@@ -936,6 +936,7 @@
   "unsupported_model_selected": "Stöds ej vald modell",
   "no_model_found": "Ingen modell hittades",
   "select_completion_model": "Välj en completion modell",
+  "model_group_system": "Systemmodeller",
   "model_info_for": "Modellinformation för",
   "basic": "Grundläggande",
   "creative": "Kreativ",

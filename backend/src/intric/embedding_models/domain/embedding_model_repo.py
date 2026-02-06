@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
 
 from intric.database.tables.ai_models_table import EmbeddingModels
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.security_classifications_table import SecurityClassification
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.main.exceptions import NotFoundException
@@ -22,7 +23,8 @@ class EmbeddingModelRepository:
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
-            sa.select(EmbeddingModels)
+            sa.select(EmbeddingModels, ModelProviders.name, ModelProviders.provider_type)
+            .outerjoin(ModelProviders, EmbeddingModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(EmbeddingModels.security_classification),
                 selectinload(EmbeddingModels.security_classification).options(
@@ -49,20 +51,23 @@ class EmbeddingModelRepository:
             stmt = stmt.where(EmbeddingModels.is_deprecated == False)  # noqa
 
         result = await self.session.execute(stmt)
-        embedding_models = result.scalars().all()
+        rows = result.all()
 
         return [
             EmbeddingModel.to_domain(
                 db_model=embedding_model,
                 user=self.user,
+                provider_name=provider_name,
+                provider_type=provider_type,
             )
-            for embedding_model in embedding_models
+            for embedding_model, provider_name, provider_type in rows
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["EmbeddingModel"]:
         # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
-            sa.select(EmbeddingModels)
+            sa.select(EmbeddingModels, ModelProviders.name, ModelProviders.provider_type)
+            .outerjoin(ModelProviders, EmbeddingModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(EmbeddingModels.security_classification),
                 selectinload(EmbeddingModels.security_classification).options(
@@ -80,14 +85,17 @@ class EmbeddingModelRepository:
         )
 
         result = await self.session.execute(stmt)
-        embedding_model = result.scalars().one_or_none()
+        row = result.one_or_none()
 
-        if embedding_model is None:
+        if row is None:
             return
 
+        embedding_model, provider_name, provider_type = row
         return EmbeddingModel.to_domain(
             db_model=embedding_model,
             user=self.user,
+            provider_name=provider_name,
+            provider_type=provider_type,
         )
 
     async def one(self, model_id: "UUID") -> "EmbeddingModel":

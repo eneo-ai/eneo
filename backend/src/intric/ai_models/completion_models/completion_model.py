@@ -110,6 +110,9 @@ class CompletionModelPublic(CompletionModel):
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
     # tenant_id and provider_id inherited from CompletionModel
+    # Provider info for grouped display in UI
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -146,6 +149,8 @@ class CompletionModelPublic(CompletionModel):
             ),
             tenant_id=completion_model.tenant_id,
             provider_id=completion_model.provider_id,
+            provider_name=completion_model.provider_name,
+            provider_type=completion_model.provider_type,
         )
 
 
