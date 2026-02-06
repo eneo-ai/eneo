@@ -18,6 +18,18 @@ from uuid import uuid4
 import pytest
 
 
+
+
+def create_mock_container(embeddings_service):
+    """Create a mock Container for persist_batch testing."""
+    mock_container = MagicMock()
+    mock_session_provider = MagicMock()
+    mock_session_provider.override = MagicMock()
+    mock_container.session = mock_session_provider
+    mock_container.create_embeddings_service = MagicMock(return_value=embeddings_service)
+    return mock_container
+
+
 # =============================================================================
 # UNIT TESTS: persist_batch return type and crawled_titles tracking
 # =============================================================================
@@ -58,11 +70,11 @@ class TestPersistBatchReturnType:
             page_buffer=[],
             ctx=ctx,
             embedding_model=None,
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
-        # Should return (0, 0, [], [])
-        assert result == (0, 0, [], []), f"Empty buffer should return (0, 0, [], []), got {result}"
+        # Should return (0, 0, [], {})
+        assert result == (0, 0, [], {}), f"Empty buffer should return (0, 0, [], {{}}), got {result}"
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_returns_all_failed(self):
@@ -96,7 +108,7 @@ class TestPersistBatchReturnType:
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         success_count, failed_count, successful_urls, _ = result

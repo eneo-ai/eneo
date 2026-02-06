@@ -3,6 +3,7 @@ from uuid import UUID
 from datetime import datetime
 
 from sqlalchemy import BigInteger, ForeignKey, and_, select, TIMESTAMP, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import EmbeddingModels
@@ -20,6 +21,11 @@ class CrawlRuns(BasePublic):
     files_downloaded: Mapped[Optional[int]] = mapped_column()
     pages_failed: Mapped[Optional[int]] = mapped_column()
     files_failed: Mapped[Optional[int]] = mapped_column()
+    failure_summary: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="JSONB dict mapping failure reason codes to counts",
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

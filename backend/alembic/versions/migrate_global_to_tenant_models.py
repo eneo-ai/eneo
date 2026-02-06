@@ -21,7 +21,7 @@ import json
 
 # revision identifiers, used by Alembic
 revision = 'migrate_global_to_tenant_models'
-down_revision = 'f7f7647d5327'
+down_revision = ('f7f7647d5327', 'tenant_scoped_templates')
 branch_labels = None
 depends_on = None
 
