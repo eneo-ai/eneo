@@ -77,7 +77,7 @@ class SharepointAuthService(BaseOauthService):
             "response_mode": "query",
             "scope": scope_param,
             "state": state,
-            "prompt": "consent",
+            "prompt": "login",
         }
 
         url = f"{auth_endpoint}?{urlencode(params)}"
