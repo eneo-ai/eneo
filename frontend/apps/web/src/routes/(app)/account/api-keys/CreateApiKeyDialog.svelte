@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { writable } from "svelte/store";
   import type {
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyType,
+    ResourcePermissionLevel,
     SpaceSparse
   } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
@@ -28,7 +30,9 @@
     Eye,
     Pencil,
     ShieldCheck,
-    Sparkles
+    Sparkles,
+    Copy,
+    CheckCircle2
   } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -40,9 +44,12 @@
 
   let { onCreated }: { onCreated: (response: ApiKeyCreatedResponse) => void } = $props();
 
-  let showDialog = $state<Dialog.OpenState>(undefined);
+  const showDialog = writable(false);
   let isSubmitting = $state(false);
   let errorMessage = $state<string | null>(null);
+  let createdSecret = $state<string | null>(null);
+  let createdResponse = $state<ApiKeyCreatedResponse | null>(null);
+  let secretCopied = $state(false);
 
   // Wizard step state
   let currentStep = $state(1);
@@ -77,6 +84,11 @@
   let allowedIps = $state<string[]>([]);
   let expiresAt = $state<string | null>(null);
   let rateLimit = $state("");
+
+  // Creation constraints from tenant policy
+  let requireExpiration = $state(false);
+  let maxExpirationDays = $state<number | null>(null);
+  let maxRateLimit = $state<number | null>(null);
 
   // Resources for scope selection
   type ResourceOption = { id: string; name: string; spaceName?: string };
@@ -124,6 +136,16 @@
     if (keyType === "pk_" && permission !== "read") {
       permission = "read";
       permissionMode = "simple";
+    }
+  });
+
+  // Effect: Clamp fine-grained permissions when base permission is lowered
+  $effect(() => {
+    if (permissionMode === "fine-grained") {
+      assistantsPermission = clampToPermission(assistantsPermission);
+      appsPermission = clampToPermission(appsPermission);
+      spacesPermission = clampToPermission(spacesPermission);
+      knowledgePermission = clampToPermission(knowledgePermission);
     }
   });
 
@@ -241,8 +263,20 @@
     }
   }
 
+  async function loadCreationConstraints() {
+    try {
+      const constraints = await intric.apiKeys.getCreationConstraints();
+      requireExpiration = constraints.require_expiration ?? false;
+      maxExpirationDays = constraints.max_expiration_days ?? null;
+      maxRateLimit = constraints.max_rate_limit ?? null;
+    } catch {
+      // Non-critical: defaults are safe (no restriction)
+    }
+  }
+
   onMount(() => {
     void loadResources();
+    void loadCreationConstraints();
   });
 
   function validateStep(step: number): string | null {
@@ -251,18 +285,16 @@
         if (!name.trim()) return m.api_keys_name_required();
         return null;
       case 2:
-        if (
-          permissionMode === "simple" &&
-          scopeType !== "tenant" &&
-          !scopeId &&
-          !manualScopeId.trim()
-        ) {
+        if (scopeType !== "tenant" && !scopeId && !manualScopeId.trim()) {
           return m.api_keys_select_scope({ scopeType });
         }
         return null;
       case 3:
         if (keyType === "pk_" && allowedOrigins.length === 0) {
           return m.api_keys_origin_required();
+        }
+        if (requireExpiration && !expiresAt) {
+          return m.api_keys_exp_required();
         }
         return null;
       default:
@@ -326,14 +358,24 @@
       allowed_origins: keyType === "pk_" && allowedOrigins.length > 0 ? allowedOrigins : null,
       allowed_ips: keyType === "sk_" && allowedIps.length > 0 ? allowedIps : null,
       expires_at: expiresAt,
-      rate_limit: rateLimit ? Number(rateLimit) : null
+      rate_limit: rateLimit ? Number(rateLimit) : null,
+      resource_permissions:
+        permissionMode === "fine-grained"
+          ? {
+              assistants: assistantsPermission as ResourcePermissionLevel,
+              apps: appsPermission as ResourcePermissionLevel,
+              spaces: spacesPermission as ResourcePermissionLevel,
+              knowledge: knowledgePermission as ResourcePermissionLevel
+            }
+          : null
     };
 
     try {
       const response = await intric.apiKeys.create(request);
-      onCreated(response);
-      showDialog = false;
-      resetForm();
+      createdSecret = response.secret;
+      createdResponse = response;
+      secretCopied = false;
+      currentStep = 4;
     } catch (error: unknown) {
       console.error(error);
       const err = error as { getReadableMessage?: () => string };
@@ -341,6 +383,22 @@
     } finally {
       isSubmitting = false;
     }
+  }
+
+  function copySecret() {
+    if (createdSecret) {
+      navigator.clipboard.writeText(createdSecret);
+      secretCopied = true;
+      setTimeout(() => (secretCopied = false), 2000);
+    }
+  }
+
+  function finishAndClose() {
+    if (createdResponse) {
+      onCreated(createdResponse);
+    }
+    $showDialog = false;
+    resetForm();
   }
 
   function resetForm() {
@@ -362,11 +420,17 @@
     allowedIps = [];
     expiresAt = null;
     rateLimit = "";
+    createdSecret = null;
+    createdResponse = null;
+    secretCopied = false;
     errorMessage = null;
   }
 
   function handleOpenChange(open: boolean) {
     if (!open) {
+      if (createdResponse) {
+        onCreated(createdResponse);
+      }
       resetForm();
     }
   }
@@ -420,9 +484,29 @@
         return m.api_keys_permission_admin();
     }
   }
+
+  // Permission level ordering for ceiling enforcement
+  const permissionOrder: Record<string, number> = {
+    none: 0,
+    read: 1,
+    write: 2,
+    admin: 3
+  };
+
+  function isLevelAllowed(level: ResourcePermission): boolean {
+    return permissionOrder[level] <= permissionOrder[permission];
+  }
+
+  // Clamp a resource permission to the ceiling
+  function clampToPermission(level: ResourcePermission): ResourcePermission {
+    if (permissionOrder[level] > permissionOrder[permission]) {
+      return permission as ResourcePermission;
+    }
+    return level;
+  }
 </script>
 
-<Dialog.Root bind:isOpen={showDialog} on:openChange={handleOpenChange}>
+<Dialog.Root openController={showDialog} on:close={() => handleOpenChange(false)}>
   <Dialog.Trigger asFragment let:trigger>
     <Button is={trigger} variant="primary" class="gap-2">
       <Key class="h-4 w-4" />
@@ -434,14 +518,17 @@
     width="large"
     class="!bg-primary flex max-h-[90vh] flex-col overflow-hidden !rounded-2xl !p-0"
   >
+    {#if currentStep <= totalSteps}
     <!-- Header with subtle gradient -->
     <div class="from-subtle to-primary flex-shrink-0 rounded-t-2xl bg-gradient-to-b px-6 pt-6 pb-5">
       <Dialog.Title class="text-default text-2xl font-bold tracking-tight">
         {m.generate_new_api_key_title()}
       </Dialog.Title>
-      <Dialog.Description class="text-secondary mt-2 max-w-xl text-sm leading-relaxed">
-        {@html m.generate_api_key_warning()}
-      </Dialog.Description>
+      <div class="text-secondary mt-2 max-w-xl text-sm leading-relaxed">
+        <Dialog.Description>
+          {@html m.generate_api_key_warning()}
+        </Dialog.Description>
+      </div>
 
       <!-- Step indicator - improved contrast and accessibility (WCAG 2.2 AA) -->
       <nav
@@ -956,13 +1043,15 @@
                         <span class="text-muted text-sm">{m.api_keys_quick_set_all()}</span>
                         <div class="flex gap-1">
                           {#each ["none", "read", "write", "admin"] as level}
+                            {@const allowed = isLevelAllowed(level as ResourcePermission)}
                             <button
                               type="button"
                               onclick={() => setAllPermissions(level as ResourcePermission)}
+                              disabled={!allowed}
                               class="focus:ring-accent-default/30 rounded-md border px-3 py-1.5 text-xs font-medium transition-all hover:shadow-sm focus:ring-2 focus:outline-none {getLevelClasses(
                                 level as ResourcePermission,
                                 false
-                              )}"
+                              )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
                             >
                               {getLevelLabel(level as ResourcePermission)}
                             </button>
@@ -1009,13 +1098,15 @@
                         <div class="px-5 py-4">
                           <div class="flex gap-2">
                             {#each ["none", "read", "write", "admin"] as level}
+                              {@const allowed = isLevelAllowed(level as ResourcePermission)}
                               <button
                                 type="button"
                                 onclick={() => (assistantsPermission = level as ResourcePermission)}
+                                disabled={!allowed}
                                 class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                   level as ResourcePermission,
                                   assistantsPermission === level
-                                )}"
+                                )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
                               >
                                 {getLevelLabel(level as ResourcePermission)}
                               </button>
@@ -1059,13 +1150,15 @@
                         <div class="px-5 py-4">
                           <div class="flex gap-2">
                             {#each ["none", "read", "write", "admin"] as level}
+                              {@const allowed = isLevelAllowed(level as ResourcePermission)}
                               <button
                                 type="button"
                                 onclick={() => (appsPermission = level as ResourcePermission)}
+                                disabled={!allowed}
                                 class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                   level as ResourcePermission,
                                   appsPermission === level
-                                )}"
+                                )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
                               >
                                 {getLevelLabel(level as ResourcePermission)}
                               </button>
@@ -1109,13 +1202,15 @@
                         <div class="px-5 py-4">
                           <div class="flex gap-2">
                             {#each ["none", "read", "write", "admin"] as level}
+                              {@const allowed = isLevelAllowed(level as ResourcePermission)}
                               <button
                                 type="button"
                                 onclick={() => (spacesPermission = level as ResourcePermission)}
+                                disabled={!allowed}
                                 class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                   level as ResourcePermission,
                                   spacesPermission === level
-                                )}"
+                                )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
                               >
                                 {getLevelLabel(level as ResourcePermission)}
                               </button>
@@ -1159,13 +1254,15 @@
                         <div class="px-5 py-4">
                           <div class="flex gap-2">
                             {#each ["none", "read", "write", "admin"] as level}
+                              {@const allowed = isLevelAllowed(level as ResourcePermission)}
                               <button
                                 type="button"
                                 onclick={() => (knowledgePermission = level as ResourcePermission)}
+                                disabled={!allowed}
                                 class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                   level as ResourcePermission,
                                   knowledgePermission === level
-                                )}"
+                                )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
                               >
                                 {getLevelLabel(level as ResourcePermission)}
                               </button>
@@ -1212,7 +1309,7 @@
                   />
                 {/if}
 
-                <ExpirationPicker bind:value={expiresAt} />
+                <ExpirationPicker bind:value={expiresAt} maxDays={maxExpirationDays} {requireExpiration} />
 
                 <div>
                   <label
@@ -1227,11 +1324,17 @@
                     placeholder={m.api_keys_rate_limit_placeholder()}
                     type="number"
                     min="1"
+                    max={maxRateLimit ?? undefined}
                     class="!h-11"
                   />
                   <p class="text-muted mt-2 text-xs">
                     {m.api_keys_rate_limit_help()}
                   </p>
+                  {#if maxRateLimit != null}
+                    <p class="text-muted mt-1 text-xs">
+                      {m.api_keys_rate_limit_max({ max: maxRateLimit })}
+                    </p>
+                  {/if}
                 </div>
               </div>
             {/if}
@@ -1245,8 +1348,8 @@
       class="border-default bg-subtle flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-b-2xl border-t px-6 py-4"
     >
       <div class="flex-shrink-0">
-        {#if currentStep > 1}
-          <Button variant="ghost" on:click={prevStep} class="gap-2">
+        {#if currentStep > 1 && currentStep <= totalSteps}
+          <Button variant="simple" on:click={prevStep} class="gap-2">
             <ChevronLeft class="h-4 w-4" />
             {m.api_keys_back()}
           </Button>
@@ -1254,16 +1357,18 @@
       </div>
 
       <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-        <Dialog.Close asChild let:close>
-          <Button is={close} variant="outlined">{m.cancel()}</Button>
-        </Dialog.Close>
+        {#if currentStep <= totalSteps}
+          <Button variant="outlined" on:click={() => { $showDialog = false; resetForm(); }}>
+            {m.cancel()}
+          </Button>
+        {/if}
 
         {#if currentStep < totalSteps}
           <Button variant="primary" on:click={nextStep} class="min-w-[80px] gap-2 sm:min-w-[100px]">
             {m.api_keys_next()}
             <ChevronRight class="h-4 w-4" />
           </Button>
-        {:else}
+        {:else if currentStep === totalSteps}
           <Button
             variant="primary"
             on:click={createKey}
@@ -1284,6 +1389,97 @@
         {/if}
       </div>
     </div>
+    {:else}
+    <!-- Step 4: Secret reveal (shown after successful creation) -->
+      <div class="flex-1 overflow-y-auto px-6 pt-8 pb-6">
+        <div class="mx-auto max-w-lg">
+          <!-- Success header -->
+          <div
+            class="flex flex-col items-center text-center"
+            in:fly={{ y: 12, duration: 350, easing: cubicOut }}
+          >
+            <div class="relative">
+              <div class="absolute -inset-2 rounded-full bg-positive/8 secret-ring-pulse"></div>
+              <div class="relative flex h-14 w-14 items-center justify-center rounded-full bg-positive/15 ring-4 ring-positive/10">
+                <CheckCircle2 class="h-7 w-7 text-positive" strokeWidth={2.5} />
+              </div>
+            </div>
+
+            <h3 class="text-default mt-4 text-lg font-bold tracking-tight">
+              {m.api_keys_created_title()}
+            </h3>
+
+            {#if createdResponse}
+              <p class="text-muted mt-1 text-sm">
+                <span class="text-default font-medium">{createdResponse.api_key.name}</span>
+                <span class="text-tertiary mx-1.5">&middot;</span>
+                <span class="font-mono text-xs text-tertiary">{createdResponse.api_key.key_prefix}...{createdResponse.api_key.key_suffix}</span>
+              </p>
+            {/if}
+          </div>
+
+          <!-- Warning banner -->
+          <div
+            class="mt-5 flex items-start gap-3 rounded-xl border border-caution/40 bg-caution/8 dark:bg-caution/12 px-4 py-3"
+            in:fly={{ y: 10, duration: 300, delay: 100, easing: cubicOut }}
+          >
+            <AlertCircle class="mt-0.5 h-4 w-4 flex-shrink-0 text-caution" />
+            <p class="text-sm leading-relaxed text-default/80 dark:text-muted">
+              <strong class="text-caution font-semibold">{m.api_keys_important()}</strong>
+              {" "}{m.api_keys_copy_warning()}
+            </p>
+          </div>
+
+          <!-- Secret display -->
+          <div
+            class="mt-5"
+            in:fly={{ y: 10, duration: 300, delay: 160, easing: cubicOut }}
+          >
+            <p class="text-muted mb-2 text-xs font-semibold uppercase tracking-wider">
+              {m.api_keys_your_new_key()}
+            </p>
+            <div class="rounded-xl border border-default bg-subtle overflow-hidden">
+              <pre class="overflow-x-auto px-4 py-3.5 text-[13px] font-mono leading-relaxed text-default select-all break-all whitespace-pre-wrap">{createdSecret}</pre>
+            </div>
+
+            <div class="mt-3 flex items-center gap-3">
+              <Button
+                variant={secretCopied ? "outlined" : "primary"}
+                on:click={copySecret}
+                class="gap-2 transition-all duration-200 {secretCopied ? '!bg-positive/10 !border-positive/30 !text-positive' : ''}"
+              >
+                {#if secretCopied}
+                  <Check class="h-4 w-4" />
+                  {m.api_keys_copied()}
+                {:else}
+                  <Copy class="h-4 w-4" />
+                  {m.api_keys_copy_to_clipboard()}
+                {/if}
+              </Button>
+              {#if secretCopied}
+                <span
+                  class="text-sm text-positive font-medium"
+                  in:fade={{ duration: 150 }}
+                  out:fade={{ duration: 150 }}
+                >
+                  {m.api_keys_copied_message()}
+                </span>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer for success step -->
+      <div
+        class="border-default bg-subtle flex flex-shrink-0 items-center justify-end gap-3 rounded-b-2xl border-t px-6 py-4"
+      >
+        <Button variant="primary" on:click={finishAndClose} class="gap-2">
+          <Check class="h-4 w-4" />
+          {m.done()}
+        </Button>
+      </div>
+    {/if}
   </Dialog.Content>
 </Dialog.Root>
 
@@ -1345,5 +1541,25 @@
 
   :global(.submit-pulse) {
     animation: submit-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Secret reveal icon ring pulse */
+  @keyframes ring-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.6;
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 0;
+    }
+  }
+
+  :global(.secret-ring-pulse) {
+    animation: ring-pulse 1.8s ease-out 0.3s;
   }
 </style>

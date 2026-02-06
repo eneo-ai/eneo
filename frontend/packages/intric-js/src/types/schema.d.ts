@@ -45,38 +45,69 @@ export interface paths {
     /** Delete App Run */
     delete: operations["delete_app_run_api_v1_app_runs__id___delete"];
   };
+  "/api/v1/api-keys/creation-constraints": {
+    /**
+     * Get API key creation constraints
+     * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
+     */
+    get: operations["get_creation_constraints_api_v1_api_keys_creation_constraints_get"];
+  };
   "/api/v1/api-keys": {
-    /** List Api Keys */
+    /**
+     * List API keys
+     * @description List manageable API keys in the current tenant with cursor pagination and filters.
+     */
     get: operations["list_api_keys_api_v1_api_keys_get"];
-    /** Create Api Key */
+    /**
+     * Create API key
+     * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+     */
     post: operations["create_api_key_api_v1_api_keys_post"];
   };
   "/api/v1/api-keys/{id}": {
-    /** Get Api Key */
+    /**
+     * Get API key
+     * @description Get a single API key by ID if the current user is authorized to manage it.
+     */
     get: operations["get_api_key_api_v1_api_keys__id__get"];
     /**
-     * Revoke Api Key Deprecated
+     * Revoke API key (deprecated alias)
      * @deprecated
      * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
      */
     delete: operations["revoke_api_key_deprecated_api_v1_api_keys__id__delete"];
-    /** Update Api Key */
+    /**
+     * Update API key
+     * @description Update API key metadata and guardrail fields supported by policy.
+     */
     patch: operations["update_api_key_api_v1_api_keys__id__patch"];
   };
   "/api/v1/api-keys/{id}/revoke": {
-    /** Revoke Api Key */
+    /**
+     * Revoke API key
+     * @description Revoke an API key and optionally include reason metadata for audit logs.
+     */
     post: operations["revoke_api_key_api_v1_api_keys__id__revoke_post"];
   };
   "/api/v1/api-keys/{id}/rotate": {
-    /** Rotate Api Key */
+    /**
+     * Rotate API key
+     * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+     */
     post: operations["rotate_api_key_api_v1_api_keys__id__rotate_post"];
   };
   "/api/v1/api-keys/{id}/suspend": {
-    /** Suspend Api Key */
+    /**
+     * Suspend API key
+     * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
+     */
     post: operations["suspend_api_key_api_v1_api_keys__id__suspend_post"];
   };
   "/api/v1/api-keys/{id}/reactivate": {
-    /** Reactivate Api Key */
+    /**
+     * Reactivate API key
+     * @description Reactivate a previously suspended API key.
+     */
     post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
   };
   "/api/v1/users/login/token/": {
@@ -103,15 +134,15 @@ export interface paths {
   };
   "/api/v1/users/api-keys/": {
     /**
-     * Generate Api Key
+     * Generate legacy user API key (GET alias)
      * @deprecated
-     * @description Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys.
+     * @description Legacy API key endpoint (GET alias). Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
      */
     get: operations["generate_api_key_api_v1_users_api_keys__get"];
     /**
-     * Generate Api Key
+     * Generate legacy user API key
      * @deprecated
-     * @description Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys.
+     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
      */
     post: operations["generate_api_key_api_v1_users_api_keys__post"];
   };
@@ -372,9 +403,9 @@ export interface paths {
   };
   "/api/v1/assistants/{id}/api-keys/": {
     /**
-     * Generate Read Only Assistant Key
+     * Generate legacy assistant API key
      * @deprecated
-     * @description Legacy assistant API key endpoint. Use /api/v1/api-keys for scoped v2 keys.
+     * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
      */
     get: operations["generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get"];
   };
@@ -799,43 +830,70 @@ export interface paths {
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
   };
   "/api/v1/admin/api-key-policy": {
-    /** Get Api Key Policy */
+    /**
+     * Get tenant API key policy
+     * @description Get API key policy settings for the current tenant.
+     */
     get: operations["get_api_key_policy_api_v1_admin_api_key_policy_get"];
-    /** Update Api Key Policy */
+    /**
+     * Update tenant API key policy
+     * @description Update tenant policy guardrails used for API key creation and validation.
+     */
     patch: operations["update_api_key_policy_api_v1_admin_api_key_policy_patch"];
   };
   "/api/v1/admin/super-api-key-status": {
-    /** Get Super Api Key Status */
+    /**
+     * Get super API key status
+     * @description Return whether super and super-duper API keys are configured in environment settings.
+     */
     get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
   };
   "/api/v1/admin/api-keys": {
-    /** List Api Keys Admin */
+    /**
+     * List tenant API keys
+     * @description List API keys across the tenant with filters and cursor pagination.
+     */
     get: operations["list_api_keys_admin_api_v1_admin_api_keys_get"];
   };
   "/api/v1/admin/api-keys/{id}": {
-    /** Get Api Key Admin */
+    /**
+     * Get tenant API key
+     * @description Get a single API key by ID within the tenant.
+     */
     get: operations["get_api_key_admin_api_v1_admin_api_keys__id__get"];
     /**
-     * Revoke Api Key Admin Deprecated
+     * Revoke API key (deprecated alias)
      * @deprecated
      * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
      */
     delete: operations["revoke_api_key_admin_deprecated_api_v1_admin_api_keys__id__delete"];
   };
   "/api/v1/admin/api-keys/{id}/revoke": {
-    /** Revoke Api Key Admin */
+    /**
+     * Revoke tenant API key
+     * @description Revoke an API key as tenant admin with optional reason metadata.
+     */
     post: operations["revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post"];
   };
   "/api/v1/admin/api-keys/{id}/suspend": {
-    /** Suspend Api Key Admin */
+    /**
+     * Suspend tenant API key
+     * @description Suspend an API key so it cannot authenticate until reactivated.
+     */
     post: operations["suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post"];
   };
   "/api/v1/admin/api-keys/{id}/reactivate": {
-    /** Reactivate Api Key Admin */
+    /**
+     * Reactivate tenant API key
+     * @description Reactivate a suspended API key.
+     */
     post: operations["reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post"];
   };
   "/api/v1/admin/api-keys/{id}/rotate": {
-    /** Rotate Api Key Admin */
+    /**
+     * Rotate tenant API key
+     * @description Rotate an API key and return the new one-time secret.
+     */
     post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
   };
   "/api/v1/admin/credentials/{provider}": {
@@ -1493,6 +1551,25 @@ export interface paths {
      * @deprecated
      */
     post: operations["create_website_api_v1_websites__post"];
+  };
+  "/api/v1/websites/check-url/": {
+    /**
+     * Check if URL exists on Organization space
+     * @description Check if a website URL already exists on the user's Organization space.
+     *
+     *     **Use case:**
+     *     When creating a new website on a Personal or Shared space, call this endpoint
+     *     to check if the URL is already being crawled on the Organization space.
+     *     This helps avoid duplicate crawls and informs users that the knowledge
+     *     might already be available for import.
+     *
+     *     **Returns:**
+     *     - Website info if URL exists on Organization space
+     *     - `null` if URL not found or user has no Organization space
+     *
+     *     **Note:** This does not block website creation - it's informational only.
+     */
+    get: operations["check_existing_website_url_api_v1_websites_check_url__get"];
   };
   "/api/v1/websites/bulk/run/": {
     /**
@@ -2877,12 +2954,35 @@ export interface components {
       expires_at?: string | null;
       /** Rate Limit */
       rate_limit?: number | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
     };
     /** ApiKeyCreatedResponse */
     ApiKeyCreatedResponse: {
       api_key: components["schemas"]["ApiKeyV2"];
       /** Secret */
       secret: string;
+    };
+    /**
+     * ApiKeyCreationConstraints
+     * @description Fields relevant to key creation UX, from tenant policy.
+     */
+    ApiKeyCreationConstraints: {
+      /**
+       * Require Expiration
+       * @default false
+       */
+      require_expiration?: boolean;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Max Rate Limit */
+      max_rate_limit?: number | null;
+    };
+    /** ApiKeyErrorResponse */
+    ApiKeyErrorResponse: {
+      /** Code */
+      code: string;
+      /** Message */
+      message: string;
     };
     /** ApiKeyInDB */
     ApiKeyInDB: {
@@ -2894,6 +2994,23 @@ export interface components {
       user_id: string | null;
       /** Assistant Id */
       assistant_id: string | null;
+    };
+    /**
+     * ApiKeyListResponse
+     * @description Response model for the API key list endpoint. Uses Optional total_count
+     * so non-admin users get null instead of an expensive COUNT query.
+     */
+    ApiKeyListResponse: {
+      /** Items */
+      items: components["schemas"]["ApiKeyV2"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count?: number | null;
     };
     /**
      * ApiKeyPermission
@@ -2980,6 +3097,7 @@ export interface components {
       expires_at?: string | null;
       /** Rate Limit */
       rate_limit?: number | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
     };
     /** ApiKeyV2 */
     ApiKeyV2: {
@@ -3005,6 +3123,7 @@ export interface components {
       allowed_origins?: string[] | null;
       /** Allowed Ips */
       allowed_ips?: string[] | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
       state: components["schemas"]["ApiKeyState"];
       /** Expires At */
       expires_at?: string | null;
@@ -7980,6 +8099,25 @@ export interface components {
       | "insight_view"
       | "insight_toggle";
     /**
+     * ResourcePermissionLevel
+     * @enum {string}
+     */
+    ResourcePermissionLevel: "none" | "read" | "write" | "admin";
+    /**
+     * ResourcePermissions
+     * @description Per-resource-type permission overrides. Each level must not exceed the key's simple permission.
+     */
+    ResourcePermissions: {
+      /** @default none */
+      assistants?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      apps?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      spaces?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      knowledge?: components["schemas"]["ResourcePermissionLevel"];
+    };
+    /**
      * RetentionPolicyResponse
      * @description Schema for audit log retention policy response.
      *
@@ -10832,6 +10970,41 @@ export interface components {
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model: components["schemas"]["ModelId"];
     };
+    /**
+     * WebsiteExistsResponse
+     * @description Response model for checking if a website URL exists on the Organization space.
+     */
+    WebsiteExistsResponse: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+      /** Url */
+      url: string;
+      /** Name */
+      name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Pages Crawled */
+      pages_crawled?: number | null;
+      /** Pages Failed */
+      pages_failed?: number | null;
+      /** Files Downloaded */
+      files_downloaded?: number | null;
+      /** Files Failed */
+      files_failed?: number | null;
+      /** Crawl Status */
+      crawl_status?: string | null;
+    };
     /** WebsiteMetadata */
     WebsiteMetadata: {
       /** Size */
@@ -11175,6 +11348,10 @@ export interface components {
       pages_failed?: number | null;
       /** Files Failed */
       files_failed?: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       /** @default queued */
       status?: components["schemas"]["Status"] | null;
       /** Result Location */
@@ -11201,6 +11378,10 @@ export interface components {
       pages_failed: number | null;
       /** Files Failed */
       files_failed: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       status: components["schemas"]["Status"];
       /** Result Location */
       result_location: string | null;
@@ -11578,7 +11759,36 @@ export interface operations {
       };
     };
   };
-  /** List Api Keys */
+  /**
+   * Get API key creation constraints
+   * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
+   */
+  get_creation_constraints_api_v1_api_keys_creation_constraints_get: {
+    responses: {
+      /** @description Creation constraints from tenant policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreationConstraints"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List API keys
+   * @description List manageable API keys in the current tenant with cursor pagination and filters.
+   */
   list_api_keys_api_v1_api_keys_get: {
     parameters: {
       query?: {
@@ -11599,16 +11809,16 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Paginated API key list. */
       200: {
         content: {
-          "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
+          "application/json": components["schemas"]["ApiKeyListResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11620,12 +11830,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Create Api Key */
+  /**
+   * Create API key
+   * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+   */
   create_api_key_api_v1_api_keys_post: {
     requestBody: {
       content: {
@@ -11633,7 +11846,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description API key created successfully. Secret is shown once. */
       201: {
         content: {
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
@@ -11642,19 +11855,19 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11666,12 +11879,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Get Api Key */
+  /**
+   * Get API key
+   * @description Get a single API key by ID if the current user is authorized to manage it.
+   */
   get_api_key_api_v1_api_keys__id__get: {
     parameters: {
       path: {
@@ -11679,7 +11895,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description API key details. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -11688,19 +11904,19 @@ export interface operations {
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11712,13 +11928,13 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
   /**
-   * Revoke Api Key Deprecated
+   * Revoke API key (deprecated alias)
    * @deprecated
    * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
    */
@@ -11729,26 +11945,26 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description API key revoked. No response body. */
       204: {
         content: never;
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11760,12 +11976,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Update Api Key */
+  /**
+   * Update API key
+   * @description Update API key metadata and guardrail fields supported by policy.
+   */
   update_api_key_api_v1_api_keys__id__patch: {
     parameters: {
       path: {
@@ -11778,7 +11997,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Updated API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -11787,25 +12006,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11817,12 +12036,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Revoke Api Key */
+  /**
+   * Revoke API key
+   * @description Revoke an API key and optionally include reason metadata for audit logs.
+   */
   revoke_api_key_api_v1_api_keys__id__revoke_post: {
     parameters: {
       path: {
@@ -11835,7 +12057,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Revoked API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -11844,25 +12066,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11874,12 +12096,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Rotate Api Key */
+  /**
+   * Rotate API key
+   * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+   */
   rotate_api_key_api_v1_api_keys__id__rotate_post: {
     parameters: {
       path: {
@@ -11887,7 +12112,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Rotated API key and one-time secret. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
@@ -11896,25 +12121,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11926,12 +12151,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Suspend Api Key */
+  /**
+   * Suspend API key
+   * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
+   */
   suspend_api_key_api_v1_api_keys__id__suspend_post: {
     parameters: {
       path: {
@@ -11944,7 +12172,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Suspended API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -11953,25 +12181,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -11983,12 +12211,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Reactivate Api Key */
+  /**
+   * Reactivate API key
+   * @description Reactivate a previously suspended API key.
+   */
   reactivate_api_key_api_v1_api_keys__id__reactivate_post: {
     parameters: {
       path: {
@@ -11996,7 +12227,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Reactivated API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -12005,25 +12236,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -12035,7 +12266,7 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
@@ -12143,31 +12374,67 @@ export interface operations {
     };
   };
   /**
-   * Generate Api Key
+   * Generate legacy user API key (GET alias)
    * @deprecated
-   * @description Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys.
+   * @description Legacy API key endpoint (GET alias). Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
    */
   generate_api_key_api_v1_users_api_keys__get: {
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
+        };
+      };
     };
   };
   /**
-   * Generate Api Key
+   * Generate legacy user API key
    * @deprecated
-   * @description Legacy API key endpoint. Use /api/v1/api-keys for scoped v2 keys.
+   * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
    */
   generate_api_key_api_v1_users_api_keys__post: {
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
         };
       };
     };
@@ -13801,9 +14068,9 @@ export interface operations {
     };
   };
   /**
-   * Generate Read Only Assistant Key
+   * Generate legacy assistant API key
    * @deprecated
-   * @description Legacy assistant API key endpoint. Use /api/v1/api-keys for scoped v2 keys.
+   * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
    */
   generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get: {
     parameters: {
@@ -13812,10 +14079,28 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy assistant API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */
@@ -15630,18 +15915,42 @@ export interface operations {
       };
     };
   };
-  /** Get Api Key Policy */
+  /**
+   * Get tenant API key policy
+   * @description Get API key policy settings for the current tenant.
+   */
   get_api_key_policy_api_v1_admin_api_key_policy_get: {
     responses: {
-      /** @description Successful Response */
+      /** @description Current tenant API key policy. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyPolicyResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
     };
   };
-  /** Update Api Key Policy */
+  /**
+   * Update tenant API key policy
+   * @description Update tenant policy guardrails used for API key creation and validation.
+   */
   update_api_key_policy_api_v1_admin_api_key_policy_patch: {
     requestBody: {
       content: {
@@ -15649,10 +15958,28 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Updated tenant API key policy. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyPolicyResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15661,20 +15988,50 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
     };
   };
-  /** Get Super Api Key Status */
+  /**
+   * Get super API key status
+   * @description Return whether super and super-duper API keys are configured in environment settings.
+   */
   get_super_api_key_status_api_v1_admin_super_api_key_status_get: {
     responses: {
-      /** @description Successful Response */
+      /** @description Super key configuration status. */
       200: {
         content: {
           "application/json": components["schemas"]["SuperApiKeyStatus"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
     };
   };
-  /** List Api Keys Admin */
+  /**
+   * List tenant API keys
+   * @description List API keys across the tenant with filters and cursor pagination.
+   */
   list_api_keys_admin_api_v1_admin_api_keys_get: {
     parameters: {
       query?: {
@@ -15697,7 +16054,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Paginated tenant API key list. */
       200: {
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
@@ -15706,13 +16063,13 @@ export interface operations {
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15724,12 +16081,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Get Api Key Admin */
+  /**
+   * Get tenant API key
+   * @description Get a single API key by ID within the tenant.
+   */
   get_api_key_admin_api_v1_admin_api_keys__id__get: {
     parameters: {
       path: {
@@ -15737,7 +16097,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Tenant API key details. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -15746,19 +16106,19 @@ export interface operations {
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15770,13 +16130,13 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
   /**
-   * Revoke Api Key Admin Deprecated
+   * Revoke API key (deprecated alias)
    * @deprecated
    * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
    */
@@ -15787,26 +16147,26 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description API key revoked. No response body. */
       204: {
         content: never;
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15818,12 +16178,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Revoke Api Key Admin */
+  /**
+   * Revoke tenant API key
+   * @description Revoke an API key as tenant admin with optional reason metadata.
+   */
   revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post: {
     parameters: {
       path: {
@@ -15836,7 +16199,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Revoked tenant API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -15845,25 +16208,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15875,12 +16238,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Suspend Api Key Admin */
+  /**
+   * Suspend tenant API key
+   * @description Suspend an API key so it cannot authenticate until reactivated.
+   */
   suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post: {
     parameters: {
       path: {
@@ -15893,7 +16259,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Suspended tenant API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -15902,25 +16268,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15932,12 +16298,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Reactivate Api Key Admin */
+  /**
+   * Reactivate tenant API key
+   * @description Reactivate a suspended API key.
+   */
   reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post: {
     parameters: {
       path: {
@@ -15945,7 +16314,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Reactivated tenant API key. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyV2"];
@@ -15954,25 +16323,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -15984,12 +16353,15 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
-  /** Rotate Api Key Admin */
+  /**
+   * Rotate tenant API key
+   * @description Rotate an API key and return the new one-time secret.
+   */
   rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post: {
     parameters: {
       path: {
@@ -15997,7 +16369,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Rotated tenant API key and one-time secret. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
@@ -16006,25 +16378,25 @@ export interface operations {
       /** @description Bad Request */
       400: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Forbidden */
       403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Not Found */
       404: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
@@ -16036,7 +16408,7 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
@@ -19431,6 +19803,44 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check if URL exists on Organization space
+   * @description Check if a website URL already exists on the user's Organization space.
+   *
+   *     **Use case:**
+   *     When creating a new website on a Personal or Shared space, call this endpoint
+   *     to check if the URL is already being crawled on the Organization space.
+   *     This helps avoid duplicate crawls and informs users that the knowledge
+   *     might already be available for import.
+   *
+   *     **Returns:**
+   *     - Website info if URL exists on Organization space
+   *     - `null` if URL not found or user has no Organization space
+   *
+   *     **Note:** This does not block website creation - it's informational only.
+   */
+  check_existing_website_url_api_v1_websites_check_url__get: {
+    parameters: {
+      query: {
+        /** @description The website URL to check */
+        url: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebsiteExistsResponse"] | null;
         };
       };
       /** @description Validation Error */

@@ -2151,6 +2151,7 @@
   "api_keys_rate_limit": "Rate Limit (requests per hour)",
   "api_keys_rate_limit_help": "Custom rate limit for this key. Leave empty to use default tenant limit.",
   "api_keys_rate_limit_placeholder": "Leave empty for default",
+  "api_keys_rate_limit_max": "Maximum allowed: {max} requests per hour.",
   "api_keys_back": "Back",
   "api_keys_next": "Next",
   "api_keys_creating": "Creating...",
@@ -2194,6 +2195,7 @@
   "api_keys_exp_1_day_from_now": "1 day from now",
   "api_keys_exp_valid_until_revoked": "This key will remain valid until manually revoked",
   "api_keys_exp_warning": "Keys without expiration pose a security risk. Consider setting an expiration date.",
+  "api_keys_exp_required": "An expiration date is required by your organization's policy.",
 
   "api_keys_tag_localhost": "localhost",
   "api_keys_tag_https_wildcard": "HTTPS wildcard",

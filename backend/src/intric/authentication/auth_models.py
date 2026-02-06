@@ -48,6 +48,33 @@ class ApiKeyPermission(str, Enum):
     ADMIN = "admin"
 
 
+# Centralized ordering — used by both policy validation and runtime enforcement
+PERMISSION_LEVEL_ORDER: dict[str, int] = {
+    "none": 0,
+    "read": 1,
+    "write": 2,
+    "admin": 3,
+}
+
+
+class ResourcePermissionLevel(str, Enum):
+    NONE = "none"
+    READ = "read"
+    WRITE = "write"
+    ADMIN = "admin"
+
+
+class ResourcePermissions(BaseModel):
+    """Per-resource-type permission overrides. Each level must not exceed the key's simple permission."""
+
+    assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ApiKeyScopeType(str, Enum):
     TENANT = "tenant"
     SPACE = "space"
@@ -118,6 +145,7 @@ class ApiKeyCreateRequest(BaseModel):
     allowed_ips: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
     rate_limit: Optional[int] = None
+    resource_permissions: Optional[ResourcePermissions] = None
 
 
 class ApiKeyUpdateRequest(BaseModel):
@@ -127,6 +155,7 @@ class ApiKeyUpdateRequest(BaseModel):
     allowed_ips: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
     rate_limit: Optional[int] = None
+    resource_permissions: Optional[ResourcePermissions] = None
 
 
 class ApiKeyV2(BaseModel):
@@ -141,6 +170,7 @@ class ApiKeyV2(BaseModel):
     scope_id: Optional[UUID] = None
     allowed_origins: Optional[list[str]] = None
     allowed_ips: Optional[list[str]] = None
+    resource_permissions: Optional[ResourcePermissions] = None
     state: ApiKeyState
     expires_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
@@ -214,6 +244,29 @@ class SuperApiKeyStatus(BaseModel):
     super_duper_api_key_configured: bool
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ApiKeyListResponse(BaseModel):
+    """Response model for the API key list endpoint. Uses Optional total_count
+    so non-admin users get null instead of an expensive COUNT query."""
+
+    items: list[ApiKeyV2]
+    limit: Optional[int] = None
+    next_cursor: Optional[datetime] = None
+    previous_cursor: Optional[datetime] = None
+    total_count: Optional[int] = None
+
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+class ApiKeyCreationConstraints(BaseModel):
+    """Fields relevant to key creation UX, from tenant policy."""
+
+    require_expiration: bool = False
+    max_expiration_days: Optional[int] = None
+    max_rate_limit: Optional[int] = None
 
 
 class ApiKeyCreatedResponse(BaseModel):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -18,6 +18,8 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    PERMISSION_LEVEL_ORDER,
+    ResourcePermissions,
 )
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
@@ -31,12 +33,80 @@ if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
 
 
+class ResourceDenialContext(TypedDict):
+    resource_type: str
+    required_level: str
+    granted_level: str
+
+
 class ApiKeyValidationError(Exception):
-    def __init__(self, status_code: int, code: str, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+        context: ResourceDenialContext | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers = headers
+        self.context = context
+
+
+def check_resource_permission(
+    key: ApiKeyV2InDB,
+    resource_type: str,
+    required: str,
+) -> None:
+    """Centralized fine-grained resource permission check.
+
+    Fail-closed: missing/unrecognized resource keys are treated as "none" (deny).
+    If resource_permissions is None, no restriction applies (backward compat).
+    """
+    if not get_settings().api_key_enforce_resource_permissions:
+        return
+
+    if key.resource_permissions is None:
+        return
+
+    try:
+        rp = ResourcePermissions.model_validate(key.resource_permissions)
+    except Exception:
+        # Malformed data — fail closed
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message="API key has malformed resource permissions.",
+        )
+
+    granted_value = getattr(rp, resource_type, None)
+    if granted_value is None:
+        # Unknown resource type — fail closed
+        granted_level = 0
+    else:
+        granted_level = PERMISSION_LEVEL_ORDER.get(
+            granted_value.value if hasattr(granted_value, "value") else str(granted_value),
+            0,
+        )
+
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 0)
+    if granted_level < required_level:
+        granted_str = (
+            granted_value.value if hasattr(granted_value, "value") else str(granted_value)
+        ) if granted_value is not None else "none"
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message=f"API key does not have '{resource_type}' {required} permission.",
+            context=ResourceDenialContext(
+                resource_type=resource_type,
+                required_level=required,
+                granted_level=granted_str,
+            ),
+        )
 
 
 @dataclass(frozen=True)

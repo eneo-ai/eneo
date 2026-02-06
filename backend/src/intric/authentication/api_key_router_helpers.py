@@ -12,7 +12,6 @@ from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import ApiKeyV2, ApiKeyV2InDB
 from intric.main.config import get_settings
-from intric.main.models import CursorPaginatedResponse
 
 
 class ApiKeyErrorResponse(BaseModel):
@@ -24,6 +23,7 @@ def raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
     raise HTTPException(
         status_code=exc.status_code,
         detail={"code": exc.code, "message": exc.message},
+        headers=exc.headers,
     ) from exc
 
 
@@ -37,17 +37,17 @@ def error_responses(codes: list[int]) -> dict[int | str, dict[str, Any]]:
 def paginate_keys(
     keys: list[ApiKeyV2InDB],
     *,
-    total_count: int,
+    total_count: int | None,
     limit: int | None,
     cursor: datetime | None,
     previous: bool,
-) -> CursorPaginatedResponse[ApiKeyV2]:
+) -> dict[str, object]:
     if limit is None:
-        return CursorPaginatedResponse(
-            items=[ApiKeyV2.model_validate(key) for key in keys],
-            total_count=total_count,
-            limit=limit,
-        )
+        return {
+            "items": [ApiKeyV2.model_validate(key) for key in keys],
+            "total_count": total_count,
+            "limit": limit,
+        }
 
     if not previous:
         if len(keys) > limit:
@@ -56,13 +56,13 @@ def paginate_keys(
         else:
             next_cursor = None
             page = keys
-        return CursorPaginatedResponse(
-            items=[ApiKeyV2.model_validate(key) for key in page],
-            total_count=total_count,
-            limit=limit,
-            next_cursor=next_cursor,
-            previous_cursor=cursor,
-        )
+        return {
+            "items": [ApiKeyV2.model_validate(key) for key in page],
+            "total_count": total_count,
+            "limit": limit,
+            "next_cursor": next_cursor,
+            "previous_cursor": cursor,
+        }
 
     if len(keys) > limit:
         page = keys[1:]
@@ -71,13 +71,13 @@ def paginate_keys(
         page = keys
         previous_cursor = None
 
-    return CursorPaginatedResponse(
-        items=[ApiKeyV2.model_validate(key) for key in page],
-        total_count=total_count,
-        limit=limit,
-        next_cursor=cursor,
-        previous_cursor=previous_cursor,
-    )
+    return {
+        "items": [ApiKeyV2.model_validate(key) for key in page],
+        "total_count": total_count,
+        "limit": limit,
+        "next_cursor": cursor,
+        "previous_cursor": previous_cursor,
+    }
 
 
 def extract_audit_context(

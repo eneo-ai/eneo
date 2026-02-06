@@ -57,95 +57,21 @@ export type Dashboard = components["schemas"]["Dashboard"];
 export type Prompt = components["schemas"]["PromptPublic"];
 export type PromptSparse = components["schemas"]["PromptSparse"];
 export type IntricErrorCode = components["schemas"]["ErrorCodes"] | 0;
-export type ApiKeyType = "pk_" | "sk_";
-export type ApiKeyPermission = "read" | "write" | "admin";
-export type ApiKeyScopeType = "tenant" | "space" | "assistant" | "app";
-export type ApiKeyState = "active" | "suspended" | "revoked" | "expired";
-export type ApiKeyStateReasonCode =
-  | "security_concern"
-  | "abuse_detected"
-  | "user_request"
-  | "admin_action"
-  | "policy_violation"
-  | "key_compromised"
-  | "user_offboarding"
-  | "rotation_completed"
-  | "scope_removed"
-  | "other";
-
-export type ApiKeyV2 = {
-  id: string;
-  key_prefix: string;
-  key_suffix: string;
-  name: string;
-  description?: string | null;
-  key_type: ApiKeyType;
-  permission: ApiKeyPermission;
-  scope_type: ApiKeyScopeType;
-  scope_id?: string | null;
-  allowed_origins?: string[] | null;
-  allowed_ips?: string[] | null;
-  state: ApiKeyState;
-  expires_at?: string | null;
-  last_used_at?: string | null;
-  revoked_at?: string | null;
-  revoked_reason_code?: ApiKeyStateReasonCode | null;
-  revoked_reason_text?: string | null;
-  suspended_at?: string | null;
-  suspended_reason_code?: ApiKeyStateReasonCode | null;
-  suspended_reason_text?: string | null;
-  rotation_grace_until?: string | null;
-  rate_limit?: number | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  rotated_from_key_id?: string | null;
-};
-
-export type ApiKeyCreateRequest = {
-  name: string;
-  description?: string | null;
-  key_type: ApiKeyType;
-  permission?: ApiKeyPermission;
-  scope_type: ApiKeyScopeType;
-  scope_id?: string | null;
-  allowed_origins?: string[] | null;
-  allowed_ips?: string[] | null;
-  expires_at?: string | null;
-  rate_limit?: number | null;
-};
-
-export type ApiKeyUpdateRequest = {
-  name?: string | null;
-  description?: string | null;
-  allowed_origins?: string[] | null;
-  allowed_ips?: string[] | null;
-  expires_at?: string | null;
-  rate_limit?: number | null;
-};
-
-export type ApiKeyStateChangeRequest = {
-  reason_code?: ApiKeyStateReasonCode | null;
-  reason_text?: string | null;
-};
-
-export type ApiKeyCreatedResponse = {
-  api_key: ApiKeyV2;
-  secret: string;
-};
-
-export type ApiKeyPolicy = {
-  max_delegation_depth?: number | null;
-  revocation_cascade_enabled?: boolean | null;
-  require_expiration?: boolean | null;
-  max_expiration_days?: number | null;
-  auto_expire_unused_days?: number | null;
-  max_rate_limit_override?: number | null;
-};
-
-export type SuperApiKeyStatus = {
-  super_api_key_configured: boolean;
-  super_duper_api_key_configured: boolean;
-};
+export type ApiKeyType = components["schemas"]["ApiKeyType"];
+export type ApiKeyPermission = components["schemas"]["ApiKeyPermission"];
+export type ApiKeyScopeType = components["schemas"]["ApiKeyScopeType"];
+export type ApiKeyState = components["schemas"]["ApiKeyState"];
+export type ApiKeyStateReasonCode = components["schemas"]["ApiKeyStateReasonCode"];
+export type ResourcePermissionLevel = components["schemas"]["ResourcePermissionLevel"];
+export type ResourcePermissions = components["schemas"]["ResourcePermissions"];
+export type ApiKeyCreationConstraints = components["schemas"]["ApiKeyCreationConstraints"];
+export type ApiKeyV2 = components["schemas"]["ApiKeyV2"];
+export type ApiKeyCreateRequest = components["schemas"]["ApiKeyCreateRequest"];
+export type ApiKeyUpdateRequest = components["schemas"]["ApiKeyUpdateRequest"];
+export type ApiKeyStateChangeRequest = components["schemas"]["ApiKeyStateChangeRequest"];
+export type ApiKeyCreatedResponse = components["schemas"]["ApiKeyCreatedResponse"];
+export type ApiKeyPolicy = components["schemas"]["ApiKeyPolicyResponse"];
+export type SuperApiKeyStatus = components["schemas"]["SuperApiKeyStatus"];
 
 export type CursorPaginated<T> = {
   items: T[];
@@ -154,6 +80,9 @@ export type CursorPaginated<T> = {
   next_cursor?: string | null;
   previous_cursor?: string | null;
 };
+
+export type ApiKeyListResponse = components["schemas"]["ApiKeyListResponse"];
+export type ApiKeyAdminListResponse = components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
 export type App = components["schemas"]["AppPublic"];
 export type AppSparse = components["schemas"]["AppSparse"];
 export type AppRun = components["schemas"]["AppRunPublic"];

@@ -98,3 +98,77 @@ async def test_rate_limit_fail_open_when_redis_unavailable():
         await limiter.enforce(key)
     finally:
         set_settings(settings)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_fail_closed_when_redis_unavailable():
+    """Redis unavailable + fail_open=False → 503."""
+    settings = get_settings()
+    patched = settings.model_copy(update={"api_key_rate_limit_fail_open": False})
+    set_settings(patched)
+
+    redis_client = FakeRedis(count=1, raise_error=True)
+    limiter = ApiKeyRateLimiter(redis_client=redis_client)
+
+    key = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        scope_type=ApiKeyScopeType.SPACE.value,
+        rate_limit=1,
+    )
+
+    try:
+        with pytest.raises(ApiKeyValidationError) as exc:
+            await limiter.enforce(key)
+        assert exc.value.status_code == 503
+        assert exc.value.code == "rate_limit_unavailable"
+    finally:
+        set_settings(settings)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_fail_closed_when_redis_is_none():
+    """Redis client is None + fail_open=False → 503."""
+    settings = get_settings()
+    patched = settings.model_copy(update={"api_key_rate_limit_fail_open": False})
+    set_settings(patched)
+
+    limiter = ApiKeyRateLimiter(redis_client=None)
+
+    key = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        scope_type=ApiKeyScopeType.TENANT.value,
+        rate_limit=100,
+    )
+
+    try:
+        with pytest.raises(ApiKeyValidationError) as exc:
+            await limiter.enforce(key)
+        assert exc.value.status_code == 503
+        assert exc.value.code == "rate_limit_unavailable"
+    finally:
+        set_settings(settings)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_exceeded_includes_headers():
+    """Rate limit exceeded response includes Retry-After and X-RateLimit headers."""
+    redis_client = FakeRedis(count=2)
+    limiter = ApiKeyRateLimiter(redis_client=redis_client)
+
+    key = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        scope_type=ApiKeyScopeType.ASSISTANT.value,
+        rate_limit=1,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await limiter.enforce(key)
+
+    assert exc.value.headers is not None
+    assert "Retry-After" in exc.value.headers
+    assert "X-RateLimit-Limit" in exc.value.headers
+    assert exc.value.headers["X-RateLimit-Remaining"] == "0"
+    assert exc.value.headers["X-RateLimit-Limit"] == "1"

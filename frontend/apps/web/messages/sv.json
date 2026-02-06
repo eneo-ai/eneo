@@ -2186,6 +2186,7 @@
   "api_keys_rate_limit": "Anropsgräns (förfrågningar per timme)",
   "api_keys_rate_limit_help": "Anpassad anropsgräns för denna nyckel. Lämna tomt för att använda organisationens standard.",
   "api_keys_rate_limit_placeholder": "Lämna tomt för standard",
+  "api_keys_rate_limit_max": "Maximalt tillåtet: {max} förfrågningar per timme.",
   "api_keys_back": "Tillbaka",
   "api_keys_next": "Nästa",
   "api_keys_creating": "Skapar...",
@@ -2229,6 +2230,7 @@
   "api_keys_exp_1_day_from_now": "1 dag från nu",
   "api_keys_exp_valid_until_revoked": "Denna nyckel förblir giltig tills den manuellt återkallas",
   "api_keys_exp_warning": "Nycklar utan utgångsdatum utgör en säkerhetsrisk. Överväg att sätta ett utgångsdatum.",
+  "api_keys_exp_required": "Ett utgångsdatum krävs enligt organisationens policy.",
 
   "api_keys_tag_localhost": "localhost",
   "api_keys_tag_https_wildcard": "HTTPS wildcard",

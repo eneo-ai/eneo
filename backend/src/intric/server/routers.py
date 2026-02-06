@@ -1,4 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from intric.authentication.auth_dependencies import (
+    ASSISTANTS_READ_OVERRIDES,
+    KNOWLEDGE_READ_OVERRIDES,
+    require_resource_permission_for_method,
+)
 
 from intric.admin.admin_router import router as admin_router
 from intric.ai_models.ai_models_router import router as ai_models_router
@@ -105,14 +111,51 @@ from intric.api.audit.routes import router as audit_router
 router = APIRouter()
 
 router.include_router(crawl_run_router, prefix="/crawl-runs", tags=["crawl-runs"])
-router.include_router(app_router, prefix="/apps", tags=["apps"])
-router.include_router(app_run_router, prefix="/app-runs", tags=["app-runs"])
+router.include_router(
+    app_router,
+    prefix="/apps",
+    tags=["apps"],
+    dependencies=[Depends(require_resource_permission_for_method("apps"))],
+)
+router.include_router(
+    app_run_router,
+    prefix="/app-runs",
+    tags=["app-runs"],
+    dependencies=[Depends(require_resource_permission_for_method("apps"))],
+)
 router.include_router(api_key_router, tags=["api-keys"])
 router.include_router(users_router, prefix="/users", tags=["users"])
-router.include_router(info_blobs_router, prefix="/info-blobs", tags=["info-blobs"])
-router.include_router(groups_router, prefix="/groups", tags=["groups"])
+router.include_router(
+    info_blobs_router,
+    prefix="/info-blobs",
+    tags=["info-blobs"],
+    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+)
+router.include_router(
+    groups_router,
+    prefix="/groups",
+    tags=["groups"],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "knowledge", read_override_endpoints=KNOWLEDGE_READ_OVERRIDES
+            )
+        )
+    ],
+)
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
-router.include_router(assistants_router, prefix="/assistants", tags=["assistants"])
+router.include_router(
+    assistants_router,
+    prefix="/assistants",
+    tags=["assistants"],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES
+            )
+        )
+    ],
+)
 router.include_router(group_chat_router, prefix="/group-chats", tags=["group-chats"])
 router.include_router(
     conversations_router, prefix="/conversations", tags=["conversations"]
@@ -165,7 +208,12 @@ router.include_router(
 router.include_router(files_router, prefix="/files", tags=["files"])
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
-router.include_router(space_router, prefix="/spaces", tags=["spaces"])
+router.include_router(
+    space_router,
+    prefix="/spaces",
+    tags=["spaces"],
+    dependencies=[Depends(require_resource_permission_for_method("spaces"))],
+)
 router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 router.include_router(website_router, prefix="/websites", tags=["websites"])
 router.include_router(websocket_router, prefix="", tags=["websockets"])

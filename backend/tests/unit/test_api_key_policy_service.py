@@ -3,7 +3,9 @@ from uuid import uuid4
 from types import SimpleNamespace
 
 from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.authentication.auth_models import ApiKeyType
 
 
 class DummyOrigin:
@@ -273,3 +275,103 @@ async def test_tenant_origin_cache_invalidate_forces_reload():
     )
 
     assert repo.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_pk_key_missing_origin_header_rejected():
+    """pk_ key with NO Origin header → 403 origin_not_allowed."""
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(["https://example.com"]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        allowed_origins=["https://example.com"],
+        allowed_ips=None,
+        revoked_at=None,
+        suspended_at=None,
+        expires_at=None,
+        tenant_id=uuid4(),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.enforce_guardrails(key=key, origin=None, client_ip=None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.code == "origin_not_allowed"
+
+
+def test_reverse_proxy_ip_resolution_extracts_leftmost_untrusted():
+    """X-Forwarded-For with trusted_proxy_count=1 extracts the leftmost untrusted hop."""
+    request = SimpleNamespace(
+        headers={
+            "x-forwarded-for": "203.0.113.50, 10.0.0.1",
+        },
+        client=SimpleNamespace(host="10.0.0.1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=1,
+        trusted_proxy_headers=[],
+    )
+    assert ip == "203.0.113.50"
+
+
+def test_reverse_proxy_ip_resolution_with_multiple_proxies():
+    """X-Forwarded-For with trusted_proxy_count=2 skips 2 rightmost hops."""
+    request = SimpleNamespace(
+        headers={
+            "x-forwarded-for": "203.0.113.50, 10.0.0.2, 10.0.0.1",
+        },
+        client=SimpleNamespace(host="10.0.0.1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=2,
+        trusted_proxy_headers=[],
+    )
+    assert ip == "203.0.113.50"
+
+
+@pytest.mark.asyncio
+async def test_max_rate_limit_override_blocks_unlimited_rate_limit():
+    """max_rate_limit_override blocks rate_limit=-1 on create/update."""
+    service = _service_with_user([])
+    service.user.tenant.api_key_policy = {"max_rate_limit_override": 100}
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_rate_limit(-1)
+
+    assert exc.value.status_code == 400
+    assert "not allowed" in exc.value.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_max_rate_limit_override_blocks_exceeding_value():
+    """max_rate_limit_override blocks rate_limit exceeding the cap."""
+    service = _service_with_user([])
+    service.user.tenant.api_key_policy = {"max_rate_limit_override": 100}
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_rate_limit(200)
+
+    assert exc.value.status_code == 400
+    assert "exceeds" in exc.value.message.lower()
+
+
+def test_reverse_proxy_ip_resolution_falls_back_to_client_host():
+    """No X-Forwarded-For + trusted_proxy_count=0 → uses request.client.host."""
+    request = SimpleNamespace(
+        headers={},
+        client=SimpleNamespace(host="192.168.1.1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=0,
+        trusted_proxy_headers=[],
+    )
+    assert ip == "192.168.1.1"

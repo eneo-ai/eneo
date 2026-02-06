@@ -17,6 +17,8 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    PERMISSION_LEVEL_ORDER,
+    ResourcePermissions,
     compute_effective_state,
 )
 from intric.main.config import get_settings
@@ -127,6 +129,18 @@ class ApiKeyPolicyService:
 
         await self._validate_expiration(request.expires_at)
         await self._validate_rate_limit(request.rate_limit)
+
+        if request.resource_permissions is not None:
+            if request.key_type == ApiKeyType.PK:
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message="Public keys (pk_) do not support fine-grained resource permissions.",
+                )
+            self._validate_resource_permissions_ceiling(
+                resource_permissions=request.resource_permissions,
+                permission=request.permission,
+            )
 
         return await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
@@ -287,6 +301,60 @@ class ApiKeyPolicyService:
             rate_limit = cast(int | None, updates.get("rate_limit"))
             await self._validate_rate_limit(rate_limit)
 
+        if "resource_permissions" in updates:
+            raw_rp = updates.get("resource_permissions")
+            if raw_rp is not None:
+                if ApiKeyType(key.key_type) == ApiKeyType.PK:
+                    raise ApiKeyValidationError(
+                        status_code=400,
+                        code="invalid_request",
+                        message="Public keys (pk_) do not support fine-grained resource permissions.",
+                    )
+                rp = (
+                    raw_rp
+                    if isinstance(raw_rp, ResourcePermissions)
+                    else ResourcePermissions.model_validate(raw_rp)
+                )
+                # Use incoming permission if both are changing, else key's existing
+                ceiling = ApiKeyPermission(
+                    updates["permission"]
+                    if "permission" in updates
+                    else key.permission
+                )
+                self._validate_resource_permissions_ceiling(
+                    resource_permissions=rp,
+                    permission=ceiling,
+                )
+        elif "permission" in updates:
+            # Permission is being lowered — check existing resource_permissions still fit
+            if key.resource_permissions is not None:
+                existing_rp = ResourcePermissions.model_validate(key.resource_permissions)
+                new_permission = ApiKeyPermission(updates["permission"])
+                self._validate_resource_permissions_ceiling(
+                    resource_permissions=existing_rp,
+                    permission=new_permission,
+                )
+
+    def _validate_resource_permissions_ceiling(
+        self,
+        *,
+        resource_permissions: ResourcePermissions,
+        permission: ApiKeyPermission,
+    ) -> None:
+        ceiling = PERMISSION_LEVEL_ORDER.get(permission.value, 0)
+        for resource_type in ("assistants", "apps", "spaces", "knowledge"):
+            level: str = getattr(resource_permissions, resource_type).value
+            level_order = PERMISSION_LEVEL_ORDER.get(level, 0)
+            if level_order > ceiling:
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message=(
+                        f"Resource permission '{resource_type}={level}' exceeds "
+                        f"the key permission ceiling '{permission.value}'."
+                    ),
+                )
+
     async def ensure_manage_authorized(self, *, key: ApiKeyV2InDB):
         return await self.ensure_creator_authorized(
             scope_type=ApiKeyScopeType(key.scope_type),
@@ -398,12 +466,6 @@ class ApiKeyPolicyService:
                 code="invalid_request",
                 message="rate_limit must be null, -1, or a positive integer.",
             )
-        if rate_limit == -1 and Permission.ADMIN not in user.permissions:
-            raise ApiKeyValidationError(
-                status_code=403,
-                code="insufficient_permission",
-                message="Unlimited rate limit requires admin permission.",
-            )
         if rate_limit < -1:
             raise ApiKeyValidationError(
                 status_code=400,
@@ -413,13 +475,27 @@ class ApiKeyPolicyService:
 
         policy = user.tenant.api_key_policy or {}
         max_override = policy.get("max_rate_limit_override")
-        if max_override is None:
-            return
-        if rate_limit > int(max_override):
+
+        if max_override is not None:
+            # max_rate_limit_override is an absolute ceiling — even admin -1
+            # (unlimited) is rejected when a cap is set.
+            if rate_limit == -1:
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message="Unlimited rate limit is not allowed when a tenant maximum is set.",
+                )
+            if rate_limit > int(max_override):
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message="rate_limit exceeds tenant maximum.",
+                )
+        elif rate_limit == -1 and Permission.ADMIN not in user.permissions:
             raise ApiKeyValidationError(
-                status_code=400,
-                code="invalid_request",
-                message="rate_limit exceeds tenant maximum.",
+                status_code=403,
+                code="insufficient_permission",
+                message="Unlimited rate limit requires admin permission.",
             )
 
     def _validate_ip_entry(self, entry: str) -> None:

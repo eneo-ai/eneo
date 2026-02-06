@@ -73,6 +73,11 @@ class ApiKeyRateLimiter:
                 status_code=429,
                 code="rate_limit_exceeded",
                 message="API key rate limit exceeded.",
+                headers={
+                    "Retry-After": str(result.window_seconds),
+                    "X-RateLimit-Limit": str(result.max_requests),
+                    "X-RateLimit-Remaining": "0",
+                },
             )
 
     def _resolve_limit(self, key: ApiKeyV2InDB) -> int | None:

@@ -22,6 +22,7 @@ from intric.authentication.auth_models import (
     ApiKeyType,
     ApiKeyV2,
     ApiKeyV2InDB,
+    ResourcePermissions,
     compute_effective_state,
 )
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -64,6 +65,12 @@ class ApiKeyLifecycleService:
         secret = self._generate_secret(request.key_type.value)
         key_hash = self._hash_hmac(secret)
 
+        resource_permissions_value = (
+            request.resource_permissions.model_dump(mode="json")
+            if request.resource_permissions
+            else None
+        )
+
         record = await self.api_key_repo.create(
             tenant_id=user.tenant_id,
             owner_user_id=user.id,
@@ -82,6 +89,7 @@ class ApiKeyLifecycleService:
             allowed_ips=request.allowed_ips,
             expires_at=request.expires_at,
             rate_limit=request.rate_limit,
+            resource_permissions=resource_permissions_value,
             state=ApiKeyState.ACTIVE.value,
         )
 
@@ -104,6 +112,10 @@ class ApiKeyLifecycleService:
                         "expires_at": record.expires_at.isoformat()
                         if record.expires_at
                         else None,
+                        "resource_permissions": resource_permissions_value,
+                        "allowed_origins": record.allowed_origins,
+                        "allowed_ips": record.allowed_ips,
+                        "rate_limit": record.rate_limit,
                     },
                 ),
                 ip_address=ip_address,
@@ -149,6 +161,12 @@ class ApiKeyLifecycleService:
         secret = self._generate_secret(key.key_prefix)
         key_hash = self._hash_hmac(secret)
 
+        resource_permissions_value = (
+            key.resource_permissions.model_dump(mode="json")
+            if isinstance(key.resource_permissions, ResourcePermissions)
+            else key.resource_permissions
+        )
+
         record = await self.api_key_repo.create(
             tenant_id=key.tenant_id,
             owner_user_id=key.owner_user_id,
@@ -167,6 +185,7 @@ class ApiKeyLifecycleService:
             allowed_ips=key.allowed_ips,
             expires_at=key.expires_at,
             rate_limit=key.rate_limit,
+            resource_permissions=resource_permissions_value,
             state=ApiKeyState.ACTIVE.value,
             rotated_from_key_id=key.id,
         )
@@ -320,6 +339,7 @@ class ApiKeyLifecycleService:
                 "allowed_ips",
                 "expires_at",
                 "rate_limit",
+                "resource_permissions",
             ):
                 if field in updates:
                     old_value = getattr(key, field)

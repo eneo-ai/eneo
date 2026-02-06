@@ -6,7 +6,12 @@
 /** @typedef {import('../types/resources').ApiKeyCreatedResponse} ApiKeyCreatedResponse */
 /** @typedef {import('../types/resources').ApiKeyPolicy} ApiKeyPolicy */
 /** @typedef {import('../types/resources').SuperApiKeyStatus} SuperApiKeyStatus */
-/** @typedef {import('../types/resources').CursorPaginated<ApiKeyV2>} ApiKeyPage */
+/** @typedef {import('../types/resources').ApiKeyCreationConstraints} ApiKeyCreationConstraints */
+/** @typedef {import('../types/resources').ApiKeyListResponse} ApiKeyPage */
+/** @typedef {import('../types/resources').ApiKeyAdminListResponse} AdminApiKeyPage */
+/** @typedef {import('../types/resources').ApiKeyScopeType} ApiKeyScopeType */
+/** @typedef {import('../types/resources').ApiKeyState} ApiKeyState */
+/** @typedef {import('../types/resources').ApiKeyType} ApiKeyType */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -15,7 +20,7 @@ export function initApiKeys(client) {
   return {
     /**
      * List API keys for the current user (scoped by permissions).
-     * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: string, scope_id?: string, state?: string, key_type?: string}} [params]
+     * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null}} [params]
      * @returns {Promise<ApiKeyPage>}
      * @throws {IntricError}
      * */
@@ -82,12 +87,18 @@ export function initApiKeys(client) {
      * @throws {IntricError}
      * */
     revoke: async ({ id, request }) => {
-      const res = await client.fetch("/api/v1/api-keys/{id}/revoke", {
+      if (request) {
+        const options = /** @type {any} */ ({
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": request }
+        });
+        return await client.fetch("/api/v1/api-keys/{id}/revoke", options);
+      }
+      return await client.fetch("/api/v1/api-keys/{id}/revoke", {
         method: "post",
-        params: { path: { id } },
-        requestBody: request ? { "application/json": request } : undefined
+        params: { path: { id } }
       });
-      return res;
     },
 
     /**
@@ -111,12 +122,18 @@ export function initApiKeys(client) {
      * @throws {IntricError}
      * */
     suspend: async ({ id, request }) => {
-      const res = await client.fetch("/api/v1/api-keys/{id}/suspend", {
+      if (request) {
+        const options = /** @type {any} */ ({
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": request }
+        });
+        return await client.fetch("/api/v1/api-keys/{id}/suspend", options);
+      }
+      return await client.fetch("/api/v1/api-keys/{id}/suspend", {
         method: "post",
-        params: { path: { id } },
-        requestBody: request ? { "application/json": request } : undefined
+        params: { path: { id } }
       });
-      return res;
     },
 
     /**
@@ -133,11 +150,23 @@ export function initApiKeys(client) {
       return res;
     },
 
+    /**
+     * Get creation constraints (policy limits) for the current user.
+     * @returns {Promise<ApiKeyCreationConstraints>}
+     * @throws {IntricError}
+     * */
+    getCreationConstraints: async () => {
+      const res = await client.fetch("/api/v1/api-keys/creation-constraints", {
+        method: "get"
+      });
+      return res;
+    },
+
     admin: {
       /**
        * List all API keys in the tenant (admin only).
-       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: string, scope_id?: string, state?: string, key_type?: string, created_by_user_id?: string}} [params]
-       * @returns {Promise<ApiKeyPage>}
+       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, created_by_user_id?: string}} [params]
+       * @returns {Promise<AdminApiKeyPage>}
        * @throws {IntricError}
        * */
       list: async (params) => {
@@ -169,12 +198,18 @@ export function initApiKeys(client) {
        * @throws {IntricError}
        * */
       revoke: async ({ id, request }) => {
-        const res = await client.fetch("/api/v1/admin/api-keys/{id}/revoke", {
+        if (request) {
+          const options = /** @type {any} */ ({
+            method: "post",
+            params: { path: { id } },
+            requestBody: { "application/json": request }
+          });
+          return await client.fetch("/api/v1/admin/api-keys/{id}/revoke", options);
+        }
+        return await client.fetch("/api/v1/admin/api-keys/{id}/revoke", {
           method: "post",
-          params: { path: { id } },
-          requestBody: request ? { "application/json": request } : undefined
+          params: { path: { id } }
         });
-        return res;
       },
 
       /**
@@ -184,12 +219,18 @@ export function initApiKeys(client) {
        * @throws {IntricError}
        * */
       suspend: async ({ id, request }) => {
-        const res = await client.fetch("/api/v1/admin/api-keys/{id}/suspend", {
+        if (request) {
+          const options = /** @type {any} */ ({
+            method: "post",
+            params: { path: { id } },
+            requestBody: { "application/json": request }
+          });
+          return await client.fetch("/api/v1/admin/api-keys/{id}/suspend", options);
+        }
+        return await client.fetch("/api/v1/admin/api-keys/{id}/suspend", {
           method: "post",
-          params: { path: { id } },
-          requestBody: request ? { "application/json": request } : undefined
+          params: { path: { id } }
         });
-        return res;
       },
 
       /**

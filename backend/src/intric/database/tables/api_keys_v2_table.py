@@ -32,6 +32,7 @@ class ApiKeysV2(BasePublic):
     rate_limit: Mapped[Optional[int]] = mapped_column(nullable=True)
     allowed_origins: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
     allowed_ips: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
+    resource_permissions: Mapped[Optional[dict[str, str]]] = mapped_column(JSONB, nullable=True)
     state: Mapped[str] = mapped_column(nullable=False, server_default="active")
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True

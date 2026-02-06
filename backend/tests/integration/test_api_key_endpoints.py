@@ -49,6 +49,32 @@ async def _add_allowed_origin(db_container, tenant_id, origin: str):
         await repo.add_origin(origin=origin, tenant_id=tenant_id)
 
 
+async def _create_space_and_assistant(
+    client,
+    *,
+    bearer_token: str,
+) -> tuple[str, str]:
+    space_response = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"api-key-space-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert space_response.status_code == 201, space_response.text
+    space_id = space_response.json()["id"]
+
+    assistant_response = await client.post(
+        "/api/v1/assistants/",
+        json={
+            "name": f"api-key-assistant-{uuid4().hex[:8]}",
+            "space_id": space_id,
+        },
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert assistant_response.status_code == 200, assistant_response.text
+    assistant_id = assistant_response.json()["id"]
+    return space_id, assistant_id
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_api_key_crud_flow(client, default_user_token):
@@ -264,6 +290,11 @@ async def test_rate_limit_enforced(client, default_user_token):
     )
     assert second.status_code == 429
     assert second.json()["code"] == "rate_limit_exceeded"
+    assert second.headers.get("X-RateLimit-Limit") == "1"
+    assert second.headers.get("X-RateLimit-Remaining") == "0"
+    retry_after = second.headers.get("Retry-After")
+    assert retry_after is not None
+    assert int(retry_after) > 0
 
 
 @pytest.mark.integration
@@ -281,6 +312,43 @@ async def test_admin_api_key_policy_update(
     payload = response.json()
     assert payload["require_expiration"] is True
     assert payload["max_expiration_days"] == 90
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_creation_constraints_reflect_tenant_policy(
+    client,
+    default_user_token,
+    regular_user_token,
+):
+    update_response = await client.patch(
+        "/api/v1/admin/api-key-policy",
+        json={
+            "require_expiration": True,
+            "max_expiration_days": 45,
+            "max_rate_limit_override": 123,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert update_response.status_code == 200, update_response.text
+
+    admin_constraints = await client.get(
+        "/api/v1/api-keys/creation-constraints",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert admin_constraints.status_code == 200, admin_constraints.text
+    admin_payload = admin_constraints.json()
+    assert admin_payload["require_expiration"] is True
+    assert admin_payload["max_expiration_days"] == 45
+    assert admin_payload["max_rate_limit"] == 123
+
+    user_constraints = await client.get(
+        "/api/v1/api-keys/creation-constraints",
+        headers={"Authorization": f"Bearer {regular_user_token}"},
+    )
+    assert user_constraints.status_code == 200, user_constraints.text
+    user_payload = user_constraints.json()
+    assert user_payload == admin_payload
 
 
 @pytest.mark.integration
@@ -605,6 +673,18 @@ async def test_user_list_pagination_and_filtering(client, default_user_token):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_non_admin_list_total_count_is_null(client, regular_user_token):
+    list_response = await client.get(
+        "/api/v1/api-keys",
+        headers={"Authorization": f"Bearer {regular_user_token}"},
+    )
+    assert list_response.status_code == 200, list_response.text
+    payload = list_response.json()
+    assert payload["total_count"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_admin_list_filtering_and_total_count(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -731,3 +811,292 @@ async def test_lifecycle_negative_paths(client, default_user_token):
     )
     assert rotate_after_revoke.status_code == 401
     assert rotate_after_revoke.json()["code"] == "invalid_api_key"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_max_rate_limit_override_enforced_on_create_and_update(
+    client,
+    default_user_token,
+):
+    policy_response = await client.patch(
+        "/api/v1/admin/api-key-policy",
+        json={"max_rate_limit_override": 100},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert policy_response.status_code == 200, policy_response.text
+
+    create_unlimited = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Unlimited Blocked",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "rate_limit": -1,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_unlimited.status_code == 400
+    assert create_unlimited.json()["code"] == "invalid_request"
+
+    create_exceeding = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Exceeding Blocked",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "rate_limit": 101,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_exceeding.status_code == 400
+    assert create_exceeding.json()["code"] == "invalid_request"
+
+    create_valid = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Cap Valid",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "rate_limit": 100,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_valid.status_code == 201, create_valid.text
+    key_id = create_valid.json()["api_key"]["id"]
+
+    update_unlimited = await client.patch(
+        f"/api/v1/api-keys/{key_id}",
+        json={"rate_limit": -1},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert update_unlimited.status_code == 400
+    assert update_unlimited.json()["code"] == "invalid_request"
+
+    update_exceeding = await client.patch(
+        f"/api/v1/api-keys/{key_id}",
+        json={"rate_limit": 1000},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert update_exceeding.status_code == 400
+    assert update_exceeding.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_preserves_resource_permissions(client, default_user_token):
+    requested_permissions = {
+        "assistants": "read",
+        "apps": "write",
+        "spaces": "none",
+        "knowledge": "read",
+    }
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate Resource Permissions",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "resource_permissions": requested_permissions,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/rotate",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+    rotated_payload = rotate_response.json()
+    assert rotated_payload["api_key"]["resource_permissions"] == requested_permissions
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_method_aware_guard_blocks_write_key_on_app_run_delete(
+    client,
+    default_user_token,
+):
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "App Run Delete Write Key",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "resource_permissions": {
+                "assistants": "none",
+                "apps": "write",
+                "spaces": "none",
+                "knowledge": "none",
+            },
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    response = await client.delete(
+        f"/api/v1/app-runs/{uuid4()}/",
+        headers={"X-API-Key": secret},
+    )
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "insufficient_resource_permission"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_method_aware_guard_allows_read_override_for_group_semantic_search(
+    client,
+    default_user_token,
+):
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Group Search Read Override Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "resource_permissions": {
+                "assistants": "none",
+                "apps": "none",
+                "spaces": "none",
+                "knowledge": "read",
+            },
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    response = await client.post(
+        f"/api/v1/groups/{uuid4()}/searches/",
+        json={"search_string": "hello"},
+        headers={"X-API-Key": secret},
+    )
+    # The endpoint should not fail due to method-aware resource guard.
+    # Unknown group ids should fail deeper in the stack (typically 404).
+    assert not (
+        response.status_code == 403
+        and response.json().get("code") == "insufficient_resource_permission"
+    ), response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_method_aware_guard_blocks_read_key_on_assistant_session_create(
+    client, default_user_token
+):
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Knowledge Read Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "resource_permissions": {
+                "assistants": "none",
+                "apps": "none",
+                "spaces": "none",
+                "knowledge": "read",
+            },
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    create_session_response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/sessions/",
+        json={"question": "hello", "stream": False},
+        headers={"X-API-Key": secret},
+    )
+    assert create_session_response.status_code == 403, create_session_response.text
+    assert (
+        create_session_response.json()["code"] == "insufficient_resource_permission"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
+    client, default_user_token
+):
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Knowledge Write Key",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "resource_permissions": {
+                "assistants": "none",
+                "apps": "none",
+                "spaces": "none",
+                "knowledge": "write",
+            },
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    delete_response = await client.delete(
+        f"/api/v1/assistants/{assistant_id}/",
+        headers={"X-API-Key": secret},
+    )
+    assert delete_response.status_code == 403, delete_response.text
+    assert delete_response.json()["code"] == "insufficient_resource_permission"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_method_aware_guard_allows_read_override_for_assistant_token_estimate(
+    client, default_user_token
+):
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Assistant Estimate Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "resource_permissions": {
+                "assistants": "read",
+                "apps": "none",
+                "spaces": "none",
+                "knowledge": "read",
+            },
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    estimate_response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/token-estimate",
+        json={"text": "hello world"},
+        headers={"X-API-Key": secret},
+    )
+    assert estimate_response.status_code == 200, estimate_response.text

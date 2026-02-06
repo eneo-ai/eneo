@@ -34,6 +34,7 @@ def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
     raise HTTPException(
         status_code=exc.status_code,
         detail={"code": exc.code, "message": exc.message},
+        headers=exc.headers,
     ) from exc
 
 

@@ -11,13 +11,16 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
 from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
+from intric.authentication.api_key_router_helpers import extract_audit_context
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_resolver import (
     ApiKeyAuthResolver,
     ApiKeyValidationError,
+    check_resource_permission,
 )
 from intric.authentication.auth_models import (
     AccessToken,
@@ -63,6 +66,41 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+_METHOD_PERMISSION_MAP: dict[str, str] = {
+    "GET": "read",
+    "HEAD": "read",
+    "OPTIONS": "read",
+    "POST": "write",
+    "PUT": "write",
+    "PATCH": "write",
+    "DELETE": "admin",
+}
+
+
+def _check_method_resource_permission(
+    request: Request,
+    key: ApiKeyV2InDB,
+    config: dict,
+) -> None:
+    """Check fine-grained resource permission based on HTTP method.
+
+    Called after authentication has set ``request.state.api_key``.
+    *config* is written by the router-level
+    ``require_resource_permission_for_method`` dependency.
+    """
+    resource_type: str = config["resource_type"]
+    read_override_endpoints: frozenset[str] | None = config.get("read_override_endpoints")
+
+    required = _METHOD_PERMISSION_MAP.get(request.method, "admin")
+
+    if required != "read" and read_override_endpoints:
+        route = request.scope.get("route")
+        if route and hasattr(route, "endpoint"):
+            if route.endpoint.__name__ in read_override_endpoints:
+                required = "read"
+
+    check_resource_permission(key, resource_type, required)
 
 
 class UserService:
@@ -562,13 +600,19 @@ class UserService:
                 message="API key tenant mismatch.",
             )
 
+        ip_address, request_id, user_agent = extract_audit_context(request)
+
         policy_service = ApiKeyPolicyService(
             allowed_origin_repo=self.allowed_origin_repo,
             space_service=self.space_service,
             user=None,
         )
         origin = request.headers.get("origin") if request else None
-        client_ip = policy_service.resolve_client_ip(request) if request else None
+        client_ip = ip_address
+        # Permission check runs after rate-limiting and last_used_at intentionally:
+        # 1. Guardrails (IP/origin/expiry) block stolen keys before any logic
+        # 2. Rate limiting before authz prevents permission-probing resource exhaustion
+        # 3. last_used_at records all access attempts for security forensics
         try:
             await policy_service.enforce_guardrails(
                 key=resolved.key,
@@ -578,7 +622,13 @@ class UserService:
             if self.api_key_rate_limiter is not None:
                 await self.api_key_rate_limiter.enforce(resolved.key)
         except ApiKeyValidationError as exc:
-            await self._log_api_key_auth_failed(user, resolved.key, exc, request)
+            await self._log_api_key_auth_failed(
+                user, resolved.key, exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+                request=request,
+            )
             raise
 
         settings = get_settings()
@@ -594,8 +644,29 @@ class UserService:
             request.state.api_key_permission = resolved.key.permission
             request.state.api_key_scope_type = resolved.key.scope_type
             request.state.api_key_scope_id = resolved.key.scope_id
+            request.state.api_key_resource_permissions = resolved.key.resource_permissions
 
-        await self._maybe_log_api_key_used(user, resolved.key, request)
+            # Method-level resource permission check (config set by router guard)
+            perm_config = getattr(request.state, "_resource_perm_config", None)
+            if perm_config is not None:
+                try:
+                    _check_method_resource_permission(request, resolved.key, perm_config)
+                except ApiKeyValidationError as exc:
+                    await self._log_api_key_auth_failed(
+                        user, resolved.key, exc,
+                        ip_address=ip_address,
+                        request_id=request_id,
+                        user_agent=user_agent,
+                        request=request,
+                    )
+                    raise
+
+        await self._maybe_log_api_key_used(
+            user, resolved.key,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
 
         logger.info(
             "API key authenticated",
@@ -708,7 +779,10 @@ class UserService:
         self,
         user: "UserInDB",
         key: ApiKeyV2InDB,
-        request: Request | None,
+        *,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
     ) -> None:
         if self.audit_service is None:
             return
@@ -716,16 +790,12 @@ class UserService:
         if sample_rate <= 0 or random.random() > sample_rate:
             return
 
-        extra = {
+        extra: dict[str, object] = {
             "scope_type": key.scope_type,
             "scope_id": str(key.scope_id) if key.scope_id else None,
             "permission": key.permission,
             "key_type": key.key_type,
         }
-        if request is not None:
-            extra["method"] = request.method
-            extra["path"] = request.url.path
-            extra["origin"] = request.headers.get("origin")
 
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,
@@ -735,8 +805,9 @@ class UserService:
             entity_id=key.id,
             description="API key used",
             metadata=AuditMetadata.standard(actor=user, target=key, extra=extra),
-            ip_address=request.client.host if request and request.client else None,
-            user_agent=request.headers.get("user-agent") if request else None,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
 
     async def _log_api_key_auth_failed(
@@ -744,12 +815,16 @@ class UserService:
         user: "UserInDB",
         key: ApiKeyV2InDB,
         exc: ApiKeyValidationError,
-        request: Request | None,
+        *,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+        request: Request | None = None,
     ) -> None:
         if self.audit_service is None:
             return
 
-        extra = {
+        extra: dict[str, object] = {
             "code": exc.code,
             "error_message": exc.message,
             "scope_type": key.scope_type,
@@ -757,10 +832,15 @@ class UserService:
             "permission": key.permission,
             "key_type": key.key_type,
         }
+        if exc.context is not None:
+            extra.update(exc.context)
         if request is not None:
+            route = request.scope.get("route")
+            extra["request_path"] = route.path if route else request.url.path
             extra["method"] = request.method
-            extra["path"] = request.url.path
-            extra["origin"] = request.headers.get("origin")
+            origin = request.headers.get("origin")
+            if origin:
+                extra["origin"] = origin
 
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,
@@ -770,8 +850,11 @@ class UserService:
             entity_id=key.id,
             description="API key authentication failed",
             metadata=AuditMetadata.standard(actor=user, target=key, extra=extra),
-            ip_address=request.client.host if request and request.client else None,
-            user_agent=request.headers.get("user-agent") if request else None,
+            outcome=Outcome.FAILURE,
+            error_message=exc.message,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
 
         logger.warning(
@@ -895,6 +978,7 @@ class UserService:
                 request=request,
                 expected_tenant_id=assistant_tenant_id,
             )
+            ip_addr, req_id, ua = extract_audit_context(request)
             try:
                 if assistant_id is not None:
                     await self._require_api_key_scope_for_assistant(
@@ -906,8 +990,15 @@ class UserService:
                 self._require_api_key_permission(
                     key=key, required=ApiKeyPermission.READ
                 )
+                check_resource_permission(key, "assistants", "read")
             except ApiKeyValidationError as exc:
-                await self._log_api_key_auth_failed(user_in_db, key, exc, request)
+                await self._log_api_key_auth_failed(
+                    user_in_db, key, exc,
+                    ip_address=ip_addr,
+                    request_id=req_id,
+                    user_agent=ua,
+                    request=request,
+                )
                 raise
 
         if user_in_db is None:

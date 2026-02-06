@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, Request, Security, status
 
 from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_service import AuthService
-from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.authentication.api_key_resolver import ApiKeyValidationError, check_resource_permission
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -28,6 +28,7 @@ def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
     raise HTTPException(
         status_code=exc.status_code,
         detail={"code": exc.code, "message": exc.message},
+        headers=exc.headers,
     ) from exc
 
 
@@ -151,5 +152,75 @@ def require_api_key_permission(required: ApiKeyPermission):
                 },
             )
         return user
+
+    return _dep
+
+
+_METHOD_PERMISSION_MAP: dict[str, str] = {
+    "GET": "read",
+    "HEAD": "read",
+    "OPTIONS": "read",
+    "POST": "write",
+    "PUT": "write",
+    "PATCH": "write",
+    "DELETE": "admin",
+}
+
+ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset({"estimate_tokens"})
+KNOWLEDGE_READ_OVERRIDES: frozenset[str] = frozenset({"run_semantic_search"})
+
+
+def require_resource_permission_for_method(
+    resource_type: str,
+    read_override_endpoints: frozenset[str] | None = None,
+):
+    """Router-level dependency: stores method→permission config for post-auth check.
+
+    The actual permission check runs in ``_resolve_api_key`` (user_service)
+    after authentication has set ``request.state.api_key``.  Router-level
+    dependencies execute *before* route-level ``Depends()``, so we cannot
+    inspect ``request.state.api_key`` here.
+    """
+
+    async def _dep(request: Request) -> None:
+        request.state._resource_perm_config = {
+            "resource_type": resource_type,
+            "read_override_endpoints": read_override_endpoints,
+        }
+
+    return _dep
+
+
+def require_resource_permission(resource_type: str, required: str):
+    """Dependency factory for fine-grained per-resource permission checks.
+
+    Fail-closed: if an API key header is present but request.state.api_key
+    was not set by the auth dependency, raise 500 to surface a dependency
+    ordering misconfiguration rather than silently allowing the request.
+    """
+
+    async def _dep(request: Request) -> None:
+        key = getattr(request.state, "api_key", None)
+        if key is None:
+            # Check if an API key header was provided but auth didn't run
+            header_name = get_settings().api_key_header_name
+            if request.headers.get(header_name):
+                logger.error(
+                    "API key header present but request.state.api_key missing — "
+                    "auth dependency may not have run before resource permission guard",
+                    extra={"resource_type": resource_type, "required": required},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": "server_configuration_error",
+                        "message": "Authentication state missing.",
+                    },
+                )
+            return
+        try:
+            check_resource_permission(key, resource_type, required)
+        except ApiKeyValidationError as exc:
+            _raise_api_key_http_error(exc)
 
     return _dep

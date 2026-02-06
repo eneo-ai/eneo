@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
@@ -18,6 +19,8 @@ from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKeyCreateRequest,
     ApiKeyCreatedResponse,
+    ApiKeyCreationConstraints,
+    ApiKeyListResponse,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateChangeRequest,
@@ -27,7 +30,6 @@ from intric.authentication.auth_models import (
     ApiKeyV2InDB,
 )
 from intric.main.container.container import Container
-from intric.main.models import CursorPaginatedResponse
 from intric.server.dependencies.container import get_container
 from intric.roles.permissions import Permission
 from intric.users.user import UserInDB
@@ -46,9 +48,9 @@ _API_KEY_EXAMPLE = {
     "allowed_ips": ["203.0.113.0/24"],
     "rate_limit": 5000,
     "state": "active",
-    "effective_state": "active",
     "key_prefix": "sk_",
     "key_suffix": "ab12cd34",
+    "resource_permissions": None,
     "expires_at": "2030-01-01T00:00:00Z",
     "last_used_at": None,
     "created_at": "2026-02-05T12:00:00Z",
@@ -110,6 +112,29 @@ async def _filter_manageable_keys(
     return filtered_keys, auth_cache
 
 
+@router.get(
+    "/api-keys/creation-constraints",
+    response_model=ApiKeyCreationConstraints,
+    tags=["API Keys"],
+    summary="Get API key creation constraints",
+    description="Returns tenant policy limits relevant to key creation UX (expiration, rate limit).",
+    responses={
+        200: {"description": "Creation constraints from tenant policy."},
+        **error_responses([401, 429]),
+    },
+)
+async def get_creation_constraints(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    user: UserInDB = container.user()
+    policy: dict[str, Any] = getattr(user.tenant, "api_key_policy", None) or {}
+    return ApiKeyCreationConstraints(
+        require_expiration=bool(policy.get("require_expiration")),
+        max_expiration_days=policy.get("max_expiration_days"),
+        max_rate_limit=policy.get("max_rate_limit_override"),
+    )
+
+
 @router.post(
     "/api-keys",
     response_model=ApiKeyCreatedResponse,
@@ -145,7 +170,7 @@ async def create_api_key(
 
 @router.get(
     "/api-keys",
-    response_model=CursorPaginatedResponse[ApiKeyV2],
+    response_model=ApiKeyListResponse,
     tags=["API Keys"],
     summary="List API keys",
     description="List manageable API keys in the current tenant with cursor pagination and filters.",
@@ -182,11 +207,12 @@ async def list_api_keys(
         key_type=key_type.value if key_type else None,
     )
 
-    filtered_keys, auth_cache = await _filter_manageable_keys(
+    filtered_keys, _auth_cache = await _filter_manageable_keys(
         keys=raw_keys,
         policy=policy,
     )
 
+    total_count: int | None = None
     if Permission.ADMIN in user.permissions:
         total_count = await repo.count(
             tenant_id=user.tenant_id,
@@ -195,20 +221,6 @@ async def list_api_keys(
             state=state,
             key_type=key_type.value if key_type else None,
         )
-    else:
-        all_matching_keys = await repo.list_filtered(
-            tenant_id=user.tenant_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            state=state,
-            key_type=key_type.value if key_type else None,
-        )
-        all_manageable_keys, _ = await _filter_manageable_keys(
-            keys=all_matching_keys,
-            policy=policy,
-            cache=auth_cache,
-        )
-        total_count = len(all_manageable_keys)
 
     return paginate_keys(
         filtered_keys,

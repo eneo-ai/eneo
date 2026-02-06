@@ -11,6 +11,8 @@ from intric.audit.domain.action_types import ActionType
 from intric.authentication.auth_models import (
     ApiKeyHashVersion,
     ApiKeyPermission,
+    ResourcePermissionLevel,
+    ResourcePermissions,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateChangeRequest,
@@ -215,3 +217,100 @@ async def test_update_revoked_key_rejects_policy_fields(user):
 
     assert exc.value.code == "invalid_request"
     assert "Only name and description" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_double_revoke_is_idempotent(user):
+    """Revoking an already-revoked key returns success without error."""
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        revoked_at=datetime.now(timezone.utc),
+        state=ApiKeyState.REVOKED,
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    policy = SimpleNamespace(ensure_manage_authorized=AsyncMock())
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    result = await service.revoke_key(key_id=key.id)
+
+    assert result.id == key.id
+    repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rotate_key_with_existing_grace_period(user):
+    """Rotation of a key that already has rotation_grace_until overwrites the grace window."""
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        rotation_grace_until=datetime.now(timezone.utc),
+    )
+    new_key = _make_key(tenant_id=user.tenant_id, rotated_from_key_id=key.id)
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.create.return_value = new_key
+    repo.update.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    response = await service.rotate_key(key_id=key.id)
+
+    assert response.secret.startswith(ApiKeyType.SK.value)
+    repo.create.assert_awaited_once()
+    repo.update.assert_awaited_once()
+    update_kwargs = repo.update.call_args.kwargs
+    assert "rotation_grace_until" in update_kwargs
+    assert update_kwargs["rotation_grace_until"] > key.rotation_grace_until
+
+
+@pytest.mark.asyncio
+async def test_rotate_serializes_resource_permissions_for_repo_create(user):
+    """Rotate passes JSON-serializable resource_permissions to repo.create."""
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        resource_permissions=ResourcePermissions(
+            assistants=ResourcePermissionLevel.READ,
+            apps=ResourcePermissionLevel.WRITE,
+            spaces=ResourcePermissionLevel.NONE,
+            knowledge=ResourcePermissionLevel.READ,
+        ),
+    )
+    new_key = _make_key(tenant_id=user.tenant_id, rotated_from_key_id=key.id)
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.create.return_value = new_key
+    repo.update.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    await service.rotate_key(key_id=key.id)
+
+    create_kwargs = repo.create.call_args.kwargs
+    assert isinstance(create_kwargs["resource_permissions"], dict)
+    assert create_kwargs["resource_permissions"]["assistants"] == "read"
+    assert create_kwargs["resource_permissions"]["apps"] == "write"
