@@ -253,7 +253,9 @@
     error = null;
   }
 
-  function handleCancel() {
+  async function handleCancel() {
+    await invalidate("admin:model-providers:load");
+    await invalidate("admin:models:load");
     closeWizard();
   }
 
