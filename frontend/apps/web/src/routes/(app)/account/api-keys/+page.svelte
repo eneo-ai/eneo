@@ -1,24 +1,24 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { writable } from "svelte/store";
   import { Page } from "$lib/components/layout";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric";
-  import { Button, CodeBlock, Dialog, Input } from "@intric/ui";
+  import { Button, Input } from "@intric/ui";
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
   import ApiKeyTable from "./ApiKeyTable.svelte";
   import CreateApiKeyDialog from "./CreateApiKeyDialog.svelte";
+  import ApiKeySecretDialog from "./ApiKeySecretDialog.svelte";
   import {
     Key,
     AlertCircle,
     RefreshCw,
     Search,
     X,
-    Copy,
-    Check,
     ShieldAlert
   } from "lucide-svelte";
-  import { fly, fade } from "svelte/transition";
+  import { fly } from "svelte/transition";
 
   let mounted = $state(false);
 
@@ -32,9 +32,9 @@
   let loading = $state(false);
   let errorMessage = $state<string | null>(null);
   let searchQuery = $state("");
-  let secretDialogOpen = $state<Dialog.OpenState>(undefined);
+  const secretDialogOpen = writable(false);
   let latestSecret = $state<string | null>(null);
-  let copied = $state(false);
+  let secretSource = $state<"created" | "rotated">("created");
 
   async function loadKeys() {
     loading = true;
@@ -50,19 +50,23 @@
     }
   }
 
-  function handleSecret(response: ApiKeyCreatedResponse) {
+  function handleSecret(response: ApiKeyCreatedResponse, source: "created" | "rotated") {
+    if (source !== "rotated") {
+      // Create flow has its own built-in one-time secret screen.
+      return;
+    }
     latestSecret = response.secret;
-    secretDialogOpen = true;
-    copied = false;
+    secretSource = source;
+    secretDialogOpen.set(true);
     void loadKeys();
   }
 
-  function copyToClipboard() {
-    if (latestSecret) {
-      navigator.clipboard.writeText(latestSecret);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
-    }
+  function handleCreated() {
+    // CreateApiKeyDialog already shows the one-time secret screen.
+    // Here we only refresh the list after the dialog closes.
+    secretDialogOpen.set(false);
+    latestSecret = null;
+    void loadKeys();
   }
 
   // Filter keys by search query
@@ -95,7 +99,7 @@
           <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
           {m.api_keys_refresh()}
         </Button>
-        <CreateApiKeyDialog onCreated={handleSecret} />
+        <CreateApiKeyDialog onCreated={handleCreated} />
       </div>
     </Page.Title>
   </Page.Header>
@@ -121,7 +125,7 @@
             </div>
             <!-- Create button in header for visibility -->
             <div class="hidden lg:block flex-shrink-0">
-              <CreateApiKeyDialog onCreated={handleSecret} />
+              <CreateApiKeyDialog onCreated={handleCreated} />
             </div>
           </div>
         </div>
@@ -179,7 +183,7 @@
                 {m.api_keys_legacy_recommend()}
               </p>
               <div class="mt-3">
-                <CreateApiKeyDialog onCreated={handleSecret} />
+                <CreateApiKeyDialog onCreated={handleCreated} />
               </div>
             </div>
           </div>
@@ -206,7 +210,7 @@
             </div>
             <!-- Mobile create button -->
             <div class="lg:hidden">
-              <CreateApiKeyDialog onCreated={handleSecret} />
+              <CreateApiKeyDialog onCreated={handleCreated} />
             </div>
           </div>
         </div>
@@ -216,7 +220,7 @@
             keys={filteredKeys}
             {loading}
             onChanged={loadKeys}
-            onSecret={handleSecret}
+            onSecret={(r) => handleSecret(r, "rotated")}
           />
         </div>
         </div>
@@ -225,59 +229,8 @@
   </Page.Main>
 </Page.Root>
 
-<!-- Secret Key Dialog -->
-<Dialog.Root bind:isOpen={secretDialogOpen} alert>
-  <Dialog.Content width="medium">
-    <Dialog.Title class="flex items-center gap-3">
-      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-positive/10 dark:bg-positive/15">
-        <Key class="h-5 w-5 text-positive" />
-      </div>
-      <span class="text-default">{m.api_keys_created_title()}</span>
-    </Dialog.Title>
-    <Dialog.Description>
-      <div class="mt-3 flex items-start gap-3 rounded-lg border border-caution/30 bg-caution/5 dark:bg-caution/10 px-4 py-3">
-        <AlertCircle class="h-5 w-5 text-caution flex-shrink-0 mt-0.5" />
-        <div class="text-sm text-muted">
-          <strong class="text-caution">{m.api_keys_important()}</strong> {m.api_keys_copy_warning()}
-        </div>
-      </div>
-    </Dialog.Description>
-    {#if latestSecret}
-      <div class="mt-5">
-        <span class="block text-sm font-medium text-muted mb-2">{m.api_keys_your_new_key()}</span>
-        <div class="relative">
-          <CodeBlock code={latestSecret} />
-        </div>
-        <div class="mt-4 flex items-center gap-3">
-          <Button
-            variant={copied ? "outlined" : "primary"}
-            on:click={copyToClipboard}
-            class="gap-2 transition-all duration-200 {copied ? '!bg-positive/10 !border-positive/30 !text-positive' : ''}"
-          >
-            {#if copied}
-              <span in:fly={{ y: -8, duration: 150 }}>
-                <Check class="h-4 w-4" />
-              </span>
-              <span in:fly={{ y: 8, duration: 150 }}>{m.api_keys_copied()}</span>
-            {:else}
-              <Copy class="h-4 w-4" />
-              {m.api_keys_copy_to_clipboard()}
-            {/if}
-          </Button>
-          {#if copied}
-            <span
-              class="text-sm text-positive"
-              in:fade={{ duration: 150 }}
-              out:fade={{ duration: 150 }}
-            >
-              {m.api_keys_copied_message()}
-            </span>
-          {/if}
-        </div>
-      </div>
-    {/if}
-    <Dialog.Controls let:close>
-      <Button is={close} variant="outlined">{m.close()}</Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<ApiKeySecretDialog
+  openController={secretDialogOpen}
+  secret={latestSecret}
+  source={secretSource}
+/>

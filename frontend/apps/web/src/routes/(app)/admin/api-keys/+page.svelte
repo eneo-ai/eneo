@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { writable } from "svelte/store";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, CodeBlock, Dialog, Input, Select, Label } from "@intric/ui";
+  import { Button, Input, Select, Label } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse } from "@intric/intric-js";
@@ -9,6 +10,7 @@
   import ApiKeyPolicyPanel from "./ApiKeyPolicyPanel.svelte";
   import SuperKeyStatusPanel from "./SuperKeyStatusPanel.svelte";
   import ScopeResourceSelector from "../../account/api-keys/ScopeResourceSelector.svelte";
+  import ApiKeySecretDialog from "../../account/api-keys/ApiKeySecretDialog.svelte";
   import {
     Search,
     Filter,
@@ -48,8 +50,9 @@
 
   // UI states
   let showFilters = $state(true);
-  let secretDialogOpen = $state<Dialog.OpenState>(undefined);
+  const secretDialogOpen = writable(false);
   let latestSecret = $state<string | null>(null);
+  let secretSource = $state<"created" | "rotated">("created");
 
   // Quick filter chips
   const quickFilters = $derived([
@@ -260,9 +263,10 @@
     return false;
   }
 
-  function handleSecret(response: ApiKeyCreatedResponse) {
+  function handleSecret(response: ApiKeyCreatedResponse, source: "created" | "rotated" = "created") {
     latestSecret = response.secret;
-    secretDialogOpen = true;
+    secretSource = source;
+    secretDialogOpen.set(true);
     void loadKeys({ reset: true });
   }
 
@@ -515,7 +519,7 @@
             {loading}
             scopeNames={scopeNamesById}
             onChanged={() => loadKeys({ reset: true })}
-            onSecret={handleSecret}
+            onSecret={(r) => handleSecret(r, "rotated")}
           />
 
           {#if nextCursor}
@@ -578,40 +582,8 @@
   </Page.Main>
 </Page.Root>
 
-<Dialog.Root bind:isOpen={secretDialogOpen} alert>
-  <Dialog.Content width="medium">
-    <Dialog.Title class="flex items-center gap-3">
-      <div
-        class="flex h-10 w-10 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/30"
-      >
-        <Key class="h-5 w-5 text-green-600 dark:text-green-400" />
-      </div>
-      <span>{m.api_key()}</span>
-    </Dialog.Title>
-    <Dialog.Description>
-      <div class="mt-2 flex items-start gap-2 text-yellow-700 dark:text-yellow-300">
-        <AlertCircle class="mt-0.5 h-4 w-4 flex-shrink-0" />
-        <span>{@html m.generate_api_key_warning()}</span>
-      </div>
-    </Dialog.Description>
-    {#if latestSecret}
-      <div class="mt-5">
-        <CodeBlock code={latestSecret} />
-        <div class="mt-4 flex items-center gap-3">
-          <Button
-            variant="primary"
-            on:click={() => {
-              navigator.clipboard.writeText(latestSecret ?? "");
-            }}
-            class="gap-2"
-          >
-            {m.api_keys_admin_copy_key()}
-          </Button>
-        </div>
-      </div>
-    {/if}
-    <Dialog.Controls let:close>
-      <Button is={close} variant="outlined">{m.close()}</Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<ApiKeySecretDialog
+  openController={secretDialogOpen}
+  secret={latestSecret}
+  source={secretSource}
+/>

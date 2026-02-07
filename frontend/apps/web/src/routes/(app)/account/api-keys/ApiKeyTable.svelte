@@ -141,13 +141,13 @@
   function getPermissionStyle(permission: string) {
     switch (permission) {
       case "read":
-        return { classes: "bg-sky-600 dark:bg-sky-500 text-white" };
+        return { label: m.api_keys_permission_read(), classes: "bg-sky-600 dark:bg-sky-500 text-white" };
       case "write":
-        return { classes: "bg-purple-500 dark:bg-purple-400 text-white" };
+        return { label: m.api_keys_permission_write(), classes: "bg-purple-500 dark:bg-purple-400 text-white" };
       case "admin":
-        return { classes: "bg-red-600 dark:bg-red-500 text-white" };
+        return { label: m.api_keys_permission_admin(), classes: "bg-red-600 dark:bg-red-500 text-white" };
       default:
-        return { classes: "bg-gray-500 dark:bg-gray-400 text-white" };
+        return { label: permission, classes: "bg-gray-500 dark:bg-gray-400 text-white" };
     }
   }
 
@@ -280,7 +280,7 @@
                 <span
                   class="rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-wide shadow-sm {permission.classes}"
                 >
-                  {key.permission}
+                  {permission.label}
                 </span>
               </div>
             </div>
@@ -306,7 +306,10 @@
 
             <!-- Actions and expand -->
             <div class="flex items-center gap-2">
-              <ApiKeyActions apiKey={key} {onChanged} {onSecret} />
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div onclick={(e) => e.stopPropagation()}>
+                <ApiKeyActions apiKey={key} {onChanged} {onSecret} />
+              </div>
 
               <div
                 class="flex h-8 w-8 items-center justify-center rounded-lg text-muted

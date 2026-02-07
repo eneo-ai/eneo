@@ -27,8 +27,10 @@
     errorMessage = null;
     try {
       const response = await intric.apiKeys.rotate({ id: apiKey.id });
+      if (!response?.secret) {
+        throw new Error("rotate_missing_secret");
+      }
       onSecret(response);
-      onChanged();
     } catch (error) {
       console.error(error);
       errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();

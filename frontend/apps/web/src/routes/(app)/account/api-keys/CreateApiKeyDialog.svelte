@@ -42,7 +42,7 @@
 
   const intric = getIntric();
 
-  let { onCreated }: { onCreated: (response: ApiKeyCreatedResponse) => void } = $props();
+  let { onCreated }: { onCreated?: () => void } = $props();
 
   const showDialog = writable(false);
   let isSubmitting = $state(false);
@@ -394,8 +394,10 @@
   }
 
   function finishAndClose() {
-    if (createdResponse) {
-      onCreated(createdResponse);
+    if (createdResponse && onCreated) {
+      onCreated();
+      // Prevent duplicate callback when the dialog emits on:close next.
+      createdResponse = null;
     }
     $showDialog = false;
     resetForm();
@@ -428,8 +430,8 @@
 
   function handleOpenChange(open: boolean) {
     if (!open) {
-      if (createdResponse) {
-        onCreated(createdResponse);
+      if (createdResponse && onCreated) {
+        onCreated();
       }
       resetForm();
     }

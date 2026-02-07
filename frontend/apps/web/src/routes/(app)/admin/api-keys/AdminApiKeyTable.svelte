@@ -121,13 +121,15 @@
     expired: { label: m.api_keys_admin_state_expired(), color: "gray", dotColor: "bg-gray-500" }
   });
 
-  const permissionConfig: Record<string, { color: string; icon: typeof Eye }> = {
-    read: { color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300", icon: Eye },
+  const permissionConfig: Record<string, { label: string; color: string; icon: typeof Eye }> = {
+    read: { label: m.api_keys_permission_read(), color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300", icon: Eye },
     write: {
+      label: m.api_keys_permission_write(),
       color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
       icon: Pencil
     },
     admin: {
+      label: m.api_keys_permission_admin(),
       color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
       icon: ShieldCheck
     }
@@ -250,7 +252,7 @@
                   class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold uppercase {permission.color}"
                 >
                   <PermissionIcon class="h-3 w-3" />
-                  {key.permission}
+                  {permission.label}
                 </span>
               </div>
             </div>
@@ -294,7 +296,10 @@
 
             <!-- Actions and expand -->
             <div class="flex items-center gap-2">
-              <AdminApiKeyActions apiKey={key} {onChanged} {onSecret} />
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div onclick={(e) => e.stopPropagation()}>
+                <AdminApiKeyActions apiKey={key} {onChanged} {onSecret} />
+              </div>
 
               <div
                 class="text-muted group-hover:bg-subtle flex h-8 w-8 items-center justify-center

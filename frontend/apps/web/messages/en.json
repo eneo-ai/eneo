@@ -2081,6 +2081,7 @@
   "api_keys_loading": "Loading...",
   "api_keys_click_to_view": "Click on a key to view details",
   "api_keys_created_title": "API Key Created",
+  "api_keys_rotated_title": "API Key Rotated",
   "api_keys_important": "Important:",
   "api_keys_copy_warning": "This is the only time you'll see this key. Copy it now and store it securely. You won't be able to view it again.",
   "api_keys_your_new_key": "Your new API key",

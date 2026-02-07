@@ -2116,6 +2116,7 @@
   "api_keys_loading": "Laddar...",
   "api_keys_click_to_view": "Klicka på en nyckel för att visa detaljer",
   "api_keys_created_title": "API-nyckel skapad",
+  "api_keys_rotated_title": "API-nyckel roterad",
   "api_keys_important": "Viktigt:",
   "api_keys_copy_warning": "Detta är enda gången du ser denna nyckel. Kopiera den nu och spara den säkert. Du kommer inte kunna visa den igen.",
   "api_keys_your_new_key": "Din nya API-nyckel",
