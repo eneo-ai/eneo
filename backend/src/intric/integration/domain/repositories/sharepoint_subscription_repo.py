@@ -50,6 +50,23 @@ class SharePointSubscriptionRepository(ABC):
         ...
 
     @abstractmethod
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID
+    ) -> "List[SharePointSubscription]":
+        """List all subscriptions that belong to a tenant."""
+        ...
+
+    @abstractmethod
+    async def one_by_tenant(
+        self,
+        subscription_id: UUID,
+        tenant_id: UUID,
+    ) -> "Optional[SharePointSubscription]":
+        """Get a subscription by ID, scoped to tenant."""
+        ...
+
+    @abstractmethod
     async def count_references(
         self,
         subscription_id: UUID

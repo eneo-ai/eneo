@@ -309,7 +309,49 @@ class TestRenewSubscription:
                     token=mock_token,
                 )
 
-        mock_recreate.assert_called_once()
+        mock_recreate.assert_called_once_with(
+            subscription=mock_subscription,
+            token=mock_token,
+            is_onedrive=False,
+        )
+        assert result is True
+
+    async def test_renew_recreates_onedrive_on_404_with_onedrive_flag(
+        self, service, mock_token
+    ):
+        """OneDrive subscriptions must pass is_onedrive=True on automatic recreation."""
+        onedrive_subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="drive-id-123",
+            subscription_id="sub-id-123",
+            drive_id="drive-id-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(days=10),
+        )
+
+        mock_response = MagicMock()
+        mock_response.status = 404
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("aiohttp.ClientSession") as mock_session_class:
+            mock_session = MagicMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_session.patch = MagicMock(return_value=mock_response)
+            mock_session_class.return_value = mock_session
+
+            with patch.object(service, "recreate_expired_subscription", return_value=True) as mock_recreate:
+                result = await service.renew_subscription(
+                    subscription=onedrive_subscription,
+                    token=mock_token,
+                )
+
+        mock_recreate.assert_called_once_with(
+            subscription=onedrive_subscription,
+            token=mock_token,
+            is_onedrive=True,
+        )
         assert result is True
 
     async def test_renew_returns_false_on_error(
@@ -425,12 +467,13 @@ class TestGraphApiInteractions:
             mock_session.post = MagicMock(return_value=mock_response)
             mock_session_class.return_value = mock_session
 
-            await service._create_graph_subscription(
+            result = await service._create_graph_subscription(
                 token=mock_token,
                 site_id=None,  # OneDrive doesn't have site_id
                 drive_id="onedrive-drive-123",
             )
 
+        assert result == "onedrive-sub-id"
         payload = mock_session.post.call_args.kwargs["json"]
         assert payload["resource"] == "/drives/onedrive-drive-123/root"
         assert "/sites/" not in payload["resource"]

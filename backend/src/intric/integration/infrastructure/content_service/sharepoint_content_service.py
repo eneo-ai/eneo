@@ -10,6 +10,7 @@ from intric.info_blobs.info_blob import InfoBlobAdd
 from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.domain.entities.sync_log import SyncLog
 from intric.integration.infrastructure.clients.sharepoint_content_client import (
+    DeltaTokenExpiredException,
     SharePointContentClient,
 )
 from intric.integration.infrastructure.content_service.utils import (
@@ -62,6 +63,24 @@ def sanitize_text_for_db(text: str) -> str:
         return text
     # Remove null bytes which cause "invalid byte sequence for encoding UTF8: 0x00"
     return text.replace("\x00", "")
+
+
+def _safe_int(value: Any) -> int:
+    """Best-effort int conversion for defensive size accounting."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if not isinstance(value, str):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 if TYPE_CHECKING:
@@ -144,6 +163,25 @@ class SharePointContentService:
         self.sync_log_repo = sync_log_repo
         self.change_key_service = change_key_service
 
+    async def _refresh_service_account_access_token(self, tenant_app) -> str:
+        """Refresh service account token and persist refresh-token rotation."""
+        if not self.service_account_auth_service:
+            raise ValueError("ServiceAccountAuthService not configured")
+
+        token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+        access_token = token_data["access_token"]
+        new_refresh_token = token_data.get("refresh_token")
+
+        if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+            tenant_app.update_refresh_token(new_refresh_token)
+            await self.tenant_sharepoint_app_repo.update(tenant_app)
+            logger.debug(
+                "Persisted rotated service account refresh token for tenant_app %s",
+                tenant_app.id,
+            )
+
+        return access_token
+
     async def pull_content(
         self,
         token_id: Optional[UUID] = None,
@@ -163,10 +201,7 @@ class SharePointContentService:
                 tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
                 # Use service account or tenant app auth based on auth_method
                 if tenant_app.is_service_account():
-                    if not self.service_account_auth_service:
-                        raise ValueError("ServiceAccountAuthService not configured")
-                    token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
-                    access_token = token_data["access_token"]
+                    access_token = await self._refresh_service_account_access_token(tenant_app)
                     logger.info(f"Using service account auth for tenant_app {tenant_app_id}")
                 else:
                     access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
@@ -302,10 +337,7 @@ class SharePointContentService:
                 tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
                 # Use service account or tenant app auth based on auth_method
                 if tenant_app.is_service_account():
-                    if not self.service_account_auth_service:
-                        raise ValueError("ServiceAccountAuthService not configured")
-                    token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
-                    access_token = token_data["access_token"]
+                    access_token = await self._refresh_service_account_access_token(tenant_app)
                     logger.info(f"Using service account auth for delta sync tenant_app {tenant_app_id}")
                 else:
                     access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
@@ -356,10 +388,27 @@ class SharePointContentService:
                     f"Starting delta sync with token: {integration_knowledge.delta_token[:20]}..."
                     if integration_knowledge.delta_token else "No delta token"
                 )
-                changes, new_delta_token = await content_client.get_delta_changes(
-                    drive_id=actual_drive_id,
-                    delta_token=integration_knowledge.delta_token,
-                )
+                try:
+                    changes, new_delta_token = await content_client.get_delta_changes(
+                        drive_id=actual_drive_id,
+                        delta_token=integration_knowledge.delta_token,
+                    )
+                except DeltaTokenExpiredException:
+                    logger.warning(
+                        "Delta token expired (410 Gone) for integration knowledge %s, "
+                        "clearing token and falling back to full sync",
+                        integration_knowledge_id,
+                    )
+                    integration_knowledge.delta_token = None
+                    await self.integration_knowledge_repo.update(obj=integration_knowledge)
+                    return await self.pull_content(
+                        token_id=token_id,
+                        tenant_app_id=tenant_app_id,
+                        integration_knowledge_id=integration_knowledge_id,
+                        site_id=site_id,
+                        drive_id=drive_id or integration_knowledge.drive_id,
+                        resource_type=resource_type or integration_knowledge.resource_type or "site",
+                    )
                 logger.info(
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
@@ -408,10 +457,18 @@ class SharePointContentService:
                     if is_deleted:
                         # Delete the corresponding info_blob if it exists
                         try:
-                            deleted_blobs = await self.info_blob_service.repo.delete_by_title_and_integration_knowledge(
-                                title=item_name,
-                                integration_knowledge_id=integration_knowledge.id,
-                            )
+                            if item_id:
+                                deleted_blobs = (
+                                    await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
+                                        sharepoint_item_id=item_id,
+                                        integration_knowledge_id=integration_knowledge.id,
+                                    )
+                                )
+                            else:
+                                deleted_blobs = await self.info_blob_service.repo.delete_by_title_and_integration_knowledge(
+                                    title=item_name,
+                                    integration_knowledge_id=integration_knowledge.id,
+                                )
 
                             # Update integration knowledge size to reflect deletion
                             # Filter out None values before accessing blob.size
@@ -419,7 +476,12 @@ class SharePointContentService:
                             for blob in valid_deleted_blobs:
                                 integration_knowledge.size -= blob.size
 
-                            logger.info(f"Deleted {len(valid_deleted_blobs)} info_blob(s) for removed SharePoint file: {item_name}")
+                            logger.info(
+                                "Deleted %s info_blob(s) for removed SharePoint file: %s (item_id=%s)",
+                                len(valid_deleted_blobs),
+                                item_name,
+                                item_id,
+                            )
                             stats["files_deleted"] = stats.get("files_deleted", 0) + len(valid_deleted_blobs)
 
                             # Invalidate ChangeKey cache for deleted item
@@ -607,6 +669,7 @@ class SharePointContentService:
                         await self._fetch_and_process_content(
                             site_id=site_id,
                             drive_id=actual_drive_id,
+                            resource_type=resource_type,
                             client=content_client,
                             token=token,
                             integration_knowledge_id=integration_knowledge_id,
@@ -645,16 +708,17 @@ class SharePointContentService:
                     integration_knowledge.selected_item_type = "site_root"
 
                     if resource_type == "onedrive":
-                        documents = await content_client.get_drive_root_children(actual_drive_id)
+                        data = await content_client.get_drive_root_children(actual_drive_id)
                     else:
-                        documents = await content_client.get_documents_in_drive(site_id=site_id)
+                        data = await content_client.get_documents_in_drive(site_id=site_id)
 
-                    if data := documents.get("value", []):
+                    if data:
                         await self._process_documents(
                             documents=data,
                             client=content_client,
                             integration_knowledge=integration_knowledge,
                             token=token,
+                            resource_type=resource_type,
                             stats=stats,
                         )
 
@@ -680,6 +744,7 @@ class SharePointContentService:
         client: SharePointContentClient,
         integration_knowledge: "IntegrationKnowledge",
         token: "SharePointToken",
+        resource_type: str,
         stats: Dict[str, int],
     ):
         for document in documents:
@@ -693,6 +758,7 @@ class SharePointContentService:
                 await self._fetch_and_process_content(
                     site_id=site_id,
                     drive_id=drive_id,
+                    resource_type=resource_type,
                     client=client,
                     token=token,
                     integration_knowledge_id=integration_knowledge.id,
@@ -710,6 +776,7 @@ class SharePointContentService:
                         text=content,
                         url=document.get("webUrl", ""),
                         integration_knowledge=integration_knowledge,
+                        sharepoint_item_id=item_id,
                     )
                     stats["files_processed"] += 1
                 else:
@@ -734,6 +801,7 @@ class SharePointContentService:
                     text=page_text,
                     url=content.get("webUrl", ""),
                     integration_knowledge=integration_knowledge,
+                    sharepoint_item_id=page.get("id"),
                 )
                 stats["pages_processed"] += 1
             else:
@@ -747,6 +815,22 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         sharepoint_item_id: Optional[str] = None,
     ) -> None:
+        existing_blob = None
+        if sharepoint_item_id:
+            existing_blob = (
+                await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
+                    sharepoint_item_id=sharepoint_item_id,
+                    integration_knowledge_id=integration_knowledge.id,
+                )
+            )
+        else:
+            existing_blob = await self.info_blob_service.repo.get_by_title_and_integration_knowledge(
+                title=title,
+                integration_knowledge_id=integration_knowledge.id,
+            )
+
+        previous_blob_size = _safe_int(existing_blob.size) if existing_blob else 0
+
         info_blob_add = InfoBlobAdd(
             title=title,
             user_id=self.user.id,
@@ -759,9 +843,14 @@ class SharePointContentService:
             sharepoint_item_id=sharepoint_item_id,
         )
 
-        info_blob = await self.info_blob_service.upsert_info_blob_by_title_and_integration(
-            info_blob_add
-        )
+        if sharepoint_item_id:
+            info_blob = await self.info_blob_service.upsert_info_blob_by_sharepoint_item_and_integration(
+                info_blob_add
+            )
+        else:
+            info_blob = await self.info_blob_service.upsert_info_blob_by_title_and_integration(
+                info_blob_add
+            )
 
         try:
             await self.info_blob_service.repo.session.execute(
@@ -780,14 +869,18 @@ class SharePointContentService:
         except Exception as e:
             logger.debug(f"Could not add embedding for {title}: {e}")
 
-        integration_knowledge_size = integration_knowledge.size + info_blob.size
-        integration_knowledge.size = integration_knowledge_size
-        await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        current_size = _safe_int(getattr(integration_knowledge, "size", 0))
+        new_blob_size = _safe_int(getattr(info_blob, "size", 0))
+        size_delta = new_blob_size - previous_blob_size
+        if size_delta:
+            integration_knowledge.size = max(0, current_size + size_delta)
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
     async def _fetch_and_process_content(
         self,
-        site_id: str,
+        site_id: Optional[str],
         drive_id: str,
+        resource_type: str,
         token: "SharePointToken",
         integration_knowledge_id: UUID,
         client: SharePointContentClient,
@@ -799,9 +892,23 @@ class SharePointContentService:
         if processed_items is None:
             processed_items = set()
 
-        results = await client.get_folder_items(
-            site_id=site_id, drive_id=drive_id, folder_id=folder_id
-        )
+        if resource_type == "onedrive":
+            if not folder_id:
+                results = await client.get_drive_root_children(drive_id)
+            else:
+                results = await client.get_drive_folder_items(
+                    drive_id=drive_id,
+                    folder_id=folder_id,
+                )
+        else:
+            if not site_id:
+                logger.warning("Missing site_id for SharePoint folder fetch (drive_id=%s)", drive_id)
+                return
+            results = await client.get_folder_items(
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id,
+            )
 
         if not results:
             return
@@ -809,6 +916,7 @@ class SharePointContentService:
         await self._process_folder_results(
             site_id=site_id,
             drive_id=drive_id,
+            resource_type=resource_type,
             client=client,
             results=results,
             integration_knowledge_id=integration_knowledge_id,
@@ -820,8 +928,9 @@ class SharePointContentService:
 
     async def _process_folder_results(
         self,
-        site_id: str,
+        site_id: Optional[str],
         drive_id: str,
+        resource_type: str,
         client: SharePointContentClient,
         results: List[Dict[str, Any]],
         integration_knowledge_id: UUID,
@@ -833,7 +942,6 @@ class SharePointContentService:
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
-        integration_knowledge_size = integration_knowledge.size
 
         for item in results:
             item_id = item.get("id")
@@ -853,6 +961,7 @@ class SharePointContentService:
                 await self._fetch_and_process_content(
                     site_id=site_id,
                     drive_id=drive_id,
+                    resource_type=resource_type,
                     client=client,
                     token=token,
                     integration_knowledge_id=integration_knowledge_id,
@@ -866,33 +975,16 @@ class SharePointContentService:
             content = await self._get_file_content(token, item)
 
             if content:
-                async with self.session.begin_nested():
-                    info_blob_add = InfoBlobAdd(
-                        title=item_name,
-                        user_id=self.user.id,
-                        text=sanitize_text_for_db(content),
-                        group_id=None,
-                        url=web_url,
-                        website_id=None,
-                        tenant_id=self.user.tenant_id,
-                        integration_knowledge_id=integration_knowledge_id,
-                        sharepoint_item_id=item_id,
-                    )
-
-                    info_blob = await self.info_blob_service.add_info_blob_without_validation(
-                        info_blob_add
-                    )
-                    await self.datastore.add(
-                        info_blob=info_blob, embedding_model=integration_knowledge.embedding_model
-                    )
-
-                    integration_knowledge_size += info_blob.size
-                    stats["files_processed"] += 1
+                await self._process_info_blob(
+                    title=item_name,
+                    text=content,
+                    url=web_url,
+                    integration_knowledge=integration_knowledge,
+                    sharepoint_item_id=item_id,
+                )
+                stats["files_processed"] += 1
             else:
                 stats["skipped_items"] += 1
-
-        integration_knowledge.size = integration_knowledge_size
-        await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
     def _initialize_stats(self) -> Dict[str, int]:
         return {
@@ -1054,8 +1146,7 @@ class SharePointContentService:
                 )
             else:
                 # Root folder
-                documents = await content_client.get_documents_in_drive(site_id=site_id)
-                items = documents.get("value", [])
+                items = await content_client.get_documents_in_drive(site_id=site_id)
 
             for item in items:
                 if item.get("folder"):

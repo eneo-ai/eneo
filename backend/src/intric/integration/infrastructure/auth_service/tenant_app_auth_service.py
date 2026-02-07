@@ -144,7 +144,18 @@ class TenantAppAuthService:
             logger.info(f"Credentials test successful for app {app.id}")
             return (True, None)
         except httpx.HTTPStatusError as e:
-            error_msg = f"HTTP {e.response.status_code}: {e.response.text}"
+            # Extract user-friendly error from Microsoft response
+            try:
+                error_body = e.response.json()
+                error_desc = error_body.get("error_description", "")
+                # Strip trace/correlation IDs from the description
+                if error_desc:
+                    # Microsoft error_description format: "AADSTS...: Human message. Trace ID: ... Timestamp: ..."
+                    error_msg = error_desc.split("\r\n")[0].split(" Trace ID:")[0].strip()
+                else:
+                    error_msg = error_body.get("error", f"HTTP {e.response.status_code}")
+            except Exception:
+                error_msg = f"HTTP {e.response.status_code}"
             logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
             return (False, error_msg)
         except Exception as e:

@@ -84,6 +84,22 @@ class IntegrationKnowledgeService:
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
 
+    async def _get_tenant_app_access_token(self, tenant_app) -> str:
+        """Resolve tenant app access token and persist service-account token rotation."""
+        if tenant_app.is_service_account():
+            if not self.service_account_auth_service:
+                raise BadRequestException("ServiceAccountAuthService not configured")
+
+            token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+            access_token = token_data["access_token"]
+            new_refresh_token = token_data.get("refresh_token")
+            if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+                tenant_app.update_refresh_token(new_refresh_token)
+                await self.tenant_sharepoint_app_repo.update(tenant_app)
+            return access_token
+
+        return await self.tenant_app_auth_service.get_access_token(tenant_app)
+
     async def create_space_integration_knowledge(
         self,
         user_integration_id: UUID,
@@ -148,14 +164,7 @@ class IntegrationKnowledgeService:
                 raise BadRequestException("Tenant app ID is required for tenant_app integrations")
 
             tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
-            # Use service account or tenant app auth based on auth_method
-            if tenant_app.is_service_account():
-                if not self.service_account_auth_service:
-                    raise BadRequestException("ServiceAccountAuthService not configured")
-                token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
-                access_token = token_data["access_token"]
-            else:
-                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+            access_token = await self._get_tenant_app_access_token(tenant_app)
             token = SimpleToken(access_token=access_token)
             token_id = None
             tenant_app_id = tenant_app.id
@@ -343,14 +352,7 @@ class IntegrationKnowledgeService:
                         raise BadRequestException("Tenant app ID is required for tenant_app integrations")
 
                     tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
-                    # Use service account or tenant app auth based on auth_method
-                    if tenant_app.is_service_account():
-                        if not self.service_account_auth_service:
-                            raise BadRequestException("ServiceAccountAuthService not configured")
-                        token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
-                        access_token = token_data["access_token"]
-                    else:
-                        access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                    access_token = await self._get_tenant_app_access_token(tenant_app)
                     token = SimpleToken(access_token=access_token)
                 else:
                     token = await self.oauth_token_repo.one(

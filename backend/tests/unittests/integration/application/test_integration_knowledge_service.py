@@ -226,6 +226,7 @@ class TestRemoveKnowledge:
         tenant_app = MagicMock()
         tenant_app.id = uuid4()
         tenant_app.is_service_account.return_value = True
+        tenant_app.service_account_refresh_token = "old-refresh-token"
         return tenant_app
 
     @pytest.fixture
@@ -363,7 +364,8 @@ class TestRemoveKnowledge:
 
         service_account_auth_service = AsyncMock()
         service_account_auth_service.refresh_access_token.return_value = {
-            "access_token": "service-account-token"
+            "access_token": "service-account-token",
+            "refresh_token": "new-refresh-token",
         }
 
         service = IntegrationKnowledgeService(
@@ -390,6 +392,10 @@ class TestRemoveKnowledge:
         service_account_auth_service.refresh_access_token.assert_called_once_with(
             tenant_app_service_account
         )
+        tenant_app_service_account.update_refresh_token.assert_called_once_with(
+            "new-refresh-token"
+        )
+        tenant_sharepoint_app_repo.update.assert_called_once_with(tenant_app_service_account)
 
     async def test_remove_knowledge_service_account_without_auth_service_logs_warning(
         self, actor, space, sharepoint_knowledge_tenant_app, tenant_app_service_account
@@ -495,6 +501,7 @@ class TestCreateSpaceIntegrationKnowledge:
         tenant_app = MagicMock()
         tenant_app.id = uuid4()
         tenant_app.is_service_account.return_value = True
+        tenant_app.service_account_refresh_token = "old-refresh-token"
         return tenant_app
 
     @pytest.fixture
@@ -688,7 +695,8 @@ class TestCreateSpaceIntegrationKnowledge:
 
         service_account_auth_service = AsyncMock()
         service_account_auth_service.refresh_access_token.return_value = {
-            "access_token": "service-account-token"
+            "access_token": "service-account-token",
+            "refresh_token": "new-refresh-token",
         }
 
         sharepoint_subscription_service = AsyncMock()
@@ -722,6 +730,10 @@ class TestCreateSpaceIntegrationKnowledge:
         service_account_auth_service.refresh_access_token.assert_called_once_with(
             tenant_app_service_account
         )
+        tenant_app_service_account.update_refresh_token.assert_called_once_with(
+            "new-refresh-token"
+        )
+        tenant_sharepoint_app_repo.update.assert_called_once_with(tenant_app_service_account)
 
     async def test_create_knowledge_tenant_app_requires_admin_permission(
         self,

@@ -22,6 +22,15 @@ from intric.main.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _resource_label(site_id: Optional[str], drive_id: Optional[str] = None) -> str:
+    """Safe short label for log messages, handles None values."""
+    if site_id:
+        return f"site {site_id[:30]}"
+    if drive_id:
+        return f"drive {drive_id[:30]}"
+    return "unknown resource"
+
+
 class SharePointSubscriptionService:
     """Manages site-level SharePoint webhook subscriptions.
 
@@ -87,7 +96,7 @@ class SharePointSubscriptionService:
             # or server downtime > 24h)
             if existing.is_expired():
                 logger.warning(
-                    f"Subscription {existing.subscription_id} for site {site_id[:30]}... has expired. "
+                    f"Subscription {existing.subscription_id} for {_resource_label(site_id)} has expired. "
                     f"Attempting automatic recreation to preserve integration relationships."
                 )
                 success = await self.recreate_expired_subscription(
@@ -97,19 +106,19 @@ class SharePointSubscriptionService:
                 )
                 if success:
                     logger.info(
-                        f"Successfully recreated expired subscription for site {site_id[:30]}..."
+                        f"Successfully recreated expired subscription for {_resource_label(site_id)}"
                     )
                     return existing  # Same DB object, updated with new subscription_id
                 else:
                     logger.error(
-                        f"Failed to recreate expired subscription for site {site_id[:30]}..., "
+                        f"Failed to recreate expired subscription for {_resource_label(site_id)}, "
                         f"returning expired subscription (webhooks will not work until recreated)"
                     )
                     return existing  # Return expired subscription - better than None
             else:
                 logger.info(
                     f"Reusing existing subscription {existing.subscription_id} "
-                    f"for user_integration={user_integration_id}, site={site_id[:30]}..."
+                    f"for user_integration={user_integration_id}, {_resource_label(site_id)}"
                 )
                 return existing
 
@@ -117,7 +126,7 @@ class SharePointSubscriptionService:
         resource_type = "OneDrive" if is_onedrive else "site"
         logger.info(
             f"Creating new {resource_type}-level subscription for user_integration={user_integration_id}, "
-            f"site={site_id[:30]}..."
+            f"{_resource_label(site_id)}"
         )
 
         if is_onedrive:
@@ -127,7 +136,7 @@ class SharePointSubscriptionService:
             # For SharePoint sites, resolve drive_id from site
             drive_id = await self._resolve_drive_id(token=token, site_id=site_id)
             if not drive_id:
-                logger.warning(f"Could not resolve drive_id for site {site_id}; cannot create subscription")
+                logger.warning(f"Could not resolve drive_id for {_resource_label(site_id)}; cannot create subscription")
                 return None
 
         subscription_id = await self._create_graph_subscription(
@@ -137,7 +146,7 @@ class SharePointSubscriptionService:
         )
 
         if not subscription_id:
-            logger.warning(f"Failed to create Microsoft Graph subscription for {resource_type} {site_id}")
+            logger.warning(f"Failed to create Microsoft Graph subscription for {_resource_label(site_id, drive_id)}")
             return None
 
         # Save to database
@@ -152,7 +161,7 @@ class SharePointSubscriptionService:
 
         saved = await self.subscription_repo.add(subscription)
         logger.info(
-            f"Created and saved subscription {subscription_id} for {resource_type} {site_id[:30]}... "
+            f"Created and saved subscription {subscription_id} for {_resource_label(site_id, drive_id)} "
             f"(expires {expiration.isoformat()})"
         )
 
@@ -183,8 +192,9 @@ class SharePointSubscriptionService:
         """
         logger.info(
             f"Recreating expired subscription {subscription.subscription_id} "
-            f"for site {subscription.site_id[:30]}..."
+            f"for {_resource_label(subscription.site_id, subscription.drive_id)}"
         )
+        old_subscription_id = subscription.subscription_id
 
         # Step 1: Try to delete old subscription from Microsoft Graph (may already be gone)
         await self._delete_graph_subscription(
@@ -215,7 +225,7 @@ class SharePointSubscriptionService:
 
         logger.info(
             f"Successfully recreated subscription {subscription.id}: "
-            f"old_id={subscription.subscription_id[:20]}..., "
+            f"old_id={old_subscription_id[:20]}..., "
             f"new_id={new_subscription_id[:20]}..., "
             f"expires={new_expiration.isoformat()}"
         )
@@ -267,7 +277,7 @@ class SharePointSubscriptionService:
 
                         logger.info(
                             f"Renewed subscription {subscription.subscription_id} "
-                            f"for site {subscription.site_id[:30]}... until {new_expiration.isoformat()}"
+                            f"for {_resource_label(subscription.site_id, subscription.drive_id)} until {new_expiration.isoformat()}"
                         )
                         return True
                     elif response.status == 404:
@@ -276,12 +286,18 @@ class SharePointSubscriptionService:
                         logger.warning(
                             f"Subscription {subscription.subscription_id} not found in Microsoft Graph "
                             f"(404 response). Automatically recreating to recover from potential DB rollback "
-                            f"or sync issue for site {subscription.site_id[:30]}..."
+                            f"or sync issue for {_resource_label(subscription.site_id, subscription.drive_id)}"
+                        )
+                        is_onedrive = (
+                            bool(subscription.site_id)
+                            and bool(subscription.drive_id)
+                            and subscription.site_id == subscription.drive_id
                         )
                         # Recreate subscription in-place (preserves all FK relationships)
                         return await self.recreate_expired_subscription(
                             subscription=subscription,
-                            token=token
+                            token=token,
+                            is_onedrive=is_onedrive,
                         )
                     else:
                         error_text = await response.text()
@@ -342,7 +358,7 @@ class SharePointSubscriptionService:
             await self.subscription_repo.delete(id=subscription_id)
             logger.info(
                 f"Deleted subscription {subscription.subscription_id} "
-                f"for site {subscription.site_id[:30]}... (no more references)"
+                f"for {_resource_label(subscription.site_id, subscription.drive_id)} (no more references)"
             )
             return True
         else:
@@ -426,22 +442,28 @@ class SharePointSubscriptionService:
                     if response.status == 201:
                         data = await response.json()
                         subscription_id = data.get("id")
+                        resource_kind = "drive" if not site_id else "site"
+                        resource_id = drive_id if not site_id else site_id
                         logger.info(
                             f"Created Microsoft Graph subscription {subscription_id} "
-                            f"for site {site_id[:30]}..., drive {drive_id[:20]}..."
+                            f"for {resource_kind} {resource_id[:30]}..., drive {drive_id[:20]}..."
                         )
                         return subscription_id
                     else:
                         error_text = await response.text()
+                        resource_kind = "drive" if not site_id else "site"
+                        resource_id = drive_id if not site_id else site_id
                         logger.error(
-                            f"Failed to create subscription for site {site_id}: "
+                            f"Failed to create subscription for {resource_kind} {resource_id}: "
                             f"HTTP {response.status} - {error_text}"
                         )
                         return None
 
         except Exception as exc:
+            resource_kind = "drive" if not site_id else "site"
+            resource_id = drive_id if not site_id else site_id
             logger.error(
-                f"Error creating subscription for site {site_id}: {exc}",
+                f"Error creating subscription for {resource_kind} {resource_id}: {exc}",
                 exc_info=True
             )
             return None

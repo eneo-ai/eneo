@@ -35,6 +35,14 @@ OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
 OAUTH_STATE_PREFIX = "sharepoint:oauth_state:"
 
 
+class _SimpleGraphToken:
+    """Lightweight token wrapper compatible with subscription service."""
+
+    def __init__(self, access_token: str):
+        self.access_token = access_token
+        self.base_url = "https://graph.microsoft.com"
+
+
 async def _get_redis_client() -> redis.Redis:
     settings = get_settings()
     return await redis.from_url(
@@ -67,6 +75,54 @@ async def _pop_oauth_state(state: str) -> Optional[dict]:
         return None
     finally:
         await client.close()
+
+
+def _is_onedrive_subscription(subscription) -> bool:
+    """Infer OneDrive subscriptions from stored identifiers.
+
+    OneDrive subscriptions store drive_id in both site_id and drive_id fields.
+    """
+    return bool(subscription.site_id and subscription.drive_id and subscription.site_id == subscription.drive_id)
+
+
+async def _get_sharepoint_token_for_user_integration(
+    user_integration,
+    container: Container,
+):
+    """Resolve token for both user_oauth and tenant_app integrations."""
+    oauth_token_service = container.oauth_token_service()
+
+    if user_integration.auth_type == "tenant_app":
+        if not user_integration.tenant_app_id:
+            raise ValueError("tenant_app integration is missing tenant_app_id")
+
+        tenant_app_repo = container.tenant_sharepoint_app_repo()
+        tenant_app = await tenant_app_repo.get_by_id(user_integration.tenant_app_id)
+        if not tenant_app:
+            raise ValueError(f"TenantSharePointApp {user_integration.tenant_app_id} not found")
+
+        if tenant_app.is_service_account():
+            service_account_auth = container.service_account_auth_service()
+            token_result = await service_account_auth.refresh_access_token(tenant_app)
+            new_refresh_token = token_result.get("refresh_token")
+            if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+                tenant_app.update_refresh_token(new_refresh_token)
+                await tenant_app_repo.update(tenant_app)
+            return _SimpleGraphToken(token_result["access_token"])
+
+        tenant_app_auth = container.tenant_app_auth_service()
+        access_token = await tenant_app_auth.get_access_token(tenant_app)
+        return _SimpleGraphToken(access_token)
+
+    token = await oauth_token_service.get_oauth_token_by_user_integration(
+        user_integration_id=user_integration.id
+    )
+    if not token:
+        raise ValueError(f"No OAuth token found for user_integration {user_integration.id}")
+    if not token.token_type.is_sharepoint:
+        raise ValueError(f"Token for user_integration {user_integration.id} is not a SharePoint token")
+
+    return await oauth_token_service.refresh_and_update_token(token_id=token.id)
 
 
 @router.post(
@@ -302,8 +358,14 @@ async def test_sharepoint_app_credentials(
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
-
-        logger.info(f"Received test request with app_config: {app_config}")
+        logger.info(
+            "Received SharePoint app test request for tenant %s by user %s "
+            "(client_id_prefix=%s, tenant_domain=%s)",
+            user.tenant_id,
+            user.id,
+            app_config.client_id[:6],
+            app_config.tenant_domain,
+        )
 
         tenant_app_auth_service: TenantAppAuthService = container.tenant_app_auth_service()
         tenant_id = user.tenant_id
@@ -449,8 +511,8 @@ async def list_sharepoint_subscriptions(
         user_integration_repo = container.user_integration_repo()
         user_repo = container.user_repo()
 
-        # Get all subscriptions
-        all_subscriptions = await subscription_repo.list_all()
+        # Tenant-scoped lookup to avoid cross-tenant disclosure
+        all_subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
 
         from datetime import datetime, timezone
 
@@ -545,10 +607,10 @@ async def renew_expired_subscriptions(
 
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
-        oauth_token_service = container.oauth_token_service()
+        user_integration_repo = container.user_integration_repo()
 
-        # Get all subscriptions
-        all_subscriptions = await subscription_repo.list_all()
+        # Tenant-scoped lookup to avoid cross-tenant operations
+        all_subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
 
         # Filter expired ones
         expired_subscriptions = [sub for sub in all_subscriptions if sub.is_expired()]
@@ -564,32 +626,33 @@ async def renew_expired_subscriptions(
 
         for sub in expired_subscriptions:
             try:
-                # Get token for this user integration
-                token = await oauth_token_service.get_oauth_token_by_user_integration(
-                    user_integration_id=sub.user_integration_id
+                user_integration = await user_integration_repo.one_or_none(
+                    id=sub.user_integration_id
                 )
-
-                if not token:
-                    error_msg = f"No token found for subscription {sub.id} (user_integration={sub.user_integration_id})"
+                if not user_integration:
+                    error_msg = (
+                        f"User integration {sub.user_integration_id} not found for subscription {sub.id}"
+                    )
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+                    failed += 1
+                    continue
+                if user_integration.tenant_id != user.tenant_id:
+                    error_msg = (
+                        f"User integration {sub.user_integration_id} does not belong to tenant {user.tenant_id}"
+                    )
                     logger.warning(error_msg)
                     errors.append(error_msg)
                     failed += 1
                     continue
 
-                # Ensure it's a SharePoint token
-                if not token.token_type.is_sharepoint:
-                    error_msg = f"Token for subscription {sub.id} is not a SharePoint token"
-                    logger.warning(error_msg)
-                    errors.append(error_msg)
-                    failed += 1
-                    continue
-
-                # Refresh token if needed (expired tokens can't be used)
                 try:
-                    token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-                    logger.debug(f"Refreshed OAuth token for subscription {sub.id}")
-                except Exception as refresh_error:
-                    error_msg = f"Failed to refresh token for subscription {sub.id}: {str(refresh_error)}"
+                    token = await _get_sharepoint_token_for_user_integration(
+                        user_integration=user_integration,
+                        container=container,
+                    )
+                except Exception as token_error:
+                    error_msg = f"Failed to resolve token for subscription {sub.id}: {token_error}"
                     logger.error(error_msg)
                     errors.append(error_msg)
                     failed += 1
@@ -598,7 +661,8 @@ async def renew_expired_subscriptions(
                 # Recreate subscription
                 success = await subscription_service.recreate_expired_subscription(
                     subscription=sub,
-                    token=token
+                    token=token,
+                    is_onedrive=_is_onedrive_subscription(sub),
                 )
 
                 if success:
@@ -668,11 +732,13 @@ async def recreate_subscription(
 
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
-        oauth_token_service = container.oauth_token_service()
         user_integration_repo = container.user_integration_repo()
 
-        # Get subscription
-        subscription = await subscription_repo.one_or_none(id=subscription_id)
+        # Tenant-scoped lookup to avoid cross-tenant access
+        subscription = await subscription_repo.one_by_tenant(
+            subscription_id=subscription_id,
+            tenant_id=user.tenant_id,
+        )
 
         if not subscription:
             raise HTTPException(
@@ -690,84 +756,33 @@ async def recreate_subscription(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User integration {subscription.user_integration_id} not found"
             )
-
-        # Handle different auth types
-        token = None
-
-        if user_integration.tenant_app_id:
-            # Tenant app authentication - get token from TenantSharePointApp
-            logger.info(f"Subscription {subscription_id} uses tenant_app_id: {user_integration.tenant_app_id}")
-            tenant_app_repo = container.tenant_sharepoint_app_repo()
-
-            tenant_app = await tenant_app_repo.get_by_id(user_integration.tenant_app_id)
-            if not tenant_app:
-                logger.error(f"TenantSharePointApp {user_integration.tenant_app_id} not found")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"TenantSharePointApp {user_integration.tenant_app_id} not found"
-                )
-
-            logger.info(f"TenantSharePointApp found: auth_method={tenant_app.auth_method}")
-
-            # Create a simple token-like object for the subscription service
-            class SimpleToken:
-                def __init__(self, access_token: str):
-                    self.access_token = access_token
-                    self.base_url = "https://graph.microsoft.com"
-
-            try:
-                if tenant_app.is_service_account():
-                    # Service account uses delegated permissions with refresh token
-                    service_account_auth = container.service_account_auth_service()
-                    token_result = await service_account_auth.refresh_access_token(tenant_app)
-                    logger.info(f"Refreshed service account token for subscription {subscription_id}")
-                    token = SimpleToken(token_result["access_token"])
-                else:
-                    # Tenant app uses client credentials flow (application permissions)
-                    tenant_app_auth = container.tenant_app_auth_service()
-                    access_token = await tenant_app_auth.get_access_token(tenant_app)
-                    logger.info(f"Got tenant app token for subscription {subscription_id}")
-                    token = SimpleToken(access_token)
-            except Exception as auth_error:
-                logger.error(f"Failed to get token for subscription {subscription_id}: {auth_error}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to get access token: {str(auth_error)}"
-                )
-        else:
-            # Personal OAuth token authentication
-            token = await oauth_token_service.get_oauth_token_by_user_integration(
-                user_integration_id=subscription.user_integration_id
+        if user_integration.tenant_id != user.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Subscription {subscription_id} not found"
             )
 
-            if not token:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No OAuth token found for user_integration {subscription.user_integration_id}"
-                )
-
-            # Ensure it's a SharePoint token
-            if not token.token_type.is_sharepoint:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Token for user_integration {subscription.user_integration_id} is not a SharePoint token"
-                )
-
-            # Refresh token if needed (expired tokens can't be used)
-            try:
-                token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-                logger.info(f"Refreshed OAuth token for subscription {subscription_id}")
-            except Exception as refresh_error:
-                logger.error(f"Failed to refresh token for subscription {subscription_id}: {refresh_error}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to refresh OAuth token: {str(refresh_error)}"
-                )
+        try:
+            token = await _get_sharepoint_token_for_user_integration(
+                user_integration=user_integration,
+                container=container,
+            )
+        except Exception as token_error:
+            logger.error(
+                "Failed to resolve token for subscription %s: %s",
+                subscription_id,
+                token_error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to get access token: {token_error}",
+            )
 
         # Recreate subscription
         success = await subscription_service.recreate_expired_subscription(
             subscription=subscription,
-            token=token
+            token=token,
+            is_onedrive=_is_onedrive_subscription(subscription),
         )
 
         if not success:

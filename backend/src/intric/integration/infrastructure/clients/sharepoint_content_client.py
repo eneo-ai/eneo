@@ -14,6 +14,11 @@ logger = get_logger(__name__)
 TokenRefreshCallback = Callable[[UUID], Awaitable[Dict[str, str]]]
 
 
+class DeltaTokenExpiredException(Exception):
+    """Raised when Microsoft Graph returns 410 Gone for an expired delta token."""
+    pass
+
+
 class SharePointContentClient(BaseClient):
     def __init__(
         self,
@@ -54,6 +59,24 @@ class SharePointContentClient(BaseClient):
         self.update_token(token_data["access_token"])
         return token_data
 
+    async def _get_all_paged_items(self, endpoint: str) -> List[Dict[str, Any]]:
+        """Follow @odata.nextLink pagination and collect all items across pages."""
+        from urllib.parse import urlparse
+
+        all_items: List[Dict[str, Any]] = []
+        next_link: Optional[str] = endpoint
+
+        while next_link:
+            if next_link.startswith("http"):
+                parsed = urlparse(next_link)
+                next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+
+            response = await self.client.get(next_link, headers=self.headers)
+            all_items.extend(response.get("value", []))
+            next_link = response.get("@odata.nextLink")
+
+        return all_items
+
     async def get_sites(self) -> Dict[str, Any]:
         try:
             return await self.client.get("v1.0/sites?search=*", headers=self.headers)
@@ -83,37 +106,35 @@ class SharePointContentClient(BaseClient):
             else:
                 raise
 
-    async def get_drive_root_children(self, drive_id: str) -> Dict[str, Any]:
-        """Get items in root of a drive (works for both OneDrive and SharePoint)."""
+    async def get_drive_root_children(self, drive_id: str) -> List[Dict[str, Any]]:
+        """Get all items in root of a drive (works for both OneDrive and SharePoint)."""
         endpoint = f"v1.0/drives/{drive_id}/root/children"
         try:
-            return await self.client.get(endpoint, headers=self.headers)
+            return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
                     "Token expired while getting drive root, refreshing..."
                 )
                 await self.refresh_token()
-                return await self.client.get(endpoint, headers=self.headers)
+                return await self._get_all_paged_items(endpoint)
             else:
                 raise
 
     async def get_drive_folder_items(
         self, drive_id: str, folder_id: str
     ) -> List[Dict[str, Any]]:
-        """Get items in a folder by drive_id (no site_id needed)."""
+        """Get all items in a folder by drive_id (no site_id needed)."""
         endpoint = f"v1.0/drives/{drive_id}/items/{folder_id}/children"
         try:
-            response = await self.client.get(endpoint, headers=self.headers)
-            return response.get("value", [])
+            return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
                     "Token expired while getting folder items, refreshing..."
                 )
                 await self.refresh_token()
-                response = await self.client.get(endpoint, headers=self.headers)
-                return response.get("value", [])
+                return await self._get_all_paged_items(endpoint)
             else:
                 raise
 
@@ -176,17 +197,15 @@ class SharePointContentClient(BaseClient):
 
         return await self.get_default_drive_id(site_id)
 
-    async def get_documents_in_drive(self, site_id: str) -> dict:
+    async def get_documents_in_drive(self, site_id: str) -> List[Dict[str, Any]]:
         try:
-            # Språk-agnostiskt: hämta default drive
             drive_id = await self.get_default_drive_id(site_id)
             if not drive_id:
                 logger.warning("No drive found for site %s", site_id)
-                return {"value": []}
+                return []
 
             endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
-            response = await self.client.get(endpoint, headers=self.headers)
-            return response
+            return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("SharePoint token expired, refreshing...")
@@ -194,10 +213,9 @@ class SharePointContentClient(BaseClient):
                 drive_id = await self.get_default_drive_id(site_id)
                 if not drive_id:
                     logger.warning("No drive found for site %s after refresh", site_id)
-                    return {"value": []}
+                    return []
                 endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
-                response = await self.client.get(endpoint, headers=self.headers)
-                return response
+                return await self._get_all_paged_items(endpoint)
             else:
                 logger.error(f"SharePoint API error: {e}")
                 raise
@@ -249,8 +267,7 @@ class SharePointContentClient(BaseClient):
             endpoint = (
                 f"v1.0/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children"
             )
-            response = await self.client.get(endpoint, headers=self.headers)
-            return response.get("value", [])
+            return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
@@ -260,8 +277,7 @@ class SharePointContentClient(BaseClient):
                 endpoint = (
                     f"v1.0/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children"
                 )
-                response = await self.client.get(endpoint, headers=self.headers)
-                return response.get("value", [])
+                return await self._get_all_paged_items(endpoint)
             else:
                 logger.error(f"SharePoint API error while getting folder items: {e}")
                 raise
@@ -413,7 +429,11 @@ class SharePointContentClient(BaseClient):
             return token
 
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 410:
+                raise DeltaTokenExpiredException(
+                    f"Delta token expired (410 Gone) during initialization for drive {drive_id}"
+                ) from e
+            elif e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("SharePoint token expired during delta init, refreshing...")
                 await self.refresh_token()
                 return await self.initialize_delta_token(drive_id)
@@ -479,7 +499,11 @@ class SharePointContentClient(BaseClient):
             return all_changes, new_delta_token
 
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 410:
+                raise DeltaTokenExpiredException(
+                    f"Delta token expired (410 Gone) for drive {drive_id}"
+                ) from e
+            elif e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("SharePoint token expired during delta query, refreshing...")
                 await self.refresh_token()
                 return await self.get_delta_changes(drive_id, delta_token)
