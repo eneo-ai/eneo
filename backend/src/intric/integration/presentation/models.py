@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Generic, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, Field, computed_field
@@ -145,7 +145,7 @@ class SharePointTreeResponse(BaseModel):
 
 class IntegrationKnowledgeMetaData(BaseModel):
     size: int
-    last_sync_summary: Optional[Dict[str, int]] = None
+    last_sync_summary: Optional[Dict[str, Any]] = None
     last_synced_at: Optional[datetime] = None
     sharepoint_subscription_expires_at: Optional[datetime] = Field(
         None,
@@ -248,6 +248,11 @@ class SyncLog(BaseModel):
     def skipped_items(self) -> int:
         """Get skipped_items from metadata."""
         return (self.metadata or {}).get("skipped_items", 0)
+
+    @computed_field
+    def skipped_details(self) -> list[dict]:
+        """Get skipped file details from metadata."""
+        return (self.metadata or {}).get("skipped_details", [])
 
     @computed_field
     def duration_seconds(self) -> Optional[float]:

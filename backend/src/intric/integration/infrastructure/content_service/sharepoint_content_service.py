@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -118,6 +118,41 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+# File extensions that cannot produce useful text content.
+# These are skipped before download to save bandwidth and avoid database pollution.
+_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset({
+    # Images
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".ico", ".webp", ".tiff", ".tif",
+    ".heic", ".heif", ".raw", ".cr2", ".nef", ".arw", ".psd",
+    # Video
+    ".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v",
+    # Audio
+    ".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a",
+    # Archives
+    ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2",
+    # Executables / binaries
+    ".exe", ".dll", ".msi", ".bin", ".iso",
+    # Other non-text
+    ".ttf", ".otf", ".woff", ".woff2",
+})
+
+
+def _unsupported_file_reason(filename: str) -> Optional[str]:
+    """Return a skip reason if the file type is unsupported, or None if OK."""
+    name = filename.lower()
+    for ext in _UNSUPPORTED_EXTENSIONS:
+        if name.endswith(ext):
+            # Determine a human-readable category
+            if ext in {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".ico", ".webp", ".tiff", ".tif",
+                       ".heic", ".heif", ".raw", ".cr2", ".nef", ".arw", ".psd"}:
+                return "Unsupported file type (image)"
+            if ext in {".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v"}:
+                return "Unsupported file type (video)"
+            if ext in {".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a"}:
+                return "Unsupported file type (audio)"
+            return f"Unsupported file type ({ext})"
+    return None
 
 
 class SimpleSharePointToken:
@@ -308,8 +343,9 @@ class SharePointContentService:
             if self.sync_log_repo:
                 files_processed = summary_stats.get("files_processed", 0)
                 files_deleted = summary_stats.get("files_deleted", 0)
+                skipped_items = summary_stats.get("skipped_items", 0)
 
-                if files_processed > 0 or files_deleted > 0:
+                if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
                     sync_log = SyncLog(
                         integration_knowledge_id=integration_knowledge_id,
                         sync_type="full",
@@ -613,6 +649,9 @@ class SharePointContentService:
                                 f"Could not delete info_blob for {item_name}: {e}"
                             )
                             stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {"file": item_name, "reason": f"Could not remove: {e}"}
+                            )
                         continue
 
                     if item.get("folder"):
@@ -632,6 +671,17 @@ class SharePointContentService:
                             f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                         )
                         stats["skipped_items"] += 1
+                        stats["skipped_details"].append(
+                            {"file": item_name, "reason": "Already synced (no changes)"}
+                        )
+                        continue
+
+                    unsupported_reason = _unsupported_file_reason(item_name)
+                    if unsupported_reason:
+                        stats["skipped_items"] += 1
+                        stats["skipped_details"].append(
+                            {"file": item_name, "reason": unsupported_reason}
+                        )
                         continue
 
                     web_url = item.get("webUrl", "")
@@ -661,20 +711,30 @@ class SharePointContentService:
                                 )
                         else:
                             stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {"file": item_name, "reason": "Empty or unreadable content"}
+                            )
 
+                    except ValueError as e:
+                        if "exceeds max download size" in str(e):
+                            reason = "File too large (exceeds 50 MB limit)"
+                        else:
+                            reason = f"Error: {e}"
+                        logger.error(f"Error processing changed file {item_name}: {e}")
+                        stats["skipped_items"] += 1
+                        stats["skipped_details"].append(
+                            {"file": item_name, "reason": reason}
+                        )
                     except Exception as e:
                         logger.error(f"Error processing changed file {item_name}: {e}")
                         stats["skipped_items"] += 1
+                        stats["skipped_details"].append(
+                            {"file": item_name, "reason": f"Error: {e}"}
+                        )
 
                 integration_knowledge.delta_token = new_delta_token
 
-                summary_stats = {
-                    "files_processed": stats.get("files_processed", 0),
-                    "files_deleted": stats.get("files_deleted", 0),
-                    "pages_processed": stats.get("pages_processed", 0),
-                    "folders_processed": stats.get("folders_processed", 0),
-                    "skipped_items": stats.get("skipped_items", 0),
-                }
+                summary_stats = self._build_summary_stats(stats)
                 integration_knowledge.last_sync_summary = summary_stats
 
                 files_processed = summary_stats.get("files_processed", 0)
@@ -693,8 +753,9 @@ class SharePointContentService:
                 if self.sync_log_repo:
                     files_processed = summary_stats.get("files_processed", 0)
                     files_deleted = summary_stats.get("files_deleted", 0)
+                    skipped_items = summary_stats.get("skipped_items", 0)
 
-                    if files_processed > 0 or files_deleted > 0:
+                    if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
                         sync_log = SyncLog(
                             integration_knowledge_id=integration_knowledge_id,
                             sync_type="delta",
@@ -736,8 +797,8 @@ class SharePointContentService:
         site_id: Optional[str],
         drive_id: Optional[str],
         resource_type: str,
-        stats: Dict[str, int],
-    ) -> Dict[str, int]:
+        stats: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """
         Process content from SharePoint site or OneDrive.
 
@@ -808,6 +869,14 @@ class SharePointContentService:
                         )
                         integration_knowledge.selected_item_type = "file"
 
+                        unsupported_reason = _unsupported_file_reason(item_name)
+                        if unsupported_reason:
+                            stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {"file": item_name, "reason": unsupported_reason}
+                            )
+                            return stats
+
                         content, _ = await content_client.get_file_content_by_id(
                             drive_id=actual_drive_id,
                             item_id=integration_knowledge.folder_id,
@@ -824,6 +893,9 @@ class SharePointContentService:
                             stats["files_processed"] += 1
                         else:
                             stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {"file": item_name, "reason": "Empty or unreadable content"}
+                            )
 
                         return stats
                 else:
@@ -871,7 +943,7 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         token: "SharePointToken",
         resource_type: str,
-        stats: Dict[str, int],
+        stats: Dict[str, Any],
     ):
         for document in documents:
             drive_id = document.get("parentReference", {}).get("driveId")
@@ -895,12 +967,20 @@ class SharePointContentService:
                 )
             else:
                 # file
+                doc_name = document.get("name", "")
+                unsupported_reason = _unsupported_file_reason(doc_name)
+                if unsupported_reason:
+                    stats["skipped_items"] += 1
+                    stats["skipped_details"].append(
+                        {"file": doc_name, "reason": unsupported_reason}
+                    )
+                    continue
                 content, _ = await client.get_file_content_by_id(
                     drive_id=drive_id, item_id=item_id
                 )
                 if content:
                     await self._process_info_blob(
-                        title=document.get("name", ""),
+                        title=doc_name,
                         text=content,
                         url=document.get("webUrl", ""),
                         integration_knowledge=integration_knowledge,
@@ -909,13 +989,16 @@ class SharePointContentService:
                     stats["files_processed"] += 1
                 else:
                     stats["skipped_items"] += 1
+                    stats["skipped_details"].append(
+                        {"file": doc_name, "reason": "Empty or unreadable content"}
+                    )
 
     async def _process_pages(
         self,
         pages: list,
         client: SharePointContentClient,
         integration_knowledge: "IntegrationKnowledge",
-        stats: Dict[str, int],
+        stats: Dict[str, Any],
     ):
         for page in pages:
             site_id = page.get("parentReference", {}).get("siteId")
@@ -935,7 +1018,11 @@ class SharePointContentService:
                 )
                 stats["pages_processed"] += 1
             else:
+                page_name = page.get("name", "") or page.get("title", "") or f"Page {page.get('id', 'unknown')}"
                 stats["skipped_items"] += 1
+                stats["skipped_details"].append(
+                    {"file": page_name, "reason": "Empty or unreadable content"}
+                )
 
     async def _process_info_blob(
         self,
@@ -1015,7 +1102,7 @@ class SharePointContentService:
         token: "SharePointToken",
         integration_knowledge_id: UUID,
         client: SharePointContentClient,
-        stats: Dict[str, int],
+        stats: Dict[str, Any],
         folder_id: Optional[str] = None,
         processed_items: set = None,
         is_root_call: bool = True,
@@ -1070,7 +1157,7 @@ class SharePointContentService:
         integration_knowledge_id: UUID,
         token: "SharePointToken",
         processed_items: set,
-        stats: Dict[str, int],
+        stats: Dict[str, Any],
         is_root_call: bool = True,
     ) -> None:
         integration_knowledge = await self.integration_knowledge_repo.one(
@@ -1106,7 +1193,7 @@ class SharePointContentService:
                 )
                 continue
 
-            content = await self._get_file_content(token, item)
+            content, skip_reason = await self._get_file_content(token, item)
 
             if content:
                 await self._process_info_blob(
@@ -1119,24 +1206,33 @@ class SharePointContentService:
                 stats["files_processed"] += 1
             else:
                 stats["skipped_items"] += 1
+                if skip_reason:
+                    stats["skipped_details"].append(
+                        {"file": item_name, "reason": skip_reason}
+                    )
 
-    def _initialize_stats(self) -> Dict[str, int]:
+    def _initialize_stats(self) -> Dict[str, Any]:
         return {
             "files_processed": 0,
             "files_deleted": 0,
             "folders_processed": 0,
             "pages_processed": 0,
             "skipped_items": 0,
+            "skipped_details": [],
         }
 
-    def _build_summary_stats(self, stats: Dict[str, int]) -> Dict[str, int]:
-        return {
+    def _build_summary_stats(self, stats: Dict[str, Any]) -> Dict[str, Any]:
+        summary: Dict[str, Any] = {
             "files_processed": stats.get("files_processed", 0),
             "files_deleted": stats.get("files_deleted", 0),
             "pages_processed": stats.get("pages_processed", 0),
             "folders_processed": stats.get("folders_processed", 0),
             "skipped_items": stats.get("skipped_items", 0),
         }
+        skipped_details = stats.get("skipped_details", [])
+        if skipped_details:
+            summary["skipped_details"] = skipped_details[:50]
+        return summary
 
     def _format_summary_for_job(self, summary: Dict[str, int]) -> str:
         files = summary.get("files_processed", 0) or 0
@@ -1357,14 +1453,20 @@ class SharePointContentService:
 
         return file_extension_to_type(item.get("name", ""))
 
-    async def _get_file_content(self, token, item: Dict[str, Any]) -> Optional[str]:
+    async def _get_file_content(
+        self, token, item: Dict[str, Any]
+    ) -> Tuple[Optional[str], Optional[str]]:
         item_id = item.get("id")
         item_name = item.get("name", "").lower()
         item_type = self._get_item_type(item)
         drive_id = item.get("parentReference", {}).get("driveId")
 
         if not item_id or item_type == "folder" or not drive_id:
-            return None
+            return None, None
+
+        skip_reason = _unsupported_file_reason(item_name)
+        if skip_reason:
+            return None, skip_reason
 
         try:
             base_url = getattr(token, "base_url", "https://graph.microsoft.com")
@@ -1380,8 +1482,15 @@ class SharePointContentService:
                 content, _ = await content_client.get_file_content_by_id(
                     drive_id=drive_id, item_id=item_id
                 )
-                return content
+                if not content:
+                    return None, "Empty or unreadable content"
+                return content, None
 
+        except ValueError as e:
+            if "exceeds max download size" in str(e):
+                return None, "File too large (exceeds 50 MB limit)"
+            logger.error(f"Error getting file content for {item_name}: {e}")
+            return None, f"Error: {e}"
         except Exception as e:
             logger.error(f"Error getting file content for {item_name}: {e}")
-            return
+            return None, f"Error: {e}"

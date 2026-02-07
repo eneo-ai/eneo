@@ -13,6 +13,11 @@
   // Get intric during component initialization
   const intric = getIntric();
 
+  interface SkippedDetail {
+    file: string;
+    reason: string;
+  }
+
   interface SyncLog {
     id: string;
     sync_type: string;
@@ -22,6 +27,7 @@
     pages_processed: number;
     folders_processed: number;
     skipped_items: number;
+    skipped_details: SkippedDetail[];
     error_message: string | null;
     started_at: string;
     completed_at: string | null;
@@ -288,6 +294,24 @@
                 <div class="text-xs text-secondary mb-2">
                   {getSyncSummary(log)}
                 </div>
+
+                <!-- Skipped details -->
+                {#if log.skipped_items > 0 && log.skipped_details?.length > 0}
+                  <details class="mb-2">
+                    <summary class="text-xs text-warning-default cursor-pointer hover:underline">
+                      {m.item_s_skipped({ count: log.skipped_items })}
+                    </summary>
+                    <ul class="mt-1 ml-4 text-xs text-secondary space-y-0.5">
+                      {#each log.skipped_details as detail}
+                        <li class="flex gap-1">
+                          <span class="font-medium text-primary truncate max-w-[200px]" title={detail.file}>{detail.file}</span>
+                          <span class="text-secondary-muted">&mdash;</span>
+                          <span class="text-secondary-muted">{detail.reason}</span>
+                        </li>
+                      {/each}
+                    </ul>
+                  </details>
+                {/if}
 
                 <!-- Duration and error -->
                 <div class="flex items-center gap-4 text-xs text-secondary-muted">
