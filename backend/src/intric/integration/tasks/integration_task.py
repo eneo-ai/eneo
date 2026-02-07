@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 import redis.asyncio as redis
 import sqlalchemy as sa
 
@@ -11,6 +11,8 @@ from intric.main.config import get_settings
 from intric.worker.worker import Worker
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from intric.integration.domain.entities.integration_knowledge import IntegrationKnowledge
     from intric.integration.presentation.models import (
         ConfluenceContentTaskParam,
@@ -47,7 +49,7 @@ async def _validate_embedding_provider(container: "Container", knowledge: "Integ
     if provider_id is None:
         return
 
-    session = container.session()
+    session = cast("AsyncSession", container.session())
     result = await session.execute(
         sa.select(ModelProviders.is_active).where(ModelProviders.id == provider_id)
     )

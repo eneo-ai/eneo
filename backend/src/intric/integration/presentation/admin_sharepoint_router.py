@@ -637,7 +637,7 @@ async def renew_expired_subscriptions(
                     errors.append(error_msg)
                     failed += 1
                     continue
-                if user_integration.tenant_id != user.tenant_id:
+                if user_integration.tenant_integration.tenant_id != user.tenant_id:
                     error_msg = (
                         f"User integration {sub.user_integration_id} does not belong to tenant {user.tenant_id}"
                     )
@@ -756,7 +756,7 @@ async def recreate_subscription(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User integration {subscription.user_integration_id} not found"
             )
-        if user_integration.tenant_id != user.tenant_id:
+        if user_integration.tenant_integration.tenant_id != user.tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Subscription {subscription_id} not found"
