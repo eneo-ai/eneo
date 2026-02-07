@@ -23,9 +23,10 @@
   type SelectedItem = {
     id: string;
     name: string;
-    type: "file" | "folder";
+    type: "file" | "folder" | "site_root";
     path: string;
     web_url?: string;
+    size?: number;
   };
 
   let { goBack, openController, integration }: IntegrationImportDialogProps = $props();
@@ -98,7 +99,13 @@
         space: $currentSpace
       };
 
-      if (selectedItem) {
+      if (selectedItem && selectedItem.type === "site_root") {
+        // "Import entire site" — same as selecting the site directly
+        importData.preview = {
+          ...selectedSite,
+          resource_type: selectedSite?.type === "onedrive" ? "onedrive" : "site"
+        };
+      } else if (selectedItem) {
         importData.preview = {
           key: selectedSite?.key, // Use site ID for SharePoint, drive ID for OneDrive
           name: selectedItem.name,
@@ -109,7 +116,6 @@
           resource_type: selectedSite?.type === "onedrive" ? "onedrive" : "site"
         };
       } else if (selectedSite) {
-        // Pass the full site/OneDrive object, including type as resource_type
         importData.preview = {
           ...selectedSite,
           resource_type: selectedSite.type === "onedrive" ? "onedrive" : "site"
@@ -139,9 +145,8 @@
     $inputValue = site.name;
   };
 
-  const handleFolderSelect = (item: { id: string; name: string; type: string; path: string }) => {
+  const handleFolderSelect = (item: { id: string; name: string; type: string; path: string; size?: number }) => {
     selectedItem = item as SelectedItem;
-    $inputValue = "";
   };
 
   $effect(() => {
@@ -149,6 +154,15 @@
       loadPreview();
     }
   });
+
+  let isOneDrive = $derived(selectedSite?.type === "onedrive");
+
+  function formatSize(bytes?: number): string {
+    if (bytes == null) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   let inputElement = $state<HTMLInputElement>();
 </script>
@@ -230,24 +244,28 @@
           </ul>
         </div>
       {:else}
-        <div class="flex flex-col gap-2">
-          <div class="px-4 py-2">
-            <span class="text-sm font-medium">{selectedSite.name}</span>
-          </div>
-          {#if !selectedItem}
-            <SharePointFolderTree
-              userIntegrationId={integration.id || ""}
-              spaceId={$currentSpace.id}
-              siteId={selectedSite.type === "onedrive" ? undefined : selectedSite.key}
-              driveId={selectedSite.type === "onedrive" ? selectedSite.key : undefined}
-              onSelect={handleFolderSelect}
-            />
-          {:else}
-            <div class="px-4 py-3 border border-default rounded-md mx-4 mb-4">
-              <div class="text-sm">
-                <div class="font-medium">{selectedItem.name}</div>
-                <div class="text-xs text-secondary mt-1">{selectedItem.path}</div>
-              </div>
+        <div class="flex flex-col">
+          <SharePointFolderTree
+            userIntegrationId={integration.id || ""}
+            spaceId={$currentSpace.id}
+            siteId={selectedSite.type === "onedrive" ? undefined : selectedSite.key}
+            driveId={selectedSite.type === "onedrive" ? selectedSite.key : undefined}
+            siteName={selectedSite.name}
+            isOneDrive={isOneDrive ?? false}
+            selectedItemId={selectedItem?.id ?? undefined}
+            onSelect={handleFolderSelect}
+          />
+
+          <!-- Selection summary bar -->
+          {#if selectedItem}
+            <div class="mx-4 mb-3 px-3 py-2 bg-accent-dimmer border border-accent rounded-md flex items-center gap-2 text-sm">
+              <span class="font-medium truncate">{selectedItem.name}</span>
+              {#if selectedItem.size != null}
+                <span class="text-xs text-secondary flex-shrink-0">({formatSize(selectedItem.size)})</span>
+              {/if}
+              {#if selectedItem.type === "site_root"}
+                <span class="text-xs text-secondary flex-shrink-0">(entire {isOneDrive ? "OneDrive" : "site"})</span>
+              {/if}
             </div>
           {/if}
         </div>
@@ -266,10 +284,9 @@
 
     <Dialog.Controls>
       <Button onclick={() => {
-        if (selectedItem) {
-          selectedItem = null;
-        } else if (selectedSite) {
+        if (selectedSite) {
           selectedSite = null;
+          selectedItem = null;
         } else {
           goBack();
         }
