@@ -127,7 +127,9 @@ class TestTokenHandling:
     ):
         """Uses OAuth token from repo when token_id is provided."""
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -147,15 +149,23 @@ class TestTokenHandling:
                 site_id="site-123",
             )
 
-        mock_dependencies["oauth_token_repo"].one.assert_called_once_with(id=mock_oauth_token.id)
+        mock_dependencies["oauth_token_repo"].one.assert_called_once_with(
+            id=mock_oauth_token.id
+        )
 
     async def test_uses_tenant_app_auth_when_tenant_app_id_provided(
         self, service, mock_dependencies, mock_tenant_app, mock_integration_knowledge
     ):
         """Uses tenant app auth service when tenant_app_id is provided."""
-        mock_dependencies["tenant_sharepoint_app_repo"].one.return_value = mock_tenant_app
-        mock_dependencies["tenant_app_auth_service"].get_access_token.return_value = "tenant-app-access-token"
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["tenant_sharepoint_app_repo"].get_by_id.return_value = (
+            mock_tenant_app
+        )
+        mock_dependencies["tenant_app_auth_service"].get_access_token.return_value = (
+            "tenant-app-access-token"
+        )
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -175,18 +185,30 @@ class TestTokenHandling:
                 site_id="site-123",
             )
 
-        mock_dependencies["tenant_app_auth_service"].get_access_token.assert_called_once()
+        mock_dependencies[
+            "tenant_app_auth_service"
+        ].get_access_token.assert_called_once()
 
     async def test_uses_service_account_auth_when_configured(
-        self, service, mock_dependencies, mock_tenant_app_service_account, mock_integration_knowledge
+        self,
+        service,
+        mock_dependencies,
+        mock_tenant_app_service_account,
+        mock_integration_knowledge,
     ):
         """Uses service account auth when tenant app is configured for service account."""
-        mock_dependencies["tenant_sharepoint_app_repo"].one.return_value = mock_tenant_app_service_account
-        mock_dependencies["service_account_auth_service"].refresh_access_token.return_value = {
+        mock_dependencies["tenant_sharepoint_app_repo"].get_by_id.return_value = (
+            mock_tenant_app_service_account
+        )
+        mock_dependencies[
+            "service_account_auth_service"
+        ].refresh_access_token.return_value = {
             "access_token": "service-account-access-token",
             "refresh_token": "new-refresh-token",
         }
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -206,7 +228,9 @@ class TestTokenHandling:
                 site_id="site-123",
             )
 
-        mock_dependencies["service_account_auth_service"].refresh_access_token.assert_called_once()
+        mock_dependencies[
+            "service_account_auth_service"
+        ].refresh_access_token.assert_called_once()
         mock_dependencies["tenant_sharepoint_app_repo"].update.assert_called_once_with(
             mock_tenant_app_service_account
         )
@@ -218,16 +242,24 @@ class TestTokenHandling:
         self, service, mock_dependencies, mock_integration_knowledge
     ):
         """Raises ValueError when neither token_id nor tenant_app_id is provided."""
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
-        with pytest.raises(ValueError, match="Either token_id or tenant_app_id must be provided"):
+        with pytest.raises(
+            ValueError, match="Either token_id or tenant_app_id must be provided"
+        ):
             await service.pull_content(
                 integration_knowledge_id=mock_integration_knowledge.id,
                 site_id="site-123",
             )
 
     async def test_raises_error_when_service_account_auth_not_configured(
-        self, mock_dependencies, mock_tenant_app_service_account, mock_integration_knowledge, mock_user
+        self,
+        mock_dependencies,
+        mock_tenant_app_service_account,
+        mock_integration_knowledge,
+        mock_user,
     ):
         """Raises ValueError when service account is used but auth service not configured."""
         # Create service without service_account_auth_service
@@ -235,10 +267,14 @@ class TestTokenHandling:
         deps["service_account_auth_service"] = None
         svc = SharePointContentService(**deps)
 
-        deps["tenant_sharepoint_app_repo"].one.return_value = mock_tenant_app_service_account
+        deps["tenant_sharepoint_app_repo"].get_by_id.return_value = (
+            mock_tenant_app_service_account
+        )
         deps["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
 
-        with pytest.raises(ValueError, match="ServiceAccountAuthService not configured"):
+        with pytest.raises(
+            ValueError, match="ServiceAccountAuthService not configured"
+        ):
             await svc.pull_content(
                 tenant_app_id=mock_tenant_app_service_account.id,
                 integration_knowledge_id=mock_integration_knowledge.id,
@@ -281,11 +317,15 @@ class TestProcessInfoBlobSizeAccounting:
         updated_blob.id = uuid4()
         updated_blob.size = 130
 
-        mock_dependencies["info_blob_service"].repo.get_by_sharepoint_item_and_integration_knowledge = (
-            AsyncMock(return_value=existing_blob)
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
         )
-        mock_dependencies["info_blob_service"].upsert_info_blob_by_sharepoint_item_and_integration = (
-            AsyncMock(return_value=updated_blob)
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
+            return_value=updated_blob
         )
         mock_dependencies["datastore"].add = AsyncMock()
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
@@ -316,11 +356,15 @@ class TestProcessInfoBlobSizeAccounting:
         updated_blob.id = uuid4()
         updated_blob.size = 100
 
-        mock_dependencies["info_blob_service"].repo.get_by_sharepoint_item_and_integration_knowledge = (
-            AsyncMock(return_value=existing_blob)
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
         )
-        mock_dependencies["info_blob_service"].upsert_info_blob_by_sharepoint_item_and_integration = (
-            AsyncMock(return_value=updated_blob)
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
+            return_value=updated_blob
         )
         mock_dependencies["datastore"].add = AsyncMock()
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
@@ -606,7 +650,9 @@ class TestDeltaChangesProcessing:
         """Falls back to full sync when no delta token exists."""
         mock_integration_knowledge.delta_token = None
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch.object(service, "pull_content", new_callable=AsyncMock) as mock_pull:
             mock_pull.return_value = "Imported 5 files"
@@ -626,7 +672,9 @@ class TestDeltaChangesProcessing:
         """Processes delta changes when delta token exists."""
         mock_integration_knowledge.delta_token = "existing-delta-token-123"
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -654,7 +702,9 @@ class TestDeltaChangesProcessing:
         mock_integration_knowledge.delta_token = "old-delta-token"
         mock_integration_knowledge.drive_id = "drive-123"
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -686,9 +736,17 @@ class TestDeltaChangesProcessing:
         mock_integration_knowledge.folder_id = None
 
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
-        mock_dependencies["info_blob_service"].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(return_value=[])
-        mock_dependencies["info_blob_service"].repo.delete_by_title_and_integration_knowledge = AsyncMock(return_value=[])
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_title_and_integration_knowledge = AsyncMock(return_value=[])
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -716,11 +774,69 @@ class TestDeltaChangesProcessing:
                 drive_id="drive-123",
             )
 
-        mock_dependencies["info_blob_service"].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_called_once_with(
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_called_once_with(
             sharepoint_item_id="item-123",
             integration_knowledge_id=mock_integration_knowledge.id,
         )
-        mock_dependencies["info_blob_service"].repo.delete_by_title_and_integration_knowledge.assert_not_called()
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_title_and_integration_knowledge.assert_not_called()
+
+    async def test_deleted_delta_size_never_goes_below_zero(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """Deleted deltas clamp integration_knowledge.size at zero."""
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_integration_knowledge.selected_item_type = "site_root"
+        mock_integration_knowledge.folder_id = None
+        mock_integration_knowledge.size = 10
+
+        deleted_blob = MagicMock()
+        deleted_blob.size = 25
+
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[deleted_blob]
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_title_and_integration_knowledge = AsyncMock(return_value=[])
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_delta_changes.return_value = (
+                [
+                    {
+                        "id": "item-123",
+                        "name": "deleted.docx",
+                        "deleted": True,
+                        "folder": False,
+                    }
+                ],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+                drive_id="drive-123",
+            )
+
+        assert mock_integration_knowledge.size == 0
 
 
 class TestOneDriveFolderTraversal:
@@ -762,7 +878,9 @@ class TestSyncLogging:
     ):
         """Creates success sync log when files are processed."""
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
+        mock_dependencies["integration_knowledge_repo"].one.return_value = (
+            mock_integration_knowledge
+        )
 
         with patch(
             "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -772,10 +890,17 @@ class TestSyncLogging:
             mock_client.__aexit__.return_value = None
             mock_client.get_default_drive_id.return_value = "drive-123"
             mock_client.get_documents_in_drive.return_value = [
-                {"id": "file-1", "name": "doc.txt", "webUrl": "https://example.com/doc.txt"}
+                {
+                    "id": "file-1",
+                    "name": "doc.txt",
+                    "webUrl": "https://example.com/doc.txt",
+                }
             ]
             mock_client.get_site_pages.return_value = {"value": []}
-            mock_client.get_file_content_by_id.return_value = ("File content", "text/plain")
+            mock_client.get_file_content_by_id.return_value = (
+                "File content",
+                "text/plain",
+            )
             mock_client.initialize_delta_token.return_value = "delta-token"
             mock_client_class.return_value = mock_client
 
@@ -796,7 +921,9 @@ class TestSyncLogging:
     ):
         """Creates error sync log when exception occurs."""
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
-        mock_dependencies["integration_knowledge_repo"].one.side_effect = Exception("Test error")
+        mock_dependencies["integration_knowledge_repo"].one.side_effect = Exception(
+            "Test error"
+        )
 
         with pytest.raises(Exception, match="Test error"):
             await service.pull_content(
@@ -822,15 +949,17 @@ class TestTokenRefreshCallback:
         refreshed_token.access_token = "new-access-token"
         refreshed_token.refresh_token = "new-refresh-token"
 
-        mock_dependencies["oauth_token_service"].refresh_and_update_token.return_value = refreshed_token
+        mock_dependencies[
+            "oauth_token_service"
+        ].refresh_and_update_token.return_value = refreshed_token
 
         result = await service.token_refresh_callback(token_id)
 
         assert result["access_token"] == "new-access-token"
         assert result["refresh_token"] == "new-refresh-token"
-        mock_dependencies["oauth_token_service"].refresh_and_update_token.assert_called_once_with(
-            token_id=token_id
-        )
+        mock_dependencies[
+            "oauth_token_service"
+        ].refresh_and_update_token.assert_called_once_with(token_id=token_id)
 
 
 class TestExtractTextFromCanvasLayout:

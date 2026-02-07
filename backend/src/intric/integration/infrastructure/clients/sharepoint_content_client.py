@@ -419,7 +419,7 @@ class SharePointContentClient(BaseClient):
                 logger.error(f"SharePoint API error when getting file content: {e}")
                 raise
 
-    async def initialize_delta_token(self, drive_id: str) -> Optional[str]:
+    async def initialize_delta_token(self, drive_id: str, *, _retried: bool = False) -> Optional[str]:
         """
         Initialize delta tracking for a drive by calling delta without a token.
         Returns the deltaLink token for future incremental syncs.
@@ -479,16 +479,16 @@ class SharePointContentClient(BaseClient):
                 raise DeltaTokenExpiredException(
                     f"Delta token expired (410 Gone) during initialization for drive {drive_id}"
                 ) from e
-            elif e.status == 401 and self.token_refresh_callback and self.token_id:
+            elif e.status == 401 and self.token_refresh_callback and self.token_id and not _retried:
                 logger.info("SharePoint token expired during delta init, refreshing...")
                 await self.refresh_token()
-                return await self.initialize_delta_token(drive_id)
+                return await self.initialize_delta_token(drive_id, _retried=True)
             else:
                 logger.error(f"Error initializing delta token: {e}")
                 raise
 
     async def get_delta_changes(
-        self, drive_id: str, delta_token: str
+        self, drive_id: str, delta_token: str, *, _retried: bool = False
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Get changes since the last delta sync using the stored token.
@@ -549,12 +549,12 @@ class SharePointContentClient(BaseClient):
                 raise DeltaTokenExpiredException(
                     f"Delta token expired (410 Gone) for drive {drive_id}"
                 ) from e
-            elif e.status == 401 and self.token_refresh_callback and self.token_id:
+            elif e.status == 401 and self.token_refresh_callback and self.token_id and not _retried:
                 logger.info(
                     "SharePoint token expired during delta query, refreshing..."
                 )
                 await self.refresh_token()
-                return await self.get_delta_changes(drive_id, delta_token)
+                return await self.get_delta_changes(drive_id, delta_token, _retried=True)
             else:
                 logger.error(f"Error getting delta changes: {e}")
                 raise

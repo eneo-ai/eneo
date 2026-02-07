@@ -126,6 +126,7 @@ class SimpleSharePointToken:
     Used for tenant_app integrations where we don't have an OauthToken
     in the database, but need a token object with access_token attribute.
     """
+
     def __init__(self, access_token: str):
         self.access_token = access_token
 
@@ -168,11 +169,16 @@ class SharePointContentService:
         if not self.service_account_auth_service:
             raise ValueError("ServiceAccountAuthService not configured")
 
-        token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+        token_data = await self.service_account_auth_service.refresh_access_token(
+            tenant_app
+        )
         access_token = token_data["access_token"]
         new_refresh_token = token_data.get("refresh_token")
 
-        if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+        if (
+            new_refresh_token
+            and new_refresh_token != tenant_app.service_account_refresh_token
+        ):
             tenant_app.update_refresh_token(new_refresh_token)
             await self.tenant_sharepoint_app_repo.update(tenant_app)
             logger.debug(
@@ -198,13 +204,23 @@ class SharePointContentService:
 
         try:
             if tenant_app_id:
-                tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
+                tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
+                    app_id=tenant_app_id
+                )
+                if not tenant_app:
+                    raise ValueError(f"Tenant app {tenant_app_id} not found")
                 # Use service account or tenant app auth based on auth_method
                 if tenant_app.is_service_account():
-                    access_token = await self._refresh_service_account_access_token(tenant_app)
-                    logger.info(f"Using service account auth for tenant_app {tenant_app_id}")
+                    access_token = await self._refresh_service_account_access_token(
+                        tenant_app
+                    )
+                    logger.info(
+                        f"Using service account auth for tenant_app {tenant_app_id}"
+                    )
                 else:
-                    access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                    access_token = await self.tenant_app_auth_service.get_access_token(
+                        tenant_app
+                    )
                     logger.info(f"Using tenant app auth for tenant_app {tenant_app_id}")
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
@@ -259,18 +275,24 @@ class SharePointContentService:
 
             if not integration_knowledge.delta_token:
                 try:
-                    base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
+                    base_url = getattr(token, "base_url", "https://graph.microsoft.com")
                     async with SharePointContentClient(
                         base_url=base_url,
                         api_token=token.access_token,
                         token_id=oauth_token_id,
-                        token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
+                        token_refresh_callback=(
+                            self.token_refresh_callback if oauth_token_id else None
+                        ),
                     ) as content_client:
                         actual_drive_id = drive_id
                         if not actual_drive_id and site_id:
-                            actual_drive_id = await content_client.get_default_drive_id(site_id)
+                            actual_drive_id = await content_client.get_default_drive_id(
+                                site_id
+                            )
                         if actual_drive_id:
-                            delta_token = await content_client.initialize_delta_token(actual_drive_id)
+                            delta_token = await content_client.initialize_delta_token(
+                                actual_drive_id
+                            )
                             if delta_token:
                                 integration_knowledge.delta_token = delta_token
                                 logger.info(
@@ -334,14 +356,26 @@ class SharePointContentService:
 
         try:
             if tenant_app_id:
-                tenant_app = await self.tenant_sharepoint_app_repo.one(id=tenant_app_id)
+                tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
+                    app_id=tenant_app_id
+                )
+                if not tenant_app:
+                    raise ValueError(f"Tenant app {tenant_app_id} not found")
                 # Use service account or tenant app auth based on auth_method
                 if tenant_app.is_service_account():
-                    access_token = await self._refresh_service_account_access_token(tenant_app)
-                    logger.info(f"Using service account auth for delta sync tenant_app {tenant_app_id}")
+                    access_token = await self._refresh_service_account_access_token(
+                        tenant_app
+                    )
+                    logger.info(
+                        f"Using service account auth for delta sync tenant_app {tenant_app_id}"
+                    )
                 else:
-                    access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
-                    logger.info(f"Using tenant app auth for delta sync tenant_app {tenant_app_id}")
+                    access_token = await self.tenant_app_auth_service.get_access_token(
+                        tenant_app
+                    )
+                    logger.info(
+                        f"Using tenant app auth for delta sync tenant_app {tenant_app_id}"
+                    )
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
             elif token_id:
@@ -365,17 +399,21 @@ class SharePointContentService:
                     integration_knowledge_id=integration_knowledge_id,
                     site_id=site_id,
                     drive_id=drive_id or integration_knowledge.drive_id,
-                    resource_type=resource_type or integration_knowledge.resource_type or "site",
+                    resource_type=resource_type
+                    or integration_knowledge.resource_type
+                    or "site",
                 )
 
             stats = self._initialize_stats()
 
-            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
+            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
             async with SharePointContentClient(
                 base_url=base_url,
                 api_token=token.access_token,
                 token_id=oauth_token_id,
-                token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
+                token_refresh_callback=(
+                    self.token_refresh_callback if oauth_token_id else None
+                ),
             ) as content_client:
                 actual_drive_id = drive_id or integration_knowledge.drive_id
                 if not actual_drive_id and site_id:
@@ -386,7 +424,8 @@ class SharePointContentService:
 
                 logger.info(
                     f"Starting delta sync with token: {integration_knowledge.delta_token[:20]}..."
-                    if integration_knowledge.delta_token else "No delta token"
+                    if integration_knowledge.delta_token
+                    else "No delta token"
                 )
                 try:
                     changes, new_delta_token = await content_client.get_delta_changes(
@@ -400,18 +439,68 @@ class SharePointContentService:
                         integration_knowledge_id,
                     )
                     integration_knowledge.delta_token = None
-                    await self.integration_knowledge_repo.update(obj=integration_knowledge)
+                    await self.integration_knowledge_repo.update(
+                        obj=integration_knowledge
+                    )
                     return await self.pull_content(
                         token_id=token_id,
                         tenant_app_id=tenant_app_id,
                         integration_knowledge_id=integration_knowledge_id,
                         site_id=site_id,
                         drive_id=drive_id or integration_knowledge.drive_id,
-                        resource_type=resource_type or integration_knowledge.resource_type or "site",
+                        resource_type=resource_type
+                        or integration_knowledge.resource_type
+                        or "site",
                     )
                 logger.info(
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
+
+                scope_folder_path = integration_knowledge.folder_path
+                known_subfolder_ids: set[str] = set()
+                if (
+                    integration_knowledge.selected_item_type == "folder"
+                    and integration_knowledge.folder_id
+                    and not scope_folder_path
+                ):
+                    # Legacy integrations may miss folder_path. Resolve it once so
+                    # nested delta changes in subfolders stay in scope.
+                    try:
+                        folder_metadata = await content_client.get_file_metadata(
+                            drive_id=actual_drive_id,
+                            item_id=integration_knowledge.folder_id,
+                        )
+                        relative_parent_path = self._extract_relative_graph_path(
+                            folder_metadata.get("parentReference", {}).get("path", "")
+                        )
+                        folder_name = str(folder_metadata.get("name", "")).strip("/")
+
+                        if relative_parent_path == "/":
+                            resolved_folder_path = (
+                                f"/{folder_name}" if folder_name else "/"
+                            )
+                        elif relative_parent_path:
+                            resolved_folder_path = (
+                                f"{relative_parent_path.rstrip('/')}/{folder_name}"
+                                if folder_name
+                                else relative_parent_path
+                            )
+                        else:
+                            resolved_folder_path = None
+
+                        if resolved_folder_path:
+                            scope_folder_path = resolved_folder_path
+                            integration_knowledge.folder_path = resolved_folder_path
+                            await self.integration_knowledge_repo.update(
+                                obj=integration_knowledge
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not resolve folder_path for delta scope (integration_knowledge=%s, folder_id=%s): %s",
+                            integration_knowledge_id,
+                            integration_knowledge.folder_id,
+                            exc,
+                        )
 
                 if len(changes) == 0:
                     logger.info(
@@ -431,7 +520,9 @@ class SharePointContentService:
                     }
 
                     integration_knowledge.last_sync_summary = summary_stats
-                    await self.integration_knowledge_repo.update(obj=integration_knowledge)
+                    await self.integration_knowledge_repo.update(
+                        obj=integration_knowledge
+                    )
 
                     logger.info("Delta sync completed: no changes detected")
                     return self._format_summary_for_job(summary_stats)
@@ -444,25 +535,39 @@ class SharePointContentService:
                     is_folder = item.get("folder", False)
                     change_key = item.get("cTag")
 
-                    logger.debug(f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})")
+                    logger.debug(
+                        f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})"
+                    )
 
-                    if not self._is_item_in_folder_scope(
+                    # Skip scope check for deleted items — they may lack
+                    # parentReference data.  The DB delete queries already
+                    # filter by integration_knowledge_id so they are safe.
+                    if not is_deleted and not self._is_item_in_folder_scope(
                         item,
                         integration_knowledge.folder_id,
+                        scope_folder_path=scope_folder_path,
+                        known_subfolder_ids=known_subfolder_ids,
                         selected_item_type=integration_knowledge.selected_item_type,
                     ):
-                        logger.debug(f"  - Skipping item {item_name}: not in folder scope")
+                        logger.debug(
+                            f"  - Skipping item {item_name}: not in folder scope"
+                        )
                         continue
+
+                    if (
+                        is_folder
+                        and item_id
+                        and integration_knowledge.selected_item_type == "folder"
+                    ):
+                        known_subfolder_ids.add(item_id)
 
                     if is_deleted:
                         # Delete the corresponding info_blob if it exists
                         try:
                             if item_id:
-                                deleted_blobs = (
-                                    await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
-                                        sharepoint_item_id=item_id,
-                                        integration_knowledge_id=integration_knowledge.id,
-                                    )
+                                deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
+                                    sharepoint_item_id=item_id,
+                                    integration_knowledge_id=integration_knowledge.id,
                                 )
                             else:
                                 deleted_blobs = await self.info_blob_service.repo.delete_by_title_and_integration_knowledge(
@@ -472,9 +577,20 @@ class SharePointContentService:
 
                             # Update integration knowledge size to reflect deletion
                             # Filter out None values before accessing blob.size
-                            valid_deleted_blobs = [blob for blob in deleted_blobs if blob is not None]
-                            for blob in valid_deleted_blobs:
-                                integration_knowledge.size -= blob.size
+                            valid_deleted_blobs = [
+                                blob for blob in deleted_blobs if blob is not None
+                            ]
+                            if valid_deleted_blobs:
+                                current_size = _safe_int(
+                                    getattr(integration_knowledge, "size", 0)
+                                )
+                                deleted_size = sum(
+                                    _safe_int(getattr(blob, "size", 0))
+                                    for blob in valid_deleted_blobs
+                                )
+                                integration_knowledge.size = max(
+                                    0, current_size - deleted_size
+                                )
 
                             logger.info(
                                 "Deleted %s info_blob(s) for removed SharePoint file: %s (item_id=%s)",
@@ -482,7 +598,9 @@ class SharePointContentService:
                                 item_name,
                                 item_id,
                             )
-                            stats["files_deleted"] = stats.get("files_deleted", 0) + len(valid_deleted_blobs)
+                            stats["files_deleted"] = stats.get(
+                                "files_deleted", 0
+                            ) + len(valid_deleted_blobs)
 
                             # Invalidate ChangeKey cache for deleted item
                             if self.change_key_service and item_id:
@@ -636,19 +754,23 @@ class SharePointContentService:
         )
 
         try:
-            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
+            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
             async with SharePointContentClient(
                 base_url=base_url,
                 api_token=token.access_token,
                 token_id=oauth_token_id,
-                token_refresh_callback=self.token_refresh_callback if oauth_token_id else None,
+                token_refresh_callback=(
+                    self.token_refresh_callback if oauth_token_id else None
+                ),
             ) as content_client:
                 actual_drive_id = drive_id
                 if not actual_drive_id and site_id:
                     actual_drive_id = await content_client.get_default_drive_id(site_id)
 
                 if not actual_drive_id:
-                    raise ValueError("Could not determine drive_id - need either drive_id or site_id")
+                    raise ValueError(
+                        "Could not determine drive_id - need either drive_id or site_id"
+                    )
 
                 if integration_knowledge.folder_id:
                     item_info = await content_client.get_file_metadata(
@@ -708,9 +830,13 @@ class SharePointContentService:
                     integration_knowledge.selected_item_type = "site_root"
 
                     if resource_type == "onedrive":
-                        data = await content_client.get_drive_root_children(actual_drive_id)
+                        data = await content_client.get_drive_root_children(
+                            actual_drive_id
+                        )
                     else:
-                        data = await content_client.get_documents_in_drive(site_id=site_id)
+                        data = await content_client.get_documents_in_drive(
+                            site_id=site_id
+                        )
 
                     if data:
                         await self._process_documents(
@@ -769,7 +895,9 @@ class SharePointContentService:
                 )
             else:
                 # file
-                content, _ = await client.get_file_content_by_id(drive_id=drive_id, item_id=item_id)
+                content, _ = await client.get_file_content_by_id(
+                    drive_id=drive_id, item_id=item_id
+                )
                 if content:
                     await self._process_info_blob(
                         title=document.get("name", ""),
@@ -791,7 +919,9 @@ class SharePointContentService:
     ):
         for page in pages:
             site_id = page.get("parentReference", {}).get("siteId")
-            content = await client.get_page_content(site_id=site_id, page_id=page.get("id"))
+            content = await client.get_page_content(
+                site_id=site_id, page_id=page.get("id")
+            )
             if content:
                 page_text = _extract_text_from_canvas_layout(content)
                 if not page_text:
@@ -817,11 +947,9 @@ class SharePointContentService:
     ) -> None:
         existing_blob = None
         if sharepoint_item_id:
-            existing_blob = (
-                await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
-                    sharepoint_item_id=sharepoint_item_id,
-                    integration_knowledge_id=integration_knowledge.id,
-                )
+            existing_blob = await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
+                sharepoint_item_id=sharepoint_item_id,
+                integration_knowledge_id=integration_knowledge.id,
             )
         else:
             existing_blob = await self.info_blob_service.repo.get_by_title_and_integration_knowledge(
@@ -848,8 +976,10 @@ class SharePointContentService:
                 info_blob_add
             )
         else:
-            info_blob = await self.info_blob_service.upsert_info_blob_by_title_and_integration(
-                info_blob_add
+            info_blob = (
+                await self.info_blob_service.upsert_info_blob_by_title_and_integration(
+                    info_blob_add
+                )
             )
 
         try:
@@ -864,7 +994,8 @@ class SharePointContentService:
 
         try:
             await self.datastore.add(
-                info_blob=info_blob, embedding_model=integration_knowledge.embedding_model
+                info_blob=info_blob,
+                embedding_model=integration_knowledge.embedding_model,
             )
         except Exception as e:
             logger.debug(f"Could not add embedding for {title}: {e}")
@@ -902,7 +1033,10 @@ class SharePointContentService:
                 )
         else:
             if not site_id:
-                logger.warning("Missing site_id for SharePoint folder fetch (drive_id=%s)", drive_id)
+                logger.warning(
+                    "Missing site_id for SharePoint folder fetch (drive_id=%s)",
+                    drive_id,
+                )
                 return
             results = await client.get_folder_items(
                 site_id=site_id,
@@ -1015,7 +1149,9 @@ class SharePointContentService:
         if files:
             processed_parts.append(f"{files} file{'s' if files != 1 else ''}")
         if deleted:
-            processed_parts.append(f"{deleted} deleted file{'s' if deleted != 1 else ''}")
+            processed_parts.append(
+                f"{deleted} deleted file{'s' if deleted != 1 else ''}"
+            )
         if pages:
             processed_parts.append(f"{pages} page{'s' if pages != 1 else ''}")
         if not processed_parts:
@@ -1036,7 +1172,8 @@ class SharePointContentService:
         self,
         item: Dict[str, Any],
         scope_folder_id: Optional[str],
-        known_subfolder_ids: Optional[set] = None,
+        scope_folder_path: Optional[str] = None,
+        known_subfolder_ids: Optional[set[str]] = None,
         selected_item_type: Optional[str] = None,
     ) -> bool:
         """
@@ -1044,12 +1181,12 @@ class SharePointContentService:
 
         Behavior depends on selected_item_type:
         - "file": Only include the specific file (item.id == scope_folder_id)
-        - "folder": Include direct children and descendants of the folder
+        - "folder": Include direct children and all descendants of the folder
         - "site_root" or None: Include all items (no filtering)
 
         For folder scope, an item is in scope if:
         - Its parent is the scope folder itself, OR
-        - Its parent is a known subfolder within the scope
+        - Its parentReference.path contains the scope folder path (nested descendant)
         """
         if not scope_folder_id:
             return True
@@ -1071,11 +1208,39 @@ class SharePointContentService:
         if parent_id == scope_folder_id:
             return True
 
-        # Child of a subfolder within the scope
+        # Child of a previously-seen subfolder in scope (backward compatibility).
         if known_subfolder_ids and parent_id in known_subfolder_ids:
             return True
 
+        # Check nested descendants via parentReference.path
+        # Graph API returns paths like "/drives/{id}/root:/Documents/Reports"
+        # We match against the stored folder_path (e.g. "/Documents/Reports")
+        if scope_folder_path:
+            relative_path = self._extract_relative_graph_path(
+                parent_ref.get("path", "")
+            )
+
+            # Item is in scope if its parent path starts with or equals the folder path
+            normalized_scope = scope_folder_path.rstrip("/")
+            normalized_parent = relative_path.rstrip("/")
+            if normalized_scope and (
+                normalized_parent == normalized_scope
+                or normalized_parent.startswith(normalized_scope + "/")
+            ):
+                return True
+
         return False
+
+    @staticmethod
+    def _extract_relative_graph_path(parent_path: str) -> str:
+        """Convert Graph parentReference.path to a comparable relative path."""
+        if not parent_path:
+            return ""
+        if ":/" in parent_path:
+            return parent_path.split(":", 1)[1]
+        if "root:" in parent_path:
+            return "/"
+        return parent_path
 
     async def _get_all_sharepoint_files(
         self,
@@ -1178,7 +1343,9 @@ class SharePointContentService:
         return files
 
     async def token_refresh_callback(self, token_id: UUID) -> Dict[str, str]:
-        token = await self.oauth_token_service.refresh_and_update_token(token_id=token_id)
+        token = await self.oauth_token_service.refresh_and_update_token(
+            token_id=token_id
+        )
         return {
             "access_token": token.access_token,
             "refresh_token": token.refresh_token,
@@ -1190,9 +1357,7 @@ class SharePointContentService:
 
         return file_extension_to_type(item.get("name", ""))
 
-    async def _get_file_content(
-        self, token, item: Dict[str, Any]
-    ) -> Optional[str]:
+    async def _get_file_content(self, token, item: Dict[str, Any]) -> Optional[str]:
         item_id = item.get("id")
         item_name = item.get("name", "").lower()
         item_type = self._get_item_type(item)
@@ -1202,13 +1367,15 @@ class SharePointContentService:
             return None
 
         try:
-            base_url = getattr(token, 'base_url', 'https://graph.microsoft.com')
-            token_id = getattr(token, 'id', None)
+            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
+            token_id = getattr(token, "id", None)
             async with SharePointContentClient(
                 base_url=base_url,
                 api_token=token.access_token,
                 token_id=token_id,
-                token_refresh_callback=self.token_refresh_callback if token_id else None,
+                token_refresh_callback=(
+                    self.token_refresh_callback if token_id else None
+                ),
             ) as content_client:
                 content, _ = await content_client.get_file_content_by_id(
                     drive_id=drive_id, item_id=item_id
