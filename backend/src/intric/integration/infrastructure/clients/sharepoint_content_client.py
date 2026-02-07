@@ -1,3 +1,4 @@
+import json
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from intric.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
 )
 from intric.libs.clients import BaseClient
+from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -16,16 +18,20 @@ TokenRefreshCallback = Callable[[UUID], Awaitable[Dict[str, str]]]
 
 class DeltaTokenExpiredException(Exception):
     """Raised when Microsoft Graph returns 410 Gone for an expired delta token."""
+
     pass
 
 
 class SharePointContentClient(BaseClient):
+    DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB safety limit
+
     def __init__(
         self,
         base_url: str,
         api_token: str,
         token_id: Optional[UUID] = None,
         token_refresh_callback: Optional[TokenRefreshCallback] = None,
+        max_download_bytes: Optional[int] = None,
     ):
         super().__init__(base_url=base_url)
         self.headers = {
@@ -36,6 +42,10 @@ class SharePointContentClient(BaseClient):
         self.token_id = token_id
         # Used to do token refresh when token is expired
         self.token_refresh_callback = token_refresh_callback
+        if max_download_bytes is None:
+            self.max_download_bytes = get_settings().sharepoint_max_download_bytes
+        else:
+            self.max_download_bytes = max_download_bytes
 
     def update_token(self, new_token: str):
         """Update the token and headers with a new token value"""
@@ -69,7 +79,9 @@ class SharePointContentClient(BaseClient):
         while next_link:
             if next_link.startswith("http"):
                 parsed = urlparse(next_link)
-                next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+                next_link = (
+                    f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+                )
 
             response = await self.client.get(next_link, headers=self.headers)
             all_items.extend(response.get("value", []))
@@ -77,18 +89,84 @@ class SharePointContentClient(BaseClient):
 
         return all_items
 
-    async def get_sites(self) -> Dict[str, Any]:
+    @staticmethod
+    def _parse_content_length(content_length: Optional[str]) -> Optional[int]:
+        if not content_length:
+            return None
         try:
-            return await self.client.get("v1.0/sites?search=*", headers=self.headers)
+            return int(content_length)
+        except (TypeError, ValueError):
+            return None
+
+    async def _read_response_with_size_limit(
+        self,
+        response: aiohttp.ClientResponse,
+        file_name: str,
+    ) -> bytes:
+        content_length = self._parse_content_length(
+            response.headers.get("Content-Length")
+        )
+        if content_length is not None and content_length > self.max_download_bytes:
+            raise ValueError(
+                f"SharePoint file '{file_name}' exceeds max download size "
+                f"({content_length} > {self.max_download_bytes} bytes)"
+            )
+
+        payload = bytearray()
+        async for chunk in response.content.iter_chunked(1024 * 1024):
+            payload.extend(chunk)
+            if len(payload) > self.max_download_bytes:
+                raise ValueError(
+                    f"SharePoint file '{file_name}' exceeds max download size "
+                    f"({len(payload)} > {self.max_download_bytes} bytes)"
+                )
+
+        return bytes(payload)
+
+    async def _download_file_content(
+        self,
+        download_url: str,
+        file_name: str,
+    ) -> Tuple[str, str]:
+        async with self.client.client.get(
+            download_url, headers=self.headers
+        ) as response:
+            response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "")
+            content_type_lower = content_type.lower()
+            payload = await self._read_response_with_size_limit(response, file_name)
+
+            if "application/json" in content_type_lower:
+                decoded = payload.decode(response.charset or "utf-8", errors="replace")
+                try:
+                    return str(json.loads(decoded)), content_type
+                except json.JSONDecodeError:
+                    return decoded, content_type
+
+            if "text/" in content_type_lower or "application/xml" in content_type_lower:
+                return (
+                    payload.decode(response.charset or "utf-8", errors="replace"),
+                    content_type,
+                )
+
+            text, detected_content_type = process_sharepoint_response(
+                response_content=payload,
+                content_type=content_type,
+                filename=file_name,
+            )
+            return text, detected_content_type
+
+    async def get_sites(self) -> Dict[str, Any]:
+        endpoint = "v1.0/sites?search=*"
+        try:
+            return {"value": await self._get_all_paged_items(endpoint)}
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
                     "SharePoint token expired while listing sites, refreshing..."
                 )
                 await self.refresh_token()
-                return await self.client.get(
-                    "v1.0/sites?search=*", headers=self.headers
-                )
+                return {"value": await self._get_all_paged_items(endpoint)}
             else:
                 raise
 
@@ -98,9 +176,7 @@ class SharePointContentClient(BaseClient):
             return await self.client.get("v1.0/me/drive", headers=self.headers)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "Token expired while getting OneDrive, refreshing..."
-                )
+                logger.info("Token expired while getting OneDrive, refreshing...")
                 await self.refresh_token()
                 return await self.client.get("v1.0/me/drive", headers=self.headers)
             else:
@@ -113,9 +189,7 @@ class SharePointContentClient(BaseClient):
             return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "Token expired while getting drive root, refreshing..."
-                )
+                logger.info("Token expired while getting drive root, refreshing...")
                 await self.refresh_token()
                 return await self._get_all_paged_items(endpoint)
             else:
@@ -130,29 +204,24 @@ class SharePointContentClient(BaseClient):
             return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "Token expired while getting folder items, refreshing..."
-                )
+                logger.info("Token expired while getting folder items, refreshing...")
                 await self.refresh_token()
                 return await self._get_all_paged_items(endpoint)
             else:
                 raise
 
     async def get_site_pages(self, site_id: str) -> Dict[str, Any]:
+        endpoint = f"v1.0/sites/{site_id}/pages"
         try:
-            endpoint = f"v1.0/sites/{site_id}/pages"
-            page_data = await self.client.get(endpoint, headers=self.headers)
-            return page_data
+            return {"value": await self._get_all_paged_items(endpoint)}
 
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 await self.refresh_token()
-                page_data = await self.client.get(endpoint, headers=self.headers)
-                return page_data
+                return {"value": await self._get_all_paged_items(endpoint)}
             else:
                 logger.error(f"SharePoint API error when getting page content: {e}")
                 raise
-
 
     async def get_default_drive_id(self, site_id: str) -> Optional[str]:
         """Returnerar default drive-id för sajten (språk-agnostiskt)."""
@@ -168,14 +237,18 @@ class SharePointContentClient(BaseClient):
                 return resp.get("id")
             raise
 
-    async def get_drives(self, site_id: str, drive_name: Optional[str] = None) -> Optional[str]:
+    async def get_drives(
+        self, site_id: str, drive_name: Optional[str] = None
+    ) -> Optional[str]:
         """Returnerar drive-id. Om drive_name är None, välj default documentLibrary deterministiskt."""
         endpoint = f"v1.0/sites/{site_id}/drives"
         try:
             response = await self.client.get(endpoint, headers=self.headers)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info("SharePoint token expired when listing drives, refreshing...")
+                logger.info(
+                    "SharePoint token expired when listing drives, refreshing..."
+                )
                 await self.refresh_token()
                 response = await self.client.get(endpoint, headers=self.headers)
             else:
@@ -288,7 +361,9 @@ class SharePointContentClient(BaseClient):
             return await self.client.get(endpoint, headers=self.headers)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info("SharePoint token expired while getting page content, refreshing...")
+                logger.info(
+                    "SharePoint token expired while getting page content, refreshing..."
+                )
                 await self.refresh_token()
                 return await self.client.get(endpoint, headers=self.headers)
             logger.error(f"SharePoint API error when getting page content: {e}")
@@ -315,25 +390,10 @@ class SharePointContentClient(BaseClient):
             if not download_url:
                 return "[Error: No download URL available]", "text/plain"
 
-            async with self.client.client.get(
-                download_url, headers=self.headers
-            ) as response:
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "")
-
-                if "application/json" in content_type:
-                    data = await response.json()
-                    return str(data), content_type
-                elif "text/" in content_type or content_type == "application/xml":
-                    return await response.text(), content_type
-                else:
-                    binary_content = await response.read()
-                    text, detected_content_type = process_sharepoint_response(
-                        response_content=binary_content,
-                        content_type=content_type,
-                        filename=file_name,
-                    )
-                    return text, detected_content_type
+            return await self._download_file_content(
+                download_url=download_url,
+                file_name=file_name,
+            )
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
@@ -351,26 +411,10 @@ class SharePointContentClient(BaseClient):
                         "text/plain",
                     )
 
-                url = download_url
-                async with self.client.client.get(
-                    url, headers=self.headers
-                ) as response:
-                    response.raise_for_status()
-                    content_type = response.headers.get("Content-Type", "")
-
-                    if "application/json" in content_type:
-                        data = await response.json()
-                        return str(data), content_type
-                    elif "text/" in content_type or content_type == "application/xml":
-                        return await response.text(), content_type
-                    else:
-                        binary_content = await response.read()
-                        text, detected_content_type = process_sharepoint_response(
-                            response_content=binary_content,
-                            content_type=content_type,
-                            filename=file_name,
-                        )
-                        return text, detected_content_type
+                return await self._download_file_content(
+                    download_url=download_url,
+                    file_name=file_name,
+                )
             else:
                 logger.error(f"SharePoint API error when getting file content: {e}")
                 raise
@@ -398,6 +442,7 @@ class SharePointContentClient(BaseClient):
                 if next_link.startswith("http"):
                     # Extract just the path and query from the full URL
                     from urllib.parse import urlparse
+
                     parsed = urlparse(next_link)
                     next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
 
@@ -417,6 +462,7 @@ class SharePointContentClient(BaseClient):
 
             # Extract just the token parameter from the deltaLink
             from urllib.parse import urlparse, parse_qs
+
             parsed = urlparse(delta_link)
             query_params = parse_qs(parsed.query)
             token = query_params.get("token", [None])[0]
@@ -465,6 +511,7 @@ class SharePointContentClient(BaseClient):
                 # Handle full URL or relative endpoint
                 if next_link.startswith("http"):
                     from urllib.parse import urlparse
+
                     parsed = urlparse(next_link)
                     next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
 
@@ -483,6 +530,7 @@ class SharePointContentClient(BaseClient):
 
                     # Extract token from deltaLink
                     from urllib.parse import urlparse, parse_qs
+
                     parsed = urlparse(delta_link)
                     query_params = parse_qs(parsed.query)
                     new_delta_token = query_params.get("token", [None])[0]
@@ -493,9 +541,7 @@ class SharePointContentClient(BaseClient):
                 # Return the old token so we don't lose sync state
                 new_delta_token = delta_token
 
-            logger.info(
-                f"Retrieved {len(all_changes)} changes for drive {drive_id}"
-            )
+            logger.info(f"Retrieved {len(all_changes)} changes for drive {drive_id}")
             return all_changes, new_delta_token
 
         except aiohttp.ClientResponseError as e:
@@ -504,7 +550,9 @@ class SharePointContentClient(BaseClient):
                     f"Delta token expired (410 Gone) for drive {drive_id}"
                 ) from e
             elif e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info("SharePoint token expired during delta query, refreshing...")
+                logger.info(
+                    "SharePoint token expired during delta query, refreshing..."
+                )
                 await self.refresh_token()
                 return await self.get_delta_changes(drive_id, delta_token)
             else:

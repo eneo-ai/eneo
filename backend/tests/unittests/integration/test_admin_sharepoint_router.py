@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from intric.integration.presentation.admin_sharepoint_router import (
     _get_sharepoint_token_for_user_integration,
+    _require_sharepoint_webhook_client_state,
     list_sharepoint_subscriptions,
     recreate_subscription,
     renew_expired_subscriptions,
@@ -81,7 +82,9 @@ async def test_recreate_subscription_uses_tenant_scoped_lookup():
         "intric.integration.presentation.admin_sharepoint_router.validate_permission"
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await recreate_subscription(subscription_id=subscription_id, container=container)
+            await recreate_subscription(
+                subscription_id=subscription_id, container=container
+            )
 
     assert exc_info.value.status_code == 404
     subscription_repo.one_by_tenant.assert_called_once_with(
@@ -122,3 +125,31 @@ async def test_token_helper_persists_rotated_service_account_refresh_token():
     assert token.access_token == "service-account-access-token"
     tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
     tenant_app_repo.update.assert_called_once_with(tenant_app)
+
+
+def test_require_sharepoint_webhook_client_state_raises_when_missing():
+    settings = MagicMock()
+    settings.sharepoint_webhook_client_state = None
+
+    with patch(
+        "intric.integration.presentation.admin_sharepoint_router.get_settings",
+        return_value=settings,
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            _require_sharepoint_webhook_client_state()
+
+    assert exc_info.value.status_code == 400
+    assert "SHAREPOINT_WEBHOOK_CLIENT_STATE" in exc_info.value.detail
+
+
+def test_require_sharepoint_webhook_client_state_returns_trimmed_value():
+    settings = MagicMock()
+    settings.sharepoint_webhook_client_state = "  webhook-secret  "
+
+    with patch(
+        "intric.integration.presentation.admin_sharepoint_router.get_settings",
+        return_value=settings,
+    ):
+        result = _require_sharepoint_webhook_client_state()
+
+    assert result == "webhook-secret"

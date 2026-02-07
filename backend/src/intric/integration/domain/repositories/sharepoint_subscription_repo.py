@@ -4,17 +4,41 @@ from typing import List, Optional, TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+    from intric.integration.domain.entities.sharepoint_subscription import (
+        SharePointSubscription,
+    )
 
 
 class SharePointSubscriptionRepository(ABC):
     """Repository for managing SharePoint webhook subscriptions."""
 
     @abstractmethod
-    async def get_by_user_and_site(
+    async def one_or_none(
         self,
-        user_integration_id: UUID,
-        site_id: str
+        id: UUID | None = None,
+        **filters,
+    ) -> "Optional[SharePointSubscription]":
+        """Get a single subscription by ID or filters, returning None if not found."""
+        ...
+
+    @abstractmethod
+    async def add(self, obj: "SharePointSubscription") -> "SharePointSubscription":
+        """Persist and return a new subscription."""
+        ...
+
+    @abstractmethod
+    async def update(self, obj: "SharePointSubscription") -> "SharePointSubscription":
+        """Persist and return an updated subscription."""
+        ...
+
+    @abstractmethod
+    async def delete(self, id: UUID) -> None:
+        """Delete a subscription by database ID."""
+        ...
+
+    @abstractmethod
+    async def get_by_user_and_site(
+        self, user_integration_id: UUID, site_id: str
     ) -> "Optional[SharePointSubscription]":
         """Get subscription for a specific user+site combination.
 
@@ -24,16 +48,14 @@ class SharePointSubscriptionRepository(ABC):
 
     @abstractmethod
     async def get_by_subscription_id(
-        self,
-        subscription_id: str
+        self, subscription_id: str
     ) -> "Optional[SharePointSubscription]":
         """Get subscription by Microsoft Graph subscription ID."""
         ...
 
     @abstractmethod
     async def list_expiring_before(
-        self,
-        expires_before: datetime
+        self, expires_before: datetime
     ) -> "List[SharePointSubscription]":
         """List all subscriptions expiring before the given datetime.
 
@@ -50,10 +72,7 @@ class SharePointSubscriptionRepository(ABC):
         ...
 
     @abstractmethod
-    async def list_by_tenant(
-        self,
-        tenant_id: UUID
-    ) -> "List[SharePointSubscription]":
+    async def list_by_tenant(self, tenant_id: UUID) -> "List[SharePointSubscription]":
         """List all subscriptions that belong to a tenant."""
         ...
 
@@ -67,10 +86,7 @@ class SharePointSubscriptionRepository(ABC):
         ...
 
     @abstractmethod
-    async def count_references(
-        self,
-        subscription_id: UUID
-    ) -> int:
+    async def count_references(self, subscription_id: UUID) -> int:
         """Count how many integration_knowledge records reference this subscription.
 
         Used to determine if subscription can be safely deleted (0 references).

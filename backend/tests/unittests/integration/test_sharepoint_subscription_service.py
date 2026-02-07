@@ -10,7 +10,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+from intric.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 from intric.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
@@ -74,7 +76,9 @@ def expired_subscription():
 @pytest.fixture
 def service(mock_subscription_repo, mock_oauth_token_service):
     """Create SharePointSubscriptionService with mocked dependencies."""
-    with patch("intric.integration.infrastructure.sharepoint_subscription_service.get_settings") as mock_settings:
+    with patch(
+        "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+    ) as mock_settings:
         settings = MagicMock()
         settings.sharepoint_webhook_notification_url = "https://example.com/webhook/"
         settings.sharepoint_webhook_client_state = "test-client-state"
@@ -116,8 +120,12 @@ class TestEnsureSubscriptionForSite:
         mock_subscription_repo.add.return_value = MagicMock(id=uuid4())
 
         # Mock Graph API calls
-        with patch.object(service, "_resolve_drive_id", return_value="resolved-drive-id"):
-            with patch.object(service, "_create_graph_subscription", return_value="new-graph-sub-id"):
+        with patch.object(
+            service, "_resolve_drive_id", return_value="resolved-drive-id"
+        ):
+            with patch.object(
+                service, "_create_graph_subscription", return_value="new-graph-sub-id"
+            ):
                 result = await service.ensure_subscription_for_site(
                     user_integration_id=user_integration_id,
                     site_id=site_id,
@@ -133,7 +141,9 @@ class TestEnsureSubscriptionForSite:
         """Recreates subscription if existing one has expired."""
         mock_subscription_repo.get_by_user_and_site.return_value = expired_subscription
 
-        with patch.object(service, "recreate_expired_subscription", return_value=True) as mock_recreate:
+        with patch.object(
+            service, "recreate_expired_subscription", return_value=True
+        ) as mock_recreate:
             result = await service.ensure_subscription_for_site(
                 user_integration_id=expired_subscription.user_integration_id,
                 site_id=expired_subscription.site_id,
@@ -147,9 +157,12 @@ class TestEnsureSubscriptionForSite:
         self, mock_subscription_repo, mock_oauth_token_service, mock_token
     ):
         """Returns None if webhook notification URL is not configured."""
-        with patch("intric.integration.infrastructure.sharepoint_subscription_service.get_settings") as mock_settings:
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+        ) as mock_settings:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = None
+            settings.sharepoint_webhook_client_state = "test-client-state"
             settings.public_origin = None
             mock_settings.return_value = settings
 
@@ -176,7 +189,9 @@ class TestEnsureSubscriptionForSite:
         mock_subscription_repo.get_by_user_and_site.return_value = None
         mock_subscription_repo.add.return_value = MagicMock(id=uuid4())
 
-        with patch.object(service, "_create_graph_subscription", return_value="new-sub-id") as mock_create:
+        with patch.object(
+            service, "_create_graph_subscription", return_value="new-sub-id"
+        ) as mock_create:
             await service.ensure_subscription_for_site(
                 user_integration_id=user_integration_id,
                 site_id=onedrive_drive_id,
@@ -199,7 +214,11 @@ class TestRecreateExpiredSubscription:
     ):
         """Successfully recreates an expired subscription."""
         with patch.object(service, "_delete_graph_subscription", return_value=True):
-            with patch.object(service, "_create_graph_subscription", return_value="new-subscription-id"):
+            with patch.object(
+                service,
+                "_create_graph_subscription",
+                return_value="new-subscription-id",
+            ):
                 result = await service.recreate_expired_subscription(
                     subscription=expired_subscription,
                     token=mock_token,
@@ -219,8 +238,12 @@ class TestRecreateExpiredSubscription:
         """Attempts to delete old subscription before creating new one."""
         old_subscription_id = expired_subscription.subscription_id
 
-        with patch.object(service, "_delete_graph_subscription", return_value=True) as mock_delete:
-            with patch.object(service, "_create_graph_subscription", return_value="new-sub-id"):
+        with patch.object(
+            service, "_delete_graph_subscription", return_value=True
+        ) as mock_delete:
+            with patch.object(
+                service, "_create_graph_subscription", return_value="new-sub-id"
+            ):
                 await service.recreate_expired_subscription(
                     subscription=expired_subscription,
                     token=mock_token,
@@ -250,7 +273,9 @@ class TestRecreateExpiredSubscription:
     ):
         """Continues with recreation even if old subscription delete fails."""
         with patch.object(service, "_delete_graph_subscription", return_value=False):
-            with patch.object(service, "_create_graph_subscription", return_value="new-sub-id"):
+            with patch.object(
+                service, "_create_graph_subscription", return_value="new-sub-id"
+            ):
                 result = await service.recreate_expired_subscription(
                     subscription=expired_subscription,
                     token=mock_token,
@@ -303,7 +328,9 @@ class TestRenewSubscription:
             mock_session.patch = MagicMock(return_value=mock_response)
             mock_session_class.return_value = mock_session
 
-            with patch.object(service, "recreate_expired_subscription", return_value=True) as mock_recreate:
+            with patch.object(
+                service, "recreate_expired_subscription", return_value=True
+            ) as mock_recreate:
                 result = await service.renew_subscription(
                     subscription=mock_subscription,
                     token=mock_token,
@@ -341,7 +368,9 @@ class TestRenewSubscription:
             mock_session.patch = MagicMock(return_value=mock_response)
             mock_session_class.return_value = mock_session
 
-            with patch.object(service, "recreate_expired_subscription", return_value=True) as mock_recreate:
+            with patch.object(
+                service, "recreate_expired_subscription", return_value=True
+            ) as mock_recreate:
                 result = await service.renew_subscription(
                     subscription=onedrive_subscription,
                     token=mock_token,
@@ -449,6 +478,7 @@ class TestGraphApiInteractions:
         assert payload["notificationUrl"] == "https://example.com/webhook/"
         assert "/sites/site-123/drives/drive-456/root" in payload["resource"]
         assert "expirationDateTime" in payload
+        assert payload["clientState"] == "test-client-state"
 
     async def test_create_graph_subscription_onedrive_resource_format(
         self, service, mock_token
@@ -477,10 +507,40 @@ class TestGraphApiInteractions:
         payload = mock_session.post.call_args.kwargs["json"]
         assert payload["resource"] == "/drives/onedrive-drive-123/root"
         assert "/sites/" not in payload["resource"]
+        assert payload["clientState"] == "test-client-state"
 
-    async def test_delete_graph_subscription_handles_404(
-        self, service, mock_token
+    async def test_create_graph_subscription_raises_if_client_state_missing(
+        self, mock_subscription_repo, mock_oauth_token_service, mock_token
     ):
+        """Must fail fast if SHAREPOINT_WEBHOOK_CLIENT_STATE is not configured."""
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+        ) as mock_settings:
+            settings = MagicMock()
+            settings.sharepoint_webhook_notification_url = (
+                "https://example.com/webhook/"
+            )
+            settings.sharepoint_webhook_client_state = None
+            settings.public_origin = "https://example.com"
+            mock_settings.return_value = settings
+
+            service_without_client_state = SharePointSubscriptionService(
+                sharepoint_subscription_repo=mock_subscription_repo,
+                oauth_token_service=mock_oauth_token_service,
+            )
+
+        with patch("aiohttp.ClientSession") as mock_session_class:
+            with pytest.raises(ValueError) as exc_info:
+                await service_without_client_state._create_graph_subscription(
+                    token=mock_token,
+                    site_id="site-123",
+                    drive_id="drive-456",
+                )
+
+        assert "SHAREPOINT_WEBHOOK_CLIENT_STATE" in str(exc_info.value)
+        mock_session_class.assert_not_called()
+
+    async def test_delete_graph_subscription_handles_404(self, service, mock_token):
         """Treats 404 as success (subscription already deleted)."""
         mock_response = MagicMock()
         mock_response.status = 404
@@ -501,9 +561,7 @@ class TestGraphApiInteractions:
 
         assert result is True
 
-    async def test_delete_graph_subscription_success(
-        self, service, mock_token
-    ):
+    async def test_delete_graph_subscription_success(self, service, mock_token):
         """Successfully deletes subscription (204 response)."""
         mock_response = MagicMock()
         mock_response.status = 204

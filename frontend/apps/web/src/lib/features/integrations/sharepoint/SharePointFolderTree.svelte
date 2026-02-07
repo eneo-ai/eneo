@@ -50,7 +50,11 @@
     [{ folderId: null, path: "/", name: siteName }]
   );
 
+  // Guard against stale responses when navigating quickly
+  let requestId = 0;
+
   const loadFolders = createAsyncState(async (folderId: string | null = null, folderPath: string = "") => {
+    const thisRequest = ++requestId;
     try {
       const queryParams: Record<string, string> = {
         space_id: spaceId
@@ -81,11 +85,15 @@
         }
       );
 
+      // Ignore stale responses from earlier navigations
+      if (thisRequest !== requestId) return;
+
       currentItems = response.items || [];
       currentPath = response.current_path || "/";
       currentFolderId = folderId;
       currentDriveId = response.drive_id;
     } catch (error) {
+      if (thisRequest !== requestId) return;
       console.error("Error loading folder tree:", error);
     }
   });
@@ -111,11 +119,11 @@
       currentFolderId = target.folderId;
       loadFolders(target.folderId, target.path);
       // Select the folder we navigated back to (or site root if index 0)
-      if (index === 0) {
+      if (index === 0 || !target.folderId) {
         handleImportEntireSite();
       } else {
         onSelect({
-          id: target.folderId ?? "",
+          id: target.folderId,
           name: target.name,
           type: "folder",
           path: target.path,
