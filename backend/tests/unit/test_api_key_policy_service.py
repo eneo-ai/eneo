@@ -375,3 +375,93 @@ def test_reverse_proxy_ip_resolution_falls_back_to_client_host():
         trusted_proxy_headers=[],
     )
     assert ip == "192.168.1.1"
+
+
+# ---------------------------------------------------------------------------
+# Guardrail edge cases (Phase 7L)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ip_allowlist_none_skips_check():
+    """Key with allowed_ips=None → IP check is skipped entirely."""
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    key = SimpleNamespace(allowed_ips=None)
+    # Should NOT raise — no IP restriction
+    service._validate_ip(key=key, client_ip="anything")
+
+
+@pytest.mark.asyncio
+async def test_ip_allowlist_empty_list_rejects_all():
+    """Key with allowed_ips=[] → rejects all IPs (no entries match)."""
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    key = SimpleNamespace(allowed_ips=[])
+    with pytest.raises(ApiKeyValidationError) as exc:
+        service._validate_ip(key=key, client_ip="10.0.0.1")
+    assert exc.value.code == "ip_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_origin_matches_case_insensitive_scheme():
+    """Origin matching is case-insensitive for scheme and host."""
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    assert service._origin_matches("HTTPS://Example.Com", "https://example.com")
+
+
+@pytest.mark.asyncio
+async def test_localhost_origin_detection():
+    """Localhost detection covers common patterns."""
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    assert service._is_localhost_origin("http://localhost:3000")
+    assert service._is_localhost_origin("http://127.0.0.1:8080")
+    assert not service._is_localhost_origin("https://app.example.com")
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_negative_one_is_unlimited_without_cap_requires_admin():
+    """rate_limit=-1 (unlimited) without cap → requires admin permission."""
+    from intric.roles.permissions import Permission
+
+    # Non-admin user → rejected
+    service = _service_with_user([], permissions=[])
+    service.user.tenant.api_key_policy = {}
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_rate_limit(-1)
+    assert exc.value.code == "insufficient_permission"
+
+    # Admin user → allowed
+    admin_service = _service_with_user([], permissions=[Permission.ADMIN])
+    admin_service.user.tenant.api_key_policy = {}
+    await admin_service._validate_rate_limit(-1)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_positive_value_always_valid():
+    """Positive rate_limit is always valid regardless of cap."""
+    service = _service_with_user([])
+    service.user.tenant.api_key_policy = {"max_rate_limit_override": 1000}
+    await service._validate_rate_limit(500)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_at_cap_boundary_valid():
+    """rate_limit exactly at the cap boundary → valid."""
+    service = _service_with_user([])
+    service.user.tenant.api_key_policy = {"max_rate_limit_override": 100}
+    await service._validate_rate_limit(100)

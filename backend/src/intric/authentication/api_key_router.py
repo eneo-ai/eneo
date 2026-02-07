@@ -16,11 +16,13 @@ from intric.authentication.api_key_router_helpers import (
     raise_api_key_http_error,
 )
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
+from intric.authentication.auth_dependencies import require_api_key_permission
 from intric.authentication.auth_models import (
     ApiKeyCreateRequest,
     ApiKeyCreatedResponse,
     ApiKeyCreationConstraints,
     ApiKeyListResponse,
+    ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateChangeRequest,
@@ -154,6 +156,7 @@ async def create_api_key(
     http_request: Request,
     payload: ApiKeyCreateRequest = Body(..., examples=[_CREATE_API_KEY_EXAMPLE]),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
@@ -291,6 +294,7 @@ async def update_api_key(
         ],
     ),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
@@ -322,6 +326,7 @@ async def revoke_api_key_deprecated(
     id: UUID,
     http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
@@ -360,6 +365,7 @@ async def revoke_api_key(
         default=None, examples=[_STATE_CHANGE_EXAMPLE]
     ),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
@@ -393,6 +399,7 @@ async def rotate_api_key(
     id: UUID,
     http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
@@ -432,6 +439,7 @@ async def suspend_api_key(
         default=None, examples=[_STATE_CHANGE_EXAMPLE]
     ),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
@@ -465,6 +473,7 @@ async def reactivate_api_key(
     id: UUID,
     http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)

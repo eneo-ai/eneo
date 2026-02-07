@@ -188,7 +188,7 @@ class AuthService:
             created_by_user_id=user_id,
             scope_type=ApiKeyScopeType.TENANT.value,
             scope_id=None,
-            permission=ApiKeyPermission.WRITE.value,
+            permission=ApiKeyPermission.ADMIN.value,
             key_type=ApiKeyType.SK.value,
             key_hash=api_key.hashed_key,
             hash_version=ApiKeyHashVersion.SHA256.value,

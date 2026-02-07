@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from intric.authentication.api_key_repo import ApiKeysRepository
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
@@ -64,12 +65,30 @@ def check_resource_permission(
     """Centralized fine-grained resource permission check.
 
     Fail-closed: missing/unrecognized resource keys are treated as "none" (deny).
-    If resource_permissions is None, no restriction applies (backward compat).
+    If resource_permissions is None, falls back to the key's basic permission
+    level as a ceiling (e.g. a read key cannot perform write operations).
     """
     if not get_settings().api_key_enforce_resource_permissions:
         return
 
     if key.resource_permissions is None:
+        # No fine-grained permissions (simple mode) — use basic permission as ceiling
+        key_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+        required_level = PERMISSION_LEVEL_ORDER.get(required, 0)
+        if key_level < required_level:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_resource_permission",
+                message=(
+                    f"API key does not have sufficient permission for "
+                    f"'{resource_type}' (requires '{required}')."
+                ),
+                context=ResourceDenialContext(
+                    resource_type=resource_type,
+                    required_level=required,
+                    granted_level=key.permission,
+                ),
+            )
         return
 
     try:
@@ -256,22 +275,25 @@ class ApiKeyAuthResolver:
             tenant_id, owner_user_id = await self._get_user_tenant(
                 legacy_record.user_id
             )
-            migrated = await self.api_key_repo.create(
-                tenant_id=tenant_id,
-                owner_user_id=owner_user_id,
-                created_by_user_id=owner_user_id,
-                scope_type=ApiKeyScopeType.TENANT.value,
-                scope_id=None,
-                permission=ApiKeyPermission.WRITE.value,
-                key_type=ApiKeyType.SK.value,
-                key_hash=self._hash_sha256(plain_key),
-                hash_version=ApiKeyHashVersion.SHA256.value,
-                key_prefix=prefix,
-                key_suffix=plain_key[-4:],
-                name="Legacy API key",
-                description=None,
-                state=ApiKeyState.ACTIVE.value,
-            )
+            try:
+                migrated = await self.api_key_repo.create(
+                    tenant_id=tenant_id,
+                    owner_user_id=owner_user_id,
+                    created_by_user_id=owner_user_id,
+                    scope_type=ApiKeyScopeType.TENANT.value,
+                    scope_id=None,
+                    permission=ApiKeyPermission.ADMIN.value,
+                    key_type=ApiKeyType.SK.value,
+                    key_hash=self._hash_sha256(plain_key),
+                    hash_version=ApiKeyHashVersion.SHA256.value,
+                    key_prefix=prefix,
+                    key_suffix=plain_key[-4:],
+                    name="Legacy API key",
+                    description=None,
+                    state=ApiKeyState.ACTIVE.value,
+                )
+            except IntegrityError:
+                migrated = await self._fetch_concurrent_migration(plain_key, prefix, tenant_id)
             await self._log_legacy_migration(
                 migrated=migrated,
                 legacy_record=legacy_record,
@@ -283,22 +305,25 @@ class ApiKeyAuthResolver:
             tenant_id, owner_user_id = await self._get_assistant_context(
                 legacy_record.assistant_id
             )
-            migrated = await self.api_key_repo.create(
-                tenant_id=tenant_id,
-                owner_user_id=owner_user_id,
-                created_by_user_id=owner_user_id,
-                scope_type=ApiKeyScopeType.ASSISTANT.value,
-                scope_id=legacy_record.assistant_id,
-                permission=ApiKeyPermission.WRITE.value,
-                key_type=ApiKeyType.SK.value,
-                key_hash=self._hash_sha256(plain_key),
-                hash_version=ApiKeyHashVersion.SHA256.value,
-                key_prefix=prefix,
-                key_suffix=plain_key[-4:],
-                name="Legacy Assistant API key",
-                description=None,
-                state=ApiKeyState.ACTIVE.value,
-            )
+            try:
+                migrated = await self.api_key_repo.create(
+                    tenant_id=tenant_id,
+                    owner_user_id=owner_user_id,
+                    created_by_user_id=owner_user_id,
+                    scope_type=ApiKeyScopeType.ASSISTANT.value,
+                    scope_id=legacy_record.assistant_id,
+                    permission=ApiKeyPermission.READ.value,
+                    key_type=ApiKeyType.SK.value,
+                    key_hash=self._hash_sha256(plain_key),
+                    hash_version=ApiKeyHashVersion.SHA256.value,
+                    key_prefix=prefix,
+                    key_suffix=plain_key[-4:],
+                    name="Legacy Assistant API key",
+                    description=None,
+                    state=ApiKeyState.ACTIVE.value,
+                )
+            except IntegrityError:
+                migrated = await self._fetch_concurrent_migration(plain_key, prefix, tenant_id)
             await self._log_legacy_migration(
                 migrated=migrated,
                 legacy_record=legacy_record,
@@ -311,6 +336,32 @@ class ApiKeyAuthResolver:
             code="invalid_api_key",
             message="Legacy API key is invalid.",
         )
+
+    async def _fetch_concurrent_migration(
+        self, plain_key: str, prefix: str, tenant_id: UUID
+    ) -> ApiKeyV2InDB:
+        """Re-fetch a v2 record created by a concurrent migration."""
+        migrated = await self.api_key_repo.get_by_hash(
+            key_hash=self._hash_sha256(plain_key),
+            hash_version=ApiKeyHashVersion.SHA256.value,
+            key_prefix=prefix,
+            tenant_id=tenant_id,
+        )
+        if migrated is None:
+            # Auto-upgrade may have already converted to HMAC
+            migrated = await self.api_key_repo.get_by_hash(
+                key_hash=self._hash_hmac(plain_key),
+                hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
+                key_prefix=prefix,
+                tenant_id=tenant_id,
+            )
+        if migrated is None:
+            raise ApiKeyValidationError(
+                status_code=500,
+                code="migration_error",
+                message="Legacy key migration failed.",
+            )
+        return migrated
 
     async def _get_user_tenant(self, user_id: UUID) -> tuple[UUID, UUID]:
         stmt = sa.select(Users.tenant_id, Users.id).where(Users.id == user_id).limit(1)

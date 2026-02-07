@@ -57,6 +57,17 @@ PERMISSION_LEVEL_ORDER: dict[str, int] = {
 }
 
 
+METHOD_PERMISSION_MAP: dict[str, str] = {
+    "GET": "read",
+    "HEAD": "read",
+    "OPTIONS": "read",
+    "POST": "write",
+    "PUT": "write",
+    "PATCH": "write",
+    "DELETE": "admin",
+}
+
+
 class ResourcePermissionLevel(str, Enum):
     NONE = "none"
     READ = "read"

@@ -11,6 +11,8 @@ from intric.authentication.api_key_resolver import (
     ApiKeyAuthResolver,
     ApiKeyValidationError,
 )
+from sqlalchemy.exc import IntegrityError
+
 from intric.authentication.auth_models import (
     ApiKeyHashVersion,
     ApiKeyPermission,
@@ -213,3 +215,200 @@ async def test_legacy_migration_logs_audit_event(resolver: ApiKeyAuthResolver):
     )
 
     resolver.audit_service.log_async.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Concurrent migration race tests (Phase 7M)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_handles_integrity_error_with_sha256_fallback(
+    resolver: ApiKeyAuthResolver,
+):
+    """IntegrityError during migration → falls back to SHA256 get_by_hash."""
+    tenant_id = uuid4()
+    owner_user_id = uuid4()
+    existing_key = _make_v2_key(
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
+        key_prefix="inp_",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.ADMIN,
+    )
+
+    resolver.api_key_repo.create = AsyncMock(
+        side_effect=IntegrityError("duplicate", {}, None),
+    )
+    # SHA256 fallback finds the concurrent record
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=existing_key)
+
+    resolver.legacy_repo.session.execute = AsyncMock(
+        return_value=_Result(
+            _Row(tenant_id=tenant_id, id=owner_user_id, user_id=owner_user_id)
+        )
+    )
+
+    migrated = await resolver._migrate_legacy_key(
+        plain_key="inp_concurrent",
+        legacy_record=SimpleNamespace(user_id=owner_user_id, assistant_id=None),
+        prefix="inp_",
+    )
+
+    assert migrated.id == existing_key.id
+    assert migrated.permission == ApiKeyPermission.ADMIN
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_handles_integrity_error_with_hmac_fallback(
+    resolver: ApiKeyAuthResolver,
+):
+    """IntegrityError + SHA256 returns None → tries HMAC_SHA256 fallback."""
+    tenant_id = uuid4()
+    owner_user_id = uuid4()
+    existing_key = _make_v2_key(
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
+        key_prefix="inp_",
+        key_type=ApiKeyType.SK,
+        hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
+    )
+
+    resolver.api_key_repo.create = AsyncMock(
+        side_effect=IntegrityError("duplicate", {}, None),
+    )
+    # SHA256 miss, HMAC hit
+    resolver.api_key_repo.get_by_hash = AsyncMock(
+        side_effect=[None, existing_key],
+    )
+
+    resolver.legacy_repo.session.execute = AsyncMock(
+        return_value=_Result(
+            _Row(tenant_id=tenant_id, id=owner_user_id, user_id=owner_user_id)
+        )
+    )
+
+    migrated = await resolver._migrate_legacy_key(
+        plain_key="inp_concurrent",
+        legacy_record=SimpleNamespace(user_id=owner_user_id, assistant_id=None),
+        prefix="inp_",
+    )
+
+    assert migrated.id == existing_key.id
+    # Verify it tried both hash lookups
+    assert resolver.api_key_repo.get_by_hash.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_integrity_error_both_fallbacks_fail(
+    resolver: ApiKeyAuthResolver,
+):
+    """IntegrityError + both fallbacks return None → raises 500."""
+    tenant_id = uuid4()
+    owner_user_id = uuid4()
+
+    resolver.api_key_repo.create = AsyncMock(
+        side_effect=IntegrityError("duplicate", {}, None),
+    )
+    # Both fallbacks miss
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=None)
+
+    resolver.legacy_repo.session.execute = AsyncMock(
+        return_value=_Result(
+            _Row(tenant_id=tenant_id, id=owner_user_id, user_id=owner_user_id)
+        )
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver._migrate_legacy_key(
+            plain_key="inp_orphan",
+            legacy_record=SimpleNamespace(user_id=owner_user_id, assistant_id=None),
+            prefix="inp_",
+        )
+
+    assert exc.value.status_code == 500
+    assert exc.value.code == "migration_error"
+
+
+# ---------------------------------------------------------------------------
+# Legacy migration permission tests (Phase 7M)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_user_key_migration_creates_admin_permission(
+    resolver: ApiKeyAuthResolver,
+):
+    """User key (user_id set) → migrates with ADMIN permission."""
+    tenant_id = uuid4()
+    owner_user_id = uuid4()
+    key = _make_v2_key(
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
+        key_prefix="inp_",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.ADMIN,
+    )
+    resolver.api_key_repo.create = AsyncMock(return_value=key)
+    resolver.legacy_repo.session.execute = AsyncMock(
+        return_value=_Result(
+            _Row(tenant_id=tenant_id, id=owner_user_id, user_id=owner_user_id)
+        )
+    )
+
+    await resolver._migrate_legacy_key(
+        plain_key="inp_user_key",
+        legacy_record=SimpleNamespace(user_id=owner_user_id, assistant_id=None),
+        prefix="inp_",
+    )
+
+    # Verify create was called with ADMIN permission
+    create_kwargs = resolver.api_key_repo.create.await_args.kwargs
+    assert create_kwargs["permission"] == ApiKeyPermission.ADMIN.value
+
+
+@pytest.mark.asyncio
+async def test_assistant_key_migration_creates_read_permission(
+    resolver: ApiKeyAuthResolver,
+):
+    """Assistant key (assistant_id set) → migrates with READ permission."""
+    tenant_id = uuid4()
+    owner_user_id = uuid4()
+    assistant_id = uuid4()
+    key = _make_v2_key(
+        tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
+        key_prefix="ina_",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.READ,
+    )
+    resolver.api_key_repo.create = AsyncMock(return_value=key)
+
+    # _get_assistant_context query
+    @dataclass
+    class _AssistantRow:
+        user_id: object
+        space_id: object
+        tenant_id: object
+
+    class _AssistantResult:
+        def first(self):
+            return _AssistantRow(
+                user_id=owner_user_id,
+                space_id=uuid4(),
+                tenant_id=tenant_id,
+            )
+
+    resolver.legacy_repo.session.execute = AsyncMock(
+        return_value=_AssistantResult()
+    )
+
+    await resolver._migrate_legacy_key(
+        plain_key="ina_assistant_key",
+        legacy_record=SimpleNamespace(user_id=None, assistant_id=assistant_id),
+        prefix="ina_",
+    )
+
+    create_kwargs = resolver.api_key_repo.create.await_args.kwargs
+    assert create_kwargs["permission"] == ApiKeyPermission.READ.value
+    assert create_kwargs["scope_type"] == ApiKeyScopeType.ASSISTANT.value

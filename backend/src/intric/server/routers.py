@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends
 
 from intric.authentication.auth_dependencies import (
+    APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
+    CONVERSATIONS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     require_resource_permission_for_method,
 )
@@ -110,20 +112,37 @@ from intric.api.audit.routes import router as audit_router
 
 router = APIRouter()
 
-router.include_router(crawl_run_router, prefix="/crawl-runs", tags=["crawl-runs"])
+router.include_router(
+    crawl_run_router,
+    prefix="/crawl-runs",
+    tags=["crawl-runs"],
+    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+)
 router.include_router(
     app_router,
     prefix="/apps",
     tags=["apps"],
-    dependencies=[Depends(require_resource_permission_for_method("apps"))],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "apps", read_override_endpoints=APPS_READ_OVERRIDES
+            )
+        )
+    ],
 )
 router.include_router(
     app_run_router,
     prefix="/app-runs",
     tags=["app-runs"],
-    dependencies=[Depends(require_resource_permission_for_method("apps"))],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "apps", read_override_endpoints=APPS_READ_OVERRIDES
+            )
+        )
+    ],
 )
-router.include_router(api_key_router, tags=["api-keys"])
+router.include_router(api_key_router)
 router.include_router(users_router, prefix="/users", tags=["users"])
 router.include_router(
     info_blobs_router,
@@ -156,11 +175,36 @@ router.include_router(
         )
     ],
 )
-router.include_router(group_chat_router, prefix="/group-chats", tags=["group-chats"])
 router.include_router(
-    conversations_router, prefix="/conversations", tags=["conversations"]
+    group_chat_router,
+    prefix="/group-chats",
+    tags=["group-chats"],
+    dependencies=[Depends(require_resource_permission_for_method("assistants"))],
 )
-router.include_router(services_router, prefix="/services", tags=["services"])
+router.include_router(
+    conversations_router,
+    prefix="/conversations",
+    tags=["conversations"],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES
+            )
+        )
+    ],
+)
+router.include_router(
+    services_router,
+    prefix="/services",
+    tags=["services"],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "apps", read_override_endpoints=APPS_READ_OVERRIDES
+            )
+        )
+    ],
+)
 router.include_router(logging_router, prefix="/logging", tags=["logging"])
 router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
@@ -205,7 +249,12 @@ router.include_router(
     prefix="/admin/tenant-models/transcription",
     tags=["admin", "tenant-models"],
 )
-router.include_router(files_router, prefix="/files", tags=["files"])
+router.include_router(
+    files_router,
+    prefix="/files",
+    tags=["files"],
+    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+)
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
 router.include_router(
@@ -215,7 +264,12 @@ router.include_router(
     dependencies=[Depends(require_resource_permission_for_method("spaces"))],
 )
 router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
-router.include_router(website_router, prefix="/websites", tags=["websites"])
+router.include_router(
+    website_router,
+    prefix="/websites",
+    tags=["websites"],
+    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+)
 router.include_router(websocket_router, prefix="", tags=["websockets"])
 router.include_router(prompt_router, prefix="/prompts", tags=["prompts"])
 router.include_router(

@@ -38,8 +38,10 @@ from intric.authentication.api_key_router_helpers import (
     raise_api_key_http_error,
 )
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
+from intric.authentication.auth_dependencies import require_api_key_permission
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
+    ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
     ApiKeyScopeType,
@@ -1139,6 +1141,7 @@ async def update_api_key_policy(
         ],
     ),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     user = container.user()
@@ -1315,6 +1318,7 @@ async def revoke_api_key_admin_deprecated(
     id: UUID,
     http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1358,6 +1362,7 @@ async def revoke_api_key_admin(
         default=None, examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]
     ),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1401,6 +1406,7 @@ async def suspend_api_key_admin(
         default=None, examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]
     ),
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1437,6 +1443,7 @@ async def reactivate_api_key_admin(
     id: UUID,
     http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1474,6 +1481,7 @@ async def rotate_api_key_admin(
     id: UUID,
     http_request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()

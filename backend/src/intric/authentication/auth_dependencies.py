@@ -130,44 +130,40 @@ def get_api_key_context(request: Request):
 
 
 def require_api_key_permission(required: ApiKeyPermission):
-    async def _dep(
-        request: Request,
-        user: UserInDB = Depends(get_current_active_user),
-    ):
-        key = getattr(request.state, "api_key", None)
-        if key is None:
-            return user
-        ordering = {
-            ApiKeyPermission.READ: 0,
-            ApiKeyPermission.WRITE: 1,
-            ApiKeyPermission.ADMIN: 2,
-        }
-        actual = ApiKeyPermission(key.permission)
-        if ordering[actual] < ordering[required]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "code": "insufficient_permission",
-                    "message": "API key does not have required permission.",
-                },
-            )
-        return user
+    """Endpoint-level guard: stash required API key permission for post-auth check.
+
+    Like ``require_resource_permission_for_method``, this dependency runs
+    BEFORE authentication sets ``request.state.api_key``.  It stores the
+    required permission level on ``request.state``, and the actual enforcement
+    happens inside ``_resolve_api_key`` (user_service) after authentication.
+
+    Bearer-token requests are unaffected — no API key state means no check.
+    NOT gated by the feature flag — management guards always enforce.
+    """
+
+    async def _dep(request: Request) -> None:
+        request.state._required_api_key_permission = required.value
 
     return _dep
 
 
-_METHOD_PERMISSION_MAP: dict[str, str] = {
-    "GET": "read",
-    "HEAD": "read",
-    "OPTIONS": "read",
-    "POST": "write",
-    "PUT": "write",
-    "PATCH": "write",
-    "DELETE": "admin",
-}
-
-ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset({"estimate_tokens"})
+ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset({
+    "estimate_tokens",
+    "ask_assistant",
+    "ask_followup",
+    "leave_feedback",
+})
 KNOWLEDGE_READ_OVERRIDES: frozenset[str] = frozenset({"run_semantic_search"})
+
+CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset({
+    "chat",
+    "leave_feedback",
+})
+
+APPS_READ_OVERRIDES: frozenset[str] = frozenset({
+    "run_service",
+    "run_app",
+})
 
 
 def require_resource_permission_for_method(

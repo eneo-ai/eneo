@@ -27,6 +27,8 @@ from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
+    METHOD_PERMISSION_MAP,
+    PERMISSION_LEVEL_ORDER,
 )
 from intric.authentication.auth_service import AuthService
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
@@ -67,15 +69,57 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_METHOD_PERMISSION_MAP: dict[str, str] = {
-    "GET": "read",
-    "HEAD": "read",
-    "OPTIONS": "read",
-    "POST": "write",
-    "PUT": "write",
-    "PATCH": "write",
-    "DELETE": "admin",
-}
+def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
+    granted = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+    needed = PERMISSION_LEVEL_ORDER.get(required.value, 3)
+    return granted >= needed
+
+
+def _check_basic_method_permission(
+    request: Request,
+    key: ApiKeyV2InDB,
+) -> None:
+    """Enforce the key's basic permission level against the HTTP method.
+
+    Catch-all for routes without a specific resource guard.
+    No read-overrides — only the raw method->permission mapping applies.
+    """
+    required = METHOD_PERMISSION_MAP.get(request.method, "admin")
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
+    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+
+    if granted_level < required_level:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message=(
+                f"API key cannot perform {request.method} requests "
+                f"on this endpoint (requires '{required}' permission)."
+            ),
+        )
+
+
+def _check_management_permission(
+    key: ApiKeyV2InDB,
+    required: str,
+) -> None:
+    """Enforce a minimum API key permission for management endpoints.
+
+    NOT gated by the feature flag — management guards always enforce.
+    """
+    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
+
+    if granted_level < required_level:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message=(
+                "API key does not have required permission. "
+                "Use a key with 'admin' permission, or authenticate "
+                "with a bearer token."
+            ),
+        )
 
 
 def _check_method_resource_permission(
@@ -92,7 +136,7 @@ def _check_method_resource_permission(
     resource_type: str = config["resource_type"]
     read_override_endpoints: frozenset[str] | None = config.get("read_override_endpoints")
 
-    required = _METHOD_PERMISSION_MAP.get(request.method, "admin")
+    required = METHOD_PERMISSION_MAP.get(request.method, "admin")
 
     if required != "read" and read_override_endpoints:
         route = request.scope.get("route")
@@ -639,16 +683,34 @@ class UserService:
             min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
         )
 
-        if request is not None:
-            request.state.api_key = resolved.key
-            request.state.api_key_permission = resolved.key.permission
-            request.state.api_key_scope_type = resolved.key.scope_type
-            request.state.api_key_scope_id = resolved.key.scope_id
-            request.state.api_key_resource_permissions = resolved.key.resource_permissions
+        if request is None:
+            raise ApiKeyValidationError(
+                status_code=500,
+                code="server_configuration_error",
+                message="API key authentication requires request context.",
+            )
 
-            # Method-level resource permission check (config set by router guard)
+        request.state.api_key = resolved.key
+        request.state.api_key_permission = resolved.key.permission
+        request.state.api_key_scope_type = resolved.key.scope_type
+        request.state.api_key_scope_id = resolved.key.scope_id
+        request.state.api_key_resource_permissions = resolved.key.resource_permissions
+
+        # Method-level permission enforcement (gated by feature flag)
+        if not get_settings().api_key_enforce_resource_permissions:
+            logger.critical(
+                "API key permission enforcement disabled for request",
+                extra={
+                    "key_id": str(resolved.key.id),
+                    "key_prefix": resolved.key.key_prefix,
+                    "method": request.method,
+                    "path": request.url.path,
+                },
+            )
+        else:
             perm_config = getattr(request.state, "_resource_perm_config", None)
             if perm_config is not None:
+                # Route has resource guard — use fine-grained check (with read-overrides)
                 try:
                     _check_method_resource_permission(request, resolved.key, perm_config)
                 except ApiKeyValidationError as exc:
@@ -660,6 +722,36 @@ class UserService:
                         request=request,
                     )
                     raise
+            else:
+                # No resource guard — fall back to basic method->permission check
+                try:
+                    _check_basic_method_permission(request, resolved.key)
+                except ApiKeyValidationError as exc:
+                    await self._log_api_key_auth_failed(
+                        user, resolved.key, exc,
+                        ip_address=ip_address,
+                        request_id=request_id,
+                        user_agent=user_agent,
+                        request=request,
+                    )
+                    raise
+
+        # Management endpoint guard (NOT gated by feature flag)
+        required_perm = getattr(
+            request.state, "_required_api_key_permission", None
+        )
+        if required_perm is not None:
+            try:
+                _check_management_permission(resolved.key, required_perm)
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user, resolved.key, exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
 
         await self._maybe_log_api_key_used(
             user, resolved.key,
@@ -704,21 +796,10 @@ class UserService:
             )
         return row.space_id, row.tenant_id
 
-    def _permission_allows(
-        self, actual: ApiKeyPermission, required: ApiKeyPermission
-    ) -> bool:
-        ordering = {
-            ApiKeyPermission.READ: 0,
-            ApiKeyPermission.WRITE: 1,
-            ApiKeyPermission.ADMIN: 2,
-        }
-        return ordering[actual] >= ordering[required]
-
     def _require_api_key_permission(
         self, *, key: ApiKeyV2InDB, required: ApiKeyPermission
     ) -> None:
-        actual = ApiKeyPermission(key.permission)
-        if not self._permission_allows(actual, required):
+        if not _permission_allows(key, required):
             raise ApiKeyValidationError(
                 status_code=403,
                 code="insufficient_permission",
@@ -795,6 +876,7 @@ class UserService:
             "scope_id": str(key.scope_id) if key.scope_id else None,
             "permission": key.permission,
             "key_type": key.key_type,
+            "key_prefix": key.key_prefix,
         }
 
         await self.audit_service.log_async(
@@ -831,6 +913,7 @@ class UserService:
             "scope_id": str(key.scope_id) if key.scope_id else None,
             "permission": key.permission,
             "key_type": key.key_type,
+            "key_prefix": key.key_prefix,
         }
         if exc.context is not None:
             extra.update(exc.context)
