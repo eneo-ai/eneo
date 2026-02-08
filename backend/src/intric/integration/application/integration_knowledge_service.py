@@ -16,7 +16,9 @@ from intric.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
-    from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
+    from intric.embedding_models.domain.embedding_model_repo import (
+        EmbeddingModelRepository,
+    )
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
@@ -37,7 +39,9 @@ if TYPE_CHECKING:
     )
     from intric.jobs.job_service import JobService
     from intric.spaces.space import Space
-    from intric.integration.infrastructure.sharepoint_subscription_service import SharePointSubscriptionService
+    from intric.integration.infrastructure.sharepoint_subscription_service import (
+        SharePointSubscriptionService,
+    )
     from intric.spaces.space_repo import SpaceRepository
     from intric.users.user import UserInDB
 
@@ -51,6 +55,7 @@ class SimpleToken:
     Used for tenant_app integrations where we don't have an OauthToken
     in the database, but need a token object with access_token attribute.
     """
+
     def __init__(self, access_token: str):
         self.access_token = access_token
 
@@ -90,10 +95,15 @@ class IntegrationKnowledgeService:
             if not self.service_account_auth_service:
                 raise BadRequestException("ServiceAccountAuthService not configured")
 
-            token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+            token_data = await self.service_account_auth_service.refresh_access_token(
+                tenant_app
+            )
             access_token = token_data["access_token"]
             new_refresh_token = token_data.get("refresh_token")
-            if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+            if (
+                new_refresh_token
+                and new_refresh_token != tenant_app.service_account_refresh_token
+            ):
                 tenant_app.update_refresh_token(new_refresh_token)
                 await self.tenant_sharepoint_app_repo.update(tenant_app)
             return access_token
@@ -127,7 +137,9 @@ class IntegrationKnowledgeService:
                     "Please contact your administrator."
                 )
 
-        embedding_model = await self.embedding_model_repo.one(model_id=embedding_model_id)
+        embedding_model = await self.embedding_model_repo.one(
+            model_id=embedding_model_id
+        )
 
         if user_integration.integration_type == "sharepoint":
             if resource_type == "onedrive":
@@ -161,20 +173,26 @@ class IntegrationKnowledgeService:
 
         if user_integration.auth_type == "tenant_app":
             if not user_integration.tenant_app_id:
-                raise BadRequestException("Tenant app ID is required for tenant_app integrations")
+                raise BadRequestException(
+                    "Tenant app ID is required for tenant_app integrations"
+                )
 
-            tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
+            tenant_app = await self.tenant_sharepoint_app_repo.one(
+                id=user_integration.tenant_app_id
+            )
             access_token = await self._get_tenant_app_access_token(tenant_app)
             token = SimpleToken(access_token=access_token)
             token_id = None
             tenant_app_id = tenant_app.id
         else:
-            oauth_token = await self.oauth_token_repo.one(user_integration_id=user_integration_id)
+            oauth_token = await self.oauth_token_repo.one(
+                user_integration_id=user_integration_id
+            )
             token = oauth_token
             token_id = oauth_token.id
             tenant_app_id = None
 
-        if hasattr(token, 'token_type') and token.token_type.is_confluence:
+        if hasattr(token, "token_type") and token.token_type.is_confluence:
             job = await self.job_service.queue_job(
                 task=Task.PULL_CONFLUENCE_CONTENT,
                 name=name,
@@ -210,7 +228,7 @@ class IntegrationKnowledgeService:
                 "drive-level" if is_onedrive else "site-level",
                 knowledge.id,
                 "drive" if is_onedrive else "site",
-                key[:30]
+                key[:30],
             )
             try:
                 subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
@@ -225,20 +243,20 @@ class IntegrationKnowledgeService:
                     logger.info(
                         "Successfully linked knowledge %s to subscription %s",
                         knowledge.id,
-                        subscription.subscription_id
+                        subscription.subscription_id,
                     )
                 else:
                     logger.warning(
                         "Could not create/reuse subscription for %s %s (webhook URL may not be configured)",
                         "drive" if is_onedrive else "site",
-                        key[:30]
+                        key[:30],
                     )
             except Exception as exc:
                 logger.warning(
                     "Failed to ensure subscription for knowledge %s: %s",
                     knowledge.id,
                     exc,
-                    exc_info=True
+                    exc_info=True,
                 )
         else:
             raise ValueError("Unknown integration type")
@@ -290,16 +308,20 @@ class IntegrationKnowledgeService:
             return
 
         # Insert distribution records
-        ins = pg_insert(IntegrationKnowledgesSpaces).values(
-            [
-                dict(integration_knowledge_id=knowledge.id, space_id=space_id)
-                for space_id in child_space_ids
-            ]
-        ).on_conflict_do_nothing(
-            index_elements=[
-                IntegrationKnowledgesSpaces.integration_knowledge_id,
-                IntegrationKnowledgesSpaces.space_id,
-            ]
+        ins = (
+            pg_insert(IntegrationKnowledgesSpaces)
+            .values(
+                [
+                    dict(integration_knowledge_id=knowledge.id, space_id=space_id)
+                    for space_id in child_space_ids
+                ]
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    IntegrationKnowledgesSpaces.integration_knowledge_id,
+                    IntegrationKnowledgesSpaces.space_id,
+                ]
+            )
         )
         await self.space_repo.session.execute(ins)
 
@@ -349,9 +371,13 @@ class IntegrationKnowledgeService:
                 user_integration = knowledge.user_integration
                 if user_integration.auth_type == "tenant_app":
                     if not user_integration.tenant_app_id:
-                        raise BadRequestException("Tenant app ID is required for tenant_app integrations")
+                        raise BadRequestException(
+                            "Tenant app ID is required for tenant_app integrations"
+                        )
 
-                    tenant_app = await self.tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
+                    tenant_app = await self.tenant_sharepoint_app_repo.one(
+                        id=user_integration.tenant_app_id
+                    )
                     access_token = await self._get_tenant_app_access_token(tenant_app)
                     token = SimpleToken(access_token=access_token)
                 else:
@@ -368,7 +394,7 @@ class IntegrationKnowledgeService:
                     "Failed to prepare subscription cleanup for %s: %s",
                     subscription_id,
                     exc,
-                    exc_info=True
+                    exc_info=True,
                 )
 
         # Delete from database FIRST (within transaction)
@@ -415,6 +441,120 @@ class IntegrationKnowledgeService:
                 exc_info=True,
             )
 
+    async def trigger_full_sync(
+        self,
+        space_id: UUID,
+        integration_knowledge_id: UUID,
+    ) -> "JobInDb":
+        """Trigger a full resync for an existing SharePoint integration knowledge."""
+        space = await self.space_repo.one(id=space_id)
+        knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
+
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_integration_knowledge_list():
+            raise UnauthorizedException()
+
+        if knowledge.space_id != space.id:
+            raise UnauthorizedException(
+                "Cannot sync knowledge from this space. "
+                "This knowledge belongs to another space."
+            )
+
+        if knowledge.integration_type != "sharepoint":
+            raise BadRequestException(
+                "Full sync is only supported for SharePoint integrations"
+            )
+
+        user_integration = knowledge.user_integration
+
+        if user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to sync organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
+            if not user_integration.tenant_app_id:
+                raise BadRequestException(
+                    "Tenant app ID is required for tenant_app integrations"
+                )
+
+            tenant_app = await self.tenant_sharepoint_app_repo.one(
+                id=user_integration.tenant_app_id
+            )
+            access_token = await self._get_tenant_app_access_token(tenant_app)
+            subscription_token = SimpleToken(access_token=access_token)
+            token_id = None
+            tenant_app_id = tenant_app.id
+        else:
+            oauth_token = await self.oauth_token_repo.one(
+                user_integration_id=user_integration.id
+            )
+            subscription_token = oauth_token
+            token_id = oauth_token.id
+            tenant_app_id = None
+
+        resource_type = knowledge.resource_type or "site"
+        is_onedrive = resource_type == "onedrive"
+        subscription_resource_id = knowledge.drive_id if is_onedrive else knowledge.site_id
+
+        if subscription_resource_id:
+            try:
+                subscription = (
+                    await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                        user_integration_id=user_integration.id,
+                        site_id=subscription_resource_id,
+                        token=subscription_token,
+                        is_onedrive=is_onedrive,
+                    )
+                )
+                subscription_db_id = getattr(subscription, "id", None) if subscription else None
+                existing_subscription_db_id = getattr(
+                    knowledge, "sharepoint_subscription_id", None
+                )
+                if (
+                    subscription_db_id
+                    and existing_subscription_db_id != subscription_db_id
+                ):
+                    knowledge.sharepoint_subscription_id = subscription_db_id
+                    await self.integration_knowledge_repo.update(knowledge)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to ensure SharePoint subscription during full sync "
+                    "for knowledge %s: %s",
+                    knowledge.id,
+                    exc,
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "Skipping subscription ensure during full sync for knowledge %s: "
+                "missing %s identifier",
+                knowledge.id,
+                "drive" if is_onedrive else "site",
+            )
+
+        job = await self.job_service.queue_job(
+            task=Task.PULL_SHAREPOINT_CONTENT,
+            name=knowledge.name,
+            task_params=SharepointContentTaskParam(
+                user_id=self.user.id,
+                id=user_integration.id,
+                token_id=token_id,
+                tenant_app_id=tenant_app_id,
+                integration_knowledge_id=knowledge.id,
+                site_id=knowledge.site_id,
+                drive_id=knowledge.drive_id,
+                folder_id=knowledge.folder_id,
+                folder_path=knowledge.folder_path,
+                resource_type=resource_type,
+            ),
+        )
+
+        return job
+
     async def update_knowledge_name(
         self,
         space_id: UUID,
@@ -440,6 +580,8 @@ class IntegrationKnowledgeService:
             )
 
         # Fetch from repo to get the full entity with created_at for update
-        knowledge = await self.integration_knowledge_repo.one(id=integration_knowledge_id)
+        knowledge = await self.integration_knowledge_repo.one(
+            id=integration_knowledge_id
+        )
         knowledge.name = name
         return await self.integration_knowledge_repo.update(knowledge)
