@@ -201,6 +201,10 @@ ACTION_METADATA = {
         "name_sv": "Integrationskälla raderad",
         "description_sv": "Loggar när en kunskapskälla tas bort",
     },
+    ActionType.INTEGRATION_KNOWLEDGE_SYNCED.value: {
+        "name_sv": "Integrationskälla synkad",
+        "description_sv": "Loggar när en full synkning startas för en integrationskälla",
+    },
     ActionType.COMPLETION_MODEL_UPDATED.value: {
         "name_sv": "Kompletteringsmodell uppdaterad",
         "description_sv": "Loggar ändringar av AI-kompletteringsmodell",

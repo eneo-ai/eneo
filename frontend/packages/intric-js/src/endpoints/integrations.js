@@ -178,6 +178,30 @@ export function initIntegrations(client) {
        * @param {string} args.name New name for the knowledge
        * @throws {IntricError}
        * */
+      /**
+       * Trigger a full resync for a SharePoint integration knowledge
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge to sync
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       *
+       * @returns {Promise<Job>} The background job processing this sync
+       * @throws {IntricError}
+       * */
+      triggerFullSync: async ({ knowledge, space }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const job = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
+          {
+            method: "post",
+            params: {
+              path: { id, integration_knowledge_id }
+            }
+          }
+        );
+        return job;
+      },
+
       rename: async ({ knowledge, space, name }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;

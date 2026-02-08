@@ -752,6 +752,43 @@ async def update_integration_knowledge(
 
 
 @router.post(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
+    response_model=JobPublic,
+    status_code=202,
+)
+async def trigger_integration_full_sync(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    user = container.user()
+
+    job = await service.trigger_full_sync(
+        space_id=id,
+        integration_knowledge_id=integration_knowledge_id,
+    )
+
+    # Audit logging
+    space_repo = container.space_repo()
+    space = await space_repo.one(id=id)
+    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_KNOWLEDGE_SYNCED,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=integration_knowledge_id,
+        description=f"Triggered full sync for {knowledge.integration_type} knowledge '{knowledge.name}' in space '{space.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space),
+    )
+
+    return job
+
+
+@router.post(
     "/{id}/members/",
     response_model=SpaceMember,
     responses=responses.get_responses([403, 404]),
