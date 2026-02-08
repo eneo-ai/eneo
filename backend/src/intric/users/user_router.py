@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
 from intric.authentication import auth_dependencies
+from intric.authentication.auth_dependencies import require_api_key_scope_check
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
@@ -616,6 +617,7 @@ async def get_currently_authenticated_user(
 async def generate_api_key(
     current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
     container: Container = Depends(get_container()),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
@@ -680,6 +682,7 @@ async def get_current_user_tenant(
 async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     user_service = container.user_service()
     current_user = container.user()
@@ -754,6 +757,7 @@ async def update_user(
     id: UUID,
     user_update: PropUserUpdate,
     container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     user_service = container.user_service()
     current_user = container.user()
@@ -870,7 +874,9 @@ async def update_user(
 
 @router.delete("/admin/{id}/", status_code=204)
 async def delete_user(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     user_service = container.user_service()
     current_user = container.user()

@@ -1060,6 +1060,7 @@ class Container(containers.DeclarativeContainer):
         predefined_roles_repo=predefined_roles_repo,
         info_blob_repo=info_blob_repo,
         api_key_rate_limiter=api_key_rate_limiter,
+        feature_flag_service=feature_flag_service,
     )
     admin_service = providers.Factory(
         AdminService,

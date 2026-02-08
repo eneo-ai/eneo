@@ -60,11 +60,19 @@ from intric.users.user import (
 )
 from intric.users.user_repo import UsersRepository
 from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.group_chats_table import GroupChatsTable
+from intric.database.tables.service_table import Services
 from intric.database.tables.users_table import Users
+from intric.database.tables.app_table import AppRuns, Apps
+from intric.database.tables.websites_table import CrawlRuns, Websites
+from intric.database.tables.sessions_table import Sessions
+from intric.database.tables.spaces_table import Spaces
 
 if TYPE_CHECKING:
     from intric.users.user import UserInDB
     from intric.spaces.space_service import SpaceService
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
 
 
 logger = get_logger(__name__)
@@ -162,6 +170,7 @@ class UserService:
         space_service: Optional["SpaceService"] = None,
         predefined_roles_repo: Optional[PredefinedRolesRepository] = None,
         api_key_rate_limiter: Optional[ApiKeyRateLimiter] = None,
+        feature_flag_service: Optional["FeatureFlagService"] = None,
     ):
         self.repo = user_repo
         self.auth_service = auth_service
@@ -175,6 +184,7 @@ class UserService:
         self.predefined_roles_repo = predefined_roles_repo
         self.info_blob_repo = info_blob_repo
         self.api_key_rate_limiter = api_key_rate_limiter
+        self.feature_flag_service = feature_flag_service
 
     async def _validate_email(self, user: UserBase):
         if (
@@ -753,6 +763,31 @@ class UserService:
                 )
                 raise
 
+        # Scope enforcement (gated by env flag AND tenant feature flag)
+        if get_settings().api_key_enforce_scope:
+            scope_enforcement_enabled = await self._is_scope_enforcement_enabled(
+                user.tenant_id
+            )
+            if scope_enforcement_enabled:
+                scope_config = getattr(request.state, "_scope_check_config", None)
+                if (
+                    scope_config is not None
+                    and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
+                ):
+                    try:
+                        await self._enforce_api_key_scope(
+                            request, resolved.key, scope_config
+                        )
+                    except ApiKeyValidationError as exc:
+                        await self._log_api_key_auth_failed(
+                            user, resolved.key, exc,
+                            ip_address=ip_address,
+                            request_id=request_id,
+                            user_agent=user_agent,
+                            request=request,
+                        )
+                        raise
+
         await self._maybe_log_api_key_used(
             user, resolved.key,
             ip_address=ip_address,
@@ -855,6 +890,287 @@ class UserService:
             code="insufficient_permission",
             message="API key scope does not allow assistant access.",
         )
+
+    # --- Scope enforcement (Phase 3) ---
+
+    async def _is_scope_enforcement_enabled(self, tenant_id: UUID) -> bool:
+        """Check if scope enforcement is enabled for tenant.
+
+        Deliberately bypasses check_is_feature_enabled() which returns False
+        on missing row. Security controls must fail-closed: missing flag = enforced.
+        """
+        if self.feature_flag_service is None:
+            logger.warning("feature_flag_service not available, defaulting to scope enforced")
+            return True
+
+        flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+            name="api_key_scope_enforcement"
+        )
+        if flag is None:
+            logger.warning(
+                "api_key_scope_enforcement feature flag not found, defaulting to enforced"
+            )
+            return True
+        return flag.is_enabled(tenant_id=tenant_id)
+
+    async def _resolve_space_id_for_resource(
+        self,
+        resource_type: str,
+        resource_id: UUID,
+    ) -> UUID | None:
+        """Resolve a resource to its space_id via lightweight direct queries.
+
+        Uses self.repo.session for DB access — no SpaceRepository dependency,
+        so this works during authentication before the user is set on the container.
+        """
+        session = self.repo.session
+
+        if resource_type == "space":
+            return resource_id
+        elif resource_type == "assistant":
+            stmt = sa.select(Assistants.space_id).where(Assistants.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "app":
+            stmt = sa.select(Apps.space_id).where(Apps.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "service":
+            stmt = sa.select(Services.space_id).where(Services.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "group_chat":
+            stmt = sa.select(GroupChatsTable.space_id).where(GroupChatsTable.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "conversation":
+            # Session → assistant_id or group_chat_id → space_id
+            row = await session.execute(
+                sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+                .where(Sessions.id == resource_id)
+            )
+            result = row.one_or_none()
+            if result is None:
+                return None
+            if result.assistant_id is not None:
+                stmt = sa.select(Assistants.space_id).where(Assistants.id == result.assistant_id)
+                return await session.scalar(stmt)
+            if result.group_chat_id is not None:
+                stmt = sa.select(GroupChatsTable.space_id).where(
+                    GroupChatsTable.id == result.group_chat_id
+                )
+                return await session.scalar(stmt)
+            return None
+        elif resource_type == "collection":
+            stmt = sa.select(CollectionsTable.space_id).where(
+                CollectionsTable.id == resource_id
+            )
+            return await session.scalar(stmt)
+        elif resource_type == "website":
+            stmt = sa.select(Websites.space_id).where(Websites.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "app_run":
+            return await self._resolve_app_run_space_id(resource_id)
+        elif resource_type == "crawl_run":
+            return await self._resolve_crawl_run_space_id(resource_id)
+        else:
+            return None
+
+    async def _resolve_app_run_space_id(self, app_run_id: UUID) -> UUID | None:
+        """Resolve app_run → app → space_id."""
+        stmt = (
+            sa.select(Spaces.id)
+            .select_from(AppRuns)
+            .join(Apps, Apps.id == AppRuns.app_id)
+            .join(Spaces, Spaces.id == Apps.space_id)
+            .where(AppRuns.id == app_run_id)
+        )
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _resolve_crawl_run_space_id(self, crawl_run_id: UUID) -> UUID | None:
+        """Resolve crawl_run → website → space_id."""
+        stmt = (
+            sa.select(Websites.space_id)
+            .select_from(CrawlRuns)
+            .join(Websites, Websites.id == CrawlRuns.website_id)
+            .where(CrawlRuns.id == crawl_run_id)
+        )
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _resolve_app_run_app_id(self, app_run_id: UUID) -> UUID | None:
+        """Resolve app_run → app_id for app-scoped key enforcement."""
+        stmt = sa.select(AppRuns.app_id).where(AppRuns.id == app_run_id)
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _resolve_session_assistant_id(self, session_id: UUID) -> UUID | None:
+        """Resolve session → assistant_id for assistant-scoped key enforcement."""
+        stmt = sa.select(Sessions.assistant_id).where(Sessions.id == session_id)
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _enforce_api_key_scope(
+        self,
+        request: Request,
+        key: ApiKeyV2InDB,
+        scope_config: dict,
+    ) -> None:
+        """Enforce API key scope restrictions.
+
+        Called after authentication when scope config is set on the route
+        and the key is non-tenant scoped.
+        """
+        resource_type: str = scope_config["resource_type"]
+        path_param: str | None = scope_config["path_param"]
+        scope_type = ApiKeyScopeType(key.scope_type)
+
+        # 1. Tenant-scoped keys always pass (fast path)
+        if scope_type == ApiKeyScopeType.TENANT:
+            return
+
+        # 2. Admin/key-management routes: deny all non-tenant keys
+        if resource_type == "admin":
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_scope",
+                message=(
+                    f"API key is scoped to {key.scope_type} '{key.scope_id}'. "
+                    f"Admin endpoints require a tenant-scoped key."
+                ),
+            )
+
+        # 3. Extract resource_id from path params
+        resource_id: UUID | None = None
+        if path_param is not None:
+            path_params = request.scope.get("path_params", {})
+            raw_id = path_params.get(path_param)
+            if raw_id is not None:
+                try:
+                    resource_id = UUID(str(raw_id))
+                except (ValueError, AttributeError):
+                    resource_id = None
+
+        # 4. LIST-ENDPOINT RULES (no resource_id in path)
+        if resource_id is None:
+            if scope_type == ApiKeyScopeType.SPACE:
+                # Space-scoped: pass — service layer filters by space membership
+                return
+            elif scope_type == ApiKeyScopeType.ASSISTANT:
+                if resource_type in ("assistant", "conversation"):
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
+                )
+            elif scope_type == ApiKeyScopeType.APP:
+                if resource_type in ("app", "app_run"):
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app and its runs."
+                    ),
+                )
+            return
+
+        # 5. SINGLE-RESOURCE RULES (resource_id found in path)
+
+        if scope_type == ApiKeyScopeType.SPACE:
+            target_space_id = await self._resolve_space_id_for_resource(
+                resource_type, resource_id
+            )
+            if target_space_id is None:
+                # Fail-closed: can't prove scope → deny
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to space '{key.scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
+                )
+            if key.scope_id != target_space_id:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to space '{key.scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
+                )
+            return
+
+        if scope_type == ApiKeyScopeType.ASSISTANT:
+            if resource_type == "assistant":
+                if key.scope_id == resource_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
+                )
+            elif resource_type == "conversation":
+                assistant_id = await self._resolve_session_assistant_id(resource_id)
+                if assistant_id is not None and key.scope_id == assistant_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
+                )
+            else:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
+                )
+
+        if scope_type == ApiKeyScopeType.APP:
+            if resource_type == "app":
+                if key.scope_id == resource_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app and its runs."
+                    ),
+                )
+            elif resource_type == "app_run":
+                app_id = await self._resolve_app_run_app_id(resource_id)
+                if app_id is not None and key.scope_id == app_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app and its runs."
+                    ),
+                )
+            else:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app and its runs."
+                    ),
+                )
 
     async def _maybe_log_api_key_used(
         self,

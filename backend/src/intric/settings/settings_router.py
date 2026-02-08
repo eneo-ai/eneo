@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from intric.authentication import auth_dependencies
+from intric.authentication.auth_dependencies import require_api_key_scope_check
 from intric.files.audio import AudioMimeTypes
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
@@ -102,6 +103,7 @@ Enable or disable the template management feature for your tenant.
 async def update_template_setting(
     data: TemplateSettingUpdate,
     container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     """
     Toggle template feature for tenant.
@@ -149,6 +151,7 @@ Enable or disable global audit logging for your tenant.
 async def update_audit_logging_setting(
     data: TemplateSettingUpdate,
     container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     """
     Toggle global audit logging for tenant.
@@ -196,6 +199,32 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
 async def update_provisioning_setting(
     data: TemplateSettingUpdate,
     container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     service = container.settings_service()
     return await service.update_provisioning_setting(enabled=data.enabled)
+
+
+@router.patch(
+    "/scope-enforcement",
+    response_model=SettingsPublic,
+    summary="Toggle API key scope enforcement",
+    description="""
+Toggle API key scope enforcement for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `api_key_scope_enforcement` feature flag for your tenant
+- When enabled: API keys are restricted to resources within their configured scope
+- When disabled: All API keys can access resources beyond their configured scope
+- Change takes effect immediately for all API key requests
+    """,
+)
+async def update_scope_enforcement_setting(
+    data: TemplateSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+):
+    service = container.settings_service()
+    return await service.update_scope_enforcement_setting(enabled=data.enabled)

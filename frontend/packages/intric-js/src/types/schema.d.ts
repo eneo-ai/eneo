@@ -357,6 +357,21 @@ export interface paths {
      */
     patch: operations["update_provisioning_setting_api_v1_settings_provisioning_patch"];
   };
+  "/api/v1/settings/scope-enforcement": {
+    /**
+     * Toggle API key scope enforcement
+     * @description Toggle API key scope enforcement for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_scope_enforcement` feature flag for your tenant
+     * - When enabled: API keys are restricted to resources within their configured scope
+     * - When disabled: All API keys can access resources beyond their configured scope
+     * - Change takes effect immediately for all API key requests
+     */
+    patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
@@ -8704,6 +8719,11 @@ export interface components {
        * @default false
        */
       provisioning?: boolean;
+      /**
+       * Api Key Scope Enforcement
+       * @default true
+       */
+      api_key_scope_enforcement?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -13181,6 +13201,39 @@ export interface operations {
    * ```
    */
   update_provisioning_setting_api_v1_settings_provisioning_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key scope enforcement
+   * @description Toggle API key scope enforcement for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_scope_enforcement` feature flag for your tenant
+   * - When enabled: API keys are restricted to resources within their configured scope
+   * - When disabled: All API keys can access resources beyond their configured scope
+   * - Change takes effect immediately for all API key requests
+   */
+  update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TemplateSettingUpdate"];

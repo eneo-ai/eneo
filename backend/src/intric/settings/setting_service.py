@@ -50,6 +50,12 @@ class SettingService:
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
 
+        # Populate api_key_scope_enforcement from feature flag
+        api_key_scope_enforcement = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="api_key_scope_enforcement",
+            tenant_id=self.user.tenant_id
+        )
+
         # Get provisioning from tenant
         tenant = await self.tenant_repo.get(self.user.tenant_id)
         provisioning = tenant.provisioning if tenant else False
@@ -62,6 +68,7 @@ class SettingService:
                 audit_logging_enabled=audit_logging_enabled,
                 tenant_credentials_enabled=tenant_credentials_enabled,
                 provisioning=provisioning,
+                api_key_scope_enforcement=api_key_scope_enforcement,
             )
 
         return SettingsPublic(
@@ -70,6 +77,7 @@ class SettingService:
             audit_logging_enabled=audit_logging_enabled,
             tenant_credentials_enabled=tenant_credentials_enabled,
             provisioning=provisioning,
+            api_key_scope_enforcement=api_key_scope_enforcement,
         )
 
     async def update_settings(self, settings: SettingsPublic):
@@ -129,10 +137,22 @@ class SettingService:
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
 
+        # Get tenant for provisioning
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=enabled,  # Use the value we just set, not a re-query
-            tenant_credentials_enabled=tenant_credentials_enabled
+            audit_logging_enabled=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="audit_logging_enabled",
+                tenant_id=self.user.tenant_id
+            ),
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            provisioning=tenant.provisioning if tenant else False,
+            api_key_scope_enforcement=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="api_key_scope_enforcement",
+                tenant_id=self.user.tenant_id
+            ),
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -177,6 +197,9 @@ class SettingService:
         app_settings = get_app_settings()
         tenant_credentials_enabled = app_settings.tenant_credentials_enabled
 
+        # Get tenant for provisioning
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=await self.feature_flag_service.check_is_feature_enabled(
@@ -184,7 +207,12 @@ class SettingService:
                 tenant_id=self.user.tenant_id
             ),
             audit_logging_enabled=enabled,  # Use the value we just set, not a re-query
-            tenant_credentials_enabled=tenant_credentials_enabled
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            provisioning=tenant.provisioning if tenant else False,
+            api_key_scope_enforcement=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="api_key_scope_enforcement",
+                tenant_id=self.user.tenant_id
+            ),
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -216,4 +244,65 @@ class SettingService:
             ),
             tenant_credentials_enabled=tenant_credentials_enabled,
             provisioning=enabled,  # Use the value we just set
+            api_key_scope_enforcement=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="api_key_scope_enforcement",
+                tenant_id=self.user.tenant_id
+            ),
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_scope_enforcement_setting(self, enabled: bool) -> SettingsPublic:
+        """Toggle the api_key_scope_enforcement feature flag for tenant.
+
+        **Admin Only:** Only users with admin permissions can toggle this setting.
+        """
+        logger.info(
+            f"Admin user {self.user.username} toggling scope enforcement to {enabled} "
+            f"for tenant {self.user.tenant_id}"
+        )
+
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+            name="api_key_scope_enforcement"
+        )
+
+        if not feature_flag:
+            raise ValueError("api_key_scope_enforcement feature flag not found")
+
+        if enabled:
+            await self.feature_flag_service.enable_tenant(
+                feature_id=feature_flag.feature_id,
+                tenant_id=self.user.tenant_id
+            )
+        else:
+            await self.feature_flag_service.disable_tenant(
+                feature_id=feature_flag.feature_id,
+                tenant_id=self.user.tenant_id
+            )
+
+        settings = await self.repo.get(self.user.id)
+
+        logger.info(
+            f"Scope enforcement successfully toggled to {enabled} "
+            f"for tenant {self.user.tenant_id}"
+        )
+
+        app_settings = get_app_settings()
+        tenant_credentials_enabled = app_settings.tenant_credentials_enabled
+
+        # Get tenant for provisioning
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+
+        return SettingsPublic(
+            chatbot_widget=settings.chatbot_widget if settings else {},
+            using_templates=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="using_templates",
+                tenant_id=self.user.tenant_id
+            ),
+            audit_logging_enabled=await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="audit_logging_enabled",
+                tenant_id=self.user.tenant_id
+            ),
+            tenant_credentials_enabled=tenant_credentials_enabled,
+            provisioning=tenant.provisioning if tenant else False,
+            api_key_scope_enforcement=enabled,  # Use the value we just set
         )

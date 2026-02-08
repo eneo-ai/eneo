@@ -5,6 +5,7 @@ from intric.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
+    require_api_key_scope_check,
     require_resource_permission_for_method,
 )
 
@@ -116,7 +117,10 @@ router.include_router(
     crawl_run_router,
     prefix="/crawl-runs",
     tags=["crawl-runs"],
-    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+    dependencies=[
+        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(require_api_key_scope_check(resource_type="crawl_run", path_param="id")),
+    ],
 )
 router.include_router(
     app_router,
@@ -127,7 +131,8 @@ router.include_router(
             require_resource_permission_for_method(
                 "apps", read_override_endpoints=APPS_READ_OVERRIDES
             )
-        )
+        ),
+        Depends(require_api_key_scope_check(resource_type="app", path_param="id")),
     ],
 )
 router.include_router(
@@ -139,16 +144,25 @@ router.include_router(
             require_resource_permission_for_method(
                 "apps", read_override_endpoints=APPS_READ_OVERRIDES
             )
-        )
+        ),
+        Depends(require_api_key_scope_check(resource_type="app_run", path_param="id")),
     ],
 )
-router.include_router(api_key_router)
+router.include_router(
+    api_key_router,
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
 router.include_router(users_router, prefix="/users", tags=["users"])
 router.include_router(
     info_blobs_router,
     prefix="/info-blobs",
     tags=["info-blobs"],
-    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+    dependencies=[
+        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(require_api_key_scope_check(resource_type="space", path_param=None)),
+    ],
 )
 router.include_router(
     groups_router,
@@ -159,7 +173,8 @@ router.include_router(
             require_resource_permission_for_method(
                 "knowledge", read_override_endpoints=KNOWLEDGE_READ_OVERRIDES
             )
-        )
+        ),
+        Depends(require_api_key_scope_check(resource_type="collection", path_param="id")),
     ],
 )
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
@@ -172,14 +187,18 @@ router.include_router(
             require_resource_permission_for_method(
                 "assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES
             )
-        )
+        ),
+        Depends(require_api_key_scope_check(resource_type="assistant", path_param="id")),
     ],
 )
 router.include_router(
     group_chat_router,
     prefix="/group-chats",
     tags=["group-chats"],
-    dependencies=[Depends(require_resource_permission_for_method("assistants"))],
+    dependencies=[
+        Depends(require_resource_permission_for_method("assistants")),
+        Depends(require_api_key_scope_check(resource_type="group_chat", path_param="id")),
+    ],
 )
 router.include_router(
     conversations_router,
@@ -190,7 +209,8 @@ router.include_router(
             require_resource_permission_for_method(
                 "assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES
             )
-        )
+        ),
+        Depends(require_api_key_scope_check(resource_type="conversation", path_param="session_id")),
     ],
 )
 router.include_router(
@@ -202,58 +222,113 @@ router.include_router(
             require_resource_permission_for_method(
                 "apps", read_override_endpoints=APPS_READ_OVERRIDES
             )
-        )
+        ),
+        Depends(require_api_key_scope_check(resource_type="service", path_param="id")),
     ],
 )
 router.include_router(logging_router, prefix="/logging", tags=["logging"])
 router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
-router.include_router(admin_router, prefix="/admin", tags=["admin"])
-router.include_router(tenant_self_credentials_router, prefix="/admin", tags=["admin"])
 router.include_router(
-    assistant_template_admin_router, prefix="", tags=["admin-templates"]
+    admin_router,
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
-router.include_router(app_template_admin_router, prefix="", tags=["admin-templates"])
+router.include_router(
+    tenant_self_credentials_router,
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
+router.include_router(
+    assistant_template_admin_router,
+    prefix="",
+    tags=["admin-templates"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
+router.include_router(
+    app_template_admin_router,
+    prefix="",
+    tags=["admin-templates"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 router.include_router(user_groups_router, prefix="/user-groups", tags=["user-groups"])
 router.include_router(
     allowed_origins_router, prefix="/allowed-origins", tags=["allowed-origins"]
 )
 router.include_router(
-    completion_models_router, prefix="/completion-models", tags=["completion-models"]
+    completion_models_router,
+    prefix="/completion-models",
+    tags=["completion-models"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
-    embedding_models_router, prefix="/embedding-models", tags=["embedding-models"]
+    embedding_models_router,
+    prefix="/embedding-models",
+    tags=["embedding-models"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
     transcription_models_router,
     prefix="/transcription-models",
     tags=["transcription-models"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
     model_providers_router,
     prefix="/admin/model-providers",
     tags=["admin", "model-providers"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
     tenant_completion_models_router,
     prefix="/admin/tenant-models/completion",
     tags=["admin", "tenant-models"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
     tenant_embedding_models_router,
     prefix="/admin/tenant-models/embedding",
     tags=["admin", "tenant-models"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
     tenant_transcription_models_router,
     prefix="/admin/tenant-models/transcription",
     tags=["admin", "tenant-models"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
 )
 router.include_router(
     files_router,
     prefix="/files",
     tags=["files"],
-    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+    dependencies=[
+        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(require_api_key_scope_check(resource_type="space", path_param=None)),
+    ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
@@ -261,14 +336,20 @@ router.include_router(
     space_router,
     prefix="/spaces",
     tags=["spaces"],
-    dependencies=[Depends(require_resource_permission_for_method("spaces"))],
+    dependencies=[
+        Depends(require_resource_permission_for_method("spaces")),
+        Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
+    ],
 )
 router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 router.include_router(
     website_router,
     prefix="/websites",
     tags=["websites"],
-    dependencies=[Depends(require_resource_permission_for_method("knowledge"))],
+    dependencies=[
+        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(require_api_key_scope_check(resource_type="website", path_param="id")),
+    ],
 )
 router.include_router(websocket_router, prefix="", tags=["websockets"])
 router.include_router(prompt_router, prefix="/prompts", tags=["prompts"])
@@ -290,12 +371,26 @@ router.include_router(
     prefix="/security-classifications",
     tags=["security-classifications"],
 )
-router.include_router(audit_router, prefix="", tags=["audit"])
+router.include_router(
+    audit_router,
+    prefix="",
+    tags=["audit"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )
-router.include_router(admin_sharepoint_router, prefix="/admin", tags=["admin"])
+router.include_router(
+    admin_sharepoint_router,
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 
 router.include_router(

@@ -141,10 +141,10 @@ def require_api_key_permission(required: ApiKeyPermission):
     NOT gated by the feature flag — management guards always enforce.
     """
 
-    async def _dep(request: Request) -> None:
+    async def _api_key_permission_dep(request: Request) -> None:
         request.state._required_api_key_permission = required.value
 
-    return _dep
+    return _api_key_permission_dep
 
 
 ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset({
@@ -178,13 +178,39 @@ def require_resource_permission_for_method(
     inspect ``request.state.api_key`` here.
     """
 
-    async def _dep(request: Request) -> None:
+    async def _resource_permission_dep(request: Request) -> None:
         request.state._resource_perm_config = {
             "resource_type": resource_type,
             "read_override_endpoints": read_override_endpoints,
         }
 
-    return _dep
+    return _resource_permission_dep
+
+
+def require_api_key_scope_check(
+    resource_type: str,
+    path_param: str | None = "id",
+):
+    """Router-level dependency: stores scope check config for post-auth enforcement.
+
+    The actual scope check runs in ``_resolve_api_key`` (user_service) after
+    authentication has set ``request.state.api_key``.
+
+    Args:
+        resource_type: The type of resource this route manages (e.g. "space",
+            "assistant", "app", "admin"). Used to determine scope compatibility.
+        path_param: URL path parameter holding the resource ID (e.g. "id",
+            "session_id"). None means no path-level check (list endpoints or
+            resources without extractable IDs).
+    """
+
+    async def _scope_check_dep(request: Request) -> None:
+        request.state._scope_check_config = {
+            "resource_type": resource_type,
+            "path_param": path_param,
+        }
+
+    return _scope_check_dep
 
 
 def require_resource_permission(resource_type: str, required: str):
@@ -195,7 +221,7 @@ def require_resource_permission(resource_type: str, required: str):
     ordering misconfiguration rather than silently allowing the request.
     """
 
-    async def _dep(request: Request) -> None:
+    async def _resource_check_dep(request: Request) -> None:
         key = getattr(request.state, "api_key", None)
         if key is None:
             # Check if an API key header was provided but auth didn't run
@@ -219,4 +245,4 @@ def require_resource_permission(resource_type: str, required: str):
         except ApiKeyValidationError as exc:
             _raise_api_key_http_error(exc)
 
-    return _dep
+    return _resource_check_dep

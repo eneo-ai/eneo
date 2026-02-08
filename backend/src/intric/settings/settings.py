@@ -24,6 +24,7 @@ class SettingsPublic(SettingsBase):
     tenant_credentials_enabled: bool = False  # Global config for tenant credential enforcement
     audit_logging_enabled: bool = True  # Feature flag for audit logging (default enabled for backward compat)
     provisioning: bool = False  # JIT provisioning - auto-create users on SSO login
+    api_key_scope_enforcement: bool = True  # Per-tenant scope enforcement toggle
 
 
 class GetModelsResponse(BaseModel):

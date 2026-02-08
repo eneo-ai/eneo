@@ -6,13 +6,14 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout/index.js";
-  import { Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@intric/ui";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric.js";
   import StorageOverviewBar from "./usage/storage/StorageOverviewBar.svelte";
   import TokenOverviewBar from "./usage/tokens/TokenOverviewBar.svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
+  import { writable } from "svelte/store";
 
   const { tenant } = getAppContext();
   const intric = getIntric();
@@ -22,6 +23,7 @@
   let usingTemplates = $state(data.settings.using_templates);
   let auditLoggingEnabled = $state(data.settings.audit_logging_enabled);
   let provisioningEnabled = $state(data.settings.provisioning ?? false);
+  let scopeEnforcementEnabled = $state(data.settings.api_key_scope_enforcement ?? true);
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -73,6 +75,42 @@
     }
   }
 
+  // Handle scope enforcement toggle change
+  const showDisableScopeDialog = writable(false);
+  let pendingScopeToggle: { current: boolean; next: boolean } | null = null;
+
+  async function handleToggleScopeEnforcement({ current, next }: { current: boolean; next: boolean }) {
+    // When disabling, show confirmation dialog first
+    if (next === false) {
+      pendingScopeToggle = { current, next };
+      $showDisableScopeDialog = true;
+      return;
+    }
+    await applyScopeEnforcementToggle(next);
+  }
+
+  async function confirmDisableScopeEnforcement() {
+    $showDisableScopeDialog = false;
+    if (pendingScopeToggle) {
+      await applyScopeEnforcementToggle(pendingScopeToggle.next);
+      pendingScopeToggle = null;
+    }
+  }
+
+  async function applyScopeEnforcementToggle(next: boolean) {
+    const previousValue = scopeEnforcementEnabled;
+    scopeEnforcementEnabled = next; // Optimistic UI update
+
+    try {
+      const updatedSettings = await intric.settings.updateScopeEnforcement(next);
+      scopeEnforcementEnabled = updatedSettings.api_key_scope_enforcement ?? true;
+      await invalidateAll();
+    } catch (error) {
+      console.error("[Admin] Error updating scope enforcement setting:", error);
+      scopeEnforcementEnabled = previousValue; // Revert on error
+    }
+  }
+
   // Handle provisioning toggle change
   async function handleToggleProvisioning({ current, next }: { current: boolean; next: boolean }) {
     console.log(`[Admin] Toggling provisioning from ${current} to ${next}`);
@@ -121,7 +159,23 @@
         <Settings.Row title={m.enable_provisioning()} description={m.enable_provisioning_description()}>
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
         </Settings.Row>
+        <Settings.Row title={m.enable_scope_enforcement()} description={m.enable_scope_enforcement_description()}>
+          <Input.Switch bind:value={scopeEnforcementEnabled} sideEffect={handleToggleScopeEnforcement} />
+        </Settings.Row>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>
 </Page.Root>
+
+<Dialog.Root alert openController={showDisableScopeDialog}>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.disable_scope_enforcement_warning_title()}</Dialog.Title>
+    <Dialog.Description>
+      {m.disable_scope_enforcement_warning_body()}
+    </Dialog.Description>
+    <Dialog.Controls let:close>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button variant="destructive" on:click={confirmDisableScopeEnforcement}>{m.disable()}</Button>
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>
