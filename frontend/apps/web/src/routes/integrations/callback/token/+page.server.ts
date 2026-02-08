@@ -9,19 +9,19 @@ export const actions: Actions = {
     const state = data.get("state") as string;
 
     if (!authCode || !state) {
-      return fail(400, { error: "Missing required fields" });
+      return fail(400, { error_key: "integration_callback_missing_required_fields" });
     }
 
     // Use internal Docker URL if available, otherwise fall back to external URL
     const backendUrl = env.INTRIC_BACKEND_SERVER_URL || env.INTRIC_BACKEND_URL;
     if (!backendUrl) {
-      return fail(500, { error: "Backend URL not configured" });
+      return fail(500, { error_key: "integration_callback_backend_url_not_configured" });
     }
 
     // Get auth token from locals (set by hooks.server.ts)
     const idToken = locals.id_token;
     if (!idToken) {
-      return fail(401, { error: "Not authenticated. Please log in and try again." });
+      return fail(401, { error_key: "integration_callback_not_authenticated" });
     }
 
     try {
@@ -55,7 +55,8 @@ export const actions: Actions = {
     } catch (error) {
       console.error("Service account auth callback error:", error);
       return fail(500, {
-        error: error instanceof Error ? error.message : "Failed to complete authentication",
+        error_key: "integration_callback_failed_to_complete_authentication",
+        error_detail: error instanceof Error ? error.message : undefined,
       });
     }
   },

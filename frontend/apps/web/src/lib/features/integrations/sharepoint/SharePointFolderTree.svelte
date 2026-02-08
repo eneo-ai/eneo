@@ -199,7 +199,9 @@
             {:else}
               <IconWeb class="w-4 h-4 flex-shrink-0 text-secondary" />
             {/if}
-            <span class="text-sm font-medium">Import entire {isOneDrive ? "OneDrive" : "site"}</span>
+            <span class="text-sm font-medium">
+              {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
+            </span>
           </button>
         {/if}
 

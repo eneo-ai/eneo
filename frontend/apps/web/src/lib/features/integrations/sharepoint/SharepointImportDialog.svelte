@@ -264,7 +264,9 @@
                 <span class="text-xs text-secondary flex-shrink-0">({formatSize(selectedItem.size)})</span>
               {/if}
               {#if selectedItem.type === "site_root"}
-                <span class="text-xs text-secondary flex-shrink-0">(entire {isOneDrive ? "OneDrive" : "site"})</span>
+                <span class="text-xs text-secondary flex-shrink-0">
+                  ({isOneDrive ? m.entire_onedrive() : m.entire_site()})
+                </span>
               {/if}
             </div>
           {/if}

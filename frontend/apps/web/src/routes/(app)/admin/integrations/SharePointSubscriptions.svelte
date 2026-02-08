@@ -250,7 +250,7 @@
                   {subscription.site_id}
                 </div>
                 <div class="max-w-[200px] truncate text-xs text-secondary" title={subscription.drive_id}>
-                  Drive: {subscription.drive_id}
+                  {m.sharepoint_drive_label()}: {subscription.drive_id}
                 </div>
               </td>
               <td class="whitespace-nowrap px-3 py-3 text-xs text-secondary">
