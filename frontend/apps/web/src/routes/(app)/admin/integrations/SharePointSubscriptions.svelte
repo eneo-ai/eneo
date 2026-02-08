@@ -3,6 +3,7 @@
   import { m } from "$lib/paraglide/messages";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { IntricClient } from "@intric/intric-js";
+  import dayjs from "dayjs";
 
   interface SharePointSubscription {
     id: string;
@@ -135,12 +136,8 @@
 
   // Format date
   function formatDate(dateString: string): string {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleString();
-    } catch {
-      return dateString;
-    }
+    const d = dayjs(dateString);
+    return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : dateString;
   }
 
   // Format time duration

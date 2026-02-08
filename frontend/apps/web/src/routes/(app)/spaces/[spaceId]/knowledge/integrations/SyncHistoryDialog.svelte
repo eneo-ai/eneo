@@ -9,6 +9,7 @@
   import { IconXMark } from "@intric/icons/x-mark";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { getIntric } from "$lib/core/Intric";
+  import dayjs from "dayjs";
 
   // Get intric during component initialization
   const intric = getIntric();
@@ -112,11 +113,8 @@
   }
 
   function formatDate(value: string): string {
-    try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return value;
-    }
+    const d = dayjs(value);
+    return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : value;
   }
 
   function getDuration(log: SyncLog): string {
