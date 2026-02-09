@@ -214,9 +214,10 @@ async def cleanup_orphaned_subscriptions(container: Container):
                 continue
 
             # Orphaned subscription - delete it
+            resource_id = subscription.site_id or subscription.drive_id or "unknown"
             logger.info(
                 f"Found orphaned subscription {subscription.subscription_id}, "
-                f"site={subscription.site_id[:30]}..."
+                f"resource={resource_id[:30]}..."
             )
 
             # Get token using unified helper (supports both OAuth and tenant app)

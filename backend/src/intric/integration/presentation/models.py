@@ -205,6 +205,8 @@ class IntegrationKnowledgePublic(BaseModel):
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     selected_item_type: Optional[str] = None
+    wrapper_id: Optional[UUID] = None
+    wrapper_name: Optional[str] = None
     permissions: list[ResourcePermission] = []
     metadata: IntegrationKnowledgeMetaData
     integration_type: Literal["confluence", "sharepoint"]

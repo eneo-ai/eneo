@@ -24,6 +24,9 @@ from intric.spaces.api.space_models import (
     AddSpaceGroupMemberRequest,
     AddSpaceMemberRequest,
     Applications,
+    CreateSpaceIntegrationKnowledgeBatchRequest,
+    CreateSpaceIntegrationKnowledgeBatchResponse,
+    CreateSpaceIntegrationKnowledgeBatchResult,
     CreateSpaceAppRequest,
     CreateSpaceAssistantRequest,
     CreateSpaceGroupsRequest,
@@ -37,6 +40,7 @@ from intric.spaces.api.space_models import (
     SpacePublic,
     SpaceSparse,
     UpdateIntegrationKnowledgeRequest,
+    UpdateIntegrationKnowledgeWrapperRequest,
     UpdateSpaceDryRunResponse,
     UpdateSpaceGroupMemberRequest,
     UpdateSpaceMemberRequest,
@@ -694,6 +698,117 @@ async def create_space_integration_knowledge(
     return job
 
 
+@router.post(
+    "/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
+    response_model=CreateSpaceIntegrationKnowledgeBatchResponse,
+    status_code=202,
+)
+async def create_space_integration_knowledge_batch(
+    id: UUID,
+    user_integration_id: UUID,
+    data: CreateSpaceIntegrationKnowledgeBatchRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    user = container.user()
+
+    batch_results = await service.create_space_integration_knowledge_batch(
+        user_integration_id=user_integration_id,
+        embedding_model_id=data.embedding_model.id,
+        space_id=id,
+        wrapper_name=data.wrapper_name,
+        items=[
+            {
+                "name": item.name,
+                "key": item.key,
+                "url": item.url,
+                "folder_id": item.folder_id,
+                "folder_path": item.folder_path,
+                "selected_item_type": item.selected_item_type,
+                "resource_type": item.resource_type or "site",
+            }
+            for item in data.items
+        ],
+    )
+
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        pass
+
+    audit_service = container.audit_service()
+    response_items: list[CreateSpaceIntegrationKnowledgeBatchResult] = []
+    created_count = 0
+    failed_count = 0
+
+    for result in batch_results:
+        if (
+            result["status"] == "created"
+            and result["knowledge"] is not None
+            and result["job"] is not None
+        ):
+            created_count += 1
+            knowledge = result["knowledge"]
+
+            response_items.append(
+                CreateSpaceIntegrationKnowledgeBatchResult(
+                    index=result["index"],
+                    name=result["name"],
+                    status="created",
+                    integration_knowledge_id=result["integration_knowledge_id"],
+                    job=JobPublic.model_validate(result["job"]),
+                    error=None,
+                )
+            )
+
+            extra = {
+                "integration_type": knowledge.integration_type,
+                "url": knowledge.url,
+                "embedding_model": {
+                    "id": str(data.embedding_model.id),
+                    "name": getattr(data.embedding_model, "name", None),
+                },
+                "batch": {"total_items": len(data.items)},
+            }
+
+            await audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
+                entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+                entity_id=knowledge.id,
+                description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}' (batch)",
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=knowledge,
+                    space=space,
+                    extra=extra,
+                ),
+            )
+            continue
+
+        failed_count += 1
+        response_items.append(
+            CreateSpaceIntegrationKnowledgeBatchResult(
+                index=result["index"],
+                name=result["name"],
+                status="failed",
+                integration_knowledge_id=None,
+                job=None,
+                error=result["error"],
+            )
+        )
+
+    return CreateSpaceIntegrationKnowledgeBatchResponse(
+        items=response_items,
+        created_count=created_count,
+        failed_count=failed_count,
+    )
+
+
 @router.delete(
     "/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
     status_code=204,
@@ -729,6 +844,44 @@ async def delete_space_integration_knowledge(
         entity_id=integration_knowledge_id,
         description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space '{space.name}'",
         metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
+    )
+
+
+@router.patch(
+    "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
+    response_model=list[IntegrationKnowledgePublic],
+)
+async def update_integration_knowledge_wrapper(
+    id: UUID,
+    wrapper_id: UUID,
+    data: UpdateIntegrationKnowledgeWrapperRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    updated_items = await service.update_wrapper_name(
+        space_id=id,
+        wrapper_id=wrapper_id,
+        name=data.name,
+    )
+    return [
+        IntegrationKnowledgeAssembler.to_space_knowledge_model(item)
+        for item in updated_items
+    ]
+
+
+@router.delete(
+    "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
+    status_code=204,
+)
+async def delete_integration_knowledge_wrapper(
+    id: UUID,
+    wrapper_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    await service.remove_wrapper_knowledge(
+        space_id=id,
+        wrapper_id=wrapper_id,
     )
 
 

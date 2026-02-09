@@ -5,6 +5,7 @@
   import { IconFileText } from "@intric/icons/file-text";
   import { IconFileImage } from "@intric/icons/file-image";
   import { IconFileAudio } from "@intric/icons/file-audio";
+  import { m } from "$lib/paraglide/messages";
 
   type TreeNode = {
     id: string;
@@ -19,23 +20,28 @@
   interface Props {
     node: TreeNode;
     isSelected?: boolean;
-    onSelect?: (node: TreeNode) => void;
+    onToggleSelect?: (node: TreeNode) => void;
     onNavigate?: (node: TreeNode) => void;
   }
 
   let {
     node,
     isSelected = false,
-    onSelect,
+    onToggleSelect,
     onNavigate
   }: Props = $props();
 
-  const handleClick = () => {
-    if (node.type === "folder") {
-      onNavigate?.(node);
-    } else {
-      onSelect?.(node);
-    }
+  const handleToggleSelect = () => {
+    onToggleSelect?.(node);
+  };
+
+  const handleCheckboxClick = (event: MouseEvent) => {
+    event.stopPropagation();
+    handleToggleSelect();
+  };
+
+  const handleNavigate = () => {
+    onNavigate?.(node);
   };
 
   function formatSize(bytes?: number): string {
@@ -64,49 +70,68 @@
   }
 </script>
 
-<button
-  type="button"
-  class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-left w-full border-b border-dimmer last:border-b-0 transition-colors
+<div
+  class="flex items-center gap-2 px-3 py-1.5 text-left w-full border-b border-dimmer last:border-b-0 transition-colors
     {isSelected ? 'bg-accent-dimmer border-accent' : 'hover:bg-hover-default'}"
-  onclick={handleClick}
 >
   <!-- Chevron for folders -->
   {#if node.type === "folder"}
-    <IconChevronRight class="w-3.5 h-3.5 flex-shrink-0 text-secondary" />
+    <button
+      type="button"
+      class="w-3.5 h-3.5 flex-shrink-0 text-secondary hover:text-primary"
+      onclick={handleNavigate}
+      title={m.open_folder()}
+      aria-label={m.open_folder()}
+    >
+      <IconChevronRight class="w-3.5 h-3.5" />
+    </button>
   {:else}
-    <div class="w-3.5"></div>
+    <div class="w-3.5 h-3.5"></div>
   {/if}
 
-  <!-- Icon -->
-  {#if node.type === "folder"}
-    <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
-  {:else}
-    {@const ext = getFileExtension(node.name)}
-    {#if IMAGE_EXTENSIONS.includes(ext)}
-      <IconFileImage class="w-4 h-4 flex-shrink-0 text-secondary" />
-    {:else if AUDIO_EXTENSIONS.includes(ext)}
-      <IconFileAudio class="w-4 h-4 flex-shrink-0 text-secondary" />
-    {:else if TEXT_EXTENSIONS.includes(ext)}
-      <IconFileText class="w-4 h-4 flex-shrink-0 text-secondary" />
+  <input
+    type="checkbox"
+    class="h-4 w-4 accent-accent-default flex-shrink-0"
+    checked={isSelected}
+    onclick={handleCheckboxClick}
+  />
+
+  <button
+    type="button"
+    class="flex items-center gap-2 text-left w-full min-w-0"
+    onclick={handleToggleSelect}
+  >
+    <!-- Icon -->
+    {#if node.type === "folder"}
+      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
     {:else}
-      <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+      {@const ext = getFileExtension(node.name)}
+      {#if IMAGE_EXTENSIONS.includes(ext)}
+        <IconFileImage class="w-4 h-4 flex-shrink-0 text-secondary" />
+      {:else if AUDIO_EXTENSIONS.includes(ext)}
+        <IconFileAudio class="w-4 h-4 flex-shrink-0 text-secondary" />
+      {:else if TEXT_EXTENSIONS.includes(ext)}
+        <IconFileText class="w-4 h-4 flex-shrink-0 text-secondary" />
+      {:else}
+        <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+      {/if}
     {/if}
-  {/if}
 
-  <!-- Name -->
-  <span class="truncate text-sm flex-1">{node.name}</span>
+    <!-- Name -->
+    <span class="truncate text-sm flex-1">{node.name}</span>
 
-  <!-- Metadata -->
-  <span class="text-xs text-secondary flex-shrink-0 tabular-nums">
-    {#if node.type === "folder" && node.has_children}
-      <!-- could show child count if available -->
-    {:else if node.size != null}
-      {formatSize(node.size)}
-    {/if}
-  </span>
-  {#if node.modified}
+    <!-- Metadata -->
     <span class="text-xs text-secondary flex-shrink-0 tabular-nums">
-      {formatDate(node.modified)}
+      {#if node.type === "folder" && node.has_children}
+        <!-- could show child count if available -->
+      {:else if node.size != null}
+        {formatSize(node.size)}
+      {/if}
     </span>
-  {/if}
-</button>
+    {#if node.modified}
+      <span class="text-xs text-secondary flex-shrink-0 tabular-nums">
+        {formatDate(node.modified)}
+      </span>
+    {/if}
+  </button>
+</div>

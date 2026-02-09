@@ -38,6 +38,8 @@ class IntegrationKnowledge(Entity):
         selected_item_type: str | None = None,
         resource_type: str | None = None,
         drive_id: str | None = None,
+        wrapper_id: UUID | None = None,
+        wrapper_name: str | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.name = name
@@ -59,6 +61,8 @@ class IntegrationKnowledge(Entity):
         self.selected_item_type = selected_item_type or "site_root"
         self.resource_type = resource_type or "site"
         self.drive_id = drive_id
+        self.wrapper_id = wrapper_id
+        self.wrapper_name = wrapper_name
 
     @property
     def integration_type(self) -> str:

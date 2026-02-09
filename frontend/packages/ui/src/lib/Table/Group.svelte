@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts" generics="T extends unknown">
+  import { createEventDispatcher } from "svelte";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import Button from "$lib/Button/Button.svelte";
   import { derived, writable } from "svelte/store";
@@ -18,8 +19,25 @@
 
   export let title: string | undefined | null = undefined;
   export let filterFn: (value: T) => boolean = () => true;
+  export let open: boolean | undefined = undefined;
+  export let showEmptyRow: boolean = true;
 
-  const open = writable(true);
+  const internalOpen = writable(true);
+  const isOpen = derived(internalOpen, ($internalOpen) =>
+    open === undefined ? $internalOpen : open
+  );
+  const dispatch = createEventDispatcher<{
+    openChange: { open: boolean };
+  }>();
+
+  function toggleOpen() {
+    const nextOpen = !$isOpen;
+    if (open === undefined) {
+      internalOpen.set(nextOpen);
+      return;
+    }
+    dispatch("openChange", { open: nextOpen });
+  }
   // Original is not exposed on the type but present on the store...
   // Keep an eye on this in the future (here we just cast it)
   const filteredRows = derived(rows, (rows) =>
@@ -87,15 +105,15 @@
           <div class="flex w-full items-center justify-between">
             <div class="flex items-center gap-2">
               <Button
-                on:click={() => ($open = !$open)}
+                on:click={toggleOpen}
                 padding="icon-leading"
                 class="font-mono font-medium"
               >
-                <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+                <IconChevronDown class="{$isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
               </Button>
               <slot name="title-prefix" />
               <Button
-                on:click={() => ($open = !$open)}
+                on:click={toggleOpen}
                 padding="text"
                 class="font-mono font-medium -ml-2"
               >
@@ -107,7 +125,7 @@
         </td>
       </tr>
     {/if}
-    {#if $open}
+    {#if $isOpen}
       {#if $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
@@ -137,11 +155,13 @@
           </Subscribe>
         {/each}
       {:else}
-        <tr>
-          <td colspan="99" class="px-4 py-3">
-            <slot name="empty" />
-          </td>
-        </tr>
+        {#if showEmptyRow}
+          <tr>
+            <td colspan="99" class="px-4 py-3">
+              <slot name="empty" />
+            </td>
+          </tr>
+        {/if}
       {/if}
     {/if}
   </tbody>
@@ -149,12 +169,12 @@
   {#if title}
     <div class="!border-b-default flex w-full items-center justify-between border-b pt-4 pb-2 !pl-2.5 pr-4">
       <Button
-        on:click={() => ($open = !$open)}
+        on:click={toggleOpen}
         padding="icon-leading"
         class="font-mono font-medium"
       >
         <div class="flex items-center gap-2">
-          <IconChevronDown class="{$open ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+          <IconChevronDown class="{$isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
           <slot name="title-prefix" />
           <span>{title}</span>
         </div>
@@ -162,7 +182,7 @@
       <slot name="title-suffix" />
     </div>
   {/if}
-  {#if $open}
+  {#if $isOpen}
     {#if $filteredRows.length > 0}
       <div style="column-gap: {gapX}rem; row-gap: {gapY}rem;" class={cardLayout({ layout })}>
         {#each $filteredRows as row (row.id)}
@@ -173,9 +193,11 @@
         {/each}
       </div>
     {:else}
-      <div class="px-4 py-3">
-        <slot name="empty" />
-      </div>
+      {#if showEmptyRow}
+        <div class="px-4 py-3">
+          <slot name="empty" />
+        </div>
+      {/if}
     {/if}
   {/if}
 {/if}

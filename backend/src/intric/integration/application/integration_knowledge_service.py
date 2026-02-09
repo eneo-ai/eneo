@@ -1,6 +1,6 @@
 import asyncio
-from typing import TYPE_CHECKING
-from uuid import UUID
+from typing import TYPE_CHECKING, TypedDict
+from uuid import UUID, uuid4
 
 from intric.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
@@ -10,7 +10,11 @@ from intric.integration.presentation.models import (
     SharepointContentTaskParam,
 )
 from intric.jobs.job_models import JobInDb, Task
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission
 
@@ -47,6 +51,26 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+class BatchIntegrationKnowledgeCreateItem(TypedDict):
+    name: str
+    key: str | None
+    url: str
+    folder_id: str | None
+    folder_path: str | None
+    selected_item_type: str | None
+    resource_type: str | None
+
+
+class BatchIntegrationKnowledgeCreateResult(TypedDict):
+    index: int
+    name: str
+    status: str
+    knowledge: "IntegrationKnowledge | None"
+    integration_knowledge_id: UUID | None
+    job: "JobInDb | None"
+    error: str | None
 
 
 class SimpleToken:
@@ -116,18 +140,23 @@ class IntegrationKnowledgeService:
         name: str,
         embedding_model_id: UUID,
         space_id: UUID,
-        key: str,
+        key: str | None,
         url: str,
-        folder_id: str = None,
-        folder_path: str = None,
-        selected_item_type: str = None,
+        folder_id: str | None = None,
+        folder_path: str | None = None,
+        selected_item_type: str | None = None,
         resource_type: str = "site",
+        wrapper_id: UUID | None = None,
+        wrapper_name: str | None = None,
     ) -> tuple[IntegrationKnowledge, "JobInDb"]:
         space = await self.space_repo.one(id=space_id)
         if not space.is_embedding_model_in_space(embedding_model_id=embedding_model_id):
             raise BadRequestException("No valid embedding model")
 
         user_integration = await self.user_integration_repo.one(id=user_integration_id)
+
+        if not key:
+            raise BadRequestException("Integration key is required")
 
         # SECURITY: tenant_app integrations (Sites.Read.All) require admin permission
         if user_integration.auth_type == "tenant_app":
@@ -166,6 +195,8 @@ class IntegrationKnowledgeService:
             folder_id=folder_id,
             folder_path=folder_path,
             selected_item_type=selected_item_type,
+            wrapper_id=wrapper_id,
+            wrapper_name=wrapper_name,
         )
         knowledge = await self.integration_knowledge_repo.add(obj=obj)
 
@@ -263,6 +294,74 @@ class IntegrationKnowledgeService:
 
         # Return both knowledge and job for frontend to track progress
         return knowledge, job
+
+    async def create_space_integration_knowledge_batch(
+        self,
+        user_integration_id: UUID,
+        embedding_model_id: UUID,
+        space_id: UUID,
+        items: list[BatchIntegrationKnowledgeCreateItem],
+        wrapper_name: str | None = None,
+    ) -> list[BatchIntegrationKnowledgeCreateResult]:
+        """Create multiple integration knowledge rows in one request.
+
+        This reuses the existing single-item flow to keep auth/sync/subscription
+        behavior aligned with the rest of the SharePoint pipeline.
+        """
+        results: list[BatchIntegrationKnowledgeCreateResult] = []
+        normalized_wrapper_name = (
+            wrapper_name.strip() if wrapper_name and wrapper_name.strip() else None
+        )
+        batch_wrapper_id = uuid4() if len(items) > 1 else None
+        batch_wrapper_name = normalized_wrapper_name if batch_wrapper_id else None
+
+        for index, item in enumerate(items):
+            try:
+                knowledge, job = await self.create_space_integration_knowledge(
+                    user_integration_id=user_integration_id,
+                    name=item["name"],
+                    embedding_model_id=embedding_model_id,
+                    space_id=space_id,
+                    key=item.get("key"),
+                    url=item["url"],
+                    folder_id=item.get("folder_id"),
+                    folder_path=item.get("folder_path"),
+                    selected_item_type=item.get("selected_item_type"),
+                    resource_type=item.get("resource_type") or "site",
+                    wrapper_id=batch_wrapper_id,
+                    wrapper_name=batch_wrapper_name,
+                )
+                results.append(
+                    BatchIntegrationKnowledgeCreateResult(
+                        index=index,
+                        name=item["name"],
+                        status="created",
+                        knowledge=knowledge,
+                        integration_knowledge_id=knowledge.id,
+                        job=job,
+                        error=None,
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to create integration knowledge batch item at index %s: %s",
+                    index,
+                    exc,
+                    exc_info=True,
+                )
+                results.append(
+                    BatchIntegrationKnowledgeCreateResult(
+                        index=index,
+                        name=item["name"],
+                        status="failed",
+                        knowledge=None,
+                        integration_knowledge_id=None,
+                        job=None,
+                        error=str(exc),
+                    )
+                )
+
+        return results
 
     async def _distribute_knowledge_if_org_space(
         self, knowledge: IntegrationKnowledge, space: "Space"
@@ -585,3 +684,78 @@ class IntegrationKnowledgeService:
         )
         knowledge.name = name
         return await self.integration_knowledge_repo.update(knowledge)
+
+    async def _get_owned_wrapper_knowledge(
+        self,
+        space: "Space",
+        wrapper_id: UUID,
+    ) -> list[IntegrationKnowledge]:
+        wrapper_items = [
+            knowledge
+            for knowledge in space.integration_knowledge_list
+            if getattr(knowledge, "wrapper_id", None) == wrapper_id
+        ]
+
+        if not wrapper_items:
+            raise NotFoundException("Integration knowledge wrapper not found")
+
+        owned_items = [
+            knowledge for knowledge in wrapper_items if knowledge.space_id == space.id
+        ]
+        if not owned_items:
+            raise UnauthorizedException(
+                "Cannot manage this wrapper from this space. "
+                "It belongs to another space."
+            )
+
+        return owned_items
+
+    async def update_wrapper_name(
+        self,
+        space_id: UUID,
+        wrapper_id: UUID,
+        name: str,
+    ) -> list[IntegrationKnowledge]:
+        """Update wrapper_name for all knowledge items in a wrapper."""
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise BadRequestException("Wrapper name cannot be empty")
+
+        space = await self.space_repo.one(id=space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_integration_knowledge_list():
+            raise UnauthorizedException()
+
+        owned_items = await self._get_owned_wrapper_knowledge(
+            space=space,
+            wrapper_id=wrapper_id,
+        )
+
+        updated_items: list[IntegrationKnowledge] = []
+        for item in owned_items:
+            knowledge = await self.integration_knowledge_repo.one(id=item.id)
+            knowledge.wrapper_name = normalized_name
+            updated_items.append(await self.integration_knowledge_repo.update(knowledge))
+
+        return updated_items
+
+    async def remove_wrapper_knowledge(
+        self,
+        space_id: UUID,
+        wrapper_id: UUID,
+    ) -> None:
+        """Delete all owned knowledge items in a wrapper."""
+        space = await self.space_repo.one(id=space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_delete_integration_knowledge_list():
+            raise UnauthorizedException()
+
+        owned_items = await self._get_owned_wrapper_knowledge(
+            space=space,
+            wrapper_id=wrapper_id,
+        )
+        for item in list(owned_items):
+            await self.remove_knowledge(
+                space_id=space_id,
+                integration_knowledge_id=item.id,
+            )

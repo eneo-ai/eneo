@@ -32,7 +32,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_crawl());
+      alert(m.integration_delete_error());
       console.error(e);
     }
     isDeleting = false;

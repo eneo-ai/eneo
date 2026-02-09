@@ -1193,7 +1193,7 @@ class SharePointContentService:
                 )
                 continue
 
-            content, skip_reason = await self._get_file_content(token, item)
+            content, skip_reason = await self._get_file_content(client, item)
 
             if content:
                 await self._process_info_blob(
@@ -1454,7 +1454,7 @@ class SharePointContentService:
         return file_extension_to_type(item.get("name", ""))
 
     async def _get_file_content(
-        self, token, item: Dict[str, Any]
+        self, client: SharePointContentClient, item: Dict[str, Any]
     ) -> Tuple[Optional[str], Optional[str]]:
         item_id = item.get("id")
         item_name = item.get("name", "").lower()
@@ -1469,22 +1469,12 @@ class SharePointContentService:
             return None, skip_reason
 
         try:
-            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
-            token_id = getattr(token, "id", None)
-            async with SharePointContentClient(
-                base_url=base_url,
-                api_token=token.access_token,
-                token_id=token_id,
-                token_refresh_callback=(
-                    self.token_refresh_callback if token_id else None
-                ),
-            ) as content_client:
-                content, _ = await content_client.get_file_content_by_id(
-                    drive_id=drive_id, item_id=item_id
-                )
-                if not content:
-                    return None, "Empty or unreadable content"
-                return content, None
+            content, _ = await client.get_file_content_by_id(
+                drive_id=drive_id, item_id=item_id
+            )
+            if not content:
+                return None, "Empty or unreadable content"
+            return content, None
 
         except ValueError as e:
             if "exceeds max download size" in str(e):
