@@ -165,6 +165,10 @@ APPS_READ_OVERRIDES: frozenset[str] = frozenset({
     "run_app",
 })
 
+FILES_READ_OVERRIDES: frozenset[str] = frozenset({
+    "generate_signed_url",
+})
+
 
 def require_resource_permission_for_method(
     resource_type: str,

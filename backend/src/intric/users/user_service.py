@@ -854,7 +854,7 @@ class UserService:
             if key.scope_id != assistant_id:
                 raise ApiKeyValidationError(
                     status_code=403,
-                    code="insufficient_permission",
+                    code="insufficient_scope",
                     message="API key is not scoped to this assistant.",
                 )
             return
@@ -871,7 +871,7 @@ class UserService:
             ):
                 raise ApiKeyValidationError(
                     status_code=403,
-                    code="insufficient_permission",
+                    code="insufficient_scope",
                     message="API key is not scoped to this assistant's space.",
                 )
             if (
@@ -880,14 +880,14 @@ class UserService:
             ):
                 raise ApiKeyValidationError(
                     status_code=403,
-                    code="insufficient_permission",
+                    code="insufficient_scope",
                     message="API key is not scoped to this tenant.",
                 )
             return
 
         raise ApiKeyValidationError(
             status_code=403,
-            code="insufficient_permission",
+            code="insufficient_scope",
             message="API key scope does not allow assistant access.",
         )
 

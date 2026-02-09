@@ -4,10 +4,13 @@ from intric.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
+    FILES_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
+    require_api_key_permission,
     require_api_key_scope_check,
     require_resource_permission_for_method,
 )
+from intric.authentication.auth_models import ApiKeyPermission
 
 from intric.admin.admin_router import router as admin_router
 from intric.ai_models.ai_models_router import router as ai_models_router
@@ -87,6 +90,7 @@ from intric.transcription_models.presentation.tenant_transcription_models_router
 )
 from intric.user_groups.user_groups_router import router as user_groups_router
 from intric.users.user_router import router as users_router
+from intric.users.user_router import users_admin_router
 from intric.websites.presentation.website_router import router as website_router
 from intric.modules.module_router import router as module_router
 from intric.sysadmin.sysadmin_router import router as sysadmin_router
@@ -152,6 +156,15 @@ router.include_router(
     api_key_router,
     dependencies=[
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
+router.include_router(
+    users_admin_router,
+    prefix="/users",
+    tags=["users"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     ],
 )
 router.include_router(users_router, prefix="/users", tags=["users"])
@@ -326,7 +339,7 @@ router.include_router(
     prefix="/files",
     tags=["files"],
     dependencies=[
-        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(require_resource_permission_for_method("knowledge", read_override_endpoints=FILES_READ_OVERRIDES)),
         Depends(require_api_key_scope_check(resource_type="space", path_param=None)),
     ],
 )
@@ -365,7 +378,15 @@ router.include_router(
 )
 router.include_router(template_router, prefix="/templates", tags=["templates"])
 router.include_router(storage_router, prefix="/storage", tags=["storage"])
-router.include_router(token_usage_router, prefix="/token-usage", tags=["token-usage"])
+router.include_router(
+    token_usage_router,
+    prefix="/token-usage",
+    tags=["token-usage"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    ],
+)
 router.include_router(
     security_classifications_router,
     prefix="/security-classifications",

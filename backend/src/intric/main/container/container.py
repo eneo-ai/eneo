@@ -915,6 +915,7 @@ class Container(containers.DeclarativeContainer):
         ai_models_service=ai_models_service,
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
+        audit_service=audit_service,
     )
     crawl_service = providers.Factory(
         CrawlService,

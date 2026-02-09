@@ -1,6 +1,9 @@
 from typing import TYPE_CHECKING
 
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.audit.application.audit_service import AuditService
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.config import get_settings as get_app_settings
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
@@ -24,12 +27,14 @@ class SettingService:
         ai_models_service: AIModelsService,
         feature_flag_service: "FeatureFlagService",
         tenant_repo: TenantRepository,
+        audit_service: AuditService,
     ):
         self.repo = repo
         self.user = user
         self.ai_models_service = ai_models_service
         self.feature_flag_service = feature_flag_service
         self.tenant_repo = tenant_repo
+        self.audit_service = audit_service
 
     async def get_settings(self):
         settings = await self.repo.get(self.user.id)
@@ -106,6 +111,11 @@ class SettingService:
             f"Admin user {self.user.username} toggling templates to {enabled} for tenant {self.user.tenant_id}"
         )
 
+        # Query real old value before toggling
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates", tenant_id=self.user.tenant_id
+        )
+
         # Get the feature flag
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
             name="using_templates"
@@ -131,6 +141,19 @@ class SettingService:
 
         logger.info(
             f"Templates successfully toggled to {enabled} for tenant {self.user.tenant_id}"
+        )
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled using_templates to {enabled}",
+            metadata={
+                "setting": "using_templates",
+                "changes": {"using_templates": {"old": old_enabled, "new": enabled}},
+            },
         )
 
         # Get global config flags
@@ -166,6 +189,11 @@ class SettingService:
             f"Admin user {self.user.username} toggling audit logging to {enabled} for tenant {self.user.tenant_id}"
         )
 
+        # Query real old value before toggling
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="audit_logging_enabled", tenant_id=self.user.tenant_id
+        )
+
         # Get the feature flag
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
             name="audit_logging_enabled"
@@ -191,6 +219,19 @@ class SettingService:
 
         logger.info(
             f"Audit logging successfully toggled to {enabled} for tenant {self.user.tenant_id}"
+        )
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled audit_logging_enabled to {enabled}",
+            metadata={
+                "setting": "audit_logging_enabled",
+                "changes": {"audit_logging_enabled": {"old": old_enabled, "new": enabled}},
+            },
         )
 
         # Get tenant_credentials_enabled from global config
@@ -222,11 +263,28 @@ class SettingService:
             f"Admin {self.user.username} toggling provisioning to {enabled} for tenant {self.user.tenant_id}"
         )
 
+        # Query real old value before toggling
+        tenant_before = await self.tenant_repo.get(self.user.tenant_id)
+        old_enabled = tenant_before.provisioning if tenant_before else False
+
         tenant_update = TenantUpdate(
             id=self.user.tenant_id,
             provisioning=enabled,
         )
         await self.tenant_repo.update_tenant(tenant_update)
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled provisioning to {enabled}",
+            metadata={
+                "setting": "provisioning",
+                "changes": {"provisioning": {"old": old_enabled, "new": enabled}},
+            },
+        )
 
         settings = await self.repo.get(self.user.id)
         app_settings = get_app_settings()
@@ -261,6 +319,11 @@ class SettingService:
             f"for tenant {self.user.tenant_id}"
         )
 
+        # Query real old value before toggling
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="api_key_scope_enforcement", tenant_id=self.user.tenant_id
+        )
+
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
             name="api_key_scope_enforcement"
         )
@@ -284,6 +347,19 @@ class SettingService:
         logger.info(
             f"Scope enforcement successfully toggled to {enabled} "
             f"for tenant {self.user.tenant_id}"
+        )
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled api_key_scope_enforcement to {enabled}",
+            metadata={
+                "setting": "api_key_scope_enforcement",
+                "changes": {"api_key_scope_enforcement": {"old": old_enabled, "new": enabled}},
+            },
         )
 
         app_settings = get_app_settings()

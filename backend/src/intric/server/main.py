@@ -6,13 +6,12 @@ import uuid
 import uvicorn
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from intric.allowed_origins.get_origin_callback import get_origin
-from intric.authentication import auth_dependencies
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.server import api_documentation
@@ -706,9 +705,7 @@ def get_application():
             ),
         )
 
-    @app.get(
-        "/version", dependencies=[Depends(auth_dependencies.get_current_active_user)]
-    )
+    @app.get("/version")
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
 

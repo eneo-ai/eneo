@@ -14,7 +14,12 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
 from intric.authentication import auth_dependencies
-from intric.authentication.auth_dependencies import require_api_key_scope_check
+from intric.authentication.auth_dependencies import (
+    require_api_key_permission,
+    require_api_key_scope_check,
+)
+from intric.authentication.auth_models import ApiKeyPermission
+from intric.roles.permissions import Permission, validate_permission
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
@@ -49,6 +54,7 @@ from intric.audit.domain.entity_types import EntityType
 logger = get_logger(__name__)
 
 router = APIRouter()
+users_admin_router = APIRouter()
 
 _LEGACY_USER_API_KEY_EXAMPLE = {
     "key": "inp_3f5f2f7f7f...d9a1",
@@ -501,7 +507,7 @@ async def login_with_mobilityguard(
     return intric_token
 
 
-@router.get("/", response_model=CursorPaginatedResponse[UserSparse])
+@users_admin_router.get("/", response_model=CursorPaginatedResponse[UserSparse])
 async def get_tenant_users(
     email: Optional[str] = Query(None, description="Email of user"),
     limit: int = Query(None, description="Users per page", ge=1),
@@ -509,6 +515,8 @@ async def get_tenant_users(
     previous: Optional[bool] = Query(False, description="Show previous page"),
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
+
     user = container.user()
     user_assembler = container.user_assembler()
     user_service = container.user_service()
@@ -585,39 +593,11 @@ async def get_currently_authenticated_user(
         **api_key_error_responses([401, 403]),
     },
 )
-@router.get(
-    "/api-keys/",
-    response_model=ApiKey,
-    tags=["Legacy API Keys"],
-    summary="Generate legacy user API key (GET alias)",
-    deprecated=True,
-    description=(
-        "Legacy API key endpoint (GET alias). Use `/api/v1/api-keys` for scoped v2 keys. "
-        "This endpoint rotates the old legacy key immediately."
-    ),
-    responses={
-        200: {
-            "description": "Legacy API key created and returned once.",
-            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
-        },
-        410: {
-            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": "deprecated_endpoint",
-                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
-                    }
-                }
-            },
-        },
-        **api_key_error_responses([401, 403]),
-    },
-)
 async def generate_api_key(
     current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
     container: Container = Depends(get_container()),
     _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    _key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
@@ -684,6 +664,7 @@ async def invite_user(
     container: Container = Depends(get_container(with_user=True)),
     _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
     session = cast(AsyncSession, container.session())
@@ -759,6 +740,7 @@ async def update_user(
     container: Container = Depends(get_container(with_user=True)),
     _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 
@@ -878,6 +860,7 @@ async def delete_user(
     container: Container = Depends(get_container(with_user=True)),
     _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 

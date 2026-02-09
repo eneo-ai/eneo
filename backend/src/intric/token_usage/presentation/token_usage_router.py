@@ -5,7 +5,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from intric.authentication.auth_dependencies import get_current_active_user
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 from intric.token_usage.presentation.token_usage_models import (
@@ -17,7 +16,7 @@ from intric.token_usage.presentation.token_usage_models import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(dependencies=[Depends(get_current_active_user)])
+router = APIRouter()
 
 
 @router.get("/", response_model=TokenUsageSummary)
