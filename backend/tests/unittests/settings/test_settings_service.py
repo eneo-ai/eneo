@@ -52,6 +52,12 @@ class MockTenantRepo:
         )
 
 
+class MockAuditService:
+    """Mock audit service for testing."""
+    async def log_async(self, *args, **kwargs):
+        pass
+
+
 async def test_get_settings_if_settings():
     repo = MockRepo()
 
@@ -63,6 +69,7 @@ async def test_get_settings_if_settings():
         ai_models_service=MockRepo(),
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
     )
 
     settings = await service.get_settings()
@@ -79,6 +86,7 @@ async def test_update_settings():
         ai_models_service=MockRepo(),
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED

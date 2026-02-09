@@ -9,6 +9,10 @@ import pytest
 from intric.main.config import get_settings, set_settings
 from intric.users.user import UserAdd, UserState
 
+# Authenticated endpoint for guardrail/enforcement tests.
+# Must trigger the full API key auth chain (unlike /version which is public).
+_AUTH_ENDPOINT = "/api/v1/assistants"
+
 
 @pytest.fixture
 async def default_user(db_container):
@@ -130,24 +134,10 @@ async def test_legacy_user_api_key_endpoints_still_work(client, default_user_tok
     assert post_payload["key"].startswith("inp_")
 
     post_auth = await client.get(
-        "/version",
+        "/api/v1/assistants",
         headers={"X-API-Key": post_payload["key"]},
     )
     assert post_auth.status_code == 200
-
-    get_response = await client.get(
-        "/api/v1/users/api-keys/",
-        headers={"Authorization": f"Bearer {default_user_token}"},
-    )
-    assert get_response.status_code == 200, get_response.text
-    get_payload = get_response.json()
-    assert get_payload["key"].startswith("inp_")
-
-    get_auth = await client.get(
-        "/version",
-        headers={"X-API-Key": get_payload["key"]},
-    )
-    assert get_auth.status_code == 200
 
 
 @pytest.mark.integration
@@ -199,7 +189,7 @@ async def test_pk_origin_guardrail(
     secret = create_response.json()["secret"]
 
     ok_response = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={
             "X-API-Key": secret,
             "Origin": "https://app.example.com",
@@ -208,7 +198,7 @@ async def test_pk_origin_guardrail(
     assert ok_response.status_code == 200
 
     deny_response = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={
             "X-API-Key": secret,
             "Origin": "https://evil.example.com",
@@ -240,7 +230,7 @@ async def test_sk_ip_guardrail(client, default_user_token):
         secret = create_response.json()["secret"]
 
         ok_response = await client.get(
-            "/version",
+            _AUTH_ENDPOINT,
             headers={
                 "X-API-Key": secret,
                 "X-Forwarded-For": "203.0.113.10, 10.0.0.1",
@@ -249,7 +239,7 @@ async def test_sk_ip_guardrail(client, default_user_token):
         assert ok_response.status_code == 200
 
         deny_response = await client.get(
-            "/version",
+            _AUTH_ENDPOINT,
             headers={
                 "X-API-Key": secret,
                 "X-Forwarded-For": "198.51.100.10, 10.0.0.1",
@@ -279,13 +269,13 @@ async def test_rate_limit_enforced(client, default_user_token):
     secret = create_response.json()["secret"]
 
     first = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={"X-API-Key": secret},
     )
     assert first.status_code == 200
 
     second = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={"X-API-Key": secret},
     )
     assert second.status_code == 429
@@ -438,7 +428,7 @@ async def test_api_key_expired_denied(client, default_user_token):
     secret = create_response.json()["secret"]
 
     response = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={"X-API-Key": secret},
     )
     assert response.status_code == 401
@@ -473,7 +463,7 @@ async def test_api_key_suspended_denied(client, default_user_token):
     assert suspend_response.status_code == 200
 
     response = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={"X-API-Key": secret},
     )
     assert response.status_code == 401
@@ -486,7 +476,7 @@ async def test_api_key_suspended_denied(client, default_user_token):
 @pytest.mark.asyncio
 async def test_invalid_api_key_denied(client):
     response = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={"X-API-Key": "sk_invalid_123456"},
     )
     assert response.status_code == 401
@@ -732,7 +722,7 @@ async def test_sk_guardrail_rejects_malformed_forwarded_ip(client, default_user_
         secret = create_response.json()["secret"]
 
         response = await client.get(
-            "/version",
+            _AUTH_ENDPOINT,
             headers={
                 "X-API-Key": secret,
                 "X-Forwarded-For": "not_an_ip, 10.0.0.1",

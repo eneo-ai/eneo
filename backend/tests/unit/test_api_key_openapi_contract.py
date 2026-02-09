@@ -18,7 +18,7 @@ REQUIRED_PATHS = {
     "/api/v1/api-keys/{id}/rotate": {"post"},
     "/api/v1/api-keys/{id}/suspend": {"post"},
     "/api/v1/api-keys/{id}/reactivate": {"post"},
-    "/api/v1/users/api-keys/": {"get", "post"},
+    "/api/v1/users/api-keys/": {"post"},
     "/api/v1/assistants/{id}/api-keys/": {"get"},
     "/api/v1/admin/api-keys": {"get"},
     "/api/v1/admin/api-keys/{id}": {"get"},
