@@ -46,6 +46,14 @@ Optionally, if Eneo cannot auto-detect its public URL (e.g., behind a reverse pr
 SHAREPOINT_WEBHOOK_NOTIFICATION_URL=https://your-eneo-domain.com/api/v1/integrations/sharepoint/webhook/
 ```
 
+You can also tune the maximum file size that Eneo downloads from SharePoint/OneDrive:
+
+```bash
+# Optional: Max file size in bytes
+# Default: 52428800 (50 MB)
+SHAREPOINT_MAX_DOWNLOAD_BYTES=52428800
+```
+
 After setting these variables, restart the backend service.
 
 ---
@@ -219,6 +227,8 @@ Files that cannot be processed (images, videos, executables) are skipped during 
 ### Import Limits and Quotas
 
 Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows progress in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
+
+By default, files larger than **50 MB** are skipped during import/sync to protect worker memory usage. You can change this limit with `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
 
 ---
 
