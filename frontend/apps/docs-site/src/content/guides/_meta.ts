@@ -8,6 +8,7 @@ const meta: MetaRecord = {
   deployment: 'Deployment',
   'document-processing': 'Document Processing',
   'sharepoint-integration': 'SharePoint Integration',
+  'upgrade-1-7-0': 'Upgrading to 1.7.0',
 }
 
 export default meta;
