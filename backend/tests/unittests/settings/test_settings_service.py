@@ -35,6 +35,23 @@ class MockFeatureFlagService:
         return False
 
 
+class MockTenantRepo:
+    """Mock tenant repo for testing."""
+    async def get(self, tenant_id):
+        # Return a mock tenant with provisioning=False
+        from intric.tenants.tenant import TenantInDB, TenantState
+        return TenantInDB(
+            id=tenant_id,
+            name="Test Tenant",
+            quota_limit=1024**3,
+            modules=[],
+            api_credentials={},
+            federation_config={},
+            state=TenantState.ACTIVE,
+            provisioning=False,
+        )
+
+
 async def test_get_settings_if_settings():
     repo = MockRepo()
 
@@ -44,7 +61,8 @@ async def test_get_settings_if_settings():
         repo=repo,
         user=TEST_USER,
         ai_models_service=MockRepo(),
-        feature_flag_service=MockFeatureFlagService()
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
     )
 
     settings = await service.get_settings()
@@ -59,7 +77,8 @@ async def test_update_settings():
         repo=repo,
         user=TEST_USER,
         ai_models_service=MockRepo(),
-        feature_flag_service=MockFeatureFlagService()
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED

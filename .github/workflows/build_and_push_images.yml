@@ -4,28 +4,27 @@ name: Build and Push Docker Images
 # Deployment is handled by external systems that watch for image updates.
 #
 # Workflow Summary:
-# - develop branch → :develop image tag → external system deploys to dev
-# - main branch → :main image tag → external system deploys to testing
-# - feature/* branches → :feature-branch-name image tag → for development/testing
-# - fix/* branches → :fix-branch-name image tag → for development/testing
-# - v* tags → version image tags → external system handles production deployment
+# - develop branch → :develop image tag → external system deploys to dev (automatic)
+# - main branch → :main image tag → external system deploys to testing (automatic)
+# - v* tags → version image tags → external system handles production deployment (automatic)
+# - Any other branch → manually triggered via Actions tab (workflow_dispatch)
+# - v*-rc/beta/etc tags → pre-release version image tags (no :latest)
 #
 # Image Tags Created:
 # - Push to develop: ghcr.io/org/repo:develop, ghcr.io/org/repo:develop-abc1234
 # - Push to main: ghcr.io/org/repo:main, ghcr.io/org/repo:main-def5678
-# - Push to feature/auth: ghcr.io/org/repo:feature-auth, ghcr.io/org/repo:feature-auth-abc1234
-# - Push to fix/grouping-chunks: ghcr.io/org/repo:fix-grouping-chunks, ghcr.io/org/repo:fix-grouping-chunks-abc1234
-# - Tag v1.0.0: ghcr.io/org/repo:v1.0.0, ghcr.io/org/repo:1.0, ghcr.io/org/repo:latest
+# - Manual trigger on any branch: ghcr.io/org/repo:branch-name, ghcr.io/org/repo:branch-name-abc1234
+# - Tag v1.0.0: ghcr.io/org/repo:v1.0.0, ghcr.io/org/repo:latest
+# - Tag v1.0.0-rc: ghcr.io/org/repo:v1.0.0-rc (no :latest)
 
 on:
   push:
     branches:
       - main
       - develop
-      - 'feature/*'
-      - 'fix/*'
     tags:
       - 'v*'  # Triggered when version tags are pushed
+  workflow_dispatch:  # Manually trigger builds for feature/fix branches from the Actions tab
 
 env:
   REGISTRY: ghcr.io
@@ -70,21 +69,25 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
-            echo "Building production version: $VERSION"
-            echo "is-release=true" >> $GITHUB_OUTPUT
+            # Check if this is a pre-release (contains hyphen after version, e.g., v1.7.0-rc)
+            if [[ "$VERSION" == *-* ]]; then
+              echo "Building pre-release version: $VERSION"
+              echo "is-release=true" >> $GITHUB_OUTPUT
+              echo "is-prerelease=true" >> $GITHUB_OUTPUT
+            else
+              echo "Building production version: $VERSION"
+              echo "is-release=true" >> $GITHUB_OUTPUT
+              echo "is-prerelease=false" >> $GITHUB_OUTPUT
+            fi
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "Building main branch for testing environment"
             echo "is-release=false" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "Building develop branch for dev environment"
             echo "is-release=false" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/feature/"* ]]; then
+          else
             BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-            echo "Building feature branch: $BRANCH_NAME"
-            echo "is-release=false" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/fix/"* ]]; then
-            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-            echo "Building fix branch: $BRANCH_NAME"
+            echo "Building branch: $BRANCH_NAME"
             echo "is-release=false" >> $GITHUB_OUTPUT
           fi
 
@@ -98,13 +101,12 @@ jobs:
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/feature/') }}
-            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/fix/') }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/main' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
-            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' && steps.build-context.outputs.is-prerelease == 'false' }}
 
             # Git SHA for traceability (always included)
             type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
@@ -141,13 +143,12 @@ jobs:
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/feature/') }}
-            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/fix/') }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/main' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
-            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' && steps.build-context.outputs.is-prerelease == 'false' }}
 
             # Git SHA for traceability (always included)
             type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
@@ -182,17 +183,29 @@ jobs:
 
           if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
-            echo "### Production Release: $VERSION" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Backend:**" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Frontend:**" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "✅ Ready for production deployment" >> $GITHUB_STEP_SUMMARY
+            if [[ "$VERSION" == *-* ]]; then
+              echo "### Pre-release: $VERSION" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Backend:**" >> $GITHUB_STEP_SUMMARY
+              echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Frontend:**" >> $GITHUB_STEP_SUMMARY
+              echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "🧪 Pre-release images built for testing" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "### Production Release: $VERSION" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Backend:**" >> $GITHUB_STEP_SUMMARY
+              echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+              echo "- \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Frontend:**" >> $GITHUB_STEP_SUMMARY
+              echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+              echo "- \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "✅ Ready for production deployment" >> $GITHUB_STEP_SUMMARY
+            fi
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "### Testing Environment Build" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -207,22 +220,13 @@ jobs:
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ github.ref }}" == "refs/heads/feature/"* ]]; then
+          else
             BRANCH_NAME="${GITHUB_REF#refs/heads/}"
             BRANCH_TAG="${BRANCH_NAME//\//-}"
-            echo "### Feature Branch Build: $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
+            echo "### Branch Build: $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BRANCH_TAG\`" >> $GITHUB_STEP_SUMMARY
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:$BRANCH_TAG\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🚀 Feature branch images built for testing and development" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ github.ref }}" == "refs/heads/fix/"* ]]; then
-            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-            BRANCH_TAG="${BRANCH_NAME//\//-}"
-            echo "### Fix Branch Build: $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BRANCH_TAG\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:$BRANCH_TAG\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🔧 Fix branch images built for testing and development" >> $GITHUB_STEP_SUMMARY
+            echo "🚀 Branch images built for testing and development" >> $GITHUB_STEP_SUMMARY
           fi

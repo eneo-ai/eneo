@@ -17,9 +17,12 @@
   export let data;
   const { user } = getAppContext();
 
-  // Consolidated filtering - spaces with any content (assistants OR apps)
+  // Consolidated filtering - spaces with any content (assistants, default_assistant for personal spaces, OR apps)
   const spacesWithContent = data.spaces.filter(
-    (space) => space.applications.assistants.count > 0 || space.applications.apps.count > 0
+    (space) =>
+      space.applications.assistants.count > 0 ||
+      (space.personal && space.default_assistant != null) ||
+      space.applications.apps.count > 0
   );
 
   const {

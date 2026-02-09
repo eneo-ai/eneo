@@ -23,7 +23,9 @@ class TenantBase(BaseModel):
     name: str
     display_name: Optional[str] = None
     quota_limit: int = Field(
-        default=10 * 1024**3, description="Size in bytes. Default is 10 GB"
+        default=10 * 1024**3,
+        description="Size in bytes. Default is 10 GB",
+        json_schema_extra={"format": "int64"},
     )
     domain: Optional[str] = None
     zitadel_org_id: Optional[str] = None
@@ -98,7 +100,8 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             "gdm",
             "mistral",
             "ovhcloud",
-            "vllm",
+            "gemini",
+            "cohere",
         }
 
         for provider, cred in v.items():

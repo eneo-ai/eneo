@@ -3,21 +3,21 @@ from uuid import UUID
 
 from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
-from intric.embedding_models.infrastructure.adapters.e5_embeddings import E5Adapter
 from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
-)
-from intric.embedding_models.infrastructure.adapters.openai_embeddings import (
-    OpenAIEmbeddingAdapter,
 )
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import SETTINGS, Settings
-from intric.settings.credential_resolver import CredentialResolver
+from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
+from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from intric.database.database import AsyncSession
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
+
+logger = get_logger(__name__)
 
 
 class EmbeddingModelLike(Protocol):
@@ -29,6 +29,7 @@ class EmbeddingModelLike(Protocol):
     """
     id: UUID
     name: str
+    provider_id: UUID | None
     litellm_model_name: str | None
     family: ModelFamily | None
     max_input: int
@@ -43,46 +44,117 @@ class CreateEmbeddingsService:
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
+        session: Optional["AsyncSession"] = None,
     ):
-        self._adapters = {
-            ModelFamily.OPEN_AI: OpenAIEmbeddingAdapter,
-            ModelFamily.E5: E5Adapter,
-        }
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
+        self.session = session
 
-    def _get_adapter(self, model: EmbeddingModelLike) -> EmbeddingModelAdapter:
+    async def _get_adapter(self, model: EmbeddingModelLike) -> EmbeddingModelAdapter:
         """Get the appropriate adapter for the embedding model.
+
+        All models must have a provider_id linking to a ModelProvider.
+        Uses LiteLLMEmbeddingAdapter which routes through LiteLLM.
+
+        Supports two paths for provider resolution:
+        1. Pre-resolved: If model carries provider_type/provider_credentials
+           (e.g. EmbeddingModelSpec from crawl bootstrap), skip DB lookup.
+        2. DB lookup: Load provider from database using provider_id + session.
 
         Args:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
                    Both satisfy the EmbeddingModelLike protocol.
         """
-        # Create credential resolver with tenant context if tenant is available
-        credential_resolver = None
-        if self.tenant:
-            credential_resolver = CredentialResolver(
-                tenant=self.tenant,
-                settings=self.config,
+        from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
+            TenantModelCredentialResolver,
+        )
+
+        # All models must have provider_id
+        if not hasattr(model, 'provider_id') or not model.provider_id:
+            raise ValueError(
+                f"Model '{model.name}' is missing required provider_id. "
+                "All models must be associated with a ModelProvider."
+            )
+
+        # Check if provider data is pre-resolved on the model (e.g. from crawl bootstrap)
+        provider_type = getattr(model, 'provider_type', None)
+        provider_credentials = getattr(model, 'provider_credentials', None)
+        provider_config = getattr(model, 'provider_config', None)
+
+        if provider_type and provider_credentials is not None:
+            # Pre-resolved path: no DB session needed
+            credential_resolver = TenantModelCredentialResolver(
+                provider_id=model.provider_id,
+                provider_type=provider_type,
+                credentials=provider_credentials,
+                config=provider_config or {},
                 encryption_service=self.encryption_service,
             )
+            litellm_model_name = f"{provider_type}/{model.name}"
+        else:
+            # DB lookup path: requires active session
+            import sqlalchemy as sa
+            from intric.database.tables.model_providers_table import ModelProviders
 
-        # Check for LiteLLM model first
-        if model.litellm_model_name:
-            return LiteLLMEmbeddingAdapter(
-                model, credential_resolver=credential_resolver
+            if not self.session:
+                logger.error(
+                    "Model requires database session but none available",
+                    extra={
+                        "model_id": str(model.id) if hasattr(model, 'id') else None,
+                        "model_name": model.name,
+                        "provider_id": str(model.provider_id),
+                        "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    }
+                )
+                raise ValueError(
+                    f"Model '{model.name}' requires database session to load provider credentials. "
+                    "Please ensure the CreateEmbeddingsService is initialized with a database session."
+                )
+
+            stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
+            result = await self.session.execute(stmt)
+            provider_db = result.scalar_one_or_none()
+
+            if provider_db is None:
+                raise ProviderNotFoundException(
+                    f"Model provider '{model.provider_id}' not found. "
+                    "The provider may have been deleted or is not accessible."
+                )
+
+            if not provider_db.is_active:
+                raise ProviderInactiveException(
+                    f"The model provider '{provider_db.name}' is currently inactive. "
+                    "Please contact your administrator to enable the provider."
+                )
+
+            credential_resolver = TenantModelCredentialResolver(
+                provider_id=provider_db.id,
+                provider_type=provider_db.provider_type,
+                credentials=provider_db.credentials,
+                config=provider_db.config,
+                encryption_service=self.encryption_service,
             )
+            litellm_model_name = f"{provider_db.provider_type}/{model.name}"
+            provider_type = provider_db.provider_type
 
-        # Fall back to existing family-based selection
-        # Handle both enum (with .value) and string (from legacy code paths)
-        family = model.family
-        family_value = family.value if hasattr(family, "value") else family
-        adapter_class = self._adapters.get(family_value)
-        if not adapter_class:
-            raise ValueError(f"No adapter found for hosting {family_value}")
+        logger.info(
+            f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
+            extra={
+                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_name": model.name,
+                "provider_id": str(model.provider_id),
+                "provider_type": provider_type,
+                "litellm_model_name": litellm_model_name,
+                "tenant_id": str(self.tenant.id) if self.tenant else None,
+            }
+        )
 
-        return adapter_class(model, credential_resolver=credential_resolver)
+        return LiteLLMEmbeddingAdapter(
+            model,
+            credential_resolver=credential_resolver,
+            litellm_model_name=litellm_model_name,
+        )
 
     async def get_embeddings(
         self,
@@ -95,7 +167,7 @@ class CreateEmbeddingsService:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
             chunks: List of InfoBlobChunk objects to embed.
         """
-        adapter = self._get_adapter(model)
+        adapter = await self._get_adapter(model)
         return await adapter.get_embeddings(chunks)
 
     async def get_embedding_for_query(
@@ -109,5 +181,5 @@ class CreateEmbeddingsService:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
             query: Search query string to embed.
         """
-        adapter = self._get_adapter(model)
+        adapter = await self._get_adapter(model)
         return await adapter.get_embedding_for_query(query)

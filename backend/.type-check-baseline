@@ -1,0 +1,3 @@
+# Type checking baseline for audit slop
+BASELINE_COMMIT=d248b014aa9dc7c91ed370cc2151dfb949aa47a6
+BASELINE_DATE=2026-01-14

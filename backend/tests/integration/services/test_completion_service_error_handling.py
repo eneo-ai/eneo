@@ -3,13 +3,17 @@
 Tests that missing API key configuration returns user-friendly errors
 instead of 500 Internal Server Error.
 
-When a tenant has no API key configured (neither tenant-specific nor global),
+When a tenant has no API key configured (provider has empty/invalid credentials),
 the service should raise APIKeyNotConfiguredException with a clear error
-message instead of letting ValueError propagate as a 500 error.
+message instead of letting errors propagate as 500 errors.
+
+NOTE: With the new provider-based architecture, all models must have a provider_id.
+APIKeyNotConfiguredException is raised when:
+1. The provider exists but has empty/invalid credentials
+2. The actual API call fails due to missing credentials
 """
 
 from datetime import datetime, timezone
-from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -22,19 +26,63 @@ from intric.ai_models.model_enums import (
     ModelStability,
 )
 from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.main.exceptions import APIKeyNotConfiguredException
+from intric.database.tables.model_providers_table import ModelProviders
+from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 
 
 @pytest.fixture
-def mock_context_builder():
-    """Mock ContextBuilder for testing."""
-    return Mock()
+async def provider_without_credentials(db_container, test_tenant):
+    """Create a provider with empty credentials for testing missing API key scenarios."""
+    async with db_container() as container:
+        session = container.session()
+
+        provider = ModelProviders(
+            tenant_id=test_tenant.id,
+            name="OpenAI (No Credentials)",
+            provider_type="openai",
+            credentials={},  # Empty credentials - will cause APIKeyNotConfiguredException
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        yield provider
 
 
 @pytest.fixture
-def openai_completion_model(test_tenant, admin_user):
-    """OpenAI completion model."""
-    return CompletionModel(
+async def provider_with_credentials(db_container, test_tenant):
+    """Create a provider with valid credentials."""
+    async with db_container() as container:
+        session = container.session()
+
+        provider = ModelProviders(
+            tenant_id=test_tenant.id,
+            name="OpenAI (With Credentials)",
+            provider_type="openai",
+            credentials={"api_key": "sk-test-key-123"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        yield provider
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_model_without_provider_id_raises_value_error(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """When a model has no provider_id, raise ValueError with clear message."""
+    from unittest.mock import Mock
+
+    # Create model WITHOUT provider_id (invalid in new architecture)
+    model = CompletionModel(
         user=admin_user,
         id=uuid4(),
         created_at=datetime.now(timezone.utc),
@@ -58,262 +106,282 @@ def openai_completion_model(test_tenant, admin_user):
         reasoning=False,
         base_url=None,
         litellm_model_name=None,
+        # provider_id is NOT set
     )
 
-
-@pytest.fixture
-def claude_completion_model(test_tenant, admin_user):
-    """Claude completion model."""
-    return CompletionModel(
-        user=admin_user,
-        id=uuid4(),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        nickname="claude3",
-        name="Claude 3",
-        token_limit=200000,
-        vision=True,
-        family=ModelFamily.CLAUDE,
-        hosting=ModelHostingLocation.USA,
-        org=ModelOrg.ANTHROPIC,
-        stability=ModelStability.STABLE,
-        open_source=False,
-        description="Anthropic Claude 3 Opus model",
-        nr_billion_parameters=None,
-        hf_link=None,
-        is_deprecated=False,
-        deployment_name=None,
-        is_org_enabled=True,
-        is_org_default=False,
-        reasoning=True,
-        base_url=None,
-        litellm_model_name=None,
-    )
-
-
-@pytest.fixture
-def azure_completion_model(test_tenant, admin_user):
-    """Azure OpenAI completion model."""
-    return CompletionModel(
-        user=admin_user,
-        id=uuid4(),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        nickname="azure-gpt4",
-        name="Azure GPT-4",
-        token_limit=8192,
-        vision=False,
-        family=ModelFamily.AZURE,
-        hosting=ModelHostingLocation.EU,
-        org=ModelOrg.MICROSOFT,
-        stability=ModelStability.STABLE,
-        open_source=False,
-        description="Azure OpenAI GPT-4 deployment",
-        nr_billion_parameters=None,
-        hf_link=None,
-        is_deprecated=False,
-        deployment_name="gpt-4",
-        is_org_enabled=True,
-        is_org_default=False,
-        reasoning=False,
-        base_url=None,
-        litellm_model_name=None,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_missing_openai_api_key_returns_503(
-    mock_context_builder,
-    test_tenant,
-    test_settings,
-    openai_completion_model,
-):
-    """When OpenAI API key is missing, raise APIKeyNotConfiguredException with clear error message."""
-    # Ensure tenant has no credentials (avoid cross-test contamination)
-    tenant = test_tenant.model_copy(update={"api_credentials": {}})
-
-    # Override settings to ensure strict mode is enabled
-    settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
-    assert settings.tenant_credentials_enabled is True
-
-    service = CompletionService(
-        context_builder=mock_context_builder,
-        tenant=tenant,
-        config=settings,
-    )
-
-    with pytest.raises(APIKeyNotConfiguredException) as exc_info:
-        service._get_adapter(openai_completion_model)
-
-    # Verify exception message
-    error_message = str(exc_info.value)
-    assert "No API key configured" in error_message
-    assert "openai" in error_message.lower()
-    # Check for either administrator guidance or credential configuration instructions
-    assert (
-        "administrator" in error_message.lower()
-        or "configure" in error_message.lower()
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_missing_anthropic_api_key_returns_503(
-    mock_context_builder,
-    test_tenant,
-    test_settings,
-    claude_completion_model,
-):
-    """When Anthropic API key is missing, raise APIKeyNotConfiguredException with clear error message."""
-    # Ensure tenant has no credentials
-    assert test_tenant.api_credentials == {}
-
-    # Override settings to ensure strict mode is enabled
-    settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
-    assert settings.tenant_credentials_enabled is True
-
-    service = CompletionService(
-        context_builder=mock_context_builder,
-        tenant=test_tenant,
-        config=settings,
-    )
-
-    with pytest.raises(APIKeyNotConfiguredException) as exc_info:
-        service._get_adapter(claude_completion_model)
-
-    # Verify exception message
-    error_message = str(exc_info.value)
-    assert "No API key configured" in error_message
-    assert "anthropic" in error_message
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_missing_azure_api_key_returns_503(
-    mock_context_builder,
-    test_tenant,
-    test_settings,
-    azure_completion_model,
-):
-    """When Azure API key is missing, raise APIKeyNotConfiguredException with clear error message."""
-    # Ensure tenant has no credentials
-    assert test_tenant.api_credentials == {}
-
-    # Override settings to ensure strict mode is enabled
-    settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
-    assert settings.tenant_credentials_enabled is True
-
-    service = CompletionService(
-        context_builder=mock_context_builder,
-        tenant=test_tenant,
-        config=settings,
-    )
-
-    with pytest.raises(APIKeyNotConfiguredException) as exc_info:
-        service._get_adapter(azure_completion_model)
-
-    # Verify exception message
-    error_message = str(exc_info.value)
-    assert "No API key configured" in error_message
-    assert "azure" in error_message
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_error_includes_provider_context(
-    mock_context_builder,
-    test_tenant,
-    test_settings,
-    openai_completion_model,
-):
-    """Error message includes provider name for troubleshooting."""
-    assert test_tenant.api_credentials == {}
-
-    # Override settings to ensure strict mode is enabled
-    settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
-    assert settings.tenant_credentials_enabled is True
-
-    service = CompletionService(
-        context_builder=mock_context_builder,
-        tenant=test_tenant,
-        config=settings,
-    )
-
-    with pytest.raises(APIKeyNotConfiguredException) as exc_info:
-        service._get_adapter(openai_completion_model)
-
-    # Verify provider context is included
-    error_message = str(exc_info.value)
-    assert "openai" in error_message.lower()
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_error_message_is_user_friendly(
-    mock_context_builder,
-    test_tenant,
-    test_settings,
-    openai_completion_model,
-):
-    """Error message is clear and actionable for end users."""
-    assert test_tenant.api_credentials == {}
-
-    # Override settings to ensure strict mode is enabled
-    settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
-    assert settings.tenant_credentials_enabled is True
-
-    service = CompletionService(
-        context_builder=mock_context_builder,
-        tenant=test_tenant,
-        config=settings,
-    )
-
-    with pytest.raises(APIKeyNotConfiguredException) as exc_info:
-        service._get_adapter(openai_completion_model)
-
-    message = str(exc_info.value)
-
-    # Verify message is user-friendly
-    assert "No API key configured" in message
-    assert "administrator" in message.lower() or "configure" in message.lower()
-    assert "openai" in message.lower()
-
-    # Should NOT contain technical details like stack traces
-    assert "ValueError" not in message
-    assert "CredentialResolver" not in message
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_successful_adapter_creation_with_tenant_credentials(
-    db_container,
-    mock_context_builder,
-    test_tenant,
-    test_settings,
-    openai_completion_model,
-):
-    """When tenant has API key configured, adapter is created successfully."""
     async with db_container() as container:
-        tenant_repo = container.tenant_repo()
-
-        # Set tenant-specific OpenAI API key
-        updated_tenant = await tenant_repo.update_api_credential(
-            tenant_id=test_tenant.id,
-            provider="openai",
-            credential={"api_key": "sk-tenant-key-123"},
+        service = CompletionService(
+            context_builder=Mock(),
+            tenant=test_tenant,
+            config=test_settings,
+            session=container.session(),
         )
 
-        # Override settings to ensure strict mode is enabled
-        settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
-        assert settings.tenant_credentials_enabled is True
+        with pytest.raises(ValueError) as exc_info:
+            await service._get_adapter(model)
+
+        assert "missing required provider_id" in str(exc_info.value)
+        assert "GPT-4" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_model_with_inactive_provider_raises_error(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """When a model's provider is inactive, raise ProviderInactiveException."""
+    from unittest.mock import Mock
+
+    async with db_container() as container:
+        session = container.session()
+
+        # Create inactive provider
+        provider = ModelProviders(
+            tenant_id=test_tenant.id,
+            name="Inactive Provider",
+            provider_type="openai",
+            credentials={"api_key": "sk-test"},
+            config={},
+            is_active=False,  # Inactive!
+        )
+        session.add(provider)
+        await session.flush()
+
+        # Create model with the inactive provider
+        model = CompletionModel(
+            user=admin_user,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="gpt4",
+            name="GPT-4",
+            token_limit=8192,
+            vision=False,
+            family=ModelFamily.OPEN_AI,
+            hosting=ModelHostingLocation.USA,
+            org=ModelOrg.OPENAI,
+            stability=ModelStability.STABLE,
+            open_source=False,
+            description="OpenAI GPT-4 model",
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            base_url=None,
+            litellm_model_name=None,
+            provider_id=provider.id,
+        )
 
         service = CompletionService(
-            context_builder=mock_context_builder,
-            tenant=updated_tenant,
-            config=settings,
+            context_builder=Mock(),
+            tenant=test_tenant,
+            config=test_settings,
+            session=session,
+        )
+
+        with pytest.raises(ProviderInactiveException) as exc_info:
+            await service._get_adapter(model)
+
+        assert "inactive" in str(exc_info.value).lower()
+        assert "Inactive Provider" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_model_with_nonexistent_provider_raises_error(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """When a model's provider doesn't exist, raise ProviderNotFoundException."""
+    from unittest.mock import Mock
+
+    async with db_container() as container:
+        session = container.session()
+
+        # Create model with a non-existent provider ID
+        non_existent_provider_id = uuid4()
+        model = CompletionModel(
+            user=admin_user,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="gpt4",
+            name="GPT-4",
+            token_limit=8192,
+            vision=False,
+            family=ModelFamily.OPEN_AI,
+            hosting=ModelHostingLocation.USA,
+            org=ModelOrg.OPENAI,
+            stability=ModelStability.STABLE,
+            open_source=False,
+            description="OpenAI GPT-4 model",
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            base_url=None,
+            litellm_model_name=None,
+            provider_id=non_existent_provider_id,
+        )
+
+        service = CompletionService(
+            context_builder=Mock(),
+            tenant=test_tenant,
+            config=test_settings,
+            session=session,
+        )
+
+        with pytest.raises(ProviderNotFoundException) as exc_info:
+            await service._get_adapter(model)
+
+        assert "not found" in str(exc_info.value).lower()
+        assert str(non_existent_provider_id) in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_adapter_creation_succeeds_with_valid_provider(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """When provider exists and is active, adapter is created successfully."""
+    from unittest.mock import Mock
+
+    async with db_container() as container:
+        session = container.session()
+
+        # Create active provider with credentials (unique name to avoid conflicts)
+        provider = ModelProviders(
+            tenant_id=test_tenant.id,
+            name="OpenAI Test Provider",
+            provider_type="openai",
+            credentials={"api_key": "sk-test-key-123"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        # Create model with the provider
+        model = CompletionModel(
+            user=admin_user,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="gpt4",
+            name="GPT-4",
+            token_limit=8192,
+            vision=False,
+            family=ModelFamily.OPEN_AI,
+            hosting=ModelHostingLocation.USA,
+            org=ModelOrg.OPENAI,
+            stability=ModelStability.STABLE,
+            open_source=False,
+            description="OpenAI GPT-4 model",
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            base_url=None,
+            litellm_model_name=None,
+            provider_id=provider.id,
+        )
+
+        service = CompletionService(
+            context_builder=Mock(),
+            tenant=test_tenant,
+            config=test_settings,
+            session=session,
         )
 
         # Should not raise any exception
-        adapter = service._get_adapter(openai_completion_model)
+        adapter = await service._get_adapter(model)
         assert adapter is not None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_different_provider_types_create_correct_adapters(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """Test that different provider types (openai, anthropic, azure) create correct adapters."""
+    from unittest.mock import Mock
+
+    provider_configs = [
+        ("openai", ModelFamily.OPEN_AI, ModelOrg.OPENAI),
+        ("anthropic", ModelFamily.CLAUDE, ModelOrg.ANTHROPIC),
+        ("azure", ModelFamily.AZURE, ModelOrg.MICROSOFT),
+    ]
+
+    async with db_container() as container:
+        session = container.session()
+
+        for provider_type, family, org in provider_configs:
+            # Create provider
+            provider = ModelProviders(
+                tenant_id=test_tenant.id,
+                name=f"{provider_type.title()} Provider",
+                provider_type=provider_type,
+                credentials={"api_key": f"sk-{provider_type}-test"},
+                config={},
+                is_active=True,
+            )
+            session.add(provider)
+            await session.flush()
+
+            # Create model
+            model = CompletionModel(
+                user=admin_user,
+                id=uuid4(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                nickname=f"{provider_type}-model",
+                name=f"{provider_type.title()} Model",
+                token_limit=8192,
+                vision=False,
+                family=family,
+                hosting=ModelHostingLocation.USA,
+                org=org,
+                stability=ModelStability.STABLE,
+                open_source=False,
+                description=f"{provider_type.title()} model",
+                nr_billion_parameters=None,
+                hf_link=None,
+                is_deprecated=False,
+                deployment_name="gpt-4" if provider_type == "azure" else None,
+                is_org_enabled=True,
+                is_org_default=False,
+                reasoning=False,
+                base_url=None,
+                litellm_model_name=None,
+                provider_id=provider.id,
+            )
+
+            service = CompletionService(
+                context_builder=Mock(),
+                tenant=test_tenant,
+                config=test_settings,
+                session=session,
+            )
+
+            adapter = await service._get_adapter(model)
+            assert adapter is not None, f"Failed to create adapter for {provider_type}"

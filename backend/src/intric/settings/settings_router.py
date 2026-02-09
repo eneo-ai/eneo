@@ -158,3 +158,44 @@ async def update_audit_logging_setting(
     """
     service = container.settings_service()
     return await service.update_audit_logging_setting(enabled=data.enabled)
+
+
+@router.patch(
+    "/provisioning",
+    response_model=SettingsPublic,
+    summary="Toggle JIT user provisioning",
+    description="""
+Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- When enabled: Users are automatically created on first SSO login
+- When disabled: Only pre-existing users can log in via SSO
+- New users get the "User" role by default
+- Change takes effect immediately for all SSO logins
+
+**Example Request:**
+```json
+{
+  "enabled": true
+}
+```
+
+**Example Response:**
+```json
+{
+  "chatbot_widget": {},
+  "using_templates": true,
+  "audit_logging_enabled": true,
+  "provisioning": true
+}
+```
+    """,
+)
+async def update_provisioning_setting(
+    data: TemplateSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.update_provisioning_setting(enabled=data.enabled)

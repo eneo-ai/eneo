@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -34,6 +35,12 @@ class EmbeddingModelPublic(BaseResponse):
     is_org_enabled: bool = False
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
+    # Tenant model fields
+    tenant_id: Optional[UUID] = None
+    provider_id: Optional[UUID] = None
+    # Provider info for grouped display in UI
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
     @classmethod
     def from_domain(cls, model: EmbeddingModel):
@@ -66,6 +73,10 @@ class EmbeddingModelPublic(BaseResponse):
             is_org_enabled=model.is_org_enabled,
             credential_provider=model.get_credential_provider_name(),
             security_classification=security_classification,
+            tenant_id=model.tenant_id,
+            provider_id=model.provider_id,
+            provider_name=model.provider_name,
+            provider_type=model.provider_type,
         )
 
 

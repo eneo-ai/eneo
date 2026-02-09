@@ -21,6 +21,7 @@ from intric.spaces.api.space_models import (
     CreateSpaceServiceResponse,
     Knowledge,
     SpaceDashboard,
+    SpaceGroupMember,
     SpaceMember,
     SpacePublic,
     SpaceRole,
@@ -194,6 +195,24 @@ class SpaceAssembler:
 
         return permissions
 
+    def _get_group_member_permissions(self, space: Space):
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        permissions = []
+
+        if actor.can_read_group_members():
+            permissions.append(ResourcePermission.READ)
+
+        if actor.can_add_group_members():
+            permissions.append(ResourcePermission.ADD)
+
+        if actor.can_edit_group_members():
+            permissions.append(ResourcePermission.EDIT)
+
+        if actor.can_delete_group_members():
+            permissions.append(ResourcePermission.REMOVE)
+
+        return permissions
+
     def _get_space_permissions(self, space: Space):
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         permissions = []
@@ -232,6 +251,7 @@ class SpaceAssembler:
             type="assistant",
             metadata_json=assistant.metadata_json,
             icon_id=assistant.icon_id,
+            completion_model_id=assistant.completion_model.id if assistant.completion_model else None,
         )
 
     def _get_group_chat_model(self, group_chat: "GroupChat"):
@@ -340,6 +360,10 @@ class SpaceAssembler:
             items=self._sort_members(space),
             permissions=self._get_member_permissions(space),
         )
+        group_members = PaginatedPermissions[SpaceGroupMember](
+            items=list(space.group_members.values()),
+            permissions=self._get_group_member_permissions(space),
+        )
         embedding_models = [
             EmbeddingModelPublic.from_domain(model)
             for model in space.embedding_models
@@ -381,6 +405,7 @@ class SpaceAssembler:
             applications=applications,
             knowledge=knowledge,
             members=members,
+            group_members=group_members,
             personal=space.is_personal(),
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
@@ -421,6 +446,13 @@ class SpaceAssembler:
         self._set_permissions_on_resources(space)
         applications = self._get_applications_model(space=space, only_published=only_published)
 
+        default_assistant = None
+        if getattr(space, "default_assistant", None) is not None:
+            default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
+                space.default_assistant,
+                permissions=self._get_default_assistant_permissions(space),
+            )
+
         return SpaceDashboard(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -431,6 +463,7 @@ class SpaceAssembler:
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             applications=applications,
+            default_assistant=default_assistant,
             data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
         )

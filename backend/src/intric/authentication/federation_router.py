@@ -25,6 +25,16 @@ from intric.server.dependencies.container import get_container
 from intric.settings.credential_resolver import CredentialResolver
 from intric.tenants.tenant import TenantState
 
+# JIT provisioning imports
+from intric.audit.application.audit_service import AuditService
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
+from intric.main.models import ModelId
+from intric.predefined_roles.predefined_role import PredefinedRoleName
+from intric.users.user import UserAdd, UserInDB, UserState
+
 logger = get_logger(__name__)
 
 router = APIRouter(
@@ -114,6 +124,118 @@ async def fetch_discovery(discovery_url: str) -> dict:
                 detail=f"Failed to fetch discovery document: HTTP {resp.status}",
             )
         return await resp.json()
+
+
+async def _jit_provision_user(
+    container,
+    tenant_id: UUID,
+    email: str,
+    correlation_id: str,
+) -> UserInDB:
+    """Create user via JIT provisioning during SSO login."""
+    predefined_roles_repo = container.predefined_roles_repo()
+    user_repo = container.user_repo()
+
+    user_role = await predefined_roles_repo.get_predefined_role_by_name(
+        PredefinedRoleName.USER
+    )
+
+    if user_role is None:
+        logger.error(
+            "JIT provisioning failed: User role not found",
+            extra={
+                "correlation_id": correlation_id,
+                "tenant_id": str(tenant_id),
+                "email": email,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="System configuration error: User role not found",
+            headers={"X-Correlation-ID": correlation_id},
+        )
+
+    username = email.split("@")[0].lower()
+
+    new_user = UserAdd(
+        email=email,
+        username=username,
+        tenant_id=tenant_id,
+        predefined_roles=[ModelId(id=user_role.id)],
+        state=UserState.ACTIVE,
+    )
+
+    try:
+        user_in_db = await user_repo.add(new_user)
+
+        logger.info(
+            "JIT provisioning: Created user",
+            extra={
+                "correlation_id": correlation_id,
+                "user_id": str(user_in_db.id),
+                "email": email,
+                "username": username,
+                "tenant_id": str(tenant_id),
+            },
+        )
+
+        return user_in_db
+
+    except Exception as e:
+        logger.error(
+            "JIT provisioning failed: Could not create user",
+            extra={
+                "correlation_id": correlation_id,
+                "email": email,
+                "tenant_id": str(tenant_id),
+                "error_type": type(e).__name__,
+                "error": str(e),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user account",
+            headers={"X-Correlation-ID": correlation_id},
+        )
+
+
+async def _log_jit_user_created(
+    container,
+    tenant_id: UUID,
+    user: UserInDB,
+    correlation_id: str,
+) -> None:
+    """Log audit event for JIT-provisioned user. Non-blocking on failure."""
+    try:
+        audit_service: AuditService = container.audit_service()
+
+        await audit_service.log(
+            tenant_id=tenant_id,
+            actor_id=None,
+            action=ActionType.USER_CREATED,
+            entity_type=EntityType.USER,
+            entity_id=user.id,
+            description=f"User '{user.email}' auto-provisioned via SSO federation",
+            metadata={
+                "provisioning_method": "jit_federation",
+                "correlation_id": correlation_id,
+                "email": user.email,
+                "username": user.username,
+            },
+            outcome=Outcome.SUCCESS,
+            actor_type=ActorType.SYSTEM,
+        )
+
+    except Exception as e:
+        logger.warning(
+            "Failed to log JIT user creation audit event",
+            extra={
+                "correlation_id": correlation_id,
+                "user_id": str(user.id),
+                "email": user.email,
+                "error": str(e),
+            },
+        )
 
 
 class TenantInfo(BaseModel):
@@ -1470,32 +1592,67 @@ async def auth_callback(
                         email_domain=email_domain,
                     )
 
-            # Lookup existing user (NO user creation - users must already exist)
             user_repo = container.user_repo()
             user = await user_repo.get_user_by_email(email)
 
             if not user:
-                logger.error(
-                    "User not found in database",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "tenant_slug": tenant_slug,
-                        "email": email,
-                        "correlation_id": correlation_id,
-                    },
-                )
-                await _log_oidc_debug(
-                    redis_client=redis_client,
-                    correlation_id=correlation_id,
-                    event="callback.user_missing",
-                    tenant_slug=tenant_slug,
-                    email=email,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="User not found. Contact your administrator for access.",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
+                tenant_repo = container.tenant_repo()
+                tenant = await tenant_repo.get(tenant_id)
+
+                if tenant and tenant.provisioning:
+                    logger.info(
+                        "JIT provisioning: Creating new user",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "tenant_slug": tenant_slug,
+                            "email": email,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.jit_provisioning",
+                        tenant_slug=tenant_slug,
+                        email=email,
+                    )
+
+                    user = await _jit_provision_user(
+                        container=container,
+                        tenant_id=tenant_id,
+                        email=email,
+                        correlation_id=correlation_id,
+                    )
+
+                    await _log_jit_user_created(
+                        container=container,
+                        tenant_id=tenant_id,
+                        user=user,
+                        correlation_id=correlation_id,
+                    )
+                else:
+                    logger.error(
+                        "User not found (JIT provisioning disabled)",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "tenant_slug": tenant_slug,
+                            "email": email,
+                            "correlation_id": correlation_id,
+                            "provisioning_enabled": tenant.provisioning if tenant else False,
+                        },
+                    )
+                    await _log_oidc_debug(
+                        redis_client=redis_client,
+                        correlation_id=correlation_id,
+                        event="callback.user_missing",
+                        tenant_slug=tenant_slug,
+                        email=email,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="User not found. Contact your administrator for access.",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
 
             # Verify user belongs to correct tenant
             if user.tenant_id != tenant_id:

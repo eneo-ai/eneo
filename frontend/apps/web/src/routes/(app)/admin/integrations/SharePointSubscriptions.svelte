@@ -3,6 +3,7 @@
   import { m } from "$lib/paraglide/messages";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { IntricClient } from "@intric/intric-js";
+  import dayjs from "dayjs";
 
   interface SharePointSubscription {
     id: string;
@@ -135,12 +136,8 @@
 
   // Format date
   function formatDate(dateString: string): string {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleString();
-    } catch {
-      return dateString;
-    }
+    const d = dayjs(dateString);
+    return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : dateString;
   }
 
   // Format time duration
@@ -253,7 +250,7 @@
                   {subscription.site_id}
                 </div>
                 <div class="max-w-[200px] truncate text-xs text-secondary" title={subscription.drive_id}>
-                  Drive: {subscription.drive_id}
+                  {m.sharepoint_drive_label()}: {subscription.drive_id}
                 </div>
               </td>
               <td class="whitespace-nowrap px-3 py-3 text-xs text-secondary">

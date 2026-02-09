@@ -159,6 +159,15 @@ class InfoBlobService:
         # Use repo's upsert method
         return await self.repo.upsert_by_title_and_integration_knowledge(info_blob)
 
+    async def upsert_info_blob_by_sharepoint_item_and_integration(
+        self,
+        info_blob: InfoBlobAdd,
+    ) -> InfoBlobInDB:
+        """Idempotent upsert for SharePoint content keyed by item ID."""
+        size_of_text = await self.quota_service.add_text(info_blob.text)
+        info_blob.size = size_of_text
+        return await self.repo.upsert_by_sharepoint_item_and_integration_knowledge(info_blob)
+
     async def add_info_blob(self, info_blob: InfoBlobAdd):
         info_blob_in_db = await self.add_info_blob_without_validation(info_blob)
 

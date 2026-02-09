@@ -55,7 +55,7 @@
   function getSubscriptionStatusLabel(status: string): string {
     switch (status) {
       case "none":
-        return m.sharepoint_webhook_none?.() || "No webhook";
+        return m.sharepoint_webhook_none();
       case "expired":
         return m.sharepoint_webhook_expired();
       case "expiring_soon":
@@ -109,7 +109,7 @@
     <div
       class="flex items-center gap-1 text-xs {getSubscriptionStatusColor(subscriptionStatus)}"
       title={subscriptionStatus === "none"
-        ? (m.sharepoint_webhook_none_tooltip?.() || "No webhook configured - changes will not sync automatically")
+        ? m.sharepoint_webhook_none_tooltip()
         : subscriptionStatus === "expired"
           ? m.sharepoint_webhook_expired_tooltip()
           : m.sharepoint_webhook_auto_renewal()}

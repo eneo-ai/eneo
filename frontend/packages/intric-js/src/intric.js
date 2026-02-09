@@ -29,6 +29,9 @@ import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
 import { initAudit } from "./endpoints/audit";
 import { initIcons } from "./endpoints/icons";
+import { initModelProviders } from "./endpoints/model-providers";
+import { initTenantModels } from "./endpoints/tenant-models";
+
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -72,6 +75,8 @@ export function createIntric(args) {
     credentials: initCredentials(client),
     audit: initAudit(client),
     icons: initIcons(client),
+    modelProviders: initModelProviders(client),
+    tenantModels: initTenantModels(client),
     client
   };
 }

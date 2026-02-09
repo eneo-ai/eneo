@@ -3,16 +3,15 @@
 ## Documentation
 
 - [AI Models Management](docs/AI_MODELS_MANAGEMENT.md) - Managing completion, embedding, and transcription models via API and CLI
+- [Type Checking](docs/TYPE_CHECKING.md) - Pyright baseline setup and local commands
 
-## CLI Scripts
+## Type Checking
 
-### Seed AI Models
-Seed completion and embedding models from the `ai_models.yml` configuration file:
+Run Pyright for audit focus and new changes:
+
 ```bash
-uv run python -m intric.cli.seed_ai_models
+./scripts/typecheck_changed.sh
 ```
-
-See [AI Models Management](docs/AI_MODELS_MANAGEMENT.md) for full documentation.
 
 ## Environment variables
 

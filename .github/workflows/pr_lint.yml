@@ -29,11 +29,11 @@ jobs:
             exit 0
           fi
 
-          VALID_PREFIXES="^(feature|fix|hotfix|chore|docs|test|refactor|ci)/"
+          VALID_PREFIXES="^(feature|feat|fix|hotfix|chore|docs|test|refactor|ci)/"
 
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "❌ Branch name '$BRANCH_NAME' does not follow naming convention."
-            echo "Branch names should start with: feature/, fix/, hotfix/, chore/, docs/, test/, refactor/, or ci/"
+            echo "Branch names should start with: feature/, feat/, fix/, hotfix/, chore/, docs/, test/, refactor/, or ci/"
             exit 1
           fi
 
@@ -115,3 +115,32 @@ jobs:
       - name: Skip message
         if: steps.changed-files.outputs.skip == 'true'
         run: echo "✅ No Python files changed in backend/ - skipping ruff checks"
+
+  backend-type-check:
+    runs-on: ubuntu-latest
+    name: Backend type check (Pyright baseline)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: uv sync --group dev
+
+      - name: Run pyright on changed files
+        working-directory: ./backend
+        env:
+          RATCHET_IGNORE_RANGE: "1"
+        run: ./scripts/typecheck_changed.sh

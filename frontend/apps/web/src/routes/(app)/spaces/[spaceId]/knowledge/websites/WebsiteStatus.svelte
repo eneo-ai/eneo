@@ -23,6 +23,11 @@
       ? m.crawl_skipped_duplicate()
       : skipReason;
 
+    // Check if there are failures in the latest crawl
+    const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
+    const filesFailed = website.latest_crawl?.files_failed ?? 0;
+    const hasFailures = pagesFailed > 0 || filesFailed > 0;
+
     if (
       website.latest_crawl?.status === "failed" &&
       skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
@@ -38,6 +43,25 @@
       case "complete": {
         const completed = dayjs(website.latest_crawl?.finished_at);
         const label = m.synced_ago({ timeAgo: dayjs().to(completed) });
+        
+        // If there are failures, show warning color and include failure info in tooltip
+        if (hasFailures) {
+          let failureText: string;
+          if (pagesFailed > 0 && filesFailed > 0) {
+            failureText = m.pages_and_files_failed({ pages: pagesFailed.toString(), files: filesFailed.toString() });
+          } else if (pagesFailed > 0) {
+            failureText = m.pages_failed({ count: pagesFailed.toString() });
+          } else {
+            failureText = m.files_failed({ count: filesFailed.toString() });
+          }
+          
+          return {
+            color: "yellow",
+            label: m.synced_with_warnings(),
+            tooltip: `${m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })} - ${failureText}`
+          };
+        }
+        
         return {
           color: dayjs().diff(completed, "days") < 10 ? "green" : "yellow",
           label,

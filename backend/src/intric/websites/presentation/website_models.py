@@ -67,6 +67,7 @@ class CrawlRunPublic(BaseResponse):
     files_downloaded: Optional[int]
     pages_failed: Optional[int]
     files_failed: Optional[int]
+    failure_summary: Optional[dict[str, int]] = None
     status: Status
     result_location: Optional[str]
     finished_at: Optional[datetime]
@@ -81,6 +82,7 @@ class CrawlRunPublic(BaseResponse):
             files_downloaded=crawl_run.files_downloaded,
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
+            failure_summary=crawl_run.failure_summary,
             status=crawl_run.status,
             result_location=crawl_run.result_location,
             finished_at=crawl_run.finished_at,
@@ -243,3 +245,43 @@ class BulkCrawlResponse(BaseModel):
 
     errors: list[dict[str, str]]
     """List of errors for failed websites (website_id and error message)"""
+
+
+class WebsiteExistsResponse(BaseModel):
+    """Response model for checking if a website URL exists on the Organization space."""
+
+    website_id: UUID
+    """ID of the existing website"""
+
+    space_id: UUID
+    """ID of the space where the website exists"""
+
+    space_name: str
+    """Name of the space where the website exists"""
+
+    url: str
+    """URL of the existing website"""
+
+    name: Optional[str]
+    """Display name of the existing website"""
+
+    update_interval: UpdateInterval
+    """Automatic update interval of the existing website"""
+
+    last_crawled_at: Optional[datetime]
+    """When the website was last crawled"""
+
+    pages_crawled: Optional[int] = None
+    """Number of pages successfully crawled"""
+
+    pages_failed: Optional[int] = None
+    """Number of pages that failed to crawl"""
+
+    files_downloaded: Optional[int] = None
+    """Number of files successfully downloaded"""
+
+    files_failed: Optional[int] = None
+    """Number of files that failed to download"""
+
+    crawl_status: Optional[str] = None
+    """Status of the latest crawl (queued, in progress, complete, failed)"""

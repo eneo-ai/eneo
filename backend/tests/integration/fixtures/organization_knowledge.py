@@ -103,6 +103,9 @@ def user_factory(admin_user):
         )
         session.add(user)
         await session.flush()
+        # SpaceActor expects user_groups_ids (domain property not on DB model)
+        if not hasattr(user, "user_groups_ids"):
+            user.user_groups_ids = set()
         return user
 
     return _create_user

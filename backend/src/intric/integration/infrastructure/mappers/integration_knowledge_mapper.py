@@ -36,6 +36,8 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
             "selected_item_type": entity.selected_item_type,
             "resource_type": entity.resource_type,
             "drive_id": entity.drive_id,
+            "wrapper_id": entity.wrapper_id,
+            "wrapper_name": entity.wrapper_name,
         }
 
     def to_entity(

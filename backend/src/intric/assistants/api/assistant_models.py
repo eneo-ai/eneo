@@ -226,6 +226,10 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
         default=None,
         description="Icon ID referencing an uploaded icon",
     )
+    completion_model_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the completion model, or None if not configured",
+    )
 
 
 class AssistantPublic(InDB, ResourcePermissionsMixin):
@@ -239,7 +243,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]
     integration_knowledge_list: list[IntegrationKnowledgePublic]
-    completion_model: CompletionModelSparse
+    completion_model: Optional[CompletionModelSparse] = None
     published: bool = False
     user: UserSparse
     tools: UseTools

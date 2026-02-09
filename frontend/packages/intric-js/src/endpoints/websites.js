@@ -189,6 +189,25 @@ export function initWebsites(client) {
         }
       });
       return res;
+    },
+
+    /**
+     * Check if a URL already exists on the Organization space.
+     * Useful for warning users before creating duplicate crawls.
+     * @param {string} url The URL to check
+     * @returns {Promise<{website_id: string, space_id: string, space_name: string, url: string, name: string | null, update_interval: string, last_crawled_at: string | null} | null>}
+     * @throws {IntricError}
+     * */
+    checkUrl: async (url) => {
+      const res = await client.fetch("/api/v1/websites/check-url/", {
+        method: "get",
+        params: {
+          query: {
+            url
+          }
+        }
+      });
+      return res;
     }
   };
 }

@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Optional
 
 from intric.integration.domain.entities.user_integration import (
@@ -12,6 +13,9 @@ logger = get_logger(__name__)
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from intric.integration.domain.repositories.oauth_token_repo import (
+        OauthTokenRepository,
+    )
     from intric.integration.domain.repositories.tenant_integration_repo import (
         TenantIntegrationRepository,
     )
@@ -20,6 +24,9 @@ if TYPE_CHECKING:
     )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
+    )
+    from intric.integration.infrastructure.sharepoint_subscription_service import (
+        SharePointSubscriptionService,
     )
     from intric.spaces.space import Space
     from intric.users.user import UserInDB
@@ -32,11 +39,15 @@ class UserIntegrationService:
         tenant_integration_repo: "TenantIntegrationRepository",
         user: "UserInDB",
         tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
+        oauth_token_repo: Optional["OauthTokenRepository"] = None,
+        sharepoint_subscription_service: Optional["SharePointSubscriptionService"] = None,
     ):
         self.user_integration_repo = user_integration_repo
         self.tenant_integration_repo = tenant_integration_repo
         self.user = user
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
+        self.oauth_token_repo = oauth_token_repo
+        self.sharepoint_subscription_service = sharepoint_subscription_service
 
     async def get_my_integrations(
         self,
@@ -113,7 +124,75 @@ class UserIntegrationService:
                 "Please use the admin panel to deactivate the SharePoint app."
             )
 
+        # Clean up related resources before deleting the user integration
+        await self._cleanup_user_integration(integration)
+
         await self.user_integration_repo.remove(id=integration.id)
+
+    async def _cleanup_user_integration(self, integration: UserIntegration) -> None:
+        """Clean up Microsoft Graph webhook subscriptions before DB cascade delete.
+
+        DB foreign keys with CASCADE will handle integration_knowledge,
+        oauth_token, and sharepoint_subscription rows. But we need to
+        delete the subscriptions from Microsoft Graph API first.
+        """
+        if not self.sharepoint_subscription_service or not self.oauth_token_repo:
+            return
+
+        # Collect Graph subscription IDs before DB cascade deletes them
+        import sqlalchemy as sa
+        from intric.database.tables.sharepoint_subscription_table import (
+            SharePointSubscription as SharePointSubscriptionDB,
+        )
+
+        stmt = sa.select(
+            SharePointSubscriptionDB.subscription_id
+        ).where(
+            SharePointSubscriptionDB.user_integration_id == integration.id
+        )
+        result = await self.user_integration_repo.session.execute(stmt)
+        graph_subscription_ids = [row[0] for row in result.all()]
+
+        if not graph_subscription_ids:
+            return
+
+        # Get token for Graph API calls
+        try:
+            token = await self.oauth_token_repo.one(
+                user_integration_id=integration.id
+            )
+        except Exception:
+            logger.warning(
+                "Could not get token for webhook cleanup of user_integration %s; "
+                "subscriptions will expire naturally at Microsoft",
+                integration.id,
+            )
+            return
+
+        # Fire-and-forget Graph API cleanup (DB rows will be cascade-deleted)
+        for graph_sub_id in graph_subscription_ids:
+            asyncio.create_task(
+                self._delete_graph_subscription(graph_sub_id, token)
+            )
+
+    async def _delete_graph_subscription(
+        self, graph_subscription_id: str, token
+    ) -> None:
+        """Fire-and-forget: delete a single subscription from Microsoft Graph."""
+        try:
+            assert self.sharepoint_subscription_service is not None
+            await self.sharepoint_subscription_service._delete_graph_subscription(
+                subscription_id=graph_subscription_id,
+                token=token,
+            )
+            logger.info("Deleted Graph subscription %s", graph_subscription_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to delete Graph subscription %s: %s "
+                "(subscription will expire naturally at Microsoft)",
+                graph_subscription_id,
+                exc,
+            )
 
     async def get_available_integrations_for_space(
         self,

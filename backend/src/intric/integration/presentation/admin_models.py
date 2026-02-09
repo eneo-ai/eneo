@@ -10,18 +10,18 @@ class TenantSharePointAppCreate(BaseModel):
 
     client_id: str = Field(
         ...,
-        description="Azure AD Application (Client) ID",
-        example="12345678-1234-1234-1234-123456789012"
+        description="Microsoft Entra ID Application (Client) ID",
+        json_schema_extra={"example": "12345678-1234-1234-1234-123456789012"}
     )
     client_secret: str = Field(
         ...,
-        description="Azure AD Application Client Secret",
-        example="abc123~xyz789"
+        description="Microsoft Entra ID Application Client Secret",
+        json_schema_extra={"example": "abc123~xyz789"}
     )
     tenant_domain: str = Field(
         ...,
-        description="Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)",
-        example="contoso.onmicrosoft.com"
+        description="Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)",
+        json_schema_extra={"example": "contoso.onmicrosoft.com"}
     )
     certificate_path: Optional[str] = Field(
         None,
@@ -166,18 +166,18 @@ class ServiceAccountAuthStart(BaseModel):
 
     client_id: str = Field(
         ...,
-        description="Azure AD Application (Client) ID",
-        example="12345678-1234-1234-1234-123456789012"
+        description="Microsoft Entra ID Application (Client) ID",
+        json_schema_extra={"example": "12345678-1234-1234-1234-123456789012"}
     )
     client_secret: str = Field(
         ...,
-        description="Azure AD Application Client Secret",
-        example="abc123~xyz789"
+        description="Microsoft Entra ID Application Client Secret",
+        json_schema_extra={"example": "abc123~xyz789"}
     )
     tenant_domain: str = Field(
         ...,
-        description="Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)",
-        example="contoso.onmicrosoft.com"
+        description="Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)",
+        json_schema_extra={"example": "contoso.onmicrosoft.com"}
     )
 
 
@@ -204,16 +204,4 @@ class ServiceAccountAuthCallback(BaseModel):
     state: str = Field(
         ...,
         description="OAuth state parameter for verification"
-    )
-    client_id: str = Field(
-        ...,
-        description="Azure AD Application (Client) ID (must match auth/start)"
-    )
-    client_secret: str = Field(
-        ...,
-        description="Azure AD Application Client Secret (must match auth/start)"
-    )
-    tenant_domain: str = Field(
-        ...,
-        description="Azure AD Tenant Domain (must match auth/start)"
     )

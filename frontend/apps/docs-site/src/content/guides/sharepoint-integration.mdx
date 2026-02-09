@@ -8,7 +8,7 @@ The SharePoint integration enables connecting SharePoint sites and OneDrive fold
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![SharePoint Integration Architecture showing User connecting to Eneo Platform (Backend API, SharePoint Service, Worker, PostgreSQL, Webhook Endpoint) which communicates with Microsoft Cloud (Azure AD, Microsoft Graph API, SharePoint & OneDrive). Includes authentication methods (Service Account, Tenant App, User OAuth) and webhook subscription lifecycle.](/diagrams/sharepoint-integration.svg)
+![SharePoint Integration Architecture showing User connecting to Eneo Platform (Backend API, SharePoint Service, Worker, PostgreSQL, Webhook Endpoint) which communicates with Microsoft Cloud (Microsoft Entra ID, Microsoft Graph API, SharePoint & OneDrive). Includes authentication methods (Service Account, Tenant App, User OAuth) and webhook subscription lifecycle.](/diagrams/sharepoint-integration.svg)
 
 </div>
 
@@ -18,13 +18,13 @@ There are two different use cases to consider:
 
 **Shared and organization spaces** use centralized authentication configured by an administrator. This means no individual user needs to log in with their account for the integration to work, avoiding issues if someone leaves or changes roles.
 
-> **Important:** Both use cases require an administrator to first register an Azure AD application and configure the integration in Eneo. The Azure AD app handles authentication for all users. Without this setup, users cannot connect to SharePoint even in personal spaces.
+> **Important:** Both use cases require an administrator to first register an Microsoft Entra ID application and configure the integration in Eneo. The Microsoft Entra ID app handles authentication for all users. Without this setup, users cannot connect to SharePoint even in personal spaces.
 
 ## Prerequisites
 
 Before you begin, you need:
 
-- Access to Azure Portal with permission to register applications in your organization's Azure AD
+- Access to Azure Portal with permission to register applications in your organization's Microsoft Entra ID
 - An Eneo installation with HTTPS (required for webhooks from Microsoft)
 - Administrator permissions in Eneo
 
@@ -46,17 +46,25 @@ Optionally, if Eneo cannot auto-detect its public URL (e.g., behind a reverse pr
 SHAREPOINT_WEBHOOK_NOTIFICATION_URL=https://your-eneo-domain.com/api/v1/integrations/sharepoint/webhook/
 ```
 
+You can also tune the maximum file size that Eneo downloads from SharePoint/OneDrive:
+
+```bash
+# Optional: Max file size in bytes
+# Default: 52428800 (50 MB)
+SHAREPOINT_MAX_DOWNLOAD_BYTES=52428800
+```
+
 After setting these variables, restart the backend service.
 
 ---
 
-## Creating an Azure AD Application
+## Creating an Microsoft Entra ID Application
 
-All communication between Eneo and SharePoint occurs via the Microsoft Graph API, which requires a registered application in Azure AD.
+All communication between Eneo and SharePoint occurs via the Microsoft Graph API, which requires a registered application in Microsoft Entra ID.
 
 ### Register the Application
 
-Go to [Azure Portal](https://portal.azure.com) and navigate to **Azure Active Directory** → **App registrations** → **New registration**.
+Go to [Azure Portal](https://portal.azure.com) and navigate to **Microsoft Entra ID** → **App registrations** → **New registration**.
 
 Fill in the following:
 - **Name**: Choose a descriptive name, for example "Eneo SharePoint Integration"
@@ -90,7 +98,7 @@ These permissions are **only required if you choose the Tenant App authenticatio
 
 After adding the permissions, click **Grant admin consent for [your tenant]** to approve them at the organization level.
 
-> **Important:** The delegated permissions `Files.Read.All` and `Sites.Read.All` require admin consent before regular users can authenticate. Without granting admin consent, only Azure AD administrators will be able to use the integration – other users will receive a consent error (AADSTS65001) when trying to sign in.
+> **Important:** The delegated permissions `Files.Read.All` and `Sites.Read.All` require admin consent before regular users can authenticate. Without granting admin consent, only Microsoft Entra ID administrators will be able to use the integration – other users will receive a consent error (AADSTS65001) when trying to sign in.
 
 ### Create a Client Secret
 
@@ -120,11 +128,11 @@ With the service account method, an administrator logs in with a dedicated Micro
 - Follows security best practices (least privilege)
 
 **Requires:**
-- A dedicated service account in Azure AD (for example `eneo-service@contoso.com`)
+- A dedicated service account in Microsoft Entra ID (for example `eneo-service@contoso.com`)
 - The account must have read permission to the SharePoint sites to be imported
-- Delegated permissions in the Azure AD application
+- Delegated permissions in the Microsoft Entra ID application
 
-> **Note:** The Azure AD app permissions define what the app *can* do on behalf of the service account, but the service account must also have actual access to the SharePoint sites. Add the service account as a **Member** or **Visitor** on each SharePoint site via **Site settings** → **Site permissions** → **Add members**. Without this, the integration will receive 403 Forbidden errors when trying to read files.
+> **Note:** The Microsoft Entra ID app permissions define what the app *can* do on behalf of the service account, but the service account must also have actual access to the SharePoint sites. Add the service account as a **Member** or **Visitor** on each SharePoint site via **Site settings** → **Site permissions** → **Add members**. Without this, the integration will receive 403 Forbidden errors when trying to read files.
 
 ### Tenant App
 
@@ -140,18 +148,18 @@ With the tenant app method, Eneo uses application permissions that grant access 
 **Disadvantages:**
 - **No granular access control** – the application can read all files across all SharePoint sites in the organization
 - Microsoft does not provide any mechanism to restrict which sites an application with application permissions can access – it's all or nothing
-- Requires an Azure AD administrator to approve application permissions
+- Requires an Microsoft Entra ID administrator to approve application permissions
 - May not comply with data minimization requirements in some organizations
 
 **Requires:**
-- Application permissions in the Azure AD application
+- Application permissions in the Microsoft Entra ID application
 - Admin consent for these permissions
 
 ---
 
 ## Configuring the Integration in Eneo
 
-Once the Azure AD application is created, you can configure the integration in Eneo.
+Once the Microsoft Entra ID application is created, you can configure the integration in Eneo.
 
 ### Open Configuration
 
@@ -159,7 +167,7 @@ Log in to Eneo as an administrator and navigate to **Admin** → **Integrations*
 
 ### Enter Credentials
 
-Fill in the form with the credentials from Azure AD:
+Fill in the form with the credentials from Microsoft Entra ID:
 
 - **Client ID**: Application (client) ID from Azure Portal
 - **Client Secret**: The client secret you created
@@ -195,7 +203,7 @@ Eneo will fetch all documents from the selected folders and process them for use
 
 ### Importing in Personal Spaces
 
-Personal spaces use OAuth authentication, allowing each user to import from their own OneDrive or SharePoint sites they have access to. This requires that an administrator has already configured the SharePoint integration at the organization level (the Azure AD app credentials must be in place).
+Personal spaces use OAuth authentication, allowing each user to import from their own OneDrive or SharePoint sites they have access to. This requires that an administrator has already configured the SharePoint integration at the organization level (the Microsoft Entra ID app credentials must be in place).
 
 1. Navigate to your personal space
 2. Go to **Knowledge** → **Add knowledge** → **SharePoint**
@@ -219,6 +227,8 @@ Files that cannot be processed (images, videos, executables) are skipped during 
 ### Import Limits and Quotas
 
 Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows progress in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
+
+By default, files larger than **50 MB** are skipped during import/sync to protect worker memory usage. You can change this limit with `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
 
 ---
 
@@ -314,11 +324,11 @@ If users get error messages when importing:
 
 ## Rotating Client Secret
 
-Client secrets in Azure AD have limited validity – usually between 6 months and 2 years depending on what was chosen when created. When the secret expires, the integration stops working.
+Client secrets in Microsoft Entra ID have limited validity – usually between 6 months and 2 years depending on what was chosen when created. When the secret expires, the integration stops working.
 
 ### Plan Rotation in Advance
 
-Azure AD shows expiration dates for client secrets under **Certificates & secrets** in the application's settings. It's recommended to set a calendar reminder at least one week before the expiration date to have time to rotate the secret without interruption.
+Microsoft Entra ID shows expiration dates for client secrets under **Certificates & secrets** in the application's settings. It's recommended to set a calendar reminder at least one week before the expiration date to have time to rotate the secret without interruption.
 
 ### Updating the Secret
 
@@ -326,7 +336,7 @@ Updating the client secret doesn't affect existing webhook subscriptions or impo
 
 To rotate the secret:
 
-1. **Create new secret in Azure AD:**
+1. **Create new secret in Microsoft Entra ID:**
    - Go to [Azure Portal](https://portal.azure.com) and navigate to your app registration
    - Under **Certificates & secrets**, click **New client secret**
    - Enter description and validity period, then click **Add**
@@ -349,7 +359,7 @@ To rotate the secret:
 
 If the secret has already expired, the integration won't be able to authenticate with Microsoft Graph. Existing webhooks won't receive notifications and new imports will fail.
 
-The solution is the same as above: create a new secret in Azure AD and update it in Eneo. After the new secret is saved, normal function resumes automatically.
+The solution is the same as above: create a new secret in Microsoft Entra ID and update it in Eneo. After the new secret is saved, normal function resumes automatically.
 
 ---
 

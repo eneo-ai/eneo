@@ -337,3 +337,65 @@ class WebsiteCRUDService:
                 })
 
         return successful_runs, errors
+
+    async def find_on_organization_space(self, url: str) -> dict | None:
+        """Find website with matching URL on the user's organization space.
+
+        Why: Help users discover that a website is already being crawled on the
+        organization space before they create a duplicate on their personal/shared space.
+
+        Args:
+            url: The URL to search for
+
+        Returns:
+            Dictionary with website info if found, None otherwise.
+            Returns None if:
+            - User has no organization space
+            - URL not found on organization space
+        """
+        from intric.spaces.space_service import TENANT_SPACE_NAME
+
+        # Get the organization space for this tenant
+        org_space = await self.space_repo.get_space_by_name_and_tenant(
+            name=TENANT_SPACE_NAME, tenant_id=self.user.tenant_id
+        )
+
+        if org_space is None:
+            return None
+
+        # Search for matching URL in the organization space's websites
+        for website in org_space.websites:
+            if website.url == url:
+                # Get crawl info from latest_crawl
+                last_crawled_at = None
+                pages_crawled = None
+                pages_failed = None
+                files_downloaded = None
+                files_failed = None
+                crawl_status = None
+
+                if website.latest_crawl:
+                    last_crawled_at = website.latest_crawl.finished_at
+                    pages_crawled = website.latest_crawl.pages_crawled
+                    pages_failed = website.latest_crawl.pages_failed
+                    files_downloaded = website.latest_crawl.files_downloaded
+                    files_failed = website.latest_crawl.files_failed
+                    status = website.latest_crawl.status
+                    crawl_status = status.value if hasattr(status, 'value') else status
+
+                return {
+                    "website_id": website.id,
+                    "space_id": org_space.id,
+                    "space_name": org_space.name,
+                    "url": website.url,
+                    "name": website.name,
+                    "update_interval": website.update_interval,
+                    "last_crawled_at": last_crawled_at,
+                    "pages_crawled": pages_crawled,
+                    "pages_failed": pages_failed,
+                    "files_downloaded": files_downloaded,
+                    "files_failed": files_failed,
+                    "crawl_status": crawl_status,
+                }
+
+        return None

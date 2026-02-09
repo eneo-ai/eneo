@@ -13,7 +13,19 @@ import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.worker.crawl_context import CrawlContext, PreparedPage
+from intric.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
+
+
+def create_mock_container(embeddings_service):
+    """Create a mock Container for persist_batch testing."""
+    from unittest.mock import MagicMock
+
+    mock_container = MagicMock()
+    mock_session_provider = MagicMock()
+    mock_session_provider.override = MagicMock()
+    mock_container.session = mock_session_provider
+    mock_container.create_embeddings_service = MagicMock(return_value=embeddings_service)
+    return mock_container
 
 
 class TestPersistenceModuleImports:
@@ -44,7 +56,7 @@ class TestPersistenceModuleSemantics:
 
     @pytest.mark.asyncio
     async def test_empty_buffer_returns_zeros(self):
-        """Empty page buffer should return (0, 0, [], [])."""
+        """Empty page buffer should return (0, 0, [], {})."""
         from intric.worker.crawl.persistence import persist_batch
 
         ctx = CrawlContext(
@@ -59,22 +71,38 @@ class TestPersistenceModuleSemantics:
             embedding_model_dimensions=1536,
         )
 
-        success, failed, success_urls, failed_urls = await persist_batch(
+        embedding_model = EmbeddingModelSpec(
+            id=uuid4(),
+            name="test-model",
+            litellm_model_name="openai/text-embedding-ada-002",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            provider_id=uuid4(),
+            provider_type="openai",
+            provider_credentials={"api_key": "test"},
+            provider_config={},
+        )
+
+        success, failed, success_urls, failures_by_reason = await persist_batch(
             page_buffer=[],
             ctx=ctx,
-            embedding_model=MagicMock(),
-            create_embeddings_service=MagicMock(),
+            embedding_model=embedding_model,
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0
         assert failed == 0
         assert success_urls == []
-        assert failed_urls == []
+        assert failures_by_reason == {}
 
     @pytest.mark.asyncio
     async def test_none_embedding_model_fails_all_pages(self):
-        """None embedding model should fail all pages."""
+        """None embedding model should fail all pages with NO_EMBEDDING_MODEL reason."""
         from intric.worker.crawl.persistence import persist_batch
+        from intric.worker.crawl_context import FailureReason
 
         ctx = CrawlContext(
             website_id=uuid4(),
@@ -93,17 +121,18 @@ class TestPersistenceModuleSemantics:
             {"url": "https://example.com/page2", "content": "Test content 2"},
         ]
 
-        success, failed, success_urls, failed_urls = await persist_batch(
+        success, failed, success_urls, failures_by_reason = await persist_batch(
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
-            create_embeddings_service=MagicMock(),
+            container=create_mock_container(MagicMock()),
         )
 
         assert success == 0
         assert failed == 2
         assert success_urls == []
-        assert len(failed_urls) == 2
+        assert FailureReason.NO_EMBEDDING_MODEL.value in failures_by_reason
+        assert len(failures_by_reason[FailureReason.NO_EMBEDDING_MODEL.value]) == 2
 
 
 class TestEmbeddingSemaphore:

@@ -18,9 +18,12 @@
 	import { m } from '$lib/paraglide/messages';
 	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
 	import { ChartPie } from 'lucide-svelte';
+	import VoiceRecordButton from './VoiceRecordButton.svelte';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
+
+	let voiceInterimText = $state('');
 
 	const {
 		state: { attachments, isUploading },
@@ -116,7 +119,10 @@
 	});
 
 	const isAskingDisabled = $derived(
-		chat.askQuestion.isLoading || $isUploading || ($question === '' && $attachments.length === 0)
+		chat.askQuestion.isLoading ||
+			$isUploading ||
+			($question === '' && $attachments.length === 0) ||
+			!chat.hasCompletionModel
 	);
 
 	let useWebSearch = $state(false);
@@ -170,7 +176,7 @@
 </script>
 
 <form
-	class="border-default bg-primary ring-dimmer focus-within:border-stronger hover:border-stronger relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 focus-within:shadow-lg hover:ring-4 md:w-full md:rounded-xl md:border"
+	class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4' : 'pointer-events-none opacity-50'}"
 >
 	<!-- Icon always absolutely positioned to prevent jumping -->
 	{#if modelInfo && tokenLimit > 0}
@@ -205,6 +211,12 @@
 
 	<MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
 
+	{#if voiceInterimText}
+		<div class="text-secondary px-2 py-1 text-sm italic opacity-60">
+			{voiceInterimText}
+		</div>
+	{/if}
+
 	<div class="flex justify-between mt-2">
 		<div class="flex items-center gap-2">
 			<AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
@@ -212,6 +224,16 @@
 				<MentionButton></MentionButton>
 			{/if}
 
+			<VoiceRecordButton
+				onTranscriptionComplete={(text) => {
+					voiceInterimText = '';
+					focusMentionInput();
+					document.execCommand('insertText', false, text);
+				}}
+				onInterimUpdate={(text) => {
+					voiceInterimText = text;
+				}}
+			/>
 			{#if chat.partner.type === 'default-assistant' && featureFlags.showWebSearch}
 				<div
 					class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"

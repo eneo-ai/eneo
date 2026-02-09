@@ -10,16 +10,18 @@ from typing import Any, Set
 # Provider-specific required fields
 # - All providers require at minimum: api_key
 # - Azure requires: api_key, endpoint, api_version, deployment_name
-# - vLLM requires: api_key, endpoint
+# - hosted_vllm requires: api_key, endpoint (for self-hosted vLLM servers)
 PROVIDER_REQUIRED_FIELDS: dict[str, Set[str]] = {
     "openai": {"api_key"},
     "anthropic": {"api_key"},
     "azure": {"api_key", "endpoint", "api_version", "deployment_name"},
+    "hosted_vllm": {"api_key", "endpoint"},
     "berget": {"api_key"},
     "gdm": {"api_key"},
     "mistral": {"api_key"},
     "ovhcloud": {"api_key"},
-    "vllm": {"api_key", "endpoint"},
+    "gemini": {"api_key"},
+    "cohere": {"api_key"},
 }
 
 
