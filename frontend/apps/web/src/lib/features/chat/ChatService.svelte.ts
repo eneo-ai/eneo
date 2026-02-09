@@ -235,6 +235,26 @@ export class ChatService {
     }
   }
 
+    async renameConversation(conversation: { id: string }, name: string) {
+    try {
+      const trimmed = (name ?? "").trim();
+      if (!trimmed) return;
+
+      await this.#intric.conversations.rename(conversation, { name: trimmed });
+
+      this.loadedConversations = this.loadedConversations.map((c) =>
+        c.id === conversation.id ? { ...c, name: trimmed } : c
+      );
+
+      if (this.currentConversation?.id === conversation.id) {
+        this.currentConversation.name = trimmed;
+      }
+    } catch (e) {
+      if (browser) alert(`Error while renaming conversation with id ${conversation.id}`);
+      console.error(e);
+    }
+  }
+
   async loadConversation(conversation: { id: string }) {
     try {
       const loaded = await this.#intric.conversations.get(conversation);

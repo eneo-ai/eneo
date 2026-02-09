@@ -13,6 +13,11 @@
   import { toStore } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
 
+  // Fallback navigation (same idea as +page.svelte)
+  import { pushState } from "$app/navigation";
+  import { page } from "$app/state";
+  import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
+
   type Props = {
     onConversationLoaded?: ((session: Conversation) => void) | undefined;
     onConversationDeleted?: ((session: ConversationSparse) => void) | undefined;
@@ -23,18 +28,37 @@
   const chat = getChatService();
   const table = Table.createWithStore(toStore(() => chat.loadedConversations));
 
+  function getSpaceIdFromPath(pathname: string): string {
+    // /spaces/{spaceId}/chat/...
+    const parts = pathname.split("/");
+    return parts[2] ?? "";
+  }
+
   const viewModel = table.createViewModel([
     table.columnPrimary({
       header: m.name(),
       value: (item) => item.name ?? "",
       cell: (item) => {
         return createRender(Table.ButtonCell, {
-          label: item.value.name,
-          async onclick() {
+          label: item.value.name ?? m.untitled(),
+          onclick: async () => {
             const loaded = await chat.loadConversation(item.value);
-            if (loaded && onConversationLoaded) {
-              onConversationLoaded(loaded);
-            }
+            if (!loaded) return;
+
+            // Let parent handle UI state if provided
+            onConversationLoaded?.(loaded);
+
+            // Fallback: ensure URL/tab is updated to chat for this conversation
+            const params = new URLSearchParams(
+              getChatQueryParams({ chatPartner: chat.partner, conversation: loaded })
+            );
+            params.set("tab", "chat");
+
+            const spaceId = getSpaceIdFromPath(page.url.pathname);
+            pushState(`/spaces/${spaceId}/chat/?${params.toString()}`, {
+              conversation: loaded,
+              tab: "chat"
+            });
           }
         });
       },
