@@ -255,6 +255,9 @@ class Settings(BaseSettings):
     transcription_max_file_size: int
     max_in_question: int
 
+    # Temporary directory for file uploads
+    upload_tmp_dir: Path = Path("/tmp")
+
     # Azure models
     using_azure_models: bool = False
     azure_api_key: Optional[str] = None
