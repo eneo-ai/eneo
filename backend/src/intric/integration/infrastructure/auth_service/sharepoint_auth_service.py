@@ -21,9 +21,7 @@ logger = getLogger(__name__)
 
 
 class SharepointAuthService(BaseOauthService):
-    # Personal OAuth: no User.Read needed (service account flow adds it
-    # separately to retrieve the account email)
-    DEFAULT_SCOPES = ["Files.Read.All", "Sites.Read.All"]
+    DEFAULT_SCOPES = ["Files.Read.All", "Sites.Read.All", "User.Read"]
 
     def __init__(self, tenant_sharepoint_app_service: Optional["TenantSharePointAppService"] = None):
         self.tenant_sharepoint_app_service = tenant_sharepoint_app_service

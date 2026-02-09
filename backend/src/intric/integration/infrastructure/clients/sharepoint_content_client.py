@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -24,6 +25,7 @@ class DeltaTokenExpiredException(Exception):
 
 class SharePointContentClient(BaseClient):
     DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB safety limit
+    DEFAULT_GROUP_SITE_CONCURRENCY = 8
 
     def __init__(
         self,
@@ -69,7 +71,9 @@ class SharePointContentClient(BaseClient):
         self.update_token(token_data["access_token"])
         return token_data
 
-    async def _get_all_paged_items(self, endpoint: str) -> List[Dict[str, Any]]:
+    async def _get_all_paged_items(
+        self, endpoint: str, headers: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
         """Follow @odata.nextLink pagination and collect all items across pages."""
         from urllib.parse import urlparse
 
@@ -83,7 +87,7 @@ class SharePointContentClient(BaseClient):
                     f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
                 )
 
-            response = await self.client.get(next_link, headers=self.headers)
+            response = await self.client.get(next_link, headers=headers or self.headers)
             all_items.extend(response.get("value", []))
             next_link = response.get("@odata.nextLink")
 
@@ -169,6 +173,120 @@ class SharePointContentClient(BaseClient):
                 return {"value": await self._get_all_paged_items(endpoint)}
             else:
                 raise
+
+    async def get_followed_sites(self) -> List[Dict[str, Any]]:
+        """Get sites the current user follows via GET v1.0/me/followedSites."""
+        endpoint = "v1.0/me/followedSites"
+        try:
+            return await self._get_all_paged_items(endpoint)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("Token expired while getting followed sites, refreshing...")
+                await self.refresh_token()
+                return await self._get_all_paged_items(endpoint)
+            else:
+                raise
+
+    async def get_my_unified_groups(self) -> List[Dict[str, Any]]:
+        """Get Microsoft 365 (unified) groups the current user is a member of."""
+        filtered_endpoint = (
+            "v1.0/me/memberOf/microsoft.graph.group"
+            "?$filter=groupTypes/any(a:a eq 'Unified')"
+            "&$select=id,displayName,groupTypes"
+        )
+        fallback_endpoint = (
+            "v1.0/me/memberOf/microsoft.graph.group?$select=id,displayName,groupTypes"
+        )
+        headers = {
+            **self.headers,
+            "ConsistencyLevel": "eventual",
+        }
+
+        async def _fetch_groups_with_fallback() -> List[Dict[str, Any]]:
+            try:
+                return await self._get_all_paged_items(
+                    filtered_endpoint, headers=headers
+                )
+            except aiohttp.ClientResponseError as e:
+                # Some tenants reject this cast/filter combo; fall back to client-side
+                # filtering so we still discover group-connected sites.
+                if e.status not in (400, 501):
+                    raise
+
+                logger.info(
+                    "Falling back to unfiltered memberOf lookup for unified groups"
+                )
+                all_groups = await self._get_all_paged_items(
+                    fallback_endpoint, headers=headers
+                )
+                filtered_groups: List[Dict[str, Any]] = []
+                for group in all_groups:
+                    group_types = group.get("groupTypes")
+                    # Some tenants/queries can omit groupTypes; keep such groups and let
+                    # /groups/{id}/sites/root determine whether a SharePoint site exists.
+                    if group_types is None:
+                        filtered_groups.append(group)
+                        continue
+                    if isinstance(group_types, list) and "Unified" in group_types:
+                        filtered_groups.append(group)
+
+                return filtered_groups
+
+        try:
+            return await _fetch_groups_with_fallback()
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("Token expired while getting groups, refreshing...")
+                await self.refresh_token()
+                headers["Authorization"] = f"Bearer {self.api_token}"
+                return await _fetch_groups_with_fallback()
+            raise
+
+    async def get_group_site(self, group_id: str) -> Optional[Dict[str, Any]]:
+        """Get the root site for a Microsoft 365 group. Returns None if not found."""
+        endpoint = f"v1.0/groups/{group_id}/sites/root"
+        try:
+            return await self.client.get(endpoint, headers=self.headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status in (404, 403):
+                return None
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("Token expired while getting group site, refreshing...")
+                await self.refresh_token()
+                try:
+                    return await self.client.get(endpoint, headers=self.headers)
+                except aiohttp.ClientResponseError as e2:
+                    if e2.status in (404, 403):
+                        return None
+                    raise
+            else:
+                raise
+
+    async def get_group_connected_sites(
+        self, max_concurrency: int = DEFAULT_GROUP_SITE_CONCURRENCY
+    ) -> List[Dict[str, Any]]:
+        """Get sites connected to Microsoft 365 groups the user is a member of."""
+        groups = await self.get_my_unified_groups()
+        semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+        async def _safe_get_group_site(group_id: str) -> Optional[Dict[str, Any]]:
+            async with semaphore:
+                try:
+                    return await self.get_group_site(group_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to get site for group %s", group_id, exc_info=True
+                    )
+                    return None
+
+        group_ids = [g["id"] for g in groups if g.get("id")]
+        if not group_ids:
+            return []
+
+        results = await asyncio.gather(
+            *[_safe_get_group_site(group_id) for group_id in group_ids]
+        )
+        return [site for site in results if site is not None]
 
     async def get_my_drive(self) -> Dict[str, Any]:
         """Get current user's OneDrive drive info (requires delegated auth)."""
