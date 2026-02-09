@@ -7,13 +7,13 @@ from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from typing import IO
 
-TMP_DIR = "/tmp/"
+from intric.main.config import get_settings
 
 
 class FileSizeService:
     @staticmethod
     async def save_file_to_disk(file: SpooledTemporaryFile):
-        destination = os.path.join(TMP_DIR, uuid.uuid4().hex)
+        destination = os.path.join(str(get_settings().upload_tmp_dir), uuid.uuid4().hex)
         destination_path = Path(destination)
 
         try:
