@@ -2278,6 +2278,7 @@
   "api_keys_admin_quick_active": "Aktiva",
   "api_keys_admin_quick_suspended": "Pausade",
   "api_keys_admin_quick_expired": "Utgångna",
+  "api_keys_admin_quick_revoked": "Återkallade",
   "api_keys_admin_quick_secret": "Hemliga nycklar",
   "api_keys_admin_quick_public": "Publika nycklar",
   "api_keys_admin_scope_all": "Alla omfång",

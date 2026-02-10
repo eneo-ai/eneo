@@ -91,6 +91,11 @@
       filter: { state: "expired" },
       color: "gray" as const
     },
+    {
+      label: m.api_keys_admin_quick_revoked(),
+      filter: { state: "revoked" },
+      color: "red" as const
+    },
     { label: m.api_keys_admin_quick_secret(), filter: { keyType: "sk_" }, color: "blue" as const },
     { label: m.api_keys_admin_quick_public(), filter: { keyType: "pk_" }, color: "orange" as const }
   ]);
@@ -810,6 +815,7 @@
                              {qf.color === 'green' ? 'bg-green-500' : ''}
                              {qf.color === 'yellow' ? 'bg-yellow-500' : ''}
                              {qf.color === 'gray' ? 'bg-gray-500' : ''}
+                             {qf.color === 'red' ? 'bg-red-500' : ''}
                              {qf.color === 'blue' ? 'bg-blue-500' : ''}
                              {qf.color === 'orange' ? 'bg-orange-500' : ''}"
                     ></span>

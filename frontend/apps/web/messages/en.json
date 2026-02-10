@@ -2243,6 +2243,7 @@
   "api_keys_admin_quick_active": "Active",
   "api_keys_admin_quick_suspended": "Suspended",
   "api_keys_admin_quick_expired": "Expired",
+  "api_keys_admin_quick_revoked": "Revoked",
   "api_keys_admin_quick_secret": "Secret keys",
   "api_keys_admin_quick_public": "Public keys",
   "api_keys_admin_scope_all": "All scopes",
